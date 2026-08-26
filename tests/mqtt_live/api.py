@@ -94,6 +94,17 @@ class PlatformApi:
             body={},
         )
 
+    def revoke_mqtt(self, device_id: str) -> None:
+        assert self.token and self.organization_id
+        request_json(
+            "POST",
+            self._url(
+                f"/api/v1/organizations/{self.organization_id}/devices/{device_id}/mqtt/revoke"
+            ),
+            token=self.token,
+            body={},
+        )
+
     def ping(self, device_id: str) -> dict:
         assert self.token and self.organization_id
         return request_json(

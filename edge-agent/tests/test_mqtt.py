@@ -33,8 +33,21 @@ def test_handle_ping_returns_pong() -> None:
     }
 
 
+def test_handle_command_requires_command_id() -> None:
+    assert handle_command(json.dumps({"type": "ping"})) is None
+    assert handle_command("not-json") is None
+
+
 def test_handle_command_ignores_unknown_type() -> None:
     assert handle_command(json.dumps({"command_id": "abc", "type": "shell"})) is None
+
+
+def test_collect_metrics_never_raises() -> None:
+    from edge_agent.metrics import collect_metrics
+
+    snapshot = collect_metrics()
+    assert isinstance(snapshot, dict)
+    assert "temperature_c" in snapshot
 
 
 def test_reconnect_backoff() -> None:
@@ -52,17 +65,26 @@ def test_resolve_mqtt_broker_host_uses_api_host_when_loopback() -> None:
 
 def test_normalize_device_topic() -> None:
     device = "bed66060-1a08-452b-9e17-ffdc29328904"
-    assert normalize_device_topic(device, None) == f"devices/{device}/events"
-    assert normalize_device_topic(device, "commands") == f"devices/{device}/commands"
-    assert normalize_device_topic(device, f"devices/{device}/custom") == f"devices/{device}/custom"
+    assert normalize_device_topic(device, None) == f"devices/{device}/status"
+    assert normalize_device_topic(device, "metrics") == f"devices/{device}/metrics"
+    assert (
+        normalize_device_topic(device, "commands", action="subscribe")
+        == f"devices/{device}/commands"
+    )
     try:
-        normalize_device_topic(device, "devices/11111111-1111-1111-1111-111111111111/events")
+        normalize_device_topic(device, "events")
+    except ValueError as exc:
+        assert "must be one of" in str(exc)
+    else:
+        raise AssertionError("expected events topic to fail")
+    try:
+        normalize_device_topic(device, "devices/11111111-1111-1111-1111-111111111111/status")
     except ValueError as exc:
         assert "must be under" in str(exc)
     else:
         raise AssertionError("expected foreign topic to fail")
     try:
-        normalize_device_topic(device, "devices/+/events")
+        normalize_device_topic(device, "devices/+/status")
     except ValueError as exc:
         assert "wildcard" in str(exc).lower()
     else:
@@ -118,8 +140,8 @@ def test_listen_mqtt_subscribes_to_requested_topic(monkeypatch) -> None:
         timeout=0,
         sleep=lambda _seconds: None,
     )
-    assert topic == "devices/device-1/events"
-    assert subscribed == ["devices/device-1/events"]
+    assert topic == "devices/device-1/commands"
+    assert subscribed == ["devices/device-1/commands"]
     subscribed.clear()
     topic = listen_mqtt(
         "device-1",

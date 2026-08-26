@@ -68,6 +68,8 @@ export type Device = {
   mqtt_configured: boolean;
   mqtt_status: "online" | "offline" | null;
   mqtt_status_at: string | null;
+  mqtt_metrics: Record<string, unknown> | null;
+  mqtt_metrics_at: string | null;
 };
 
 export type DeviceCredential = {

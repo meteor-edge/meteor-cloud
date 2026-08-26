@@ -19,7 +19,12 @@ from app.modules.mqtt.service import MqttPublisher, MqttService, NoopPublisher
 
 logger = logging.getLogger(__name__)
 
-_SUBSCRIBE_TOPICS = ("devices/+/status", "devices/+/commands/result", "devices/+/events")
+_SUBSCRIBE_TOPICS = (
+    "devices/+/status",
+    "devices/+/metrics",
+    "devices/+/commands/result",
+    "devices/+/events",
+)
 
 
 class PlatformMqttClient(MqttPublisher):
@@ -181,6 +186,8 @@ class PlatformMqttClient(MqttPublisher):
                 device_id, suffix = parsed
                 if suffix == "status":
                     service.apply_status_message(device_id=device_id, payload=payload)
+                elif suffix == "metrics":
+                    service.apply_metrics_message(device_id=device_id, payload=payload)
                 elif suffix == "commands/result":
                     service.apply_command_result(device_id=device_id, payload=payload)
                 device = session.get(Device, device_id)

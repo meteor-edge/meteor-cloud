@@ -557,7 +557,7 @@ def test_mqtt_test_requires_mqtt_json(tmp_path, monkeypatch, capsys) -> None:
     assert "MQTT is not configured" in capsys.readouterr().err
 
 
-def test_mqtt_test_publishes_events_topic(tmp_path, monkeypatch, capsys) -> None:
+def test_mqtt_test_publishes_status_topic(tmp_path, monkeypatch, capsys) -> None:
     from edge_agent.mqtt_config import MqttConfig, write_mqtt_config
 
     config_dir = tmp_path / "meteorcli"
@@ -573,7 +573,7 @@ def test_mqtt_test_publishes_events_topic(tmp_path, monkeypatch, capsys) -> None
     published: list[tuple[str, dict | str, object]] = []
 
     def fake_publish(device_id: str, _config: object, payload: dict | str, **kwargs: object) -> str:
-        topic = str(kwargs.get("topic") or f"devices/{device_id}/events")
+        topic = str(kwargs.get("topic") or f"devices/{device_id}/status")
         published.append((device_id, payload, topic))
         return topic
 
@@ -583,8 +583,23 @@ def test_mqtt_test_publishes_events_topic(tmp_path, monkeypatch, capsys) -> None
     assert code == 0
     assert published[0][0] == "device-1"
     assert published[0][1]["message"] == "mqtt-test"
-    assert published[0][2] == "devices/device-1/events"
-    assert "devices/device-1/events" in capsys.readouterr().out
+    assert published[0][1]["status"] == "online"
+    assert published[0][2] == "devices/device-1/status"
+    assert "devices/device-1/status" in capsys.readouterr().out
+
+    code = meteorcli.main(
+        [
+            "--config-dir",
+            str(config_dir),
+            "mqtt-test",
+            "metrics",
+            '{"cpu_percent":1}',
+        ]
+    )
+    assert code == 0
+    assert published[1][1] == {"cpu_percent": 1}
+    assert published[1][2] == "devices/device-1/metrics"
+    assert "devices/device-1/metrics" in capsys.readouterr().out
 
     code = meteorcli.main(
         [
@@ -595,10 +610,8 @@ def test_mqtt_test_publishes_events_topic(tmp_path, monkeypatch, capsys) -> None
             '{"hello":true}',
         ]
     )
-    assert code == 0
-    assert published[1][1] == {"hello": True}
-    assert published[1][2] == "devices/device-1/custom"
-    assert "devices/device-1/custom" in capsys.readouterr().out
+    assert code == 1
+    assert "must be one of" in capsys.readouterr().err
 
 
 def test_mqtt_test_rejects_other_device_topic(tmp_path, monkeypatch, capsys) -> None:
@@ -640,7 +653,7 @@ def test_mqtt_listen_requires_mqtt_json(tmp_path, monkeypatch, capsys) -> None:
     assert "MQTT is not configured" in capsys.readouterr().err
 
 
-def test_mqtt_listen_subscribes_to_events_topic(tmp_path, monkeypatch, capsys) -> None:
+def test_mqtt_listen_subscribes_to_commands_topic(tmp_path, monkeypatch, capsys) -> None:
     from edge_agent.mqtt_config import MqttConfig, write_mqtt_config
 
     config_dir = tmp_path / "meteorcli"
@@ -656,7 +669,7 @@ def test_mqtt_listen_subscribes_to_events_topic(tmp_path, monkeypatch, capsys) -
     listened: list[tuple[str, object, float | None]] = []
 
     def fake_listen(device_id: str, config: object, **kwargs: object) -> str:
-        topic = str(kwargs.get("topic") or f"devices/{device_id}/events")
+        topic = str(kwargs.get("topic") or f"devices/{device_id}/commands")
         listened.append((device_id, config, kwargs.get("timeout"), topic))
         kwargs["on_message"](topic, '{"hello":true}')  # type: ignore[operator]
         return topic
@@ -667,9 +680,9 @@ def test_mqtt_listen_subscribes_to_events_topic(tmp_path, monkeypatch, capsys) -
     assert code == 0
     assert listened[0][0] == "device-1"
     assert listened[0][2] == 0.0
-    assert listened[0][3] == "devices/device-1/events"
+    assert listened[0][3] == "devices/device-1/commands"
     out = capsys.readouterr().out
-    assert "devices/device-1/events" in out
+    assert "devices/device-1/commands" in out
     assert '{"hello":true}' in out
 
     code = meteorcli.main(

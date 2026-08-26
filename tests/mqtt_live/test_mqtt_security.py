@@ -6,8 +6,6 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from mqtt_live.broker import MqttSession
 from mqtt_live.http import wait_until
 
@@ -72,8 +70,14 @@ def test_disabled_device_denied(api, live_config):
 
 
 def test_revoked_credential_denied(api, live_config):
-    """HTTP revoke-credential does not revoke MQTT; disable is the live control."""
-    pytest.skip("No public API sets device_mqtt_credentials.revoked_at; covered by backend unit tests")
+    device = api.register_device("sec-revoked")
+    api.revoke_mqtt(device.device_id)
+    session = _session(live_config, device)
+    session.start()
+    try:
+        assert session.wait_connected() is False
+    finally:
+        session.close()
 
 
 def test_own_topics_allowed(api, live_config):
@@ -84,17 +88,27 @@ def test_own_topics_allowed(api, live_config):
     try:
         assert session.wait_connected() is True
         assert session.wait_subscribed() is True
-        session.subscribe(f"devices/{device.device_id}/events")
-        assert session.wait_subscribed() is True
         assert session.publish(
             f"devices/{device.device_id}/status",
             json.dumps({"status": "online"}),
             retain=True,
         )
         assert session.publish(
+            f"devices/{device.device_id}/metrics",
+            json.dumps({"cpu_percent": 10.0, "memory_percent": 20.0, "disk_percent": 30.0}),
+        )
+        session.subscribe(f"devices/{device.device_id}/events")
+        subscribed = session.wait_subscribed()
+        # deny_action=disconnect can drop the socket before SUBACK; paho may then
+        # reconnect and succeed on the original commands subscribe.
+        denied_sub = (not subscribed) or session.disconnect_event.is_set()
+        assert denied_sub
+        published = session.publish(
             f"devices/{device.device_id}/events",
             json.dumps({"event": "boot"}),
         )
+        denied = (not published) or session.disconnect_event.wait(8)
+        assert denied
     finally:
         session.close()
 

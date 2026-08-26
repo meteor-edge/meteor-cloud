@@ -92,6 +92,8 @@ const device = {
   mqtt_configured: true,
   mqtt_status: "online" as const,
   mqtt_status_at: new Date().toISOString(),
+  mqtt_metrics: { cpu_percent: 18.4, memory_percent: 42.1, disk_percent: 61.3, temperature_c: 54.2 },
+  mqtt_metrics_at: new Date().toISOString(),
 };
 
 beforeEach(() => {
@@ -378,7 +380,10 @@ describe("Device detail", () => {
     renderApp(["/organizations/org-1/devices/device-1"]);
     expect(await screen.findByText("MQTT Connection")).toBeInTheDocument();
     expect(screen.getAllByText("aa:bb:cc:dd:ee:ff").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("devices/device-1/events").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("devices/device-1/status").length).toBeGreaterThan(0);
+    expect(screen.getByText("devices/device-1/metrics")).toBeInTheDocument();
+    expect(screen.getByText("18.4")).toBeInTheDocument();
+    expect(screen.getByText("42.1")).toBeInTheDocument();
     expect(screen.getByText(/meteorcli mqtt-test/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /test connection/i }));
     expect(await screen.findByText(/connection test successful/i)).toBeInTheDocument();

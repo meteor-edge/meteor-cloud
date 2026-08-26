@@ -407,6 +407,21 @@ def revoke_device_credential(
 
 
 @router.post(
+    "/devices/{device_id}/mqtt/revoke",
+    response_model=DeviceResponse,
+)
+def revoke_mqtt_credential(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+) -> DeviceResponse:
+    return service.revoke_mqtt_credential(
+        actor=current_user, organization_id=organization_id, device_id=device_id
+    )
+
+
+@router.post(
     "/devices/{device_id}/commands/ping",
     response_model=DevicePingResponse,
 )

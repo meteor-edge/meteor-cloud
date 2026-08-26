@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid
@@ -16,6 +15,7 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.modules.fleet.models import Device, DeviceCommand, DeviceMqttCredential
 from app.modules.fleet.tokens import hash_token
 from app.modules.mqtt.acl import can_access_topic, device_id_from_username
+from app.modules.mqtt.payloads import parse_json_object, parse_metrics_payload, parse_status_payload
 from app.modules.mqtt.schemas import (
     DevicePingResponse,
     MqttAuthorizeResponse,
@@ -84,9 +84,8 @@ class MqttService:
         return MqttAuthorizeResponse(result="allow")
 
     def apply_status_message(self, *, device_id: uuid.UUID, payload: str) -> bool:
-        data = _parse_json(payload)
-        status = data.get("status") if isinstance(data.get("status"), str) else None
-        if status not in {"online", "offline"}:
+        status = parse_status_payload(payload)
+        if status is None:
             return False
         device = self.session.get(Device, device_id)
         if device is None:
@@ -94,6 +93,19 @@ class MqttService:
         now = datetime.now(UTC)
         device.mqtt_status = status
         device.mqtt_status_at = now
+        self.session.add(device)
+        self.session.flush()
+        return True
+
+    def apply_metrics_message(self, *, device_id: uuid.UUID, payload: str) -> bool:
+        snapshot = parse_metrics_payload(payload)
+        if snapshot is None:
+            return False
+        device = self.session.get(Device, device_id)
+        if device is None:
+            return False
+        device.mqtt_metrics = snapshot
+        device.mqtt_metrics_at = datetime.now(UTC)
         self.session.add(device)
         self.session.flush()
         return True
@@ -208,11 +220,7 @@ class MqttService:
 
 
 def _parse_json(payload: str) -> dict[str, Any]:
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return parse_json_object(payload)
 
 
 def _as_uuid(value: object) -> uuid.UUID | None:

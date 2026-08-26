@@ -5,7 +5,7 @@ OBS_COMPOSE := $(COMPOSE) -f docker-compose.observability.yml
 BACKEND_DIR := platform/backend
 FRONTEND_DIR := platform/frontend
 INSTALLER_DIR := installer
-AGENT_DIR := agent-example
+AGENT_DIR := edge-agent
 INFRA_DIR := infrastructure
 CONFIG ?= installation.yaml
 

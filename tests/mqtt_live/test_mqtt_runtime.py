@@ -125,9 +125,9 @@ def test_other_device_cannot_complete_foreign_command(api, live_config):
         session_b.close()
 
 
-def test_device_events_reach_platform_observer(api, live_config):
-    device = api.register_device("events-pub")
-    topic = f"devices/{device.device_id}/events"
+def test_device_metrics_reach_platform(api, live_config):
+    device = api.register_device("metrics-pub")
+    topic = f"devices/{device.device_id}/metrics"
     observer = _platform_session(live_config)
     observer.auto_subscribe = [topic]
     session = _device_session(live_config, device)
@@ -137,13 +137,26 @@ def test_device_events_reach_platform_observer(api, live_config):
         assert observer.wait_connected() is True
         assert observer.wait_subscribed() is True
         assert session.wait_connected() is True
-        payload = json.dumps({"source": "meteorcli", "message": "mqtt-test"})
+        payload = json.dumps(
+            {
+                "timestamp": "2026-08-25T12:00:00Z",
+                "cpu_percent": 18.4,
+                "memory_percent": 42.1,
+                "disk_percent": 61.3,
+                "temperature_c": 54.2,
+            }
+        )
         assert session.publish(topic, payload) is True
         found = observer.wait_message(
-            lambda t, body: t == topic and "mqtt-test" in body,
+            lambda t, body: t == topic and "18.4" in body,
             timeout=15,
         )
         assert found is not None
+        assert wait_until(
+            lambda: (api.get_device(device.device_id).get("mqtt_metrics") or {}).get("cpu_percent")
+            == 18.4,
+            timeout_seconds=20,
+        )
     finally:
         session.close()
         observer.close()

@@ -4,10 +4,13 @@ Local development uses **one-way TLS** plus a unique MQTT username/password per
 device and a strict topic ACL. This is enough to prove:
 
 ```text
-Registered device → authenticates to MQTT → sends a message → receives a ping → returns pong
+Registered device → authenticates to MQTT → publishes status/metrics → ping → pong
 ```
 
 Certificate-based device authentication (mTLS) is **not** implemented yet.
+
+Production AWS Ansible does **not** deploy EMQX yet. Use `make dev` / `make test-mqtt`
+for MQTT. Do not treat cloud deploys as MQTT-complete.
 
 ## Security model
 
@@ -15,9 +18,9 @@ Certificate-based device authentication (mTLS) is **not** implemented yet.
 | --- | --- |
 | Per-device MQTT password | Each device has `device_<device_id>` / a random secret. The platform stores only the SHA-256 hash. The plaintext is returned **once** at registration/claim. |
 | Broker TLS (`mqtts://localhost:8883`) | Protects the password in transit. Devices verify `ca.crt`. |
-| Topic ACL | A device can only publish/subscribe its own `devices/{id}/…` topics. A stolen credential impersonates **that device only**. |
-| Revoke / disable | MQTT auth rejects disabled devices and revoked MQTT credentials. |
-| HTTP vs MQTT | The `dev_` HTTP token and the MQTT password are separate secrets. |
+| Topic ACL | A device may publish only `status`, `metrics`, and `commands/result`, and subscribe only to `commands`. The platform MQTT user is a superuser for the Fleet MQTT test console. |
+| Revoke / disable | MQTT auth rejects disabled devices and revoked MQTT credentials (`POST .../devices/{id}/mqtt/revoke`). |
+| HTTP vs MQTT | The `dev_` HTTP token and the MQTT password are separate secrets. HTTP last-seen and MQTT online/offline are independent. |
 
 Internal broker callbacks:
 
@@ -41,47 +44,40 @@ make dev
 
 Then register a device (`meteorcli register` or request-token/claim). The agent
 stores MQTT credentials in `mqtt.json` (`0600`) and `mqtt-ca.crt`. Start
-`meteorcli run` so the agent connects, publishes `online`, and answers ping.
+`meteorcli run` so the agent connects, publishes `online` plus a metrics snapshot,
+and answers ping.
 
-On the device detail page: **Test Connection** (ping), plus that device's ID,
-MAC address, topics, and meteorcli examples. Open **MQTT test** in the sidebar
-for a free-form topic/payload console (plain text, any topic).
+On the device detail page: **Test Connection** (ping), latest CPU/memory/disk
+snapshot, topics, and meteorcli examples. Open **MQTT test** in the sidebar for a
+free-form topic/payload console (platform credentials; any topic).
 
-To watch a device event from the Pi:
+To publish a status probe from the Pi:
 
 ```bash
 meteorcli mqtt-test
 ```
 
-That publishes one JSON message to `devices/{device_id}/events` over TLS. The
-MQTT test page shows the payload under **Messages**. Register/claim must have
-written `~/.config/meteorcli/mqtt.json` first (`meteorcli status` should say
-`MQTT: configured`). `MQTT_PUBLIC_HOST` on the server must be reachable from
-the device (not `localhost` for a Pi on the LAN). `make mqtt-certs` includes
-this machine's LAN IP in the broker certificate; restart EMQX after generating
-certs so it loads the new files.
+That publishes one JSON message to `devices/{device_id}/status` over TLS.
+Register/claim must have written `~/.config/meteorcli/mqtt.json` first
+(`meteorcli status` should say `MQTT: configured`). `MQTT_PUBLIC_HOST` on the
+server must be reachable from the device (not `localhost` for a Pi on the LAN).
+`make mqtt-certs` includes this machine's LAN IP in the broker certificate;
+restart EMQX after generating certs so it loads the new files.
 
-To print messages on the same topic as the Fleet MQTT test page, run:
+To print inbound commands:
 
 ```bash
 meteorcli mqtt-listen
 ```
 
-That defaults to `devices/{device_id}/events`. Pass a topic (or suffix) to
-listen elsewhere on **this device only**:
-
-```bash
-meteorcli mqtt-listen commands
-meteorcli mqtt-listen devices/DEVICE_ID/custom
-```
-
-Publish with an optional topic and payload (`mqtt-test` with no args uses the
-same events topic as the UI):
+That defaults to `devices/{device_id}/commands` (the only device subscribe).
 
 ```bash
 meteorcli mqtt-test
-meteorcli mqtt-test devices/DEVICE_ID/events '{"hello":true}'
-meteorcli mqtt-test custom 'hello'
+meteorcli mqtt-test devices/DEVICE_ID/status '{"status":"online"}'
+meteorcli mqtt-test metrics
+meteorcli mqtt-listen
+meteorcli mqtt-listen commands
 ```
 
 Wildcards and other devices' topics are rejected. Uses a separate MQTT client
@@ -113,11 +109,16 @@ A second device username must be **denied** on `devices/OTHER_ID/#`.
 ## Topics
 
 ```text
-devices/{device_id}/status              PUBLISH / SUBSCRIBE (device, LWT)
-devices/{device_id}/events              PUBLISH / SUBSCRIBE (device and MQTT test)
+devices/{device_id}/status              PUBLISH (device, LWT) / platform subscribe
+devices/{device_id}/metrics             PUBLISH (device) / platform subscribe (latest snapshot only)
 devices/{device_id}/commands            SUBSCRIBE (device) / PUBLISH (platform)
-devices/{device_id}/commands/result     PUBLISH / SUBSCRIBE (device)
-devices/{device_id}/…                   other names on this device only (no wildcards)
+devices/{device_id}/commands/result     PUBLISH (device) / platform subscribe
+devices/{device_id}/telemetry           reserved; devices are denied
 ```
 
-QoS 1 for commands, results, and status.
+The Fleet MQTT test page uses the **platform** MQTT user and may publish or
+subscribe to other names (including `events`). Devices cannot.
+
+QoS 1 for status, metrics, commands, and results. Metrics are not time-series:
+the backend keeps only the latest snapshot. Disk % is for `/`. Temperature is
+omitted when `/sys/class/thermal/thermal_zone0/temp` is missing.

@@ -234,6 +234,11 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    mqtt_metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    mqtt_metrics_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
 
 class EnrollmentApiKey(Base, UUIDPrimaryKeyMixin, TimestampMixin):

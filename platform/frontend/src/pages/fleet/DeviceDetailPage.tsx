@@ -34,6 +34,14 @@ function Detail({ label, value }: { label: string; value: string | null | undefi
   );
 }
 
+function metricText(metrics: Record<string, unknown> | null, key: string): string | null {
+  if (!metrics || metrics[key] == null) {
+    return null;
+  }
+  const value = metrics[key];
+  return typeof value === "number" ? String(value) : String(value);
+}
+
 export function DeviceDetailPage() {
   const { organizationId = "", deviceId = "" } = useParams();
   const { token } = useAuth();
@@ -97,14 +105,13 @@ export function DeviceDetailPage() {
   }
   const device = deviceQuery.data;
   const currentName = name ?? device.name;
-  const eventsTopic = `devices/${device.id}/events`;
   const commandsTopic = `devices/${device.id}/commands`;
   const statusTopic = `devices/${device.id}/status`;
+  const metricsTopic = `devices/${device.id}/metrics`;
   const meteorcliExamples = [
     "meteorcli mqtt-test",
-    `meteorcli mqtt-test ${eventsTopic} '{"mac_address":"${device.mac_addresses[0] ?? ""}","message":"hello"}'`,
+    `meteorcli mqtt-test ${statusTopic} '{"status":"online","mac_address":"${device.mac_addresses[0] ?? ""}"}'`,
     "meteorcli mqtt-listen",
-    `meteorcli mqtt-listen ${eventsTopic}`,
     `meteorcli mqtt-listen commands`,
   ].join("\n");
 
@@ -222,9 +229,9 @@ export function DeviceDetailPage() {
             value={device.mac_addresses.length ? device.mac_addresses.join(", ") : null}
           />
           <Detail label="MQTT username" value={`device_${device.id}`} />
-          <Detail label="Events topic" value={eventsTopic} />
-          <Detail label="Commands topic" value={commandsTopic} />
           <Detail label="Status topic" value={statusTopic} />
+          <Detail label="Metrics topic" value={metricsTopic} />
+          <Detail label="Commands topic" value={commandsTopic} />
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">On the device</p>
@@ -242,7 +249,7 @@ export function DeviceDetailPage() {
           <MqttConsole
             token={token}
             organizationId={organizationId}
-            defaultTopic={eventsTopic}
+            defaultTopic={statusTopic}
             topicLocked
             canPublish={canManage}
           />
@@ -250,6 +257,26 @@ export function DeviceDetailPage() {
       </div>
 
       <div className="grid gap-4 rounded-lg border border-border bg-white/80 p-6 shadow-sm sm:grid-cols-2">
+        <Detail
+          label="CPU %"
+          value={metricText(device.mqtt_metrics, "cpu_percent")}
+        />
+        <Detail
+          label="Memory %"
+          value={metricText(device.mqtt_metrics, "memory_percent")}
+        />
+        <Detail
+          label="Disk %"
+          value={metricText(device.mqtt_metrics, "disk_percent")}
+        />
+        <Detail
+          label="Temperature °C"
+          value={metricText(device.mqtt_metrics, "temperature_c")}
+        />
+        <Detail
+          label="Metrics updated"
+          value={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
+        />
         <Detail label="Serial number" value={device.serial_number} />
         <Detail label="Operating system" value={[device.os_name, device.os_version].filter(Boolean).join(" ")} />
         <Detail label="Kernel" value={device.kernel_version} />

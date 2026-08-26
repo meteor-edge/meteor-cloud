@@ -207,6 +207,8 @@ class DeviceResponse(BaseModel):
     mqtt_configured: bool = False
     mqtt_status: str | None = None
     mqtt_status_at: datetime | None = None
+    mqtt_metrics: dict[str, Any] | None = None
+    mqtt_metrics_at: datetime | None = None
 
 
 class DeviceUpdateRequest(BaseModel):

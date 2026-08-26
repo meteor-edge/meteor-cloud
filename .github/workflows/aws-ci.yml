@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: |
             platform/backend/pyproject.toml
             installer/pyproject.toml
-            agent-example/pyproject.toml
+            edge-agent/pyproject.toml
       - uses: actions/setup-node@v5
         with:
           node-version: "22"

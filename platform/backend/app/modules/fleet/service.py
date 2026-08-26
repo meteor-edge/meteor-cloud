@@ -759,6 +759,26 @@ class FleetService:
         self.session.refresh(device)
         return self._to_device_response(device)
 
+    def revoke_mqtt_credential(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+    ) -> DeviceResponse:
+        membership = self._require_membership(organization_id, actor.id)
+        self._require_manage(membership.role)
+        device = self._require_device(organization_id, device_id)
+        cred = self.session.get(DeviceMqttCredential, device_id)
+        if cred is None:
+            raise NotFoundError("mqtt_not_configured", "This device has no MQTT credential.")
+        if cred.revoked_at is None:
+            cred.revoked_at = datetime.now(UTC)
+            self.session.add(cred)
+            self.session.commit()
+        self.session.refresh(device)
+        return self._to_device_response(device)
+
     def ping_device(
         self,
         *,
@@ -871,6 +891,8 @@ class FleetService:
             mqtt_configured=self._mqtt_configured(device.id),
             mqtt_status=device.mqtt_status,
             mqtt_status_at=device.mqtt_status_at,
+            mqtt_metrics=device.mqtt_metrics,
+            mqtt_metrics_at=device.mqtt_metrics_at,
         )
 
     def _mqtt_configured(self, device_id: uuid.UUID) -> bool:

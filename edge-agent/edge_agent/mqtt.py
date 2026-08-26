@@ -10,10 +10,12 @@ import ssl
 import time
 import uuid
 from collections.abc import Callable
-from threading import Event
+from datetime import UTC, datetime
+from threading import Event, Thread
 
 import paho.mqtt.client as mqtt
 
+from edge_agent.metrics import collect_metrics, read_uptime_seconds
 from edge_agent.mqtt_config import MqttConfig, resolve_mqtt_broker_host
 
 logger = logging.getLogger("edge_agent")
@@ -21,6 +23,25 @@ logger = logging.getLogger("edge_agent")
 AGENT_VERSION = "0.2.0"
 COMMANDS_QOS = 1
 STATUS_QOS = 1
+METRICS_INTERVAL_SECONDS = 60.0
+DEVICE_PUBLISH_SUFFIXES = frozenset({"status", "metrics", "commands/result"})
+DEVICE_SUBSCRIBE_SUFFIXES = frozenset({"commands"})
+
+
+def utc_timestamp() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def online_status_payload() -> dict:
+    payload: dict = {
+        "status": "online",
+        "timestamp": utc_timestamp(),
+        "agent_version": AGENT_VERSION,
+    }
+    uptime = read_uptime_seconds()
+    if uptime is not None:
+        payload["uptime_seconds"] = uptime
+    return payload
 
 
 def next_backoff(seconds: float, *, factor: float = 2.0, max_delay: float = 30.0) -> float:
@@ -96,6 +117,8 @@ class DeviceMqttSession:
         self.server_url = server_url
         self._sleep = sleep
         self._client: mqtt.Client | None = None
+        self._metrics_stop = Event()
+        self._metrics_thread: Thread | None = None
 
     def _broker_host(self) -> str:
         return resolve_mqtt_broker_host(self.config.host, self.server_url)
@@ -109,12 +132,12 @@ class DeviceMqttSession:
         return f"devices/{self.device_id}/status"
 
     @property
-    def result_topic(self) -> str:
-        return f"devices/{self.device_id}/commands/result"
+    def metrics_topic(self) -> str:
+        return f"devices/{self.device_id}/metrics"
 
     @property
-    def events_topic(self) -> str:
-        return f"devices/{self.device_id}/events"
+    def result_topic(self) -> str:
+        return f"devices/{self.device_id}/commands/result"
 
     def start(self) -> None:
         client = mqtt.Client(
@@ -145,9 +168,13 @@ class DeviceMqttSession:
         client.connect_async(self._broker_host(), self.config.port, 60)
         client.loop_start()
         self._client = client
+        self._metrics_stop.clear()
+        self._metrics_thread = Thread(target=self._metrics_loop, name="mqtt-metrics", daemon=True)
+        self._metrics_thread.start()
 
     def stop(self) -> None:
         client = self._client
+        self._metrics_stop.set()
         if client is None:
             return
         try:
@@ -189,7 +216,7 @@ class DeviceMqttSession:
         client.subscribe(self.commands_topic, qos=COMMANDS_QOS)
         client.publish(
             self.status_topic,
-            payload=json.dumps({"status": "online", "agent_version": AGENT_VERSION}),
+            payload=json.dumps(online_status_payload()),
             qos=STATUS_QOS,
             retain=True,
         )
@@ -224,34 +251,61 @@ class DeviceMqttSession:
             retain=False,
         )
 
+    def _metrics_loop(self) -> None:
+        while not self._metrics_stop.is_set():
+            self._publish_metrics()
+            if self._metrics_stop.wait(METRICS_INTERVAL_SECONDS):
+                break
 
-def events_topic(device_id: str) -> str:
-    return f"devices/{device_id}/events"
+    def _publish_metrics(self) -> None:
+        client = self._client
+        if client is None:
+            return
+        try:
+            body = collect_metrics()
+            body["timestamp"] = utc_timestamp()
+            client.publish(
+                self.metrics_topic,
+                payload=json.dumps(body),
+                qos=STATUS_QOS,
+                retain=False,
+            )
+        except Exception:
+            logger.debug("Could not publish MQTT metrics")
 
 
 def commands_topic(device_id: str) -> str:
     return f"devices/{device_id}/commands"
 
 
-DEFAULT_TEST_TOPIC_SUFFIX = "events"
+DEFAULT_PUBLISH_SUFFIX = "status"
+DEFAULT_SUBSCRIBE_SUFFIX = "commands"
 
 
-def normalize_device_topic(device_id: str, topic: str | None) -> str:
-    """Resolve a CLI topic to devices/{device_id}/…. Reject other devices and wildcards."""
-    raw = (topic or DEFAULT_TEST_TOPIC_SUFFIX).strip()
-    if not raw:
-        raw = DEFAULT_TEST_TOPIC_SUFFIX
+def normalize_device_topic(
+    device_id: str,
+    topic: str | None,
+    *,
+    action: str = "publish",
+) -> str:
+    """Resolve a CLI topic to an allowed devices/{device_id}/… name."""
+    allowed = DEVICE_PUBLISH_SUFFIXES if action == "publish" else DEVICE_SUBSCRIBE_SUFFIXES
+    default = DEFAULT_PUBLISH_SUFFIX if action == "publish" else DEFAULT_SUBSCRIBE_SUFFIX
+    raw = (topic or default).strip() or default
     if any(part in {"+", "#"} for part in raw.split("/")):
         raise ValueError("MQTT wildcards are not allowed")
     prefix = f"devices/{device_id}/"
-    if "/" not in raw:
-        return f"{prefix}{raw}"
-    if not raw.startswith(prefix):
-        raise ValueError(f"topic must be under {prefix.rstrip('/')}")
-    suffix = raw[len(prefix) :]
-    if not suffix:
-        raise ValueError(f"topic must be under {prefix.rstrip('/')}")
-    return raw
+    if raw.startswith("devices/"):
+        if not raw.startswith(prefix):
+            raise ValueError(f"topic must be under {prefix.rstrip('/')}")
+        resolved = raw
+    else:
+        resolved = f"{prefix}{raw}"
+    suffix = resolved[len(prefix) :]
+    if suffix not in allowed:
+        names = ", ".join(sorted(allowed))
+        raise ValueError(f"topic must be one of: {names}")
+    return resolved
 
 
 def _device_mqtt_client(
@@ -342,7 +396,7 @@ def publish_test_event(
     """Connect over TLS, publish one message, then disconnect."""
     insecure = tls_insecure_enabled() if tls_insecure is None else tls_insecure
     host = resolve_mqtt_broker_host(config.host, server_url)
-    resolved = normalize_device_topic(device_id, topic)
+    resolved = normalize_device_topic(device_id, topic, action="publish")
     body = json.dumps(payload) if isinstance(payload, dict) else payload
     verify_broker_tls(host, config.port, config.ca_path, insecure=insecure)
     client = _device_mqtt_client(device_id, config, suffix="mqtt-test", insecure=insecure)
@@ -370,14 +424,14 @@ def listen_mqtt(
     on_message: Callable[[str, str], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
-    """Subscribe to a device topic and print payloads until timeout.
+    """Subscribe to this device's command topic over TLS.
 
-    Default topic matches the Fleet MQTT test page (events). Uses a unique
-    client id so ``meteorcli run`` stays connected. Does not handle ping.
+    Default topic is ``devices/{id}/commands`` (the only device subscribe).
+    Uses a unique client id so ``meteorcli run`` stays connected.
     """
     insecure = tls_insecure_enabled() if tls_insecure is None else tls_insecure
     host = resolve_mqtt_broker_host(config.host, server_url)
-    resolved = normalize_device_topic(device_id, topic)
+    resolved = normalize_device_topic(device_id, topic, action="subscribe")
     emit = on_message or (lambda _topic, _payload: None)
     verify_broker_tls(host, config.port, config.ca_path, insecure=insecure)
     client = _device_mqtt_client(device_id, config, suffix="mqtt-listen", insecure=insecure)

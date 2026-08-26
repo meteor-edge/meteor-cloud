@@ -151,3 +151,31 @@ def test_status_message_updates_device(db_session: Session) -> None:
     ).json()
     assert listed["mqtt_configured"] is True
     assert listed["mqtt_status"] == "online"
+
+
+def test_metrics_message_stores_latest_snapshot(db_session: Session) -> None:
+    publisher = RecordingPublisher()
+    client = _client_with_publisher(db_session, publisher)
+    _headers, body = _register(client, db_session)
+    device_id = uuid.UUID(body["device_id"])
+    ok = MqttService(db_session).apply_metrics_message(
+        device_id=device_id,
+        payload=json.dumps(
+            {
+                "timestamp": "2026-08-25T12:00:00Z",
+                "cpu_percent": 18.4,
+                "memory_percent": 42.1,
+                "disk_percent": 61.3,
+                "temperature_c": None,
+            }
+        ),
+    )
+    db_session.commit()
+    assert ok is True
+    listed = client.get(
+        f"/api/v1/organizations/{body['organization_id']}/devices/{device_id}",
+        headers=auth_header(client, "owner@example.com"),
+    ).json()
+    assert listed["mqtt_metrics"]["cpu_percent"] == 18.4
+    assert listed["mqtt_metrics"]["temperature_c"] is None
+    assert listed["mqtt_metrics_at"] is not None

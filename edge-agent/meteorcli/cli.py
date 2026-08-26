@@ -8,8 +8,8 @@ Subcommands
   request-token  Ask the API for a device token; wait briefly for admin approval.
   claim          Collect the device token after a later approval.
   run        Send periodic heartbeats.
-  mqtt-test    Publish one TLS MQTT message (default: devices/{id}/events).
-  mqtt-listen  Print messages on a device topic (default: devices/{id}/events).
+  mqtt-test    Publish one TLS MQTT message (default: devices/{id}/status).
+  mqtt-listen  Print inbound commands (default: devices/{id}/commands).
   status       Show persisted (non-secret) configuration.
 
 Secrets are never printed by any command except when the user explicitly
@@ -655,9 +655,10 @@ def _cmd_mqtt_test(args: argparse.Namespace) -> int:
     if mqtt_config is None:
         return 1
     try:
-        topic = normalize_device_topic(config.device_id, args.topic)
+        topic = normalize_device_topic(config.device_id, args.topic, action="publish")
         if args.message is None:
             payload: dict | str = {
+                "status": "online",
                 "source": "meteorcli",
                 "message": "mqtt-test",
                 "sent_at": datetime.now(UTC).isoformat(),
@@ -699,7 +700,7 @@ def _cmd_mqtt_listen(args: argparse.Namespace) -> int:
     if mqtt_config is None:
         return 1
     try:
-        topic = normalize_device_topic(config.device_id, args.topic)
+        topic = normalize_device_topic(config.device_id, args.topic, action="subscribe")
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -741,9 +742,9 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} register --token reg_XXXX\n"
             f"  {PROG} run\n"
             f"  {PROG} mqtt-test\n"
-            f"  {PROG} mqtt-test devices/DEVICE_ID/events '{{\"hello\":true}}'\n"
+            f"  {PROG} mqtt-test devices/DEVICE_ID/status '{{\"status\":\"online\"}}'\n"
             f"  {PROG} mqtt-listen\n"
-            f"  {PROG} mqtt-listen devices/DEVICE_ID/commands\n"
+            f"  {PROG} mqtt-listen commands\n"
             f"  {PROG} status\n"
             "\n"
             "Environment variables:\n"
@@ -946,16 +947,17 @@ def build_parser() -> argparse.ArgumentParser:
         "mqtt-test",
         help="Publish one MQTT test message over TLS.",
         description=(
-            "Publish to a device topic using mqtt.json. With no topic, uses "
-            "devices/{device_id}/events (same as the Fleet MQTT test page). "
-            "Optional message is JSON if it starts with { or [, otherwise raw text."
+            "Publish to an allowed device topic using mqtt.json. With no topic, uses "
+            "devices/{device_id}/status. Allowed publish suffixes: status, metrics, "
+            "commands/result. Optional message is JSON if it starts with { or [, "
+            "otherwise raw text."
         ),
     )
     mqtt_test_parser.add_argument(
         "topic",
         nargs="?",
         default=None,
-        help="Topic or suffix (default: events). Must be under this device.",
+        help="Topic or suffix (default: status). Allowed: status, metrics, commands/result.",
     )
     mqtt_test_parser.add_argument(
         "message",
@@ -969,18 +971,17 @@ def build_parser() -> argparse.ArgumentParser:
         "mqtt-listen",
         help="Print MQTT messages on a device topic.",
         description=(
-            "Subscribe to a device topic over TLS and print payloads. "
-            "With no topic, uses devices/{device_id}/events (same as the Fleet "
-            "MQTT test page). Other topics must still belong to this device. "
-            "Does not answer ping. Uses a unique MQTT client id so meteorcli run "
-            "stays connected."
+            "Subscribe to this device's command topic over TLS and print payloads. "
+            "With no topic, uses devices/{device_id}/commands (the only device "
+            "subscribe). Does not answer ping. Uses a unique MQTT client id so "
+            "meteorcli run stays connected."
         ),
     )
     mqtt_listen_parser.add_argument(
         "topic",
         nargs="?",
         default=None,
-        help="Topic or suffix (default: events). Must be under this device.",
+        help="Topic or suffix (default: commands). Devices may only subscribe to commands.",
     )
     mqtt_listen_parser.add_argument(
         "--timeout",

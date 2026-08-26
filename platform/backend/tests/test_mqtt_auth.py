@@ -150,3 +150,46 @@ def test_authorize_own_and_foreign_topics(client: TestClient, db_session: Sessio
     )
     assert allowed.json()["result"] == "allow"
     assert denied.json()["result"] == "deny"
+
+
+def test_authorize_denies_events_and_allows_metrics(client: TestClient, db_session: Session) -> None:
+    body = _register(client, db_session)
+    device_id = body["device_id"]
+    username = body["mqtt"]["username"]
+    metrics = client.post(
+        "/internal/mqtt/authorize",
+        headers=INTERNAL,
+        json={
+            "username": username,
+            "action": "publish",
+            "topic": f"devices/{device_id}/metrics",
+        },
+    )
+    events = client.post(
+        "/internal/mqtt/authorize",
+        headers=INTERNAL,
+        json={
+            "username": username,
+            "action": "publish",
+            "topic": f"devices/{device_id}/events",
+        },
+    )
+    assert metrics.json()["result"] == "allow"
+    assert events.json()["result"] == "deny"
+
+
+def test_revoke_mqtt_api_rejects_authenticate(client: TestClient, db_session: Session) -> None:
+    body = _register(client, db_session)
+    owner_headers = auth_header(client, "owner@example.com")
+    revoke = client.post(
+        f"/api/v1/organizations/{body['organization_id']}/devices/{body['device_id']}/mqtt/revoke",
+        headers=owner_headers,
+    )
+    assert revoke.status_code == 200, revoke.text
+    assert revoke.json()["mqtt_configured"] is False
+    response = client.post(
+        "/internal/mqtt/authenticate",
+        headers=INTERNAL,
+        json={"username": body["mqtt"]["username"], "password": body["mqtt"]["password"]},
+    )
+    assert response.json()["result"] == "deny"

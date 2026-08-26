@@ -100,7 +100,7 @@ make ansible-check
 | **Fleet: device-initiated enrollment** | [docs/fleet/device-request-enrollment.md](docs/fleet/device-request-enrollment.md) |
 | **Fleet: device authentication** | [docs/fleet/device-authentication.md](docs/fleet/device-authentication.md) |
 | **Fleet: heartbeat & status** | [docs/fleet/heartbeat.md](docs/fleet/heartbeat.md) |
-| **Reference agent** | [agent-example/README.md](agent-example/README.md) |
+| **Device agent (edge-agent / meteorcli)** | [edge-agent/README.md](edge-agent/README.md) |
 | **Infrastructure** | [infrastructure/README.md](infrastructure/README.md) |
 | **Installer** | [installer/README.md](installer/README.md) |
 

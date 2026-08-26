@@ -1,7 +1,8 @@
 """Per-device MQTT topic permissions.
 
-A device may only access ``devices/{its_id}/…``. Wildcards and other devices
-are denied. Inbound ``commands`` may be subscribed but not published.
+A device may only publish status, metrics, and command results, and may only
+subscribe to inbound commands. Wildcards, other devices, and reserved topics
+such as telemetry are denied.
 """
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ import uuid
 
 DEVICE_USERNAME_PREFIX = "device_"
 
-PLATFORM_ONLY_PUBLISH = "commands"
+DEVICE_PUBLISH_SUFFIXES = frozenset({"status", "metrics", "commands/result"})
+DEVICE_SUBSCRIBE_SUFFIXES = frozenset({"commands"})
 
 
 def mqtt_username_for(device_id: uuid.UUID) -> str:
@@ -63,7 +65,7 @@ def can_access_topic(device_id: uuid.UUID, action: str, topic: str) -> bool:
         return False
     direction = _normalize_action(action)
     if direction == "publish":
-        return suffix != PLATFORM_ONLY_PUBLISH
+        return suffix in DEVICE_PUBLISH_SUFFIXES
     if direction == "subscribe":
-        return True
+        return suffix in DEVICE_SUBSCRIBE_SUFFIXES
     return False
