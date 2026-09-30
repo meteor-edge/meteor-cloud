@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws test lint format typecheck install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website
+.PHONY: help join-help dev stop up down plan status-aws test lint format typecheck install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website checkout-ui
 
 COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f docker-compose.observability.yml
@@ -33,6 +33,8 @@ join-help:
 dev: ## Start control-plane, data-plane, console, and website
 	@test -f .env || cp .env.example .env
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
+	@test -f $(CONSOLE_DIR)/package.json || (echo "Console source missing. Run: make checkout-ui" && exit 1)
+	@test -f $(WEBSITE_DIR)/package.json || (echo "Website source missing. Run: make checkout-ui" && exit 1)
 	$(COMPOSE) up --build -d
 	@echo ""
 	@echo "Development stack is starting:"
@@ -59,13 +61,19 @@ dev-data-plane: ## Start EMQX and the data-plane MQTT gateway
 
 dev-console: ## Start the operator console
 	@test -f .env || cp .env.example .env
+	@test -f $(CONSOLE_DIR)/package.json || (echo "Console source missing. Run: make checkout-ui" && exit 1)
 	$(CONSOLE_COMPOSE) up --build -d
 	@echo "Console: http://localhost:5173  (needs VITE_API_BASE_URL pointing at a control plane)"
 
 dev-website: ## Start the public website and docs
 	@test -f .env || cp .env.example .env
+	@test -f $(WEBSITE_DIR)/package.json || (echo "Website source missing. Run: make checkout-ui" && exit 1)
 	$(WEBSITE_COMPOSE) up --build -d
 	@echo "Website: http://localhost:3000"
+
+checkout-ui: ## Copy console and website from the private meteor-ui repo
+	chmod +x scripts/checkout-ui.sh
+	./scripts/checkout-ui.sh
 
 mqtt-certs: ## Generate local MQTT CA and broker certificates
 	./scripts/generate-local-mqtt-certs.sh
@@ -82,6 +90,8 @@ test-cloud-e2e: ## Terraform+Ansible AWS deploy, same MQTT tests, always destroy
 observability: ## Start the development stack plus Prometheus, Loki, and Grafana
 	@test -f .env || cp .env.example .env
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
+	@test -f $(CONSOLE_DIR)/package.json || (echo "Console source missing. Run: make checkout-ui" && exit 1)
+	@test -f $(WEBSITE_DIR)/package.json || (echo "Website source missing. Run: make checkout-ui" && exit 1)
 	$(OBS_COMPOSE) up --build -d
 	@echo ""
 	@echo "Observability stack is starting:"
@@ -137,9 +147,11 @@ install-data-plane: ## Install data-plane Python dependencies
 	cd $(DATA_PLANE_DIR) && python -m pip install -e ".[dev]"
 
 install-console: ## Install console Node dependencies
+	@test -f $(CONSOLE_DIR)/package.json || (echo "Console source missing. Run: make checkout-ui" && exit 1)
 	cd $(CONSOLE_DIR) && npm install
 
 install-website: ## Install website Node dependencies
+	@test -f $(WEBSITE_DIR)/package.json || (echo "Website source missing. Run: make checkout-ui" && exit 1)
 	cd $(WEBSITE_DIR) && npm install
 
 install-installer: ## Install installer Python dependencies
@@ -148,7 +160,9 @@ install-installer: ## Install installer Python dependencies
 install-agent: ## Install reference agent Python dependencies
 	cd $(AGENT_DIR) && python -m pip install -e ".[dev]"
 
-install: install-backend install-data-plane install-console install-website install-installer install-agent ## Install all local dependencies
+install: install-backend install-data-plane install-installer install-agent ## Install backend local dependencies
+	@if [ -f $(CONSOLE_DIR)/package.json ]; then $(MAKE) install-console; else echo "skip console (make checkout-ui)"; fi
+	@if [ -f $(WEBSITE_DIR)/package.json ]; then $(MAKE) install-website; else echo "skip website (make checkout-ui)"; fi
 
 backend-test: ## Run control-plane tests (dedicated *_test database, never the app DB)
 	cd $(BACKEND_DIR) && python -m pytest -q
@@ -157,6 +171,7 @@ data-plane-test: ## Run data-plane tests
 	cd $(DATA_PLANE_DIR) && python -m pytest -q
 
 console-test: ## Run console tests
+	@test -f $(CONSOLE_DIR)/package.json || (echo "Console source missing. Run: make checkout-ui" && exit 1)
 	cd $(CONSOLE_DIR) && npm test -- --run
 
 agent-test: ## Run reference agent tests
@@ -171,8 +186,12 @@ test: ## Run all tests
 	cd $(DATA_PLANE_DIR) && python -m pytest -q
 	@echo "==> Agent tests"
 	cd $(AGENT_DIR) && python -m pytest -q
-	@echo "==> Console tests"
-	cd $(CONSOLE_DIR) && npm test -- --run
+	@if [ -f $(CONSOLE_DIR)/package.json ]; then \
+		echo "==> Console tests"; \
+		cd $(CONSOLE_DIR) && npm test -- --run; \
+	else \
+		echo "==> Console tests skipped (make checkout-ui)"; \
+	fi
 
 lint: ## Lint all projects
 	@echo "==> Installer lint"
@@ -183,10 +202,8 @@ lint: ## Lint all projects
 	cd $(DATA_PLANE_DIR) && python -m ruff check .
 	@echo "==> Agent lint"
 	cd $(AGENT_DIR) && python -m ruff check .
-	@echo "==> Console lint"
-	cd $(CONSOLE_DIR) && npm run lint
-	@echo "==> Website lint"
-	cd $(WEBSITE_DIR) && npm run lint
+	@if [ -f $(CONSOLE_DIR)/package.json ]; then echo "==> Console lint"; cd $(CONSOLE_DIR) && npm run lint; else echo "==> Console lint skipped"; fi
+	@if [ -f $(WEBSITE_DIR)/package.json ]; then echo "==> Website lint"; cd $(WEBSITE_DIR) && npm run lint; else echo "==> Website lint skipped"; fi
 
 format: ## Format all projects
 	@echo "==> Installer format"
@@ -197,10 +214,8 @@ format: ## Format all projects
 	cd $(DATA_PLANE_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Agent format"
 	cd $(AGENT_DIR) && python -m ruff format . && python -m ruff check --fix .
-	@echo "==> Console format"
-	cd $(CONSOLE_DIR) && npm run format
-	@echo "==> Website format"
-	cd $(WEBSITE_DIR) && npm run lint -- --fix
+	@if [ -f $(CONSOLE_DIR)/package.json ]; then echo "==> Console format"; cd $(CONSOLE_DIR) && npm run format; else echo "==> Console format skipped"; fi
+	@if [ -f $(WEBSITE_DIR)/package.json ]; then echo "==> Website format"; cd $(WEBSITE_DIR) && npm run lint -- --fix; else echo "==> Website format skipped"; fi
 
 typecheck: ## Run static type checks where configured
 	@echo "==> Control-plane typecheck (compileall)"

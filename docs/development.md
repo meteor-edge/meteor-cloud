@@ -15,10 +15,11 @@ cp .env.example .env
 python -m venv .venv
 source .venv/bin/activate
 
+make checkout-ui     # private git@github.com:meteor-edge/meteor-ui.git
 make install
 ```
 
-`make install` installs control-plane, data-plane, console, website, installer, and agent dependencies.
+`make checkout-ui` copies console and website from the private UI repo. `make install` installs control-plane, data-plane, installer, and agent dependencies, plus console/website when those sources are present.
 
 ## Running the stack
 
@@ -66,7 +67,7 @@ Same machine stacks **must** use network name `meteorcloud`.
 
 Telemetry is **PostgreSQL last-value** on `Device` (`TELEMETRY_PROVIDER=postgresql`). Timescale and ClickHouse are reserved names and fail fast.
 
-Website content is files under `website/content` (`WEBSITE_CONTENT_SOURCE=filesystem`). A later CMS should use its own database, not the control-plane Postgres.
+Website content is files under `website/content` after `make checkout-ui` (`WEBSITE_CONTENT_SOURCE=filesystem`). A later CMS should use its own database, not the control-plane Postgres.
 
 Stop with:
 
@@ -145,7 +146,7 @@ Runs:
 2. Control-plane Pytest suite (requires PostgreSQL; use `make dev` first)
 3. Data-plane Pytest suite
 4. Agent Pytest suite
-5. Console Vitest suite
+5. Console Vitest suite (after `make checkout-ui`)
 
 Control-plane Pytest uses a sibling `*_test` database, never `DATABASE_URL` / `edge_platform`.
 
@@ -175,7 +176,7 @@ Copy `.env.example` to `.env` and adjust as needed. Important values:
 | `TEST_DATABASE_URL` | Optional pytest database (must end in `_test`) |
 | `JWT_SECRET_KEY` | Signing key for JWT utilities |
 | `BACKEND_CORS_ORIGINS` | Allowed browser origins |
-| `VITE_API_BASE_URL` | Console → control-plane API origin |
+| `VITE_DOCS_BASE_URL` | Console → public docs site (`/docs`) |
 | `SITE_URL` | Public website origin (canonical URLs, sitemap) |
 | `WEBSITE_CONTENT_SOURCE` | `filesystem` (implemented) or `database` (reserved, website-owned DB) |
 | `DATA_PLANE_URL` | Control plane → data-plane HTTP API |

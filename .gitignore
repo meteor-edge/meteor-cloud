@@ -58,6 +58,12 @@ coverage/
 frontend/dist/
 frontend/coverage/
 
+# Frontend source lives in meteor-edge/meteor-ui (private). Placeholders stay tracked.
+/console/**
+!/console/README.md
+/website/**
+!/website/README.md
+
 # Terraform
 **/.terraform/
 *.tfstate

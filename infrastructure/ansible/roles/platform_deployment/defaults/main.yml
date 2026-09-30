@@ -4,6 +4,8 @@ git_ref: master
 image_source: git
 backend_image: edge-platform-backend:0.2.0
 frontend_image: edge-platform-frontend:0.2.0
+ui_repository_url: git@github.com:meteor-edge/meteor-ui.git
+ui_git_ref: main
 platform_public_url: http://127.0.0.1
 postgres_database: edge_platform
 postgres_username: edge_platform

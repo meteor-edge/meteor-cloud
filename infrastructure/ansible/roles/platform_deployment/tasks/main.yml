@@ -17,6 +17,21 @@
     update: true
   when: (image_source | default('git')) == 'git'
 
+- name: Clone operator UI repository
+  ansible.builtin.git:
+    repo: "{{ ui_repository_url }}"
+    dest: /opt/edge-platform/ui
+    version: "{{ ui_git_ref | default('main') }}"
+    force: true
+    update: true
+    accept_hostkey: true
+  when: (image_source | default('git')) == 'git' and (ui_repository_url | default('')) | length > 0
+
+- name: Overlay console source from meteor-ui
+  ansible.builtin.command:
+    cmd: cp -a /opt/edge-platform/ui/console/. /opt/edge-platform/src/console/
+  when: (image_source | default('git')) == 'git' and (ui_repository_url | default('')) | length > 0
+
 - name: Build backend image from repository
   ansible.builtin.command:
     cmd: >-
@@ -33,6 +48,7 @@
       docker build
       -f infrastructure/docker/Dockerfile.console
       --build-arg VITE_API_BASE_URL={{ platform_public_url }}
+      --build-arg VITE_DOCS_BASE_URL={{ docs_public_url | default('http://localhost:3000/docs') }}
       -t {{ frontend_image | default('edge-platform-frontend:0.2.0') }}
       .
     chdir: /opt/edge-platform/src

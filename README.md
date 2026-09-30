@@ -10,8 +10,8 @@ Each of these is its own process and has its own Compose file under `compose/`.
 | --- | --- | --- |
 | Control plane | `control-plane/` | Identity, organizations, device registry, enrollment, MQTT policy and ingest, operator API |
 | Data plane | `data-plane/` | EMQX platform client: publish, subscribe, forward inbound MQTT to the control plane |
-| Console | `console/` | Operator UI. Browser talks only to the control-plane API |
-| Website | `website/` | Public MeteorCloud site (landing, about, contact, docs). No control-plane dependency |
+| Console | `console/` | Operator UI (source: private `meteor-edge/meteor-ui`). Browser talks only to the control-plane API |
+| Website | `website/` | Public MeteorCloud site (source: private `meteor-edge/meteor-ui`). No control-plane dependency |
 | Device plane | `device-plane/agent/` | On-device agent (`meteorcli`) |
 | Infrastructure | `infrastructure/` | Terraform, Ansible, installer, Docker, observability |
 
@@ -46,7 +46,7 @@ make dev-website
 
 Stop: `make stop`
 
-Product documentation for operators and integrators lives on the website under **Docs**. In-repo `docs/` is the same material in Markdown for Git and the installer.
+Product documentation for operators and integrators lives on the website under **Docs**. The operator console links there (`VITE_DOCS_BASE_URL`). Console and website source is in the private repo [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui). This tree keeps empty `console/` and `website/` placeholders. Copy source locally with `make checkout-ui`. Details: [docs/frontends.md](docs/frontends.md).
 
 ## Cloud deployment
 
@@ -76,8 +76,8 @@ AWS production Compose currently runs the control plane and console on one host.
 ├── control-plane/              # FastAPI (app.*)
 ├── data-plane/                 # MQTT gateway (data_plane.*)
 ├── device-plane/agent/         # meteorcli
-├── console/                    # operator UI
-├── website/                    # public Next.js site
+├── console/                    # operator UI (placeholder; source in meteor-ui)
+├── website/                    # public Next.js site (placeholder; source in meteor-ui)
 ├── compose/                    # one Compose file per module
 ├── contracts/                  # HTTP JSON between planes
 ├── infrastructure/

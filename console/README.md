@@ -1,27 +1,15 @@
-# MeteorCloud operator console
+# Operator console
 
-React UI for fleet, organizations, and the MQTT test page. The browser talks
-**only** to the control-plane API (`VITE_API_BASE_URL`). It never calls the
-data-plane host.
+Source lives in the private repo **[meteor-edge/meteor-ui](https://github.com/meteor-edge/meteor-ui)** (`console/`).
 
-## Stack
-
-- React + TypeScript
-- Vite
-- Tailwind CSS
-- TanStack Query
-- React Router
-- shadcn-style UI primitives
-
-## Local development
+This directory is a placeholder so the public MeteorCloud tree still shows a console module.
 
 ```bash
-# From the repository root:
-make install-console
-make dev
-
-# Or run Vite directly:
-cd console
-npm install
-npm run dev
+make checkout-ui
 ```
+
+That copies the Vite app here. Copied files are gitignored and are not committed.
+
+Docs link: `VITE_DOCS_BASE_URL` (default `http://localhost:3000/docs`) on the website app in the same private repo.
+
+See [docs/frontends.md](../docs/frontends.md).

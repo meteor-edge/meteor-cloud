@@ -62,8 +62,10 @@ Keep **one** data-plane MQTT subscriber until shared subscriptions exist.
 
 ## Console and website
 
-- Console: Vite/React. `VITE_API_BASE_URL` is the control-plane origin only.
-- Website: Next.js. Static/marketing + docs. Content is files today (`website/content`). A later CMS can use a **separate** database — not the control-plane Postgres. Select with `WEBSITE_CONTENT_SOURCE=filesystem` (implemented) or `database` (reserved).
+- Console: Vite/React in private `meteor-edge/meteor-ui`. `VITE_API_BASE_URL` is the control-plane origin only. `VITE_DOCS_BASE_URL` is the public docs site (default `http://localhost:3000/docs`).
+- Website: Next.js in the same private repo. Independent deploy. No control-plane login.
+
+See [Frontends](frontends.md).
 
 ## Provider selection
 

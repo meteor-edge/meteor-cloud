@@ -1,27 +1,13 @@
-# MeteorCloud website
+# Public website
 
-Public Next.js site: landing, about, contact, and documentation. **Not** the operator
-console. It does not call the control-plane API.
+Source lives in the private repo **[meteor-edge/meteor-ui](https://github.com/meteor-edge/meteor-ui)** (`website/`).
 
-## Run
+This directory is a placeholder so the public MeteorCloud tree still shows a website module.
 
 ```bash
-# from repository root
-make install-website
-make dev-website
-
-# or
-cd website
-npm install
-npm run dev
+make checkout-ui
 ```
 
-http://localhost:3000
+That copies the Next.js app here. Copied files are gitignored and are not committed.
 
-## Content
-
-Markdown lives in `content/docs/`. `WEBSITE_CONTENT_SOURCE=filesystem` (default).
-`database` is reserved for a later CMS. That database must be owned by this app,
-not the control-plane Postgres.
-
-Optional: `SITE_URL` (canonical URLs, sitemap), `CONTACT_WEBHOOK_URL` (contact form delivery).
+See [docs/frontends.md](../docs/frontends.md).
