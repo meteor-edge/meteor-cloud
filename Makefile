@@ -157,9 +157,11 @@ install: install-backend install-data-plane install-installer install-agent ## I
 	@if [ -f $(CONSOLE_DIR)/package.json ]; then $(MAKE) install-console; else echo "skip console (make checkout-ui)"; fi
 
 backend-test: ## Run control-plane tests (dedicated *_test database, never the app DB)
+	@python -c "import sqlalchemy" >/dev/null 2>&1 || (echo "Control-plane deps missing. Run: make install-backend" && exit 1)
 	cd $(BACKEND_DIR) && python -m pytest -q
 
 data-plane-test: ## Run data-plane tests
+	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
 	cd $(DATA_PLANE_DIR) && python -m pytest -q
 
 console-test: ## Run console tests
@@ -173,8 +175,10 @@ test: ## Run all tests
 	@echo "==> Installer tests"
 	cd $(INSTALLER_DIR) && python -m pytest -q
 	@echo "==> Control-plane tests"
+	@python -c "import sqlalchemy" >/dev/null 2>&1 || (echo "Control-plane deps missing. Run: make install-backend" && exit 1)
 	cd $(BACKEND_DIR) && python -m pytest -q
 	@echo "==> Data-plane tests"
+	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
 	cd $(DATA_PLANE_DIR) && python -m pytest -q
 	@echo "==> Agent tests"
 	cd $(AGENT_DIR) && python -m pytest -q

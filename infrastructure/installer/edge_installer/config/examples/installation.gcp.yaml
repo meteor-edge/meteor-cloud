@@ -1,0 +1,53 @@
+installation:
+  name: production
+  environment: production
+  provider: gcp
+
+platform:
+  version: "0.2.0"
+  domain: null
+  public_url: null
+
+gcp:
+  project_id: your-gcp-project
+  region: europe-west1
+
+network:
+  allowed_ssh_cidrs: []
+  allow_http: true
+  allow_https: true
+
+services:
+  cloud_app:
+    enabled: true
+  vpn:
+    enabled: false
+
+components:
+  postgres:
+    enabled: true
+    provider: local
+    database_name: edge_platform
+    username: edge_platform
+  redis:
+    enabled: true
+    provider: local
+  reverse_proxy:
+    enabled: true
+    provider: traefik
+
+deployment:
+  repository_url: https://github.com/shahabkamali/MeteorCloud.git
+  git_ref: master
+  image_source: git
+  backend_image: edge-platform-backend:0.2.0
+  frontend_image: edge-platform-frontend:0.2.0
+  image_pull_policy: never
+  health_check_timeout_seconds: 180
+
+secrets:
+  source: environment
+
+observability:
+  enabled: false
+  backend: prometheus
