@@ -1,0 +1,18 @@
+---
+description: Vendor systems behind adapters; PostgreSQL is the likely stable store
+alwaysApply: true
+---
+
+# Replaceable infrastructure adapters
+
+Domain and application code must not import vendor clients directly. ClickHouse, Kafka, EMQX, Redis, S3/MinIO, Mender, and similar systems are **adapters** behind ports. They must stay swappable.
+
+**PostgreSQL is the exception that may stay.** Control-plane persistence can keep using PostgreSQL/SQLAlchemy repositories. Do not add a generic `DatabaseProvider`, and do not abstract every SQL query.
+
+When adding a real vendor boundary:
+
+* Depend on a port (repository, `TelemetryStore`, `MessageBus`, `MQTTGateway`, `ObjectStorage`, `OTAProvider`, cache/rate-limit, etc.).
+* Put the current vendor in an adapter. Select it from configuration. Leave unimplemented providers unimplemented.
+* Do not hard-code ClickHouse, Kafka, EMQX, Redis, S3, or Mender into domain services.
+
+Do not invent adapters or implement Kafka/ClickHouse/S3/Mender until that product actually exists.

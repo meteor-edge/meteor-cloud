@@ -44,8 +44,8 @@ Thumbs.db
 
 # Installer state
 .installer-state/
-installer/state/*.json
-!installer/state/.gitkeep
+infrastructure/installer/state/*.json
+!infrastructure/installer/state/.gitkeep
 
 # Docker
 *.log
@@ -55,8 +55,8 @@ coverage/
 *.cover
 
 # Frontend build
-platform/frontend/dist/
-platform/frontend/coverage/
+frontend/dist/
+frontend/coverage/
 
 # Terraform
 **/.terraform/

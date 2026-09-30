@@ -68,26 +68,27 @@ edge-installer
 ## Backend structure
 
 ```text
-platform/backend/
-├── app/
-│   ├── api/          # health
-│   ├── cli/          # create-admin
-│   ├── core/         # config, db, logging, security
-│   ├── modules/
-│   │   ├── identity/       # auth, users
-│   │   └── organizations/  # orgs, memberships, RBAC
-│   └── main.py
-├── alembic/
-└── tests/
+control-plane/app/
+├── api/rest/         # health
+├── ports/            # MQTTGateway, RateLimiter, OTAProvider
+├── adapters/         # provider selection (emqx, redis, ota=none)
+├── identity/
+├── tenancy/
+├── devices/
+├── audit/
+├── core/             # config, db, logging, security
+└── main.py
+
+data-plane/data_plane/connectivity/mqtt/   # EMQX adapter
 ```
 
 ## Frontend structure
 
 ```text
-platform/frontend/src/
+frontend/src/
 ├── components/
 ├── layouts/
-├── pages/            # auth, organizations, dashboard
+├── pages/
 ├── lib/
 └── App.tsx
 ```
@@ -95,12 +96,14 @@ platform/frontend/src/
 ## Repository layout
 
 ```text
-├── installer/          # edge-installer CLI
-├── platform/           # backend + frontend
-├── infrastructure/     # Terraform modules + Ansible playbooks
+├── control-plane/
+├── data-plane/
+├── device-plane/agent/
+├── frontend/
+├── infrastructure/     # Terraform, Ansible, installer, Docker
+├── tests/mqtt_live/
 ├── docs/
-├── installation.yaml   # AWS deploy config (local, gitignored state)
-└── Makefile            # make dev, make up, make down, ...
+└── Makefile
 ```
 
 ## Milestone scope
@@ -111,15 +114,31 @@ platform/frontend/src/
 | **2** | Auth, organizations, RBAC, frontend org pages |
 | **3** | AWS EC2 deploy, modular Terraform/Ansible, cloud_app + vpn services |
 
+## Provider boundaries
+
+Domain code depends on ports in `control-plane/app/ports/`. Current adapters are selected from configuration (`DATABASE_PROVIDER`, `CACHE_PROVIDER`, `MQTT_PROVIDER`, `OTA_PROVIDER`).
+
+| Port | Current adapter | Notes |
+|------|-----------------|-------|
+| Domain repositories (`DeviceRepository`, …) | PostgreSQL / SQLAlchemy | No generic `DatabaseProvider` |
+| `RateLimiter` | Redis (`RedisRateLimiter`) | Tests use `InMemoryRateLimiter` |
+| `MQTTGateway` | EMQX (`PlatformMqttClient`) | MQTT HTTP auth stays in `data_plane` |
+| `OTAProvider` | none | No OTA product yet |
+
+Future stores (ClickHouse, Kafka, S3/MinIO, Mender) have empty directories only.
+
+Kubernetes and WireGuard stay in `infrastructure/`; they are not imported by domain modules.
+
 ## Explicit non-goals (current)
 
-- Device management, MQTT, OTA
-- Kubernetes, multi-node, RDS, ElastiCache
-- GCP / Azure
+- OTA / Mender, Kafka, ClickHouse, object-storage adapters
+- Kubernetes as application logic
+- Multi-node, RDS, ElastiCache
 - Zero-downtime upgrades
 
 ## Extension points
 
 1. New service: Terraform module + Ansible playbook + `services/registry.py` + YAML config
-2. Business modules: `platform/backend/app/modules/`
-3. Remote Terraform state (S3 backend) — designed for, not implemented yet
+2. Business modules: `control-plane/app/` plus replaceable ports in `app/ports/`
+3. New vendor: implement the existing port; select it from settings — do not import the vendor SDK from domain services
+4. Remote Terraform state (S3 backend) — designed for, not implemented yet

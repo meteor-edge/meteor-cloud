@@ -21,7 +21,7 @@
   ansible.builtin.command:
     cmd: >-
       docker build
-      -f platform/docker/Dockerfile.backend
+      -f infrastructure/docker/Dockerfile.backend
       -t {{ backend_image | default('edge-platform-backend:0.2.0') }}
       .
     chdir: /opt/edge-platform/src
@@ -31,7 +31,7 @@
   ansible.builtin.command:
     cmd: >-
       docker build
-      -f platform/docker/Dockerfile.frontend
+      -f infrastructure/docker/Dockerfile.frontend
       --build-arg VITE_API_BASE_URL={{ platform_public_url }}
       -t {{ frontend_image | default('edge-platform-frontend:0.2.0') }}
       .

@@ -56,7 +56,8 @@ make logs
 
 ```bash
 # Start PostgreSQL somehow, then:
-cd platform/backend
+cd control-plane
+export PYTHONPATH=.:../data-plane
 export DATABASE_URL=postgresql+psycopg://edge:edge@localhost:5432/edge_platform
 alembic upgrade head
 uvicorn app.main:app --reload
@@ -65,14 +66,14 @@ uvicorn app.main:app --reload
 ### Frontend
 
 ```bash
-cd platform/frontend
+cd frontend
 npm run dev
 ```
 
 ### Installer
 
 ```bash
-cd installer
+cd infrastructure/installer
 edge-installer validate --config config/examples/installation.yaml
 ```
 
@@ -129,21 +130,25 @@ Copy `.env.example` to `.env` and adjust as needed. Important values:
 | `JWT_SECRET_KEY` | Signing key for JWT utilities |
 | `BACKEND_CORS_ORIGINS` | Allowed browser origins |
 | `VITE_API_BASE_URL` | Frontend → backend base URL |
+| `DATABASE_PROVIDER` | Persistence adapter (`postgresql` only) |
+| `CACHE_PROVIDER` | Rate-limit adapter (`redis` only) |
+| `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
+| `OTA_PROVIDER` | OTA adapter (`none` until a provider exists) |
 
 ## Adding a backend module later
 
-1. Create `platform/backend/app/modules/<name>/`
+1. Create `control-plane/app/<name>/`
 2. Keep routers thin; put domain logic beside the module
 3. Register routers from `app/main.py`
 4. Add Alembic migrations for new tables
-5. Add focused tests under `platform/backend/tests/`
+5. Add focused tests under `control-plane/tests/`
+6. New infrastructure vendors implement a port in `app/ports/` — do not import vendor SDKs from domain services
 
 ## Adding an installer component later
 
-1. Implement `PlatformComponent` in `installer/components/`
-2. Register it in `installer/components/registry.py`
+1. Implement `PlatformComponent` in `infrastructure/installer/` as needed
+2. Register it in the installer service registry
 3. Wire enablement through configuration models
-4. Call it from `PlatformDeployment` when implementation begins
 
 ## Coding standards
 

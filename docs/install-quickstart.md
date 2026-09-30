@@ -11,7 +11,7 @@ See [AWS prerequisites](aws-prerequisites.md).
 ## 2. Configure
 
 ```bash
-cp installer/edge_installer/config/examples/installation.yaml ./installation.yaml
+cp infrastructure/installer/edge_installer/config/examples/installation.yaml ./installation.yaml
 # Edit: aws.region, ssh key, allowed_ssh_cidrs, services
 ```
 

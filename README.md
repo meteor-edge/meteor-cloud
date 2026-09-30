@@ -6,11 +6,12 @@ Self-hosted Linux Edge Platform — control plane with modular AWS deployment.
 
 | Area | Purpose |
 | --- | --- |
-| `installer/` | `edge-installer` CLI — Terraform + Ansible deploy |
-| `platform/` | FastAPI backend + React frontend |
-| `infrastructure/` | Modular Terraform modules + Ansible playbooks |
+| `control-plane/` | FastAPI domain (identity, tenancy, devices, audit) |
+| `data-plane/` | MQTT connectivity and future ingestion/messaging |
+| `device-plane/` | On-device agent (`meteorcli` / `edge-agent`) |
+| `frontend/` | React operator UI |
+| `infrastructure/` | Terraform, Ansible, installer, Docker, observability |
 | `docs/` | Architecture, deployment, and development guides |
-| `installation.yaml` | AWS deploy configuration (copy from example) |
 
 ## Local development
 
@@ -65,14 +66,18 @@ make ansible-check
 ## Repository layout
 
 ```text
-├── installer/edge_installer/   # CLI, config, service registry
-├── platform/backend/           # FastAPI
-├── platform/frontend/          # React
+├── control-plane/              # FastAPI app (app.*)
+├── data-plane/                 # MQTT adapter (data_plane.*)
+├── device-plane/agent/         # edge-agent / meteorcli
+├── frontend/                   # React
 ├── infrastructure/
-│   ├── terraform/modules/      # cloud_app, vpn, ...
-│   └── ansible/playbooks/      # site.yml, services/
+│   ├── terraform/
+│   ├── ansible/
+│   ├── installer/              # edge-installer CLI
+│   ├── docker/
+│   └── observability/
+├── tests/mqtt_live/
 ├── docs/
-├── installation.yaml
 └── Makefile
 ```
 
@@ -100,9 +105,9 @@ make ansible-check
 | **Fleet: device-initiated enrollment** | [docs/fleet/device-request-enrollment.md](docs/fleet/device-request-enrollment.md) |
 | **Fleet: device authentication** | [docs/fleet/device-authentication.md](docs/fleet/device-authentication.md) |
 | **Fleet: heartbeat & status** | [docs/fleet/heartbeat.md](docs/fleet/heartbeat.md) |
-| **Device agent (edge-agent / meteorcli)** | [edge-agent/README.md](edge-agent/README.md) |
+| **Device agent (edge-agent / meteorcli)** | [device-plane/agent/README.md](device-plane/agent/README.md) |
 | **Infrastructure** | [infrastructure/README.md](infrastructure/README.md) |
-| **Installer** | [installer/README.md](installer/README.md) |
+| **Installer** | [infrastructure/installer/README.md](infrastructure/installer/README.md) |
 
 ## Milestone status
 

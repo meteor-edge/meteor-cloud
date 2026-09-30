@@ -27,7 +27,7 @@ if ! command -v terraform >/dev/null || ! command -v ansible-playbook >/dev/null
   exit 0
 fi
 
-CONFIG="${CONFIG:-$ROOT/installer/edge_installer/config/examples/installation.ci.yaml}"
+CONFIG="${CONFIG:-$ROOT/infrastructure/installer/edge_installer/config/examples/installation.ci.yaml}"
 if grep -q '__INSTALLATION_NAME__' "$CONFIG" 2>/dev/null; then
   echo "Cloud E2E: NOT RUN (CONFIG still has CI placeholders; set CONFIG to a filled installation.yaml)"
   exit 0

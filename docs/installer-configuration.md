@@ -15,7 +15,7 @@ Single YAML file, typically `installation.yaml` at the repo root.
 | `deployment` | Git repo / container images, health timeout |
 | `secrets` | Must be `environment` — values from env vars |
 
-Full example: `installer/edge_installer/config/examples/installation.yaml`
+Full example: `infrastructure/installer/edge_installer/config/examples/installation.yaml`
 
 ## Services (modular deploy)
 
