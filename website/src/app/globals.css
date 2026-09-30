@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f7fb;
+  --foreground: #0f1c2e;
+  --muted: #5b6b80;
+  --card: #ffffff;
+  --primary: #1066f0;
+  --primary-dark: #0a4bb8;
+  --accent: #12c4e8;
+  --border: #d5deea;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-primary-dark: var(--primary-dark);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(circle at 0% 0%, rgb(18 196 232 / 0.18), transparent 38%),
+    radial-gradient(circle at 100% 0%, rgb(16 102 240 / 0.14), transparent 42%);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+.prose-doc h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 1rem;
+}
+.prose-doc h2 {
+  font-size: 1.25rem;
+  font-weight: 650;
+  margin: 2rem 0 0.75rem;
+}
+.prose-doc h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 1.5rem 0 0.5rem;
+}
+.prose-doc p,
+.prose-doc ul,
+.prose-doc ol,
+.prose-doc table {
+  margin: 0 0 1rem;
+  color: var(--foreground);
+  line-height: 1.7;
+}
+.prose-doc a {
+  color: var(--primary-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prose-doc code {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.875em;
+  background: #e8eef6;
+  padding: 0.1em 0.35em;
+  border-radius: 0.3rem;
+}
+.prose-doc pre {
+  overflow-x: auto;
+  background: #0f1c2e;
+  color: #e8eef6;
+  padding: 1rem 1.1rem;
+  border-radius: 0.75rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+.prose-doc pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+.prose-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.prose-doc th,
+.prose-doc td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+}
+.prose-doc th {
+  background: #eef3f9;
+}
+.prose-doc ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.prose-doc ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}

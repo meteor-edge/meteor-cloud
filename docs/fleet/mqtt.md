@@ -1,16 +1,12 @@
-# MQTT (Milestone 5)
+# MQTT
 
-Local development uses **one-way TLS** plus a unique MQTT username/password per
-device and a strict topic ACL. This is enough to prove:
+Devices connect to EMQX over **one-way TLS** with a per-device username and password and a strict topic ACL.
 
 ```text
 Registered device → authenticates to MQTT → publishes status/metrics → ping → pong
 ```
 
-Certificate-based device authentication (mTLS) is **not** implemented yet.
-
-Production AWS Ansible does **not** deploy EMQX yet. Use `make dev` / `make test-mqtt`
-for MQTT. Do not treat cloud deploys as MQTT-complete.
+Certificate-based device authentication (mTLS) is not implemented. Production AWS Ansible does not deploy EMQX; use local Compose or run the data-plane stack yourself. Cloud Run does not expose MQTT TCP 8883.
 
 ## Security model
 

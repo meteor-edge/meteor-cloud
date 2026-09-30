@@ -1,6 +1,6 @@
-# Identity and Organizations
+# Identity and organizations
 
-Milestone 2 adds authentication and multi-tenant organizations.
+Authentication and multi-tenant organizations.
 
 ## Concepts
 

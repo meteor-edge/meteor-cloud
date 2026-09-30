@@ -1,0 +1,16 @@
+networks:
+  meteorcloud:
+    name: meteorcloud
+
+services:
+  website:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.website.dev
+    environment:
+      SITE_URL: ${SITE_URL:-http://localhost:3000}
+      WEBSITE_CONTENT_SOURCE: filesystem
+    ports:
+      - "3000:3000"
+    networks:
+      - meteorcloud

@@ -1,142 +1,82 @@
-# Architecture Overview
+# Architecture
 
-## Goals
+MeteorCloud is a modular self-hosted fleet platform. Application modules do not import each other’s internals. They talk over HTTP, MQTT, and environment configuration.
 
-The Edge Platform is a self-hosted Linux control plane with a standalone installer, AWS EC2 or GCP Cloud Run deployment, and a FastAPI + React application stack.
-
-## High-level components
+## Runtime
 
 ```text
-┌────────────────────┐
-│  edge-installer    │  Install / maintain services (AWS or GCP)
-│  (standalone CLI)  │
-└─────────┬──────────┘
-          │
-     ┌────┴────┐
-     ▼         ▼
- AWS EC2     GCP Cloud Run
- Terraform   Terraform only
- + Ansible   (Cloud SQL, Redis, LB)
-          │
-          ▼
-┌──────────────────────────────────────────┐
-│              Edge Platform               │
-│  ┌──────────────┐     ┌───────────────┐  │
-│  │   Console    │────▶│ Control plane │  │
-│  │ React / Vite │     │ FastAPI / PG  │  │
-│  └──────────────┘     └───────────────┘  │
-│                              │           │
-│                              ▼           │
-│                       Data plane MQTT    │
-└──────────────────────────────────────────┘
+Browser ──► Console ──► Control plane (FastAPI) ──► PostgreSQL
+                              │                         Redis
+meteor-agent HTTPS ───────────┤
+                              │
+meteor-agent MQTT ──► EMQX ───┼── HTTP auth/authorize
+                              │
+Control plane ── HTTP publish/watch ──► Data plane ── MQTT ──► EMQX
+Data plane ── HTTP ingest ────────────► Control plane
 ```
 
-The platform application never knows how it was installed. The installer is a separate package that deploys it as one of several optional **services**.
+The public **website** is not in this path. It is a marketing and documentation site with no login to the control plane.
 
-## Modular services
+## Modules
+
+| Module | Deployable unit | Compose |
+| --- | --- | --- |
+| Control plane | Identity, tenancy, devices, audit, MQTT policy, ingest, operator API | `compose/control-plane.yml` |
+| Data plane | EMQX client, publish/watch, ingest forward | `compose/data-plane.yml` |
+| Console | Operator UI | `compose/console.yml` |
+| Website | Landing, about, contact, docs | `compose/website.yml` |
+| Device agent | `meteorcli` on the edge device | not a Compose service |
+
+Installer-managed **cloud services** (AWS/GCP) are separate from these application modules:
 
 | Service | AWS | GCP Cloud Run |
 |---------|-----|----------------|
 | `cloud_app` | EC2 + Docker Compose + Traefik | Cloud Run + Cloud SQL + Memorystore + HTTPS LB |
 | `vpn` | WireGuard on the EC2 host | Not supported |
 
-Configured in `installation.yaml` under `services:`. Default: both enabled. One command deploys all enabled services: `make up` / `edge-installer apply`.
-
 See [Modular services](services.md).
 
-## Installer architecture
-
-```text
-edge-installer
-    |
-    +-- Configuration (installation.yaml)
-    |
-    +-- Service registry (cloud_app, vpn, ...)
-    |
-    +-- AWS provider (EC2 Terraform + Ansible)
-    +-- GCP provider (Cloud Run Terraform)
-
-    +-- State (.installer-state/)
-    |
-    +-- Health verification
-```
-
-## Backend structure
+## Control plane
 
 ```text
 control-plane/app/
 ├── api/rest/         # health
 ├── ports/            # MQTTGateway, RateLimiter, OTAProvider
-├── adapters/         # provider selection (emqx, redis, ota=none)
+├── adapters/         # emqx (via data-plane HTTP), redis, ota=none
 ├── identity/
 ├── tenancy/
 ├── devices/
 ├── audit/
-├── core/             # config, db, logging, security
+├── mqtt/             # ACL, credentials, ingest, SSE hub, ping orchestration
+├── core/
 └── main.py
-
-data-plane/data_plane/   # MQTT FastAPI process (EMQX client)
 ```
 
-## Console structure
+PostgreSQL is the control-plane database. There is no generic `DatabaseProvider`. Vendor systems (EMQX, Redis, future OTA) sit behind ports.
 
-```text
-console/src/
-├── components/
-├── layouts/
-├── pages/
-├── lib/
-└── App.tsx
-```
+## Data plane
 
-## Repository layout
+Python FastAPI process. Owns the platform MQTT session. Forwards each inbound payload to `POST {CONTROL_PLANE_URL}/internal/mqtt/ingest`. JSON contract: [`contracts/mqtt-http.md`](../contracts/mqtt-http.md).
 
-```text
-├── control-plane/
-├── data-plane/
-├── device-plane/agent/
-├── console/
-├── compose/
-├── contracts/
-├── infrastructure/     # Terraform, Ansible, installer, Docker
-├── tests/mqtt_live/
-├── docs/
-└── Makefile
-```
+Keep **one** data-plane MQTT subscriber until shared subscriptions exist.
 
-## Milestone scope
+## Console and website
 
-| Milestone | Delivered |
-|-----------|-----------|
-| **1** | Compose dev stack, FastAPI/React foundation, installer scaffold |
-| **2** | Auth, organizations, RBAC, frontend org pages |
-| **3** | AWS EC2 deploy, modular Terraform/Ansible, cloud_app + vpn services |
+- Console: Vite/React. `VITE_API_BASE_URL` is the control-plane origin only.
+- Website: Next.js. Static/marketing + docs. Content is files today (`website/content`). A later CMS can use a **separate** database — not the control-plane Postgres. Select with `WEBSITE_CONTENT_SOURCE=filesystem` (implemented) or `database` (reserved).
 
-## Provider boundaries
+## Provider selection
 
-Domain code depends on ports in `control-plane/app/ports/`. Current adapters are selected from configuration (`DATABASE_PROVIDER`, `CACHE_PROVIDER`, `MQTT_PROVIDER`, `OTA_PROVIDER`).
+| Port | Implemented | Reserved (fail fast) |
+|------|-------------|----------------------|
+| Persistence | PostgreSQL | — |
+| `RateLimiter` | Redis | — |
+| `MQTTGateway` | Data-plane HTTP → EMQX | other broker names |
+| Telemetry last-value | PostgreSQL columns on `Device` | `timescale`, `clickhouse` |
+| `OTAProvider` | `none` | `mender` and others later |
 
-| Port | Current adapter | Notes |
-|------|-----------------|-------|
-| Domain repositories (`DeviceRepository`, …) | PostgreSQL / SQLAlchemy | No generic `DatabaseProvider` |
-| `RateLimiter` | Redis (`RedisRateLimiter`) | Tests use `InMemoryRateLimiter` |
-| `MQTTGateway` | Data-plane HTTP client (`DataPlaneMQTTGateway`) | EMQX lives in the data-plane process; HTTP auth stays on the control plane |
-| `OTAProvider` | none | No OTA product yet |
+Kafka, object storage, and Mender SDKs are not in the product.
 
-Future stores (ClickHouse, Kafka, S3/MinIO, Mender) have empty directories only.
+## Kubernetes
 
-Kubernetes and WireGuard stay in `infrastructure/`; they are not imported by domain modules.
-
-## Explicit non-goals (current)
-
-- OTA / Mender, Kafka, ClickHouse, object-storage adapters
-- Kubernetes as application logic
-- Multi-node, RDS, ElastiCache
-- Zero-downtime upgrades
-
-## Extension points
-
-1. New service: Terraform module + Ansible playbook + `services/registry.py` + YAML config
-2. Business modules: `control-plane/app/` plus replaceable ports in `app/ports/`
-3. New vendor: implement the existing port; select it from settings — do not import the vendor SDK from domain services
-4. Remote Terraform state (S3 backend) — designed for, not implemented yet
+No manifests in this repo. A later split would be Deployments: `control-plane`, `data-plane`, `console`, `website`. Scale API, console, and website independently. Keep the data-plane MQTT consumer at 1 until a consumer group exists.

@@ -1,15 +1,5 @@
-# Edge Platform
+# MeteorCloud website (legacy note)
 
-The control-plane application consists of:
+Older layouts used `backend/` and `frontend/` under a `platform/` tree. The live modules are `control-plane/`, `data-plane/`, `console/`, and `website/`.
 
-| Area | Path | Role |
-| --- | --- | --- |
-| Backend | `backend/` | FastAPI API, database, auth infrastructure |
-| Console | `console/` | React operator UI shell |
-| Docker | `docker/` | Container build files |
-
-The platform never knows how it was installed. The installer lives outside this
-tree and treats the platform as a deployable artifact.
-
-See the repository root README and `docs/` for architecture and development
-guidance.
+The application never knows how it was installed. The installer lives in `infrastructure/installer/` and treats enabled **services** (`cloud_app`, `vpn`) as deployable units, separate from the application Compose modules.

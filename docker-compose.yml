@@ -5,3 +5,5 @@ include:
     project_directory: .
   - path: compose/console.yml
     project_directory: .
+  - path: compose/website.yml
+    project_directory: .

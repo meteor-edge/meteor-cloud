@@ -16,3 +16,9 @@ services:
       - ./console:/app
       - /app/node_modules
     command: npm run dev -- --host 0.0.0.0 --port 5173
+
+  website:
+    volumes:
+      - ./website:/app
+      - /app/node_modules
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000

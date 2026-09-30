@@ -184,3 +184,25 @@ jobs:
         run: npm run build
       - name: Test (vitest)
         run: npm test -- --run
+
+  website:
+    name: Website (Next.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint (eslint)
+        run: npm run lint
+      - name: Build
+        env:
+          SITE_URL: http://localhost:3000
+        run: npm run build

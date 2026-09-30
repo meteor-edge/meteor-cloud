@@ -1,13 +1,15 @@
-.PHONY: help join-help dev stop up down plan status-aws test lint format typecheck install-backend install-data-plane install-console install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console stop-control-plane stop-data-plane stop-console
+.PHONY: help join-help dev stop up down plan status-aws test lint format typecheck install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website
 
 COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f docker-compose.observability.yml
 CP_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-cp docker compose --project-directory . -f compose/control-plane.yml
 DP_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-dp docker compose --project-directory . -f compose/data-plane.yml
 CONSOLE_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-console docker compose --project-directory . -f compose/console.yml
+WEBSITE_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-website docker compose --project-directory . -f compose/website.yml
 BACKEND_DIR := control-plane
 DATA_PLANE_DIR := data-plane
 CONSOLE_DIR := console
+WEBSITE_DIR := website
 INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := device-plane/agent
 INFRA_DIR := infrastructure
@@ -23,20 +25,22 @@ join-help:
 	@echo "  Control plane alone: API works; MQTT/ping do not; console can attach if VITE_API_BASE_URL points at that API."
 	@echo "  Data plane alone: broker listens; device connect fails until control plane auth is reachable."
 	@echo "  Console alone: static UI; unusable until a control plane is reachable at the configured API base URL."
+	@echo "  Website alone: landing and docs; no control-plane URL required."
 	@echo "  Together: DATA_PLANE_URL and CONTROL_PLANE_URL use Compose service names, not localhost."
 	@echo "  Console: VITE_API_BASE_URL=http://localhost:8000 in local browser. Never a data-plane host."
 	@echo "  Host-only: DATA_PLANE_URL=http://127.0.0.1:8081 and CONTROL_PLANE_URL=http://127.0.0.1:8000."
 
-dev: ## Start control-plane, data-plane, and console together
+dev: ## Start control-plane, data-plane, console, and website
 	@test -f .env || cp .env.example .env
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
 	$(COMPOSE) up --build -d
 	@echo ""
 	@echo "Development stack is starting:"
+	@echo "  Website:      http://localhost:3000"
 	@echo "  Console:      http://localhost:5173"
 	@echo "  Control plane: http://localhost:8000"
 	@echo "  Data plane:   http://localhost:8081/health"
-	@echo "  API docs:     http://localhost:8000/docs"
+	@echo "  OpenAPI:      http://localhost:8000/docs"
 	@echo "  MQTT TLS:     mqtts://localhost:8883"
 	@echo "  EMQX UI:      http://localhost:18083  (admin / public)"
 	@echo "  Seed:         make seed"
@@ -58,6 +62,11 @@ dev-console: ## Start the operator console
 	$(CONSOLE_COMPOSE) up --build -d
 	@echo "Console: http://localhost:5173  (needs VITE_API_BASE_URL pointing at a control plane)"
 
+dev-website: ## Start the public website and docs
+	@test -f .env || cp .env.example .env
+	$(WEBSITE_COMPOSE) up --build -d
+	@echo "Website: http://localhost:3000"
+
 mqtt-certs: ## Generate local MQTT CA and broker certificates
 	./scripts/generate-local-mqtt-certs.sh
 	-$(COMPOSE) restart emqx
@@ -77,6 +86,7 @@ observability: ## Start the development stack plus Prometheus, Loki, and Grafana
 	@echo ""
 	@echo "Observability stack is starting:"
 	@echo "  App:        http://localhost:5173"
+	@echo "  Website:    http://localhost:3000"
 	@echo "  API:        http://localhost:8000"
 	@echo "  Metrics:    http://localhost:8000/metrics"
 	@echo "  Prometheus: http://localhost:9090"
@@ -94,6 +104,9 @@ stop-data-plane: ## Stop the data-plane Compose project
 
 stop-console: ## Stop the console Compose project
 	$(CONSOLE_COMPOSE) down
+
+stop-website: ## Stop the website Compose project
+	$(WEBSITE_COMPOSE) down
 
 up: ## Deploy all enabled AWS services (Terraform + Ansible)
 	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
@@ -126,13 +139,16 @@ install-data-plane: ## Install data-plane Python dependencies
 install-console: ## Install console Node dependencies
 	cd $(CONSOLE_DIR) && npm install
 
+install-website: ## Install website Node dependencies
+	cd $(WEBSITE_DIR) && npm install
+
 install-installer: ## Install installer Python dependencies
 	cd $(INSTALLER_DIR) && python -m pip install -e ".[dev]"
 
 install-agent: ## Install reference agent Python dependencies
 	cd $(AGENT_DIR) && python -m pip install -e ".[dev]"
 
-install: install-backend install-data-plane install-console install-installer install-agent ## Install all local dependencies
+install: install-backend install-data-plane install-console install-website install-installer install-agent ## Install all local dependencies
 
 backend-test: ## Run control-plane tests (dedicated *_test database, never the app DB)
 	cd $(BACKEND_DIR) && python -m pytest -q
@@ -169,6 +185,8 @@ lint: ## Lint all projects
 	cd $(AGENT_DIR) && python -m ruff check .
 	@echo "==> Console lint"
 	cd $(CONSOLE_DIR) && npm run lint
+	@echo "==> Website lint"
+	cd $(WEBSITE_DIR) && npm run lint
 
 format: ## Format all projects
 	@echo "==> Installer format"
@@ -181,6 +199,8 @@ format: ## Format all projects
 	cd $(AGENT_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Console format"
 	cd $(CONSOLE_DIR) && npm run format
+	@echo "==> Website format"
+	cd $(WEBSITE_DIR) && npm run lint -- --fix
 
 typecheck: ## Run static type checks where configured
 	@echo "==> Control-plane typecheck (compileall)"
@@ -234,7 +254,9 @@ clean: ## Remove local build artifacts
 	$(CP_COMPOSE) down -v --remove-orphans || true
 	$(DP_COMPOSE) down -v --remove-orphans || true
 	$(CONSOLE_COMPOSE) down -v --remove-orphans || true
+	$(WEBSITE_COMPOSE) down -v --remove-orphans || true
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
 	rm -rf $(CONSOLE_DIR)/node_modules $(CONSOLE_DIR)/dist $(CONSOLE_DIR)/coverage
+	rm -rf $(WEBSITE_DIR)/node_modules $(WEBSITE_DIR)/.next

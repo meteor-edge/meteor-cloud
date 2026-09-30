@@ -6,7 +6,7 @@ Deploy one or more independent stacks from a single `installation.yaml` and one 
 
 | Service | Description | Requires |
 |---------|-------------|----------|
-| `cloud_app` | Edge Platform (API, frontend, Postgres, Redis) | AWS: Docker/Traefik. GCP: Cloud Run |
+| `cloud_app` | Application stack (control-plane API, console, Postgres, Redis) | AWS: Docker/Traefik. GCP: Cloud Run |
 | `vpn` | WireGuard VPN tunnel on the EC2 host | AWS only; disable on GCP |
 
 More services can be added following the extension guide below.

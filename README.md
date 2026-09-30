@@ -1,17 +1,21 @@
-# Edge Platform
+# MeteorCloud
 
-Self-hosted Linux Edge Platform — control plane with modular AWS EC2 or GCP Cloud Run deployment.
+Self-hosted Linux fleet platform: operator console, control plane, MQTT data plane, and a device agent. Deploy the application stack on AWS EC2 or GCP Cloud Run. The public website is a separate Next.js app.
 
-## What you get
+## Modules
 
-| Area | Purpose |
-| --- | --- |
-| `control-plane/` | FastAPI domain (identity, tenancy, devices, audit, MQTT policy/ingest) |
-| `data-plane/` | MQTT gateway process (EMQX client, publish/watch, ingest HTTP) |
-| `device-plane/` | On-device agent (`meteorcli` / `edge-agent`) |
-| `console/` | React operator console (talks only to the control-plane API) |
-| `infrastructure/` | Terraform, Ansible, installer, Docker, observability |
-| `docs/` | Architecture, deployment, and development guides |
+Each of these is its own process and has its own Compose file under `compose/`.
+
+| Module | Path | Role |
+| --- | --- | --- |
+| Control plane | `control-plane/` | Identity, organizations, device registry, enrollment, MQTT policy and ingest, operator API |
+| Data plane | `data-plane/` | EMQX platform client: publish, subscribe, forward inbound MQTT to the control plane |
+| Console | `console/` | Operator UI. Browser talks only to the control-plane API |
+| Website | `website/` | Public MeteorCloud site (landing, about, contact, docs). No control-plane dependency |
+| Device plane | `device-plane/agent/` | On-device agent (`meteorcli`) |
+| Infrastructure | `infrastructure/` | Terraform, Ansible, installer, Docker, observability |
+
+Same machine: join Compose projects on the Docker network named `meteorcloud`. Across servers: set `DATA_PLANE_URL`, `CONTROL_PLANE_URL`, and `VITE_API_BASE_URL` to reachable origins. The website only needs its own HTTP port.
 
 ## Local development
 
@@ -21,18 +25,32 @@ make dev
 make seed      # optional: owner@example.com / dev-password-123
 ```
 
-- Console: http://localhost:5173
-- Control plane: http://localhost:8000/health
-- Data plane: http://localhost:8081/health
-- API docs: http://localhost:8000/docs
-- MQTT TLS: mqtts://localhost:8883
-- EMQX dashboard (dev): http://localhost:18083
+| Surface | URL |
+| --- | --- |
+| Website | http://localhost:3000 |
+| Console | http://localhost:5173 |
+| Control plane | http://localhost:8000 |
+| Data plane | http://localhost:8081/health |
+| OpenAPI | http://localhost:8000/docs |
+| MQTT TLS | mqtts://localhost:8883 |
+| EMQX dashboard (dev) | http://localhost:18083 |
+
+Start one module:
+
+```bash
+make dev-control-plane
+make dev-data-plane
+make dev-console
+make dev-website
+```
 
 Stop: `make stop`
 
+Product documentation for operators and integrators lives on the website under **Docs**. In-repo `docs/` is the same material in Markdown for Git and the installer.
+
 ## Cloud deployment
 
-**AWS (EC2 + Ansible)** — see [AWS deployment](docs/aws-deployment.md):
+**AWS (EC2 + Ansible)** — [AWS deployment](docs/aws-deployment.md):
 
 ```bash
 export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
@@ -41,7 +59,7 @@ export EDGE_PLATFORM_JWT_SECRET='...'
 make up
 ```
 
-**GCP (Cloud Run)** — see [GCP Cloud Run](docs/gcp-deployment.md):
+**GCP (Cloud Run)** — [GCP Cloud Run](docs/gcp-deployment.md):
 
 ```bash
 cp installer/edge_installer/config/examples/installation.gcp.yaml ./installation.yaml
@@ -50,69 +68,19 @@ export EDGE_PLATFORM_JWT_SECRET='...'
 make up
 ```
 
-## Tooling
+AWS production Compose currently runs the control plane and console on one host. MQTT/EMQX is local Compose (or a host you run yourself). Cloud Run does not expose MQTT TCP 8883. The website is not part of `cloud_app`; deploy it separately.
 
-```bash
-source .venv/bin/activate
-make install
-make test
-make lint
-make terraform-check
-make ansible-check
-```
-
-## Repository layout
+## Layout
 
 ```text
-├── control-plane/              # FastAPI app (app.*)
+├── control-plane/              # FastAPI (app.*)
 ├── data-plane/                 # MQTT gateway (data_plane.*)
-├── device-plane/agent/         # edge-agent / meteorcli
-├── console/                    # React operator console
-├── compose/                    # separately deployable Compose files
-├── contracts/                  # HTTP JSON contracts (no codegen)
+├── device-plane/agent/         # meteorcli
+├── console/                    # operator UI
+├── website/                    # public Next.js site
+├── compose/                    # one Compose file per module
+├── contracts/                  # HTTP JSON between planes
 ├── infrastructure/
-│   ├── terraform/
-│   ├── ansible/
-│   ├── installer/              # edge-installer CLI
-│   ├── docker/
-│   └── observability/
-├── tests/mqtt_live/
-├── docs/
+├── docs/                       # Markdown source (mirrored on the website)
 └── Makefile
 ```
-
-## Documentation
-
-| Topic | Doc |
-|-------|-----|
-| **Quick install** | [docs/install-quickstart.md](docs/install-quickstart.md) |
-| **Modular services** | [docs/services.md](docs/services.md) |
-| **Configuration** | [docs/installer-configuration.md](docs/installer-configuration.md) |
-| **GCP Cloud Run** | [docs/gcp-deployment.md](docs/gcp-deployment.md) |
-| **AWS prerequisites** | [docs/aws-prerequisites.md](docs/aws-prerequisites.md) |
-| **AWS deployment** | [docs/aws-deployment.md](docs/aws-deployment.md) |
-| **AWS CI (throwaway EC2)** | [docs/aws-ci.md](docs/aws-ci.md) |
-| **Upgrades** | [docs/upgrades.md](docs/upgrades.md) |
-| **Destroy** | [docs/destroy.md](docs/destroy.md) |
-| **Troubleshooting** | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| **Observability** | [docs/observability.md](docs/observability.md) |
-| **Architecture** | [docs/architecture.md](docs/architecture.md) |
-| **Development** | [docs/development.md](docs/development.md) |
-| **Auth & orgs** | [docs/identity-and-organizations.md](docs/identity-and-organizations.md) |
-| **Fleet: device types & groups** | [docs/fleet/device-types.md](docs/fleet/device-types.md) |
-| **Fleet: registration tokens** | [docs/fleet/registration-tokens.md](docs/fleet/registration-tokens.md) |
-| **Fleet: device registration** | [docs/fleet/device-registration.md](docs/fleet/device-registration.md) |
-| **Fleet: API keys** | [docs/fleet/enrollment-api-keys.md](docs/fleet/enrollment-api-keys.md) |
-| **Fleet: device-initiated enrollment** | [docs/fleet/device-request-enrollment.md](docs/fleet/device-request-enrollment.md) |
-| **Fleet: device authentication** | [docs/fleet/device-authentication.md](docs/fleet/device-authentication.md) |
-| **Fleet: heartbeat & status** | [docs/fleet/heartbeat.md](docs/fleet/heartbeat.md) |
-| **Device agent (edge-agent / meteorcli)** | [device-plane/agent/README.md](device-plane/agent/README.md) |
-| **Infrastructure** | [infrastructure/README.md](infrastructure/README.md) |
-| **Installer** | [infrastructure/installer/README.md](infrastructure/installer/README.md) |
-
-## Milestone status
-
-- **Milestone 1** — dev stack, FastAPI/React foundation, installer CLI
-- **Milestone 2** — auth, organizations, memberships, RBAC
-- **Milestone 3** — modular AWS deploy (`cloud_app`, `vpn`), `make up`
-- **Milestone 4** — fleet foundation: device types/groups, registration tokens, device registration & heartbeat, reference agent
