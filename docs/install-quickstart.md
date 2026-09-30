@@ -18,7 +18,7 @@ Deploy modular services to **AWS EC2** or **GCP Cloud Run**.
 ## 2. Configure (AWS)
 
 ```bash
-cp installer/edge_installer/config/examples/installation.yaml ./installation.yaml
+cp infrastructure/installer/edge_installer/config/examples/installation.yaml ./installation.yaml
 # Edit: aws.region, ssh key, allowed_ssh_cidrs, services
 ```
 

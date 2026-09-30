@@ -94,7 +94,7 @@ infrastructure/
         ├── platform_*/
         └── vpn/
 
-installer/edge_installer/services/
+infrastructure/installer/edge_installer/services/
 └── registry.py                 # service definitions
 ```
 
@@ -108,7 +108,7 @@ installer/edge_installer/services/
    - import_playbook: services/<name>.yml
      when: "'<name>' in enabled_services"
    ```
-5. **Registry** — add entry in `installer/edge_installer/services/registry.py`
+5. **Registry** — add entry in `infrastructure/installer/edge_installer/services/registry.py`
 6. **Config** — add settings under `services:` in `installation.yaml` and Pydantic models
 
 ## Related

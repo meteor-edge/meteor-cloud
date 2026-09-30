@@ -9,7 +9,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./platform/docker/postgres/init-test-db.sh:/docker-entrypoint-initdb.d/02-init-test-db.sh
+      - ./infrastructure/databases/postgres/init-test-db.sh:/docker-entrypoint-initdb.d/02-init-test-db.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-edge} -d ${POSTGRES_DB:-edge_platform}"]
       interval: 5s
@@ -27,7 +27,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: platform/docker/Dockerfile.backend
+      dockerfile: infrastructure/docker/Dockerfile.backend
     env_file:
       - .env
     environment:
@@ -70,7 +70,7 @@ services:
       - "8883:8883"
       - "18083:18083"
     volumes:
-      - ./platform/docker/emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
+      - ./infrastructure/networking/emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
       - ./certs/ca.crt:/opt/emqx/etc/certs/ca.crt:ro
       - ./certs/server.crt:/opt/emqx/etc/certs/server.crt:ro
       - ./certs/server.key:/opt/emqx/etc/certs/server.key:ro
@@ -87,7 +87,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: platform/docker/Dockerfile.frontend.dev
+      dockerfile: infrastructure/docker/Dockerfile.frontend.dev
     environment:
       VITE_API_BASE_URL: http://localhost:8000
     ports:

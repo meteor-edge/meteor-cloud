@@ -19,4 +19,7 @@ alwaysApply: true
 * Prefer containers and config/env for deploy-specific values. Avoid new hard-coded AWS account IDs, regions, or endpoints in application code.
 * Never commit secrets. Use the target platform’s secret-management mechanism.
 * Prefer portable, open standards unless an AWS-specific feature is explicitly required for the current path.
+* Keep domain logic in `control-plane/` (and device behavior in `device-plane/`). Put vendor SDKs behind ports in `app/ports/` and adapters in `app/adapters/` or `data-plane/`. Do not import PostgreSQL, EMQX, Redis, Mender, S3, or Kafka clients from domain services.
+* Add a port only at a real provider boundary. Do not add a generic `DatabaseProvider`, and do not implement vendors that are not in the product yet.
+* Kubernetes, Terraform, Ansible, and WireGuard are deployment infrastructure. They must not become part of business/domain modules.
 

@@ -101,7 +101,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
     volumes:
-      - /opt/edge-platform/src/platform/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /opt/edge-platform/src/infrastructure/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - /opt/edge-platform/data/prometheus:/prometheus
     depends_on:
       backend:
@@ -113,7 +113,7 @@ services:
     image: grafana/loki:3.3.2
     command: ["-config.file=/etc/loki/loki.yml"]
     volumes:
-      - /opt/edge-platform/src/platform/observability/loki.yml:/etc/loki/loki.yml:ro
+      - /opt/edge-platform/src/infrastructure/observability/loki.yml:/etc/loki/loki.yml:ro
     networks:
       - platform
 
@@ -134,7 +134,7 @@ services:
       - /etc/alloy/config.alloy
       - --storage.path=/var/lib/alloy/data
     volumes:
-      - /opt/edge-platform/src/platform/observability/config.alloy:/etc/alloy/config.alloy:ro
+      - /opt/edge-platform/src/infrastructure/observability/config.alloy:/etc/alloy/config.alloy:ro
     depends_on:
       - loki
       - docker-socket-proxy
@@ -148,7 +148,7 @@ services:
       GF_SECURITY_ADMIN_USER: {{ grafana_admin_user }}
       GF_SECURITY_ADMIN_PASSWORD: {{ grafana_admin_password }}
     volumes:
-      - /opt/edge-platform/src/platform/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - /opt/edge-platform/src/infrastructure/observability/grafana/provisioning:/etc/grafana/provisioning:ro
     ports:
       - "127.0.0.1:3001:3000"
     depends_on:

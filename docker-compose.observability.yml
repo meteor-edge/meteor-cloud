@@ -29,7 +29,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
     volumes:
-      - ./platform/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"
@@ -43,7 +43,7 @@ services:
     image: grafana/loki:3.3.2
     command: ["-config.file=/etc/loki/loki.yml"]
     volumes:
-      - ./platform/observability/loki.yml:/etc/loki/loki.yml:ro
+      - ./infrastructure/observability/loki.yml:/etc/loki/loki.yml:ro
     ports:
       - "127.0.0.1:3100:3100"
     networks:
@@ -68,7 +68,7 @@ services:
       - /etc/alloy/config.alloy
       - --storage.path=/var/lib/alloy/data
     volumes:
-      - ./platform/observability/config.alloy:/etc/alloy/config.alloy:ro
+      - ./infrastructure/observability/config.alloy:/etc/alloy/config.alloy:ro
     depends_on:
       - loki
       - docker-socket-proxy
@@ -83,7 +83,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
     volumes:
-      - ./platform/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/observability/grafana/provisioning:/etc/grafana/provisioning:ro
     ports:
       - "3001:3000"
     depends_on:

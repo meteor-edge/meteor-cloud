@@ -2,10 +2,10 @@
 
 COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f docker-compose.observability.yml
-BACKEND_DIR := platform/backend
-FRONTEND_DIR := platform/frontend
-INSTALLER_DIR := installer
-AGENT_DIR := edge-agent
+BACKEND_DIR := control-plane
+FRONTEND_DIR := frontend
+INSTALLER_DIR := infrastructure/installer
+AGENT_DIR := device-plane/agent
 INFRA_DIR := infrastructure
 CONFIG ?= installation.yaml
 
@@ -54,8 +54,8 @@ stop: ## Stop the development stack
 	$(COMPOSE) down
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.observability.yml down 2>/dev/null
 
-up: ## Deploy enabled services (AWS: Terraform+Ansible, GCP: Cloud Run Terraform)
-	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from installer/edge_installer/config/examples/installation.yaml" && exit 1)
+up: ## Deploy all enabled AWS services (Terraform + Ansible)
+	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
 	cd $(INSTALLER_DIR) && edge-installer apply $(CONFIG)
 
 down: ## Destroy the installation
@@ -113,7 +113,7 @@ lint: ## Lint all projects
 	@echo "==> Installer lint"
 	cd $(INSTALLER_DIR) && python -m ruff check .
 	@echo "==> Backend lint"
-	cd $(BACKEND_DIR) && python -m ruff check .
+	cd $(BACKEND_DIR) && python -m ruff check . ../data-plane/data_plane
 	@echo "==> Agent lint"
 	cd $(AGENT_DIR) && python -m ruff check .
 	@echo "==> Frontend lint"
@@ -123,7 +123,7 @@ format: ## Format all projects
 	@echo "==> Installer format"
 	cd $(INSTALLER_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Backend format"
-	cd $(BACKEND_DIR) && python -m ruff format . && python -m ruff check --fix .
+	cd $(BACKEND_DIR) && python -m ruff format . ../data-plane/data_plane && python -m ruff check --fix . ../data-plane/data_plane
 	@echo "==> Agent format"
 	cd $(AGENT_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Frontend format"
@@ -131,7 +131,7 @@ format: ## Format all projects
 
 typecheck: ## Run static type checks where configured
 	@echo "==> Backend typecheck (compileall)"
-	cd $(BACKEND_DIR) && python -m compileall app tests scripts
+	cd $(BACKEND_DIR) && PYTHONPATH=.:../data-plane python -m compileall app tests scripts ../data-plane/data_plane
 	@echo "==> Installer typecheck (compileall)"
 	cd $(INSTALLER_DIR) && python -m compileall edge_installer tests
 	@echo "==> Agent typecheck (compileall)"

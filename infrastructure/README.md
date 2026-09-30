@@ -6,6 +6,13 @@ Terraform and Ansible for deploying modular services to AWS, plus a Terraform-on
 
 ```text
 infrastructure/
+├── installer/                  # edge-installer CLI
+├── docker/                     # backend/frontend images
+├── databases/                  # postgres init; clickhouse/redis placeholders
+├── networking/                 # EMQX config; WireGuard placeholder
+├── storage/                    # object-storage placeholder
+├── kubernetes/                 # deployment placeholder
+├── observability/              # Prometheus, Loki, Grafana, Alloy
 ├── terraform/
 │   ├── aws/                    # EC2 root stack — orchestrates modules
 │   ├── gcp/                    # Cloud Run root stack

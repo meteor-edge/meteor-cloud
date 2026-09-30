@@ -96,4 +96,4 @@ meteorcli register \
 Devices can also [request enrollment](device-request-enrollment.md) without a
 token, using an organization API key and administrator approval.
 
-See [edge-agent/README.md](../../edge-agent/README.md).
+See [device-plane/agent/README.md](../../device-plane/agent/README.md).

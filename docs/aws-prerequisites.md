@@ -13,7 +13,7 @@
 Install the installer:
 
 ```bash
-cd installer && pip install -e ".[dev]"
+cd infrastructure/installer && pip install -e ".[dev]"
 ```
 
 ## AWS authentication
@@ -92,7 +92,7 @@ wg genkey   # use output as EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY
 Copy the example and edit:
 
 ```bash
-cp installer/edge_installer/config/examples/installation.yaml ./installation.yaml
+cp infrastructure/installer/edge_installer/config/examples/installation.yaml ./installation.yaml
 ```
 
 Set `network.allowed_ssh_cidrs` to your public IP `/32` (or wider for testing).

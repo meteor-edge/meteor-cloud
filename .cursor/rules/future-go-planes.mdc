@@ -1,0 +1,20 @@
+---
+description: Future Python control-plane + Go data/device-plane; do not migrate now
+alwaysApply: true
+---
+
+# Future plane languages (do not implement yet)
+
+Control-plane stays Python/FastAPI (business logic, identity, tenancy, device registry, desired state, API, orchestration).
+
+Later, **data-plane** and **device-plane** may move to Go (telemetry, ingestion, MQTT/Kafka, streaming, agent, heartbeat, commands, local device ops). Frontend, infrastructure, docs, and scripts stay language-independent.
+
+**Do not** migrate to Go, add a Go implementation, restructure for that split, or rewrite working code for this direction unless the user explicitly asks.
+
+While implementing today’s Python monolith:
+
+* Keep control-plane vs data-plane responsibilities separate.
+* Do not make data-plane depend on control-plane Python internals; prefer APIs, events, schemas, and ports.
+* Keep infrastructure adapters replaceable. Do not assume data-plane or device-plane will always be Python.
+
+If a proposed change would make a later Python-control-plane + Go-data/device-plane split harder, **stop and ask the user before proceeding**.
