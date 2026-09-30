@@ -6,7 +6,7 @@ import stat
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "generate-local-mqtt-certs.sh"
 COMPOSE_CONTROL = ROOT / "compose" / "control-plane.yml"
 COMPOSE_DATA = ROOT / "compose" / "data-plane.yml"

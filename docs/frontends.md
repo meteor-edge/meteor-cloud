@@ -2,11 +2,10 @@
 
 The **console** and **website** are separate frontend apps in the private repo
 [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui). They do not
-share a Vite/Next project. Each has its own Compose file and image.
+share a Vite/Next project.
 
-This MeteorCloud tree keeps empty placeholders (`console/README.md`,
-`website/README.md`) so the directories still appear. Application source is not
-here.
+This MeteorCloud tree keeps an empty **console** placeholder (`console/README.md`)
+so that directory still appears. The **website** is not in this tree at all.
 
 The console never imports website code. It only opens docs as an ordinary URL
 (`VITE_DOCS_BASE_URL`, default `http://localhost:3000/docs`).
@@ -15,19 +14,27 @@ The console never imports website code. It only opens docs as an ordinary URL
 
 You need SSH (or HTTPS) access to the private UI repo.
 
+Console (cloned into `ui/`, git remote `git@github.com:meteor-edge/meteor-ui.git`):
+
 ```bash
 make checkout-ui
-make install-console install-website
+make install-console
 make dev-console    # :5173  VITE_DOCS_BASE_URL → website docs
+git -C ui push      # console changes go to meteor-ui, not this repo
+```
+
+Website (clone meteor-ui; do not copy it here):
+
+```bash
+git clone git@github.com:meteor-edge/meteor-ui.git
+cd meteor-ui
+make install-website
 make dev-website    # :3000
 ```
 
-`METEOR_UI_REMOTE` and `METEOR_UI_REF` override the clone URL and branch.
+`METEOR_UI_REMOTE` and `METEOR_UI_REF` override the console clone URL and branch.
 
-Copied files are gitignored. They will not show up on the public remote.
-
-Work on the UIs in a clone of `meteor-ui` (or here after `checkout-ui`, then copy
-changes back). Do not `git add` console or website source in MeteorCloud.
+Do not `git add` console source in MeteorCloud.
 
 ## Production images
 

@@ -58,11 +58,13 @@ coverage/
 frontend/dist/
 frontend/coverage/
 
-# Frontend source lives in meteor-edge/meteor-ui (private). Placeholders stay tracked.
+# Console source lives in meteor-edge/meteor-ui (private). Placeholder README stays tracked.
 /console/**
 !/console/README.md
-/website/**
-!/website/README.md
+# Local clone of meteor-ui (git remote for console). Not part of this repo.
+/ui/
+# Website is not part of this tree. Ignore if someone copies it locally.
+/website/
 
 # Terraform
 **/.terraform/

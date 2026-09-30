@@ -9,10 +9,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY control-plane/pyproject.toml control-plane/README.md ./
-COPY control-plane/app ./app
-COPY control-plane/alembic ./alembic
-COPY control-plane/alembic.ini ./
+COPY src/control-plane/pyproject.toml src/control-plane/README.md ./
+COPY src/control-plane/app ./app
+COPY src/control-plane/alembic ./alembic
+COPY src/control-plane/alembic.ini ./
 
 RUN pip install --no-cache-dir .
 

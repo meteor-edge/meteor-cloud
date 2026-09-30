@@ -20,7 +20,7 @@ _UNSAFE_DATABASE_NAMES = {"edge_platform", "postgres", "template0", "template1"}
 
 def _env_file_candidates() -> list[Path]:
     here = Path(__file__).resolve()
-    repo_root = here.parents[2]
+    repo_root = here.parents[3]
     backend_dir = here.parents[1]
     return [
         Path.cwd() / ".env",

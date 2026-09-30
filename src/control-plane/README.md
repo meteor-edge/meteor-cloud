@@ -20,7 +20,7 @@ make install-backend
 make dev
 
 # Or run the API directly:
-cd control-plane
+cd src/control-plane
 export DATA_PLANE_URL=http://127.0.0.1:8081
 uvicorn app.main:app --reload
 ```

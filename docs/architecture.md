@@ -24,7 +24,7 @@ The public **website** is not in this path. It is a marketing and documentation 
 | Control plane | Identity, tenancy, devices, audit, MQTT policy, ingest, operator API | `compose/control-plane.yml` |
 | Data plane | EMQX client, publish/watch, ingest forward | `compose/data-plane.yml` |
 | Console | Operator UI | `compose/console.yml` |
-| Website | Landing, about, contact, docs | `compose/website.yml` |
+| Website | Landing, about, contact, docs | private `meteor-ui` (not this tree) |
 | Device agent | `meteorcli` on the edge device | not a Compose service |
 
 Installer-managed **cloud services** (AWS/GCP) are separate from these application modules:
@@ -39,7 +39,7 @@ See [Modular services](services.md).
 ## Control plane
 
 ```text
-control-plane/app/
+src/control-plane/app/
 ├── api/rest/         # health
 ├── ports/            # MQTTGateway, RateLimiter, OTAProvider
 ├── adapters/         # emqx (via data-plane HTTP), redis, ota=none

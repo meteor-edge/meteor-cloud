@@ -1,15 +1,26 @@
 # Operator console
 
-Source lives in the private repo **[meteor-edge/meteor-ui](https://github.com/meteor-edge/meteor-ui)** (`console/`).
+Source lives in the private repo **[meteor-edge/meteor-ui](https://github.com/meteor-edge/meteor-ui)**.
 
-This directory is a placeholder so the public MeteorCloud tree still shows a console module.
+This directory is a placeholder on the public MeteorCloud tree. Local source is
+cloned into `ui/` (gitignored), which has `origin` set to meteor-ui.
 
 ```bash
 make checkout-ui
+make install-console
+make dev-console
 ```
 
-That copies the Vite app here. Copied files are gitignored and are not committed.
+Work in `ui/console`. Push to the UI repo (not MeteorCloud):
 
-Docs link: `VITE_DOCS_BASE_URL` (default `http://localhost:3000/docs`) on the website app in the same private repo.
+```bash
+git -C ui status
+git -C ui add console
+git -C ui commit -m "..."
+git -C ui push
+```
+
+Docs link: `VITE_DOCS_BASE_URL` (default `http://localhost:3000/docs`) on the
+website app in the same private repo.
 
 See [docs/frontends.md](../docs/frontends.md).

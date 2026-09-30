@@ -5,8 +5,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-COPY data-plane/pyproject.toml data-plane/README.md ./
-COPY data-plane/data_plane ./data_plane
+COPY src/data-plane/pyproject.toml src/data-plane/README.md ./
+COPY src/data-plane/data_plane ./data_plane
 
 RUN pip install --no-cache-dir .
 

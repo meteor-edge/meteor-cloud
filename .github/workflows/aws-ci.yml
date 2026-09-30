@@ -37,10 +37,10 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: |
-            control-plane/pyproject.toml
-            data-plane/pyproject.toml
+            src/control-plane/pyproject.toml
+            src/data-plane/pyproject.toml
             infrastructure/installer/pyproject.toml
-            device-plane/agent/pyproject.toml
+            src/device-plane/agent/pyproject.toml
       - name: Install dependencies
         run: make install
       - name: Test

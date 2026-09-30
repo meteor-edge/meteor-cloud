@@ -8,14 +8,13 @@ Each of these is its own process and has its own Compose file under `compose/`.
 
 | Module | Path | Role |
 | --- | --- | --- |
-| Control plane | `control-plane/` | Identity, organizations, device registry, enrollment, MQTT policy and ingest, operator API |
-| Data plane | `data-plane/` | EMQX platform client: publish, subscribe, forward inbound MQTT to the control plane |
+| Control plane | `src/control-plane/` | Identity, organizations, device registry, enrollment, MQTT policy and ingest, operator API |
+| Data plane | `src/data-plane/` | EMQX platform client: publish, subscribe, forward inbound MQTT to the control plane |
 | Console | `console/` | Operator UI (source: private `meteor-edge/meteor-ui`). Browser talks only to the control-plane API |
-| Website | `website/` | Public MeteorCloud site (source: private `meteor-edge/meteor-ui`). No control-plane dependency |
-| Device plane | `device-plane/agent/` | On-device agent (`meteorcli`) |
+| Device plane | `src/device-plane/agent/` | On-device agent (`meteorcli`) |
 | Infrastructure | `infrastructure/` | Terraform, Ansible, installer, Docker, observability |
 
-Same machine: join Compose projects on the Docker network named `meteorcloud`. Across servers: set `DATA_PLANE_URL`, `CONTROL_PLANE_URL`, and `VITE_API_BASE_URL` to reachable origins. The website only needs its own HTTP port.
+Same machine: join Compose projects on the Docker network named `meteorcloud`. Across servers: set `DATA_PLANE_URL`, `CONTROL_PLANE_URL`, and `VITE_API_BASE_URL` to reachable origins. The public website is a separate app in [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui); it is not a directory in this repo.
 
 ## Local development
 
@@ -27,7 +26,6 @@ make seed      # optional: owner@example.com / dev-password-123
 
 | Surface | URL |
 | --- | --- |
-| Website | http://localhost:3000 |
 | Console | http://localhost:5173 |
 | Control plane | http://localhost:8000 |
 | Data plane | http://localhost:8081/health |
@@ -41,12 +39,13 @@ Start one module:
 make dev-control-plane
 make dev-data-plane
 make dev-console
-make dev-website
 ```
+
+Public website (clone `meteor-ui`, not this tree): `make dev-website` inside that repo.
 
 Stop: `make stop`
 
-Product documentation for operators and integrators lives on the website under **Docs**. The operator console links there (`VITE_DOCS_BASE_URL`). Console and website source is in the private repo [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui). This tree keeps empty `console/` and `website/` placeholders. Copy source locally with `make checkout-ui`. Details: [docs/frontends.md](docs/frontends.md).
+Product documentation for operators and integrators lives on the website under **Docs**. The operator console links there (`VITE_DOCS_BASE_URL`). Console and website source is in the private repo [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui). This tree keeps an empty `console/` placeholder. `make checkout-ui` clones meteor-ui into `ui/` (gitignored). Push console with `git -C ui push`. Details: [docs/frontends.md](docs/frontends.md).
 
 ## Cloud deployment
 
@@ -73,11 +72,11 @@ AWS production Compose currently runs the control plane and console on one host.
 ## Layout
 
 ```text
-├── control-plane/              # FastAPI (app.*)
-├── data-plane/                 # MQTT gateway (data_plane.*)
-├── device-plane/agent/         # meteorcli
+├── src/
+│   ├── control-plane/          # FastAPI (app.*)
+│   ├── data-plane/             # MQTT gateway (data_plane.*)
+│   └── device-plane/agent/     # meteorcli
 ├── console/                    # operator UI (placeholder; source in meteor-ui)
-├── website/                    # public Next.js site (placeholder; source in meteor-ui)
 ├── compose/                    # one Compose file per module
 ├── contracts/                  # HTTP JSON between planes
 ├── infrastructure/

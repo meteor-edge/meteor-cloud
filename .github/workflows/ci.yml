@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: control-plane
+        working-directory: src/control-plane
     env:
       # Matches the Postgres service below; the app otherwise reads .env (absent in CI).
       DATABASE_URL: postgresql+psycopg://edge:edge@localhost:5432/edge_platform_test
@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: control-plane/pyproject.toml
+          cache-dependency-path: src/control-plane/pyproject.toml
       - name: Install dependencies
         run: python -m pip install -e ".[dev]"
       - name: Lint (ruff)
@@ -55,14 +55,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: data-plane
+        working-directory: src/data-plane
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: data-plane/pyproject.toml
+          cache-dependency-path: src/data-plane/pyproject.toml
       - name: Install dependencies
         run: python -m pip install -e ".[dev]"
       - name: Lint (ruff)
@@ -99,14 +99,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: device-plane/agent
+        working-directory: src/device-plane/agent
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: device-plane/agent/pyproject.toml
+          cache-dependency-path: src/device-plane/agent/pyproject.toml
       - name: Install dependencies
         run: python -m pip install -e ".[dev]"
       - name: Lint (ruff)
@@ -129,7 +129,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: control-plane/pyproject.toml
+          cache-dependency-path: src/control-plane/pyproject.toml
       - name: Install MQTT test dependencies
         run: python -m pip install pytest paho-mqtt
       - name: MQTT live tests
