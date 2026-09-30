@@ -6,9 +6,10 @@ Single YAML file, typically `installation.yaml` at the repo root.
 
 | Section | Purpose |
 |---------|---------|
-| `installation` | Name, environment, provider (`aws`) |
+| `installation` | Name, environment, provider (`aws` or `gcp`) |
 | `platform` | App version, optional domain / public URL |
-| `aws` | Region, instance type, SSH key, Elastic IP |
+| `aws` | Required for `provider: aws` — region, instance type, SSH key, Elastic IP |
+| `gcp` | Required for `provider: gcp` — project, region, Cloud Run/SQL sizing |
 | `network` | SSH CIDRs, HTTP/HTTPS exposure |
 | `services` | **Which stacks to deploy** (cloud_app, vpn, ...) |
 | `components` | In-app components when cloud_app is enabled (Postgres, Redis, Traefik) |
@@ -39,6 +40,23 @@ services:
 When `cloud_app` is disabled, Postgres/JWT secrets are not required.
 
 See [Modular services](services.md).
+
+## GCP Cloud Run
+
+Example: `installer/edge_installer/config/examples/installation.gcp.yaml`
+
+```yaml
+installation:
+  provider: gcp
+
+gcp:
+  project_id: your-gcp-project
+  region: europe-west1
+```
+
+`services.vpn` must be disabled. Images must already be in a registry Cloud Run can pull. Secrets stay in `EDGE_PLATFORM_*` env vars.
+
+See [GCP Cloud Run deployment](gcp-deployment.md).
 
 ## AWS settings
 

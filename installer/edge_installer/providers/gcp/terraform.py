@@ -1,9 +1,10 @@
-"""AWS Terraform integration."""
+"""GCP Cloud Run Terraform integration."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -16,54 +17,60 @@ from edge_installer.state.paths import infrastructure_root, terraform_workdir
 logger = logging.getLogger(__name__)
 
 
-class TerraformRunner:
+class GcpTerraformRunner:
     def __init__(self, config: InstallationConfig, workdir: Path) -> None:
         self.config = config
         self.workdir = workdir
 
     def prepare(self) -> None:
-        source = infrastructure_root() / "terraform" / "aws"
-        modules_source = infrastructure_root() / "terraform" / "modules"
+        source = infrastructure_root() / "terraform" / "gcp"
+        module_source = infrastructure_root() / "terraform" / "modules" / "gcp_cloud_run"
         self.workdir.mkdir(parents=True, exist_ok=True)
-        for name in ("main.tf", "variables.tf", "outputs.tf", "versions.tf"):
+        for name in ("main.tf", "variables.tf", "outputs.tf", "versions.tf", ".terraform.lock.hcl"):
             src = source / name
             if src.exists():
                 shutil.copy2(src, self.workdir / name)
-        if modules_source.exists():
-            dest_modules = self.workdir / "modules"
-            if dest_modules.exists():
-                shutil.rmtree(dest_modules)
-            shutil.copytree(modules_source, dest_modules)
+        dest_module = self.workdir / "modules" / "gcp_cloud_run"
+        if dest_module.exists():
+            shutil.rmtree(dest_module)
+        shutil.copytree(module_source, dest_module)
 
     def variables(self) -> dict[str, object]:
         cfg = self.config
-        aws = cfg.aws
-        if aws is None:
-            raise TerraformExecutionError("aws settings are missing", stage="terraform_vars")
-        arch = "amd64" if aws.architecture == "amd64" else "arm64"
+        gcp = cfg.gcp
+        if gcp is None:
+            raise TerraformExecutionError("gcp settings are missing", stage="terraform_vars")
+        domain = cfg.platform.domain or ""
+        public_url = (cfg.platform.public_url or "").rstrip("/")
         return {
             "installation_name": cfg.installation.name,
             "environment": cfg.installation.environment,
-            "enabled_services": cfg.enabled_service_names(),
-            "aws_region": aws.region,
-            "aws_profile": aws.profile or "",
-            "availability_zone": aws.availability_zone or "",
-            "instance_type": aws.instance_type,
-            "architecture": arch,
-            "ami_id": aws.ami_id or "",
-            "ssh_key_name": aws.ssh_key_name,
-            "root_volume_size_gb": aws.root_volume_size_gb,
-            "assign_elastic_ip": aws.assign_elastic_ip,
-            "allowed_ssh_cidrs": cfg.network.allowed_ssh_cidrs,
-            "allow_http": cfg.network.allow_http,
-            "allow_https": cfg.network.allow_https,
-            "vpn_listen_port": cfg.services.vpn.listen_port,
-            "vpn_allowed_client_cidrs": cfg.services.vpn.allowed_client_cidrs,
-            "tags": {
-                "Installation": cfg.installation.name,
-                "Environment": cfg.installation.environment,
-                "ManagedBy": "edge-installer",
-                "Platform": "edge-platform",
+            "project_id": gcp.project_id,
+            "region": gcp.region,
+            "backend_image": cfg.deployment.backend_image,
+            "frontend_image": cfg.deployment.frontend_image,
+            "postgres_database": cfg.components.postgres.database_name,
+            "postgres_username": cfg.components.postgres.username,
+            "domain": domain,
+            "public_url": public_url,
+            "sql_tier": gcp.sql_tier,
+            "sql_disk_size_gb": gcp.sql_disk_size_gb,
+            "redis_memory_size_gb": gcp.redis_memory_size_gb,
+            "deletion_protection": gcp.deletion_protection,
+            "min_instances": gcp.min_instances,
+            "max_instances": gcp.max_instances,
+            "backend_cpu": gcp.backend_cpu,
+            "backend_memory": gcp.backend_memory,
+            "frontend_cpu": gcp.frontend_cpu,
+            "frontend_memory": gcp.frontend_memory,
+            "create_artifact_registry": gcp.create_artifact_registry,
+            "enable_apis": gcp.enable_apis,
+            "subnet_cidr": gcp.subnet_cidr,
+            "labels": {
+                "installation": cfg.installation.name,
+                "environment": cfg.installation.environment,
+                "managed-by": "edge-installer",
+                "platform": "edge-platform",
             },
         }
 
@@ -72,12 +79,20 @@ class TerraformRunner:
         path.write_text(json.dumps(self.variables(), indent=2), encoding="utf-8")
         return path
 
+    def _env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        if password := os.environ.get("EDGE_PLATFORM_POSTGRES_PASSWORD"):
+            env["TF_VAR_postgres_password"] = password
+        if secret := os.environ.get("EDGE_PLATFORM_JWT_SECRET"):
+            env["TF_VAR_jwt_secret"] = secret
+        return env
+
     def init(self) -> None:
-        result = run_command(["terraform", "init", "-input=false"], cwd=str(self.workdir))
+        result = run_command(["terraform", "init", "-input=false"], cwd=str(self.workdir), env=self._env())
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_init")
 
     def validate(self) -> None:
-        result = run_command(["terraform", "validate"], cwd=str(self.workdir))
+        result = run_command(["terraform", "validate"], cwd=str(self.workdir), env=self._env())
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_validate")
 
     def plan(self) -> str:
@@ -85,6 +100,7 @@ class TerraformRunner:
         result = run_command(
             ["terraform", "plan", "-input=false", "-var-file=terraform.tfvars.json"],
             cwd=str(self.workdir),
+            env=self._env(),
         )
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_plan")
         return result.stdout
@@ -100,6 +116,7 @@ class TerraformRunner:
                 "-var-file=terraform.tfvars.json",
             ],
             cwd=str(self.workdir),
+            env=self._env(),
         )
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_apply")
         return self.read_outputs()
@@ -118,19 +135,20 @@ class TerraformRunner:
                 "-var-file=terraform.tfvars.json",
             ],
             cwd=str(self.workdir),
+            env=self._env(),
         )
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_destroy")
 
     def read_outputs(self) -> TerraformOutputs:
-        result = run_command(["terraform", "output", "-json"], cwd=str(self.workdir))
+        result = run_command(["terraform", "output", "-json"], cwd=str(self.workdir), env=self._env())
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_outputs")
         raw = json.loads(result.stdout)
         flattened = {key: value["value"] for key, value in raw.items()}
         return TerraformOutputs.model_validate(flattened)
 
 
-def terraform_runner_for(config: InstallationConfig) -> TerraformRunner:
+def gcp_terraform_runner_for(config: InstallationConfig) -> GcpTerraformRunner:
     workdir = terraform_workdir(config.installation.name)
-    runner = TerraformRunner(config, workdir)
+    runner = GcpTerraformRunner(config, workdir)
     runner.prepare()
     return runner

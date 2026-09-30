@@ -67,6 +67,7 @@ def test_installation_lock_blocks_second_acquire(state_root: Path) -> None:
 
 def test_inventory_generation(tmp_path: Path) -> None:
     config = load_configuration(EXAMPLE)
+    assert config.aws is not None
     config.aws.ssh_private_key_path = str(tmp_path / "key.pem")
     (tmp_path / "key.pem").write_text("key", encoding="utf-8")
     outputs = TerraformOutputs(

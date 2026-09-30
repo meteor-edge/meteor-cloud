@@ -1,0 +1,65 @@
+installation:
+  name: production
+  environment: production
+  provider: gcp
+
+platform:
+  version: "0.2.0"
+  domain: null
+  public_url: null
+
+gcp:
+  project_id: your-gcp-project
+  region: europe-west1
+  sql_tier: db-f1-micro
+  sql_disk_size_gb: 10
+  redis_memory_size_gb: 1
+  deletion_protection: false
+  min_instances: 0
+  max_instances: 4
+  backend_cpu: "1"
+  backend_memory: 1Gi
+  frontend_cpu: "1"
+  frontend_memory: 512Mi
+  create_artifact_registry: true
+  enable_apis: true
+  subnet_cidr: 10.20.0.0/24
+
+network:
+  allow_http: true
+  allow_https: true
+
+services:
+  cloud_app:
+    enabled: true
+  vpn:
+    enabled: false
+
+components:
+  postgres:
+    enabled: true
+    provider: local
+    database_name: edge_platform
+    username: edge_platform
+  redis:
+    enabled: true
+    provider: local
+  reverse_proxy:
+    enabled: false
+    provider: traefik
+
+deployment:
+  repository_url: https://github.com/meteor-edge/meteor-cloud.git
+  git_ref: master
+  image_source: registry
+  backend_image: europe-west1-docker.pkg.dev/your-gcp-project/production-app/backend:0.2.0
+  frontend_image: europe-west1-docker.pkg.dev/your-gcp-project/production-app/frontend:0.2.0
+  image_pull_policy: always
+  health_check_timeout_seconds: 300
+
+secrets:
+  source: environment
+
+observability:
+  enabled: false
+  backend: prometheus

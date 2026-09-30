@@ -14,6 +14,8 @@ def write_inventory(
     outputs: TerraformOutputs,
     config: InstallationConfig,
 ) -> None:
+    if config.aws is None:
+        raise ValueError("aws settings are required to write Ansible inventory")
     key_path = Path(config.aws.ssh_private_key_path).expanduser()
     host = outputs.connect_ip
     content = (

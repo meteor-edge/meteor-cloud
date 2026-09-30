@@ -17,6 +17,7 @@ from edge_installer.exceptions import InstallerError
 from edge_installer.health.service import HealthService
 from edge_installer.providers.aws.outputs import TerraformOutputs
 from edge_installer.providers.aws.provider import AwsEc2Provider
+from edge_installer.providers.gcp.provider import GcpCloudRunProvider
 from edge_installer.state.models import InstallationState
 from edge_installer.state.paths import installation_dir, installation_state_file
 from edge_installer.state.store import InstallationLock, load_state, save_state
@@ -31,10 +32,16 @@ class ApplyResult:
     health: dict[str, str]
 
 
+def _provider_for(config: InstallationConfig) -> AwsEc2Provider | GcpCloudRunProvider:
+    if config.installation.provider == "gcp":
+        return GcpCloudRunProvider(config)
+    return AwsEc2Provider(config)
+
+
 class PlatformDeploymentService:
     def __init__(self, config: InstallationConfig) -> None:
         self.config = config
-        self.provider = AwsEc2Provider(config)
+        self.provider = _provider_for(config)
         self.ansible = AnsibleRunner()
         self.health = HealthService()
 
@@ -48,6 +55,11 @@ class PlatformDeploymentService:
         return result
 
     def apply(self) -> ApplyResult:
+        if self.config.installation.provider == "gcp":
+            return self._apply_gcp()
+        return self._apply_aws()
+
+    def _apply_aws(self) -> ApplyResult:
         self.validate()
         enabled = self.config.enabled_service_names()
         name = self.config.installation.name
@@ -90,6 +102,29 @@ class PlatformDeploymentService:
             state = self._save_state(outputs, url, health, enabled)
             return ApplyResult(state=state, outputs=outputs, health=health)
 
+    def _apply_gcp(self) -> ApplyResult:
+        self.validate()
+        enabled = self.config.enabled_service_names()
+        name = self.config.installation.name
+
+        with InstallationLock(name):
+            logger.info("[1/3] Validating GCP Cloud Run configuration")
+            logger.info("[2/3] Applying Terraform (Cloud Run, Cloud SQL, Redis, load balancer)")
+            outputs = self._apply_infrastructure()
+            health: dict[str, str] = {"status": "skipped"}
+            url = outputs.platform_url or platform_url(self.config, outputs)
+            if "cloud_app" in enabled and url:
+                logger.info("[3/3] Verifying Cloud Run health")
+                report = self.health.verify(
+                    url,
+                    timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+                )
+                health = report.as_dict()
+            else:
+                logger.info("[3/3] Skipping cloud app health")
+            state = self._save_state(outputs, url or None, health, enabled)
+            return ApplyResult(state=state, outputs=outputs, health=health)
+
     def status(self) -> dict[str, object]:
         state = load_state(self.config.installation.name)
         result: dict[str, object] = {"state": state.model_dump() if state else None}
@@ -106,6 +141,8 @@ class PlatformDeploymentService:
         return result
 
     def upgrade(self) -> ApplyResult:
+        if self.config.installation.provider == "gcp":
+            return self._apply_gcp()
         state = load_state(self.config.installation.name)
         if state is None:
             raise InstallerError("Installation not found.", stage="upgrade")
@@ -134,28 +171,29 @@ class PlatformDeploymentService:
     def destroy(self) -> None:
         name = self.config.installation.name
         with InstallationLock(name):
-            try:
-                state = load_state(name)
-                if state and state.public_ip:
-                    outputs = TerraformOutputs(
-                        instance_id=state.instance_id or "",
-                        public_ip=state.public_ip,
-                        elastic_ip=state.elastic_ip or "",
-                        private_ip="",
-                        region=state.region,
-                        ssh_username="ubuntu",
-                        security_group_id="",
-                    )
-                    inventory = installation_dir(name) / "inventory.ini"
-                    write_inventory(path=inventory, outputs=outputs, config=self.config)
-                    extra = build_ansible_extra_vars(self.config, outputs)
-                    self.ansible.run_playbook(
-                        "destroy.yml",
-                        inventory=inventory,
-                        extra_vars=extra,
-                    )
-            except InstallerError:
-                logger.warning("Remote destroy playbook skipped or failed.")
+            if self.config.installation.provider == "aws":
+                try:
+                    state = load_state(name)
+                    if state and state.public_ip:
+                        outputs = TerraformOutputs(
+                            instance_id=state.instance_id or "",
+                            public_ip=state.public_ip,
+                            elastic_ip=state.elastic_ip or "",
+                            private_ip="",
+                            region=state.region,
+                            ssh_username="ubuntu",
+                            security_group_id="",
+                        )
+                        inventory = installation_dir(name) / "inventory.ini"
+                        write_inventory(path=inventory, outputs=outputs, config=self.config)
+                        extra = build_ansible_extra_vars(self.config, outputs)
+                        self.ansible.run_playbook(
+                            "destroy.yml",
+                            inventory=inventory,
+                            extra_vars=extra,
+                        )
+                except InstallerError:
+                    logger.warning("Remote destroy playbook skipped or failed.")
             self.provider.destroy()
             state_path = installation_state_file(name)
             state_path.unlink(missing_ok=True)
@@ -165,6 +203,8 @@ class PlatformDeploymentService:
         return self.provider.apply()
 
     def _wait_for_ssh(self, outputs: TerraformOutputs) -> None:
+        if self.config.aws is None:
+            raise InstallerError("aws settings are required for SSH wait", stage="ssh")
         key_path = Path(self.config.aws.ssh_private_key_path).expanduser()
         wait_for_server(
             outputs.connect_ip,

@@ -14,6 +14,8 @@ def platform_url(config: InstallationConfig, outputs: TerraformOutputs) -> str:
     if config.platform.domain:
         scheme = "https" if config.network.allow_https else "http"
         return f"{scheme}://{config.platform.domain}"
+    if outputs.platform_url:
+        return outputs.platform_url.rstrip("/")
     return f"http://{outputs.connect_ip}"
 
 

@@ -12,9 +12,10 @@ alwaysApply: true
 * Validate realistic inputs and edge cases without over-engineering.
 * Run relevant tests, checks, and linters after making changes.
 * Verify the requested behavior and avoid regressions.
-* Deployment today is AWS-only: `installation.provider` is `Literal["aws"]` and apply/plan/destroy go through `AwsEc2Provider`. Do not treat Azure, GCP, Kubernetes, or on-prem as implemented.
-* Multi-provider support is a future goal, not a current requirement. Keep using the existing AWS config contract (`aws:`, SSH, region, instance type, and related env secrets).
-* When adding infra behavior, put AWS-specific code behind `InfrastructureProvider` / `AwsEc2Provider` (or a new adapter of that type). Do not scatter new provider APIs into app or Ansible as if other clouds already exist.
+* Deployment today is AWS EC2 (Ansible) or GCP Cloud Run (Terraform only). `installation.provider` is `Literal["aws", "gcp"]`. AWS apply/plan/destroy go through `AwsEc2Provider`; GCP goes through `GcpCloudRunProvider`.
+* Keep using the existing AWS config contract (`aws:`, SSH, region, instance type, and related env secrets) for the EC2 path. GCP uses `gcp:` (project, region, Cloud Run sizing) and the same `EDGE_PLATFORM_*` secrets.
+* When adding infra behavior, put provider-specific code behind `InfrastructureProvider` / `AwsEc2Provider` / `GcpCloudRunProvider`. Do not scatter GCP APIs into Ansible or AWS Terraform, and do not scatter AWS APIs into the Cloud Run stack.
+* VPN, Traefik, and MQTT/EMQX are AWS (or local Compose) only. Cloud Run does not expose MQTT TCP 8883.
 * Prefer containers and config/env for deploy-specific values. Avoid new hard-coded AWS account IDs, regions, or endpoints in application code.
 * Never commit secrets. Use the target platform’s secret-management mechanism.
 * Prefer portable, open standards unless an AWS-specific feature is explicitly required for the current path.

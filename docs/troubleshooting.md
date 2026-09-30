@@ -102,7 +102,20 @@ This deployment is suitable for demos and early production. Not included: full O
 
 Lock down `network.allowed_ssh_cidrs` to your IP in production.
 
+## GCP Cloud Run
+
+| Error | Fix |
+|-------|-----|
+| GCP credentials are not configured | `gcloud auth application-default login` or set `GOOGLE_APPLICATION_CREDENTIALS` |
+| `services.vpn is not supported` | Set `services.vpn.enabled: false` |
+| Cloud Run image not found | Push `deployment.backend_image` / `frontend_image` to Artifact Registry first |
+| Health check timeout | Images must exist; first boot runs migrations. Increase `health_check_timeout_seconds` |
+| Managed cert still provisioning | Point DNS at the load balancer IP; Google certs can take minutes |
+
+See [GCP Cloud Run](gcp-deployment.md).
+
 ## Related
 
+- [GCP Cloud Run](gcp-deployment.md)
 - [Install quickstart](install-quickstart.md)
 - [AWS deployment](aws-deployment.md)

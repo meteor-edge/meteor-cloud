@@ -2,25 +2,21 @@
 
 ## Goals
 
-The Edge Platform is a self-hosted Linux control plane with a standalone installer, modular AWS deployment, and a FastAPI + React application stack.
+The Edge Platform is a self-hosted Linux control plane with a standalone installer, AWS EC2 or GCP Cloud Run deployment, and a FastAPI + React application stack.
 
 ## High-level components
 
 ```text
 ┌────────────────────┐
-│  edge-installer    │  Install / maintain services on AWS
+│  edge-installer    │  Install / maintain services (AWS or GCP)
 │  (standalone CLI)  │
 └─────────┬──────────┘
-          │ Terraform + Ansible
-          ▼
-┌──────────────────────────────────────────┐
-│           AWS EC2 (single host)          │
-│  ┌─────────────┐  ┌─────────────────┐  │
-│  │  cloud_app  │  │      vpn        │  │
-│  │ Docker stack│  │   WireGuard     │  │
-│  │ Traefik/API │  │                 │  │
-│  └─────────────┘  └─────────────────┘  │
-└──────────────────────────────────────────┘
+          │
+     ┌────┴────┐
+     ▼         ▼
+ AWS EC2     GCP Cloud Run
+ Terraform   Terraform only
+ + Ansible   (Cloud SQL, Redis, LB)
           │
           ▼
 ┌──────────────────────────────────────────┐
@@ -36,10 +32,10 @@ The platform application never knows how it was installed. The installer is a se
 
 ## Modular services
 
-| Service | Infrastructure | Software |
-|---------|----------------|----------|
-| `cloud_app` | EC2, SG, EIP (Terraform `modules/cloud_app`) | Docker Compose stack (Ansible) |
-| `vpn` | WireGuard UDP SG rule (Terraform `modules/vpn`) | WireGuard (Ansible `roles/vpn`) |
+| Service | AWS | GCP Cloud Run |
+|---------|-----|----------------|
+| `cloud_app` | EC2 + Docker Compose + Traefik | Cloud Run + Cloud SQL + Memorystore + HTTPS LB |
+| `vpn` | WireGuard on the EC2 host | Not supported |
 
 Configured in `installation.yaml` under `services:`. Default: both enabled. One command deploys all enabled services: `make up` / `edge-installer apply`.
 
@@ -54,12 +50,9 @@ edge-installer
     |
     +-- Service registry (cloud_app, vpn, ...)
     |
-    +-- AWS provider
-    |       +-- Terraform root stack + modules
-    |
-    +-- Ansible runner
-    |       +-- site.yml → provision + deploy (per service)
-    |
+    +-- AWS provider (EC2 Terraform + Ansible)
+    +-- GCP provider (Cloud Run Terraform)
+
     +-- State (.installer-state/)
     |
     +-- Health verification

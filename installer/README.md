@@ -1,6 +1,6 @@
 # Edge Platform Installer
 
-Standalone CLI (`edge-installer`) to install and maintain the Edge Platform on AWS. The platform application does not know how it was installed.
+Standalone CLI (`edge-installer`) to install and maintain the Edge Platform on AWS EC2 or GCP Cloud Run. The platform application does not know how it was installed.
 
 ## Quick start
 
@@ -57,7 +57,8 @@ installer/edge_installer/
 ├── cli/              # Typer CLI
 ├── config/           # YAML loading and validation
 ├── services/         # Service registry (cloud_app, vpn, ...)
-├── providers/aws/    # Terraform integration
+├── providers/aws/    # EC2 Terraform
+├── providers/gcp/    # Cloud Run Terraform
 ├── deployment/       # Ansible, SSH, orchestration
 ├── state/            # Local state and locking
 ├── health/           # Post-deploy checks

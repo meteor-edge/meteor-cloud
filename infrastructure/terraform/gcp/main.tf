@@ -1,0 +1,30 @@
+module "gcp_cloud_run" {
+  source = "./modules/gcp_cloud_run"
+
+  installation_name        = var.installation_name
+  environment              = var.environment
+  project_id               = var.project_id
+  region                   = var.region
+  backend_image            = var.backend_image
+  frontend_image           = var.frontend_image
+  postgres_database        = var.postgres_database
+  postgres_username        = var.postgres_username
+  postgres_password        = var.postgres_password
+  jwt_secret               = var.jwt_secret
+  domain                   = var.domain
+  public_url               = var.public_url
+  sql_tier                 = var.sql_tier
+  sql_disk_size_gb         = var.sql_disk_size_gb
+  redis_memory_size_gb     = var.redis_memory_size_gb
+  deletion_protection      = var.deletion_protection
+  min_instances            = var.min_instances
+  max_instances            = var.max_instances
+  backend_cpu              = var.backend_cpu
+  backend_memory           = var.backend_memory
+  frontend_cpu             = var.frontend_cpu
+  frontend_memory          = var.frontend_memory
+  create_artifact_registry = var.create_artifact_registry
+  enable_apis              = var.enable_apis
+  subnet_cidr              = var.subnet_cidr
+  labels                   = var.labels
+}

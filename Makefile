@@ -54,14 +54,14 @@ stop: ## Stop the development stack
 	$(COMPOSE) down
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.observability.yml down 2>/dev/null
 
-up: ## Deploy all enabled AWS services (Terraform + Ansible)
+up: ## Deploy enabled services (AWS: Terraform+Ansible, GCP: Cloud Run Terraform)
 	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from installer/edge_installer/config/examples/installation.yaml" && exit 1)
 	cd $(INSTALLER_DIR) && edge-installer apply $(CONFIG)
 
-down: ## Destroy AWS installation
+down: ## Destroy the installation
 	cd $(INSTALLER_DIR) && edge-installer destroy $(CONFIG) --yes
 
-plan: ## Preview AWS changes for enabled services
+plan: ## Preview infrastructure changes for enabled services
 	cd $(INSTALLER_DIR) && edge-installer plan $(CONFIG)
 
 status-aws: ## Show AWS installation status and health
@@ -147,6 +147,14 @@ terraform-check: ## Validate Terraform formatting and syntax
 	cd $(INFRA_DIR)/terraform/aws && terraform init -backend=false -input=false
 	cd $(INFRA_DIR)/terraform/aws && terraform validate
 	rm -rf $(INFRA_DIR)/terraform/aws/modules
+	rm -rf $(INFRA_DIR)/terraform/gcp/modules
+	mkdir -p $(INFRA_DIR)/terraform/gcp/modules
+	cp -r $(INFRA_DIR)/terraform/modules/gcp_cloud_run $(INFRA_DIR)/terraform/gcp/modules/gcp_cloud_run
+	cd $(INFRA_DIR)/terraform/gcp && terraform fmt -check
+	cd $(INFRA_DIR)/terraform/gcp && terraform init -backend=false -input=false
+	cd $(INFRA_DIR)/terraform/gcp && terraform validate
+	cd $(INFRA_DIR)/terraform/modules/gcp_cloud_run && terraform fmt -check
+	rm -rf $(INFRA_DIR)/terraform/gcp/modules
 
 ansible-check: ## Run Ansible syntax checks
 	cd $(INFRA_DIR)/ansible && ansible-playbook --syntax-check playbooks/site.yml
@@ -160,10 +168,10 @@ ansible-check: ## Run Ansible syntax checks
 installer-validate: ## Validate installer configuration
 	cd $(INSTALLER_DIR) && edge-installer validate $(CONFIG)
 
-installer-plan: ## Plan AWS infrastructure and deployment
+installer-plan: ## Plan infrastructure and deployment
 	cd $(INSTALLER_DIR) && edge-installer plan $(CONFIG)
 
-installer-apply: ## Apply AWS infrastructure and deploy platform
+installer-apply: ## Apply infrastructure and deploy platform
 	cd $(INSTALLER_DIR) && edge-installer apply $(CONFIG)
 
 clean: ## Remove local build artifacts

@@ -12,6 +12,7 @@ from edge_installer.config.validation import (
     validate_aws_credentials,
     validate_configuration,
     validate_dependencies,
+    validate_gcp_credentials,
 )
 from edge_installer.deployment.service import PlatformDeploymentService
 from edge_installer.exceptions import ConfigurationError, InstallerError
@@ -39,11 +40,12 @@ def run_init(*, output: Path, console: Console) -> None:
 def run_validate(*, config_path: Path, console: Console) -> None:
     try:
         config = load_configuration(config_path)
-        errors = (
-            validate_configuration(config)
-            + validate_dependencies()
-            + validate_aws_credentials(config.aws.profile)
-        )
+        errors = validate_configuration(config) + validate_dependencies(config)
+        if config.installation.provider == "gcp":
+            errors.extend(validate_gcp_credentials())
+        else:
+            profile = config.aws.profile if config.aws else None
+            errors.extend(validate_aws_credentials(profile))
         if errors:
             console.print("[red]Configuration is invalid:[/red]")
             for item in errors:
@@ -78,10 +80,15 @@ def run_apply(*, config_path: Path, console: Console) -> None:
     console.print("\n[green bold]Installation completed successfully.[/green bold]\n")
     console.print(f"Installation: {config.installation.name}")
     console.print(f"Services: {', '.join(config.enabled_service_names())}")
-    console.print("Provider: AWS")
-    console.print(f"Region: {config.aws.region}")
-    console.print(f"Instance ID: {result.outputs.instance_id}")
-    console.print(f"Public IP: {result.outputs.public_ip}")
+    console.print(f"Provider: {config.installation.provider}")
+    if config.installation.provider == "gcp" and config.gcp is not None:
+        console.print(f"Project: {config.gcp.project_id}")
+        console.print(f"Region: {config.gcp.region}")
+        console.print(f"Load balancer IP: {result.outputs.public_ip}")
+    else:
+        console.print(f"Region: {config.aws.region if config.aws else result.outputs.region}")
+        console.print(f"Instance ID: {result.outputs.instance_id}")
+        console.print(f"Public IP: {result.outputs.public_ip}")
     console.print(f"Platform URL: {result.state.platform_url}")
     for key, value in result.health.items():
         console.print(f"{key.replace('_', ' ').title()}: {value}")
@@ -109,12 +116,14 @@ def run_upgrade(*, config_path: Path, console: Console) -> None:
 
 
 def run_destroy(*, config_path: Path, force: bool, console: Console) -> None:
+    service = _load(config_path)
     if not force:
-        confirmed = console.input("Destroy installation and AWS resources? [y/N] ")
+        confirmed = console.input(
+            f"Destroy installation and {service.config.installation.provider.upper()} resources? [y/N] "
+        )
         if confirmed.strip().lower() not in {"y", "yes"}:
             console.print("Aborted.")
             raise SystemExit(0)
-    service = _load(config_path)
     try:
         service.destroy()
     except InstallerError as exc:

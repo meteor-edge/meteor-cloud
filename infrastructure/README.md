@@ -1,21 +1,34 @@
 # Infrastructure
 
-Terraform and Ansible for deploying modular services to AWS.
+Terraform and Ansible for deploying modular services to AWS, plus a Terraform-only GCP Cloud Run stack.
 
 ## Layout
 
 ```text
 infrastructure/
 ├── terraform/
-│   ├── aws/                    # Root stack — orchestrates modules
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   ├── outputs.tf
-│   │   └── versions.tf
+│   ├── aws/                    # EC2 root stack — orchestrates modules
+│   ├── gcp/                    # Cloud Run root stack
 │   └── modules/
 │       ├── cloud_app/          # EC2, security group, Elastic IP
-│       └── vpn/                # WireGuard UDP ingress rules
-└── ansible/
+│       ├── vpn/                # WireGuard UDP ingress rules
+│       └── gcp_cloud_run/      # Cloud Run, Cloud SQL, Redis, load balancer
+└── ansible/                    # AWS only
+```
+
+## Providers
+
+| Provider | Path | How it runs |
+|----------|------|-------------|
+| AWS | `terraform/aws` + Ansible | EC2, Docker Compose, Traefik, optional VPN |
+| GCP | `terraform/gcp` | Cloud Run, Cloud SQL, Memorystore, HTTP(S) LB |
+
+See [GCP Cloud Run](../docs/gcp-deployment.md) and [AWS deployment](../docs/aws-deployment.md).
+
+## AWS Ansible layout
+
+```text
+ansible/
     ├── ansible.cfg
     ├── playbooks/
     │   ├── site.yml            # Entry: provision + deploy
@@ -79,6 +92,6 @@ make ansible-check
 
 ## Further reading
 
-- [Install quickstart](../docs/install-quickstart.md)
+- [GCP Cloud Run](../docs/gcp-deployment.md)
 - [AWS deployment](../docs/aws-deployment.md)
 - [AWS prerequisites](../docs/aws-prerequisites.md)

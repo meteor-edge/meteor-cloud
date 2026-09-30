@@ -1,4 +1,4 @@
-"""AWS EC2 infrastructure provider."""
+"""GCP Cloud Run infrastructure provider."""
 
 from __future__ import annotations
 
@@ -8,18 +8,18 @@ from typing import Any
 from edge_installer.config.models import InstallationConfig
 from edge_installer.exceptions import InfrastructureProvisioningError
 from edge_installer.providers.aws.outputs import TerraformOutputs
-from edge_installer.providers.aws.terraform import terraform_runner_for
 from edge_installer.providers.base import InfrastructureProvider
+from edge_installer.providers.gcp.terraform import gcp_terraform_runner_for
 
 logger = logging.getLogger(__name__)
 
 
-class AwsEc2Provider(InfrastructureProvider):
-    name = "aws"
+class GcpCloudRunProvider(InfrastructureProvider):
+    name = "gcp"
 
     def __init__(self, config: InstallationConfig) -> None:
         self.config = config
-        self.terraform = terraform_runner_for(config)
+        self.terraform = gcp_terraform_runner_for(config)
 
     def validate(self) -> None:
         self.terraform.init()
@@ -28,9 +28,10 @@ class AwsEc2Provider(InfrastructureProvider):
     def plan(self) -> dict[str, Any]:
         self.terraform.init()
         output = self.terraform.plan()
+        region = self.config.gcp.region if self.config.gcp else ""
         return {
             "provider": self.name,
-            "region": self.config.aws.region if self.config.aws else "",
+            "region": region,
             "plan_output": output,
             "components": self.config.enabled_component_names(),
             "platform_version": self.config.platform.version,

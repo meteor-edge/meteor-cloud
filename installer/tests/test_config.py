@@ -170,3 +170,55 @@ def test_observability_settings_rejects_unknown_backend() -> None:
 def test_observability_settings_rejects_unknown_field() -> None:
     with pytest.raises(ValidationError):
         ObservabilitySettings(enabled=True, backend="prometheus", extra_field="nope")
+
+
+def test_load_gcp_example_configuration() -> None:
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "edge_installer"
+        / "config"
+        / "examples"
+        / "installation.gcp.yaml"
+    )
+    config = load_configuration(path)
+
+    assert config.installation.provider == "gcp"
+    assert config.gcp is not None
+    assert config.gcp.project_id == "your-gcp-project"
+    assert config.aws is None
+    assert config.services.vpn.enabled is False
+
+
+def test_validate_gcp_skips_ssh_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "secret")
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "edge_installer"
+        / "config"
+        / "examples"
+        / "installation.gcp.yaml"
+    )
+    config = load_configuration(path)
+    errors = validate_configuration(config)
+
+    assert not any("ssh_private_key_path" in item for item in errors)
+    assert not any("allowed_ssh_cidrs" in item for item in errors)
+
+
+def test_validate_rejects_vpn_on_gcp(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "secret")
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "edge_installer"
+        / "config"
+        / "examples"
+        / "installation.gcp.yaml"
+    )
+    config = load_configuration(path)
+    config.services.vpn.enabled = True
+    errors = validate_configuration(config)
+
+    assert any("vpn is not supported on GCP" in item for item in errors)
+

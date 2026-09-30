@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 INSTALLATION_NAME_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
@@ -15,7 +15,7 @@ class InstallationSettings(BaseModel):
 
     name: str = Field(min_length=1, max_length=63)
     environment: Literal["development", "staging", "production"]
-    provider: Literal["aws"] = "aws"
+    provider: Literal["aws", "gcp"] = "aws"
 
 
 class PlatformSettings(BaseModel):
@@ -41,10 +41,30 @@ class AwsSettings(BaseModel):
     profile: str | None = None
 
 
+class GcpSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(min_length=1)
+    region: str = "europe-west1"
+    sql_tier: str = "db-f1-micro"
+    sql_disk_size_gb: int = Field(default=10, ge=10, le=1024)
+    redis_memory_size_gb: int = Field(default=1, ge=1, le=16)
+    deletion_protection: bool = False
+    min_instances: int = Field(default=0, ge=0, le=10)
+    max_instances: int = Field(default=4, ge=1, le=100)
+    backend_cpu: str = "1"
+    backend_memory: str = "1Gi"
+    frontend_cpu: str = "1"
+    frontend_memory: str = "512Mi"
+    create_artifact_registry: bool = True
+    enable_apis: bool = True
+    subnet_cidr: str = "10.20.0.0/24"
+
+
 class NetworkSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    allowed_ssh_cidrs: list[str] = Field(min_length=1)
+    allowed_ssh_cidrs: list[str] = Field(default_factory=list)
     allow_http: bool = True
     allow_https: bool = True
 
@@ -152,7 +172,8 @@ class InstallationConfig(BaseModel):
 
     installation: InstallationSettings
     platform: PlatformSettings
-    aws: AwsSettings
+    aws: AwsSettings | None = None
+    gcp: GcpSettings | None = None
     network: NetworkSettings
     services: ServicesSettings = Field(default_factory=ServicesSettings)
     components: ComponentsSettings = Field(default_factory=ComponentsSettings)
@@ -172,3 +193,12 @@ class InstallationConfig(BaseModel):
 
     def enabled_service_names(self) -> list[str]:
         return self.services.enabled_names()
+
+    @model_validator(mode="after")
+    def require_provider_settings(self) -> InstallationConfig:
+        provider = self.installation.provider
+        if provider == "aws" and self.aws is None:
+            raise ValueError("aws settings are required when installation.provider is aws")
+        if provider == "gcp" and self.gcp is None:
+            raise ValueError("gcp settings are required when installation.provider is gcp")
+        return self

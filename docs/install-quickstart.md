@@ -1,14 +1,21 @@
 # Install the platform (short guide)
 
-Deploy modular services to AWS with one command.
+Deploy modular services to **AWS EC2** or **GCP Cloud Run**.
 
-## 1. Prerequisites
+## AWS (EC2)
 
 - Python 3.13+, Terraform 1.5+, Ansible 2.15+, AWS credentials, SSH key pair
+- Copy `installer/edge_installer/config/examples/installation.yaml`
+- See [AWS prerequisites](aws-prerequisites.md)
 
-See [AWS prerequisites](aws-prerequisites.md).
+## GCP (Cloud Run)
 
-## 2. Configure
+- Terraform 1.5+, GCP credentials (`gcloud auth application-default login`)
+- Copy `installer/edge_installer/config/examples/installation.gcp.yaml`
+- Push container images, then `make up`
+- See [GCP Cloud Run](gcp-deployment.md)
+
+## 2. Configure (AWS)
 
 ```bash
 cp installer/edge_installer/config/examples/installation.yaml ./installation.yaml

@@ -1,16 +1,15 @@
 # Edge Platform
 
-Self-hosted Linux Edge Platform — control plane with modular AWS deployment.
+Self-hosted Linux Edge Platform — control plane with modular AWS EC2 or GCP Cloud Run deployment.
 
 ## What you get
 
 | Area | Purpose |
 | --- | --- |
-| `installer/` | `edge-installer` CLI — Terraform + Ansible deploy |
+| `installer/` | `edge-installer` CLI — Terraform (+ Ansible on AWS) |
 | `platform/` | FastAPI backend + React frontend |
-| `infrastructure/` | Modular Terraform modules + Ansible playbooks |
-| `docs/` | Architecture, deployment, and development guides |
-| `installation.yaml` | AWS deploy configuration (copy from example) |
+| `infrastructure/` | Terraform for AWS EC2 and GCP Cloud Run + Ansible (AWS only) |
+| `installation.yaml` | Deploy configuration (copy from AWS or GCP example) |
 
 ## Local development
 
@@ -28,27 +27,24 @@ make seed      # optional: owner@example.com / dev-password-123
 
 Stop: `make stop`
 
-## AWS deployment (one command)
+## Cloud deployment
+
+**AWS (EC2 + Ansible)** — see [AWS deployment](docs/aws-deployment.md):
 
 ```bash
 export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
 export EDGE_PLATFORM_JWT_SECRET='...'
-
-# Edit installation.yaml — enable services under services:
-make up        # Terraform + Ansible for all enabled services
-make plan      # preview
-make status-aws
-make down      # destroy
+# Edit installation.yaml — provider: aws
+make up
 ```
 
-Default services: **cloud_app** (platform app) + **vpn** (WireGuard). Toggle in `installation.yaml`:
+**GCP (Cloud Run)** — see [GCP Cloud Run](docs/gcp-deployment.md):
 
-```yaml
-services:
-  cloud_app:
-    enabled: true
-  vpn:
-    enabled: false
+```bash
+cp installer/edge_installer/config/examples/installation.gcp.yaml ./installation.yaml
+export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
+export EDGE_PLATFORM_JWT_SECRET='...'
+make up
 ```
 
 ## Tooling
@@ -69,8 +65,10 @@ make ansible-check
 ├── platform/backend/           # FastAPI
 ├── platform/frontend/          # React
 ├── infrastructure/
-│   ├── terraform/modules/      # cloud_app, vpn, ...
-│   └── ansible/playbooks/      # site.yml, services/
+│   ├── terraform/aws/          # EC2 root stack
+│   ├── terraform/gcp/          # Cloud Run root stack
+│   ├── terraform/modules/      # cloud_app, vpn, gcp_cloud_run
+│   └── ansible/playbooks/      # AWS only
 ├── docs/
 ├── installation.yaml
 └── Makefile
@@ -83,6 +81,7 @@ make ansible-check
 | **Quick install** | [docs/install-quickstart.md](docs/install-quickstart.md) |
 | **Modular services** | [docs/services.md](docs/services.md) |
 | **Configuration** | [docs/installer-configuration.md](docs/installer-configuration.md) |
+| **GCP Cloud Run** | [docs/gcp-deployment.md](docs/gcp-deployment.md) |
 | **AWS prerequisites** | [docs/aws-prerequisites.md](docs/aws-prerequisites.md) |
 | **AWS deployment** | [docs/aws-deployment.md](docs/aws-deployment.md) |
 | **AWS CI (throwaway EC2)** | [docs/aws-ci.md](docs/aws-ci.md) |
