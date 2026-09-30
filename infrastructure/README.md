@@ -7,7 +7,7 @@ Terraform and Ansible for deploying modular services to AWS, plus a Terraform-on
 ```text
 infrastructure/
 ├── installer/                  # edge-installer CLI
-├── docker/                     # backend/frontend images
+├── docker/                     # control-plane, data-plane, console images
 ├── databases/                  # postgres init; clickhouse/redis placeholders
 ├── networking/                 # EMQX config; WireGuard placeholder
 ├── storage/                    # object-storage placeholder

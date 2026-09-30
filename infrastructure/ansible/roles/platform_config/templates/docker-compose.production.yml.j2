@@ -52,7 +52,7 @@ services:
     networks:
       - platform
 
-  frontend:
+  console:
     image: {{ frontend_image }}
     restart: unless-stopped
     depends_on:
@@ -74,7 +74,7 @@ services:
     depends_on:
       backend:
         condition: service_started
-      frontend:
+      console:
         condition: service_started
     networks:
       - platform

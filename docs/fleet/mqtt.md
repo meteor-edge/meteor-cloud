@@ -27,9 +27,12 @@ Internal broker callbacks:
 ```text
 POST /internal/mqtt/authenticate
 POST /internal/mqtt/authorize
+POST /internal/mqtt/ingest
 ```
 
-These require `X-MQTT-Internal-Token` and are not user APIs.
+These require `X-MQTT-Internal-Token` and are not user APIs. The data plane
+forwards every inbound MQTT payload to ingest. Last-value status/metrics stay
+in PostgreSQL (`TELEMETRY_PROVIDER=postgresql`). See `contracts/mqtt-http.md`.
 
 ## Local setup
 

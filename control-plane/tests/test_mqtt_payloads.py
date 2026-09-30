@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from data_plane.connectivity.mqtt.payloads import parse_metrics_payload, parse_status_payload
+from app.mqtt.payloads import parse_metrics_payload, parse_status_payload
 
 
 def test_parse_status_accepts_online_offline() -> None:

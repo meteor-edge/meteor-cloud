@@ -1,6 +1,8 @@
-# Edge Platform Frontend
+# MeteorCloud operator console
 
-React control-plane UI for the Edge Platform.
+React UI for fleet, organizations, and the MQTT test page. The browser talks
+**only** to the control-plane API (`VITE_API_BASE_URL`). It never calls the
+data-plane host.
 
 ## Stack
 
@@ -15,16 +17,11 @@ React control-plane UI for the Edge Platform.
 
 ```bash
 # From the repository root:
-make install-frontend
+make install-console
 make dev
 
 # Or run Vite directly:
-cd frontend
+cd console
 npm install
 npm run dev
 ```
-
-## Milestone 1 scope
-
-Application shell, routing, layout, sidebar, header, landing page, and health
-page. No business pages yet.

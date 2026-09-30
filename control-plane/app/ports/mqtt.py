@@ -1,7 +1,7 @@
 """MQTT connectivity port.
 
-The control plane publishes commands and consumes device traffic through this
-gateway. The current adapter is EMQX via ``data_plane.connectivity.mqtt``.
+The control plane publishes and watches topics through this gateway.
+The current adapter is the data-plane HTTP API (EMQX behind that service).
 """
 
 from __future__ import annotations
@@ -18,3 +18,7 @@ class MQTTGateway(Protocol):
         qos: int = 1,
         retain: bool = False,
     ) -> None: ...
+
+    def watch_topic(self, topic: str) -> None: ...
+
+    def unwatch_topic(self, topic: str) -> None: ...

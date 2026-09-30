@@ -22,9 +22,12 @@ The Edge Platform is a self-hosted Linux control plane with a standalone install
 ┌──────────────────────────────────────────┐
 │              Edge Platform               │
 │  ┌──────────────┐     ┌───────────────┐  │
-│  │   Frontend   │────▶│    Backend    │  │
+│  │   Console    │────▶│ Control plane │  │
 │  │ React / Vite │     │ FastAPI / PG  │  │
 │  └──────────────┘     └───────────────┘  │
+│                              │           │
+│                              ▼           │
+│                       Data plane MQTT    │
 └──────────────────────────────────────────┘
 ```
 
@@ -72,13 +75,13 @@ control-plane/app/
 ├── core/             # config, db, logging, security
 └── main.py
 
-data-plane/data_plane/connectivity/mqtt/   # EMQX adapter
+data-plane/data_plane/   # MQTT FastAPI process (EMQX client)
 ```
 
-## Frontend structure
+## Console structure
 
 ```text
-frontend/src/
+console/src/
 ├── components/
 ├── layouts/
 ├── pages/
@@ -92,7 +95,9 @@ frontend/src/
 ├── control-plane/
 ├── data-plane/
 ├── device-plane/agent/
-├── frontend/
+├── console/
+├── compose/
+├── contracts/
 ├── infrastructure/     # Terraform, Ansible, installer, Docker
 ├── tests/mqtt_live/
 ├── docs/
@@ -115,7 +120,7 @@ Domain code depends on ports in `control-plane/app/ports/`. Current adapters are
 |------|-----------------|-------|
 | Domain repositories (`DeviceRepository`, …) | PostgreSQL / SQLAlchemy | No generic `DatabaseProvider` |
 | `RateLimiter` | Redis (`RedisRateLimiter`) | Tests use `InMemoryRateLimiter` |
-| `MQTTGateway` | EMQX (`PlatformMqttClient`) | MQTT HTTP auth stays in `data_plane` |
+| `MQTTGateway` | Data-plane HTTP client (`DataPlaneMQTTGateway`) | EMQX lives in the data-plane process; HTTP auth stays on the control plane |
 | `OTAProvider` | none | No OTA product yet |
 
 Future stores (ClickHouse, Kafka, S3/MinIO, Mender) have empty directories only.

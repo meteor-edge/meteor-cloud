@@ -14,15 +14,15 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.devices.models import Device, DeviceCommand, DeviceMqttCredential
 from app.devices.tokens import hash_token
-from app.ports.mqtt import MQTTGateway
-from data_plane.connectivity.mqtt.acl import can_access_topic, device_id_from_username
-from data_plane.connectivity.mqtt.payloads import parse_json_object, parse_metrics_payload, parse_status_payload
-from data_plane.connectivity.mqtt.schemas import (
+from app.mqtt.acl import can_access_topic, device_id_from_username
+from app.mqtt.payloads import parse_json_object, parse_metrics_payload, parse_status_payload
+from app.mqtt.schemas import (
     DevicePingResponse,
     MqttAuthorizeResponse,
     MqttAuthResponse,
     PingCommandPayload,
 )
+from app.ports.mqtt import MQTTGateway
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,12 @@ class NoopPublisher:
         retain: bool = False,
     ) -> None:
         raise RuntimeError("MQTT broker is not enabled.")
+
+    def watch_topic(self, topic: str) -> None:
+        return None
+
+    def unwatch_topic(self, topic: str) -> None:
+        return None
 
 
 class MqttService:

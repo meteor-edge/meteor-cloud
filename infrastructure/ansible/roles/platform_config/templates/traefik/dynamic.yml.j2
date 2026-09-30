@@ -24,7 +24,7 @@ http:
       tls:
         certResolver: letsencrypt
 {% endif %}
-    frontend:
+    console:
       rule: PathPrefix(`/`)
       priority: 1
       entryPoints:
@@ -33,7 +33,7 @@ http:
 {% else %}
         - web
 {% endif %}
-      service: frontend
+      service: console
 {% if platform_domain %}
       tls:
         certResolver: letsencrypt
@@ -52,10 +52,10 @@ http:
       loadBalancer:
         servers:
           - url: http://backend:8000
-    frontend:
+    console:
       loadBalancer:
         servers:
-          - url: http://frontend:80
+          - url: http://console:80
 {% if platform_domain %}
     noop:
       loadBalancer:

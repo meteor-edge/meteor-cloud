@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from data_plane.connectivity.mqtt.acl import can_access_topic, device_id_from_username, mqtt_username_for
+from app.mqtt.acl import can_access_topic, device_id_from_username, mqtt_username_for
 
 DEVICE = uuid.UUID("11111111-1111-1111-1111-111111111111")
 OTHER = uuid.UUID("22222222-2222-2222-2222-222222222222")

@@ -1,6 +1,7 @@
-# Edge Platform Backend
+# Edge Platform control plane
 
-FastAPI control-plane API for the Edge Platform.
+FastAPI control-plane API for MeteorCloud: identity, organizations, device
+registry, enrollment, MQTT policy/ingest, and operator APIs.
 
 ## Stack
 
@@ -20,17 +21,15 @@ make dev
 
 # Or run the API directly:
 cd control-plane
-export PYTHONPATH=.:../data-plane
+export DATA_PLANE_URL=http://127.0.0.1:8081
 uvicorn app.main:app --reload
 ```
+
+MQTT publish/watch goes to the data-plane HTTP API. EMQX still authenticates
+against this process at `/internal/mqtt/authenticate` and `/authorize`.
 
 ## Health
 
 ```bash
 curl http://localhost:8000/health
 ```
-
-## Milestone 1 scope
-
-Configuration, database, logging, health endpoint, JWT/password utilities, and
-authentication dependencies. No business modules yet.

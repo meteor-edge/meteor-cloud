@@ -21,7 +21,7 @@ services:
       - /sys:/host/sys:ro
       - /:/host/root:ro
     networks:
-      - default
+      - meteorcloud
 
   prometheus:
     image: prom/prometheus:v2.55.1
@@ -37,7 +37,7 @@ services:
       - backend
       - node-exporter
     networks:
-      - default
+      - meteorcloud
 
   loki:
     image: grafana/loki:3.3.2
@@ -47,7 +47,7 @@ services:
     ports:
       - "127.0.0.1:3100:3100"
     networks:
-      - default
+      - meteorcloud
 
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
@@ -73,7 +73,7 @@ services:
       - loki
       - docker-socket-proxy
     networks:
-      - default
+      - meteorcloud
       - docker_proxy
 
   grafana:
@@ -90,11 +90,13 @@ services:
       - prometheus
       - loki
     networks:
-      - default
+      - meteorcloud
 
 volumes:
   prometheus_data:
 
 networks:
+  meteorcloud:
+    name: meteorcloud
   docker_proxy:
     internal: true

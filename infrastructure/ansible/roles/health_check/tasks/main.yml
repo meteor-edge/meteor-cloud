@@ -8,7 +8,7 @@
   delay: 5
   until: backend_health.status == 200
 
-- name: Check frontend root
+- name: Check console root
   ansible.builtin.uri:
     url: "{{ platform_public_url }}/"
   register: frontend_health

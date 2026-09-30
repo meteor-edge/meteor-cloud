@@ -19,9 +19,9 @@ from app.core.request_id import RequestIdMiddleware
 from app.devices.agent_router import router as agent_router
 from app.devices.router import router as fleet_router
 from app.identity.router import router as identity_router
+from app.mqtt.internal_router import router as mqtt_internal_router
+from app.mqtt.runtime import start_mqtt_runtime, stop_mqtt_runtime
 from app.tenancy.router import router as organizations_router
-from data_plane.connectivity.mqtt.broker import start_mqtt_runtime, stop_mqtt_runtime
-from data_plane.connectivity.mqtt.internal_router import router as mqtt_internal_router
 
 logger = logging.getLogger(__name__)
 

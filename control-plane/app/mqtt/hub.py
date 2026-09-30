@@ -10,7 +10,7 @@ from queue import Full, Queue
 from threading import Lock
 from typing import Any
 
-from data_plane.connectivity.mqtt.topics import mqtt_topic_matches
+from app.mqtt.topics import mqtt_topic_matches
 
 _MAX_RECENT = 50
 _MAX_QUEUE = 50

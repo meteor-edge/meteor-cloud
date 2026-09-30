@@ -32,10 +32,10 @@ from app.devices.schemas import (
     RegistrationTokenResponse,
 )
 from app.identity.dependencies import CurrentUser
-from data_plane.connectivity.mqtt.broker import get_mqtt_publisher, get_mqtt_topic_watcher
-from data_plane.connectivity.mqtt.hub import get_mqtt_event_hub
-from data_plane.connectivity.mqtt.schemas import DevicePingResponse, MqttTestPublishRequest, MqttTestPublishResponse
-from data_plane.connectivity.mqtt.service import MqttPublisher
+from app.mqtt.hub import get_mqtt_event_hub
+from app.mqtt.runtime import get_mqtt_publisher, get_mqtt_topic_watcher
+from app.mqtt.schemas import DevicePingResponse, MqttTestPublishRequest, MqttTestPublishResponse
+from app.mqtt.service import MqttPublisher
 
 router = APIRouter(prefix="/api/v1/organizations/{organization_id}", tags=["fleet"])
 

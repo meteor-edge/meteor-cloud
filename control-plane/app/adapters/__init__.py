@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from app.core.config import Settings
 from app.devices.rate_limit import InMemoryRateLimiter, RedisRateLimiter
+from app.mqtt.service import NoopPublisher
 from app.ports.cache import RateLimiter
 from app.ports.mqtt import MQTTGateway
 from app.ports.ota import OTAProvider
-from data_plane.connectivity.mqtt.service import NoopPublisher
 
 
 def mqtt_gateway(settings: Settings) -> MQTTGateway:
@@ -18,9 +18,13 @@ def mqtt_gateway(settings: Settings) -> MQTTGateway:
         return NoopPublisher()
     if settings.mqtt_provider != "emqx":
         raise RuntimeError(f"Unsupported mqtt.provider={settings.mqtt_provider!r}; only 'emqx' is implemented")
-    from data_plane.connectivity.mqtt.broker import PlatformMqttClient
+    if settings.telemetry_provider != "postgresql":
+        raise RuntimeError(
+            f"Unsupported telemetry.provider={settings.telemetry_provider!r}; only 'postgresql' is implemented"
+        )
+    from app.adapters.data_plane_mqtt import DataPlaneMQTTGateway
 
-    return PlatformMqttClient(settings)
+    return DataPlaneMQTTGateway(settings)
 
 
 def rate_limiter(settings: Settings, *, limit: int, window_seconds: int, prefix: str) -> RateLimiter:

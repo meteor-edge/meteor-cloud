@@ -1,30 +1,62 @@
-.PHONY: help dev stop up down plan status-aws test lint format typecheck install-backend install-frontend install-installer install-agent clean migrate seed backend-test frontend-test agent-test installer-test terraform-check ansible-check observability mqtt-certs test-mqtt test-cloud-e2e
+.PHONY: help join-help dev stop up down plan status-aws test lint format typecheck install-backend install-data-plane install-console install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console stop-control-plane stop-data-plane stop-console
 
 COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f docker-compose.observability.yml
+CP_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-cp docker compose --project-directory . -f compose/control-plane.yml
+DP_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-dp docker compose --project-directory . -f compose/data-plane.yml
+CONSOLE_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-console docker compose --project-directory . -f compose/console.yml
 BACKEND_DIR := control-plane
-FRONTEND_DIR := frontend
+DATA_PLANE_DIR := data-plane
+CONSOLE_DIR := console
 INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := device-plane/agent
 INFRA_DIR := infrastructure
 CONFIG ?= installation.yaml
 
 help: ## Show available commands
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
+	@$(MAKE) --no-print-directory join-help
 
-dev: ## Start the development stack
+join-help:
+	@echo ""
+	@echo "Join rules (same machine: stacks must use network name meteorcloud):"
+	@echo "  Control plane alone: API works; MQTT/ping do not; console can attach if VITE_API_BASE_URL points at that API."
+	@echo "  Data plane alone: broker listens; device connect fails until control plane auth is reachable."
+	@echo "  Console alone: static UI; unusable until a control plane is reachable at the configured API base URL."
+	@echo "  Together: DATA_PLANE_URL and CONTROL_PLANE_URL use Compose service names, not localhost."
+	@echo "  Console: VITE_API_BASE_URL=http://localhost:8000 in local browser. Never a data-plane host."
+	@echo "  Host-only: DATA_PLANE_URL=http://127.0.0.1:8081 and CONTROL_PLANE_URL=http://127.0.0.1:8000."
+
+dev: ## Start control-plane, data-plane, and console together
 	@test -f .env || cp .env.example .env
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
 	$(COMPOSE) up --build -d
 	@echo ""
 	@echo "Development stack is starting:"
-	@echo "  Backend:  http://localhost:8000"
-	@echo "  Frontend: http://localhost:5173"
-	@echo "  API docs: http://localhost:8000/docs"
-	@echo "  Health:   http://localhost:8000/health"
-	@echo "  MQTT TLS: mqtts://localhost:8883"
-	@echo "  EMQX UI:  http://localhost:18083  (admin / public)"
-	@echo "  Seed:     make seed"
+	@echo "  Console:      http://localhost:5173"
+	@echo "  Control plane: http://localhost:8000"
+	@echo "  Data plane:   http://localhost:8081/health"
+	@echo "  API docs:     http://localhost:8000/docs"
+	@echo "  MQTT TLS:     mqtts://localhost:8883"
+	@echo "  EMQX UI:      http://localhost:18083  (admin / public)"
+	@echo "  Seed:         make seed"
+	@$(MAKE) --no-print-directory join-help
+
+dev-control-plane: ## Start postgres, redis, and the control-plane API
+	@test -f .env || cp .env.example .env
+	$(CP_COMPOSE) up --build -d
+	@echo "Control plane: http://localhost:8000  (MQTT/ping need the data plane on network meteorcloud)"
+
+dev-data-plane: ## Start EMQX and the data-plane MQTT gateway
+	@test -f .env || cp .env.example .env
+	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
+	$(DP_COMPOSE) up --build -d
+	@echo "Data plane: http://localhost:8081/health  MQTT: mqtts://localhost:8883"
+
+dev-console: ## Start the operator console
+	@test -f .env || cp .env.example .env
+	$(CONSOLE_COMPOSE) up --build -d
+	@echo "Console: http://localhost:5173  (needs VITE_API_BASE_URL pointing at a control plane)"
 
 mqtt-certs: ## Generate local MQTT CA and broker certificates
 	./scripts/generate-local-mqtt-certs.sh
@@ -50,9 +82,18 @@ observability: ## Start the development stack plus Prometheus, Loki, and Grafana
 	@echo "  Prometheus: http://localhost:9090"
 	@echo "  Grafana:    http://localhost:3001  (set GRAFANA_ADMIN_USER/PASSWORD)"
 
-stop: ## Stop the development stack
+stop: ## Stop the full development stack
 	$(COMPOSE) down
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.observability.yml down 2>/dev/null
+
+stop-control-plane: ## Stop the control-plane Compose project
+	$(CP_COMPOSE) down
+
+stop-data-plane: ## Stop the data-plane Compose project
+	$(DP_COMPOSE) down
+
+stop-console: ## Stop the console Compose project
+	$(CONSOLE_COMPOSE) down
 
 up: ## Deploy all enabled AWS services (Terraform + Ansible)
 	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
@@ -76,11 +117,14 @@ migrate: ## Run database migrations
 seed: ## Seed development users and organization
 	cd $(BACKEND_DIR) && python scripts/seed.py
 
-install-backend: ## Install backend Python dependencies
+install-backend: ## Install control-plane Python dependencies
 	cd $(BACKEND_DIR) && python -m pip install -e ".[dev]"
 
-install-frontend: ## Install frontend Node dependencies
-	cd $(FRONTEND_DIR) && npm install
+install-data-plane: ## Install data-plane Python dependencies
+	cd $(DATA_PLANE_DIR) && python -m pip install -e ".[dev]"
+
+install-console: ## Install console Node dependencies
+	cd $(CONSOLE_DIR) && npm install
 
 install-installer: ## Install installer Python dependencies
 	cd $(INSTALLER_DIR) && python -m pip install -e ".[dev]"
@@ -88,13 +132,16 @@ install-installer: ## Install installer Python dependencies
 install-agent: ## Install reference agent Python dependencies
 	cd $(AGENT_DIR) && python -m pip install -e ".[dev]"
 
-install: install-backend install-frontend install-installer install-agent ## Install all local dependencies
+install: install-backend install-data-plane install-console install-installer install-agent ## Install all local dependencies
 
-backend-test: ## Run backend tests (dedicated *_test database, never the app DB)
+backend-test: ## Run control-plane tests (dedicated *_test database, never the app DB)
 	cd $(BACKEND_DIR) && python -m pytest -q
 
-frontend-test: ## Run frontend tests
-	cd $(FRONTEND_DIR) && npm test -- --run
+data-plane-test: ## Run data-plane tests
+	cd $(DATA_PLANE_DIR) && python -m pytest -q
+
+console-test: ## Run console tests
+	cd $(CONSOLE_DIR) && npm test -- --run
 
 agent-test: ## Run reference agent tests
 	cd $(AGENT_DIR) && python -m pytest -q
@@ -102,36 +149,44 @@ agent-test: ## Run reference agent tests
 test: ## Run all tests
 	@echo "==> Installer tests"
 	cd $(INSTALLER_DIR) && python -m pytest -q
-	@echo "==> Backend tests"
+	@echo "==> Control-plane tests"
 	cd $(BACKEND_DIR) && python -m pytest -q
+	@echo "==> Data-plane tests"
+	cd $(DATA_PLANE_DIR) && python -m pytest -q
 	@echo "==> Agent tests"
 	cd $(AGENT_DIR) && python -m pytest -q
-	@echo "==> Frontend tests"
-	cd $(FRONTEND_DIR) && npm test -- --run
+	@echo "==> Console tests"
+	cd $(CONSOLE_DIR) && npm test -- --run
 
 lint: ## Lint all projects
 	@echo "==> Installer lint"
 	cd $(INSTALLER_DIR) && python -m ruff check .
-	@echo "==> Backend lint"
-	cd $(BACKEND_DIR) && python -m ruff check . ../data-plane/data_plane
+	@echo "==> Control-plane lint"
+	cd $(BACKEND_DIR) && python -m ruff check .
+	@echo "==> Data-plane lint"
+	cd $(DATA_PLANE_DIR) && python -m ruff check .
 	@echo "==> Agent lint"
 	cd $(AGENT_DIR) && python -m ruff check .
-	@echo "==> Frontend lint"
-	cd $(FRONTEND_DIR) && npm run lint
+	@echo "==> Console lint"
+	cd $(CONSOLE_DIR) && npm run lint
 
 format: ## Format all projects
 	@echo "==> Installer format"
 	cd $(INSTALLER_DIR) && python -m ruff format . && python -m ruff check --fix .
-	@echo "==> Backend format"
-	cd $(BACKEND_DIR) && python -m ruff format . ../data-plane/data_plane && python -m ruff check --fix . ../data-plane/data_plane
+	@echo "==> Control-plane format"
+	cd $(BACKEND_DIR) && python -m ruff format . && python -m ruff check --fix .
+	@echo "==> Data-plane format"
+	cd $(DATA_PLANE_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Agent format"
 	cd $(AGENT_DIR) && python -m ruff format . && python -m ruff check --fix .
-	@echo "==> Frontend format"
-	cd $(FRONTEND_DIR) && npm run format
+	@echo "==> Console format"
+	cd $(CONSOLE_DIR) && npm run format
 
 typecheck: ## Run static type checks where configured
-	@echo "==> Backend typecheck (compileall)"
-	cd $(BACKEND_DIR) && PYTHONPATH=.:../data-plane python -m compileall app tests scripts ../data-plane/data_plane
+	@echo "==> Control-plane typecheck (compileall)"
+	cd $(BACKEND_DIR) && python -m compileall app tests scripts
+	@echo "==> Data-plane typecheck (compileall)"
+	cd $(DATA_PLANE_DIR) && python -m compileall data_plane tests
 	@echo "==> Installer typecheck (compileall)"
 	cd $(INSTALLER_DIR) && python -m compileall edge_installer tests
 	@echo "==> Agent typecheck (compileall)"
@@ -176,7 +231,10 @@ installer-apply: ## Apply infrastructure and deploy platform
 
 clean: ## Remove local build artifacts
 	$(COMPOSE) down -v --remove-orphans || true
+	$(CP_COMPOSE) down -v --remove-orphans || true
+	$(DP_COMPOSE) down -v --remove-orphans || true
+	$(CONSOLE_COMPOSE) down -v --remove-orphans || true
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
-	rm -rf $(FRONTEND_DIR)/node_modules $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/coverage
+	rm -rf $(CONSOLE_DIR)/node_modules $(CONSOLE_DIR)/dist $(CONSOLE_DIR)/coverage
