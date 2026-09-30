@@ -63,10 +63,10 @@ from app.devices.tokens import (
     generate_registration_token,
 )
 from app.identity.models import User
+from app.mqtt.schemas import DevicePingResponse, MqttTestPublishResponse
+from app.mqtt.service import MqttPublisher, MqttService
 from app.tenancy.models import OrganizationMembership, OrganizationRole
 from app.tenancy.repository import OrganizationRepository
-from data_plane.connectivity.mqtt.schemas import DevicePingResponse, MqttTestPublishResponse
-from data_plane.connectivity.mqtt.service import MqttPublisher, MqttService
 
 
 class FleetService:
@@ -804,7 +804,7 @@ class FleetService:
         device_id: uuid.UUID | None,
         topic: str | None,
     ) -> str:
-        from data_plane.connectivity.mqtt.topics import validate_mqtt_topic
+        from app.mqtt.topics import validate_mqtt_topic
 
         self._require_membership(organization_id, actor.id)
         if device_id is not None:
@@ -825,7 +825,7 @@ class FleetService:
         publisher: MqttPublisher,
     ) -> MqttTestPublishResponse:
         from app.core.exceptions import ValidationAppError
-        from data_plane.connectivity.mqtt.topics import validate_mqtt_topic
+        from app.mqtt.topics import validate_mqtt_topic
 
         membership = self._require_membership(organization_id, actor.id)
         self._require_manage(membership.role)

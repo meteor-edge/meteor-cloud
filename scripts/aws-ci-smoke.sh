@@ -24,5 +24,5 @@ check() {
 echo "Smoke checks against ${BASE}"
 check "/health" "backend health"
 check "/api/v1/health" "API health" || check "/health" "API health fallback"
-check "/" "frontend"
+check "/" "console"
 echo "All smoke checks passed."

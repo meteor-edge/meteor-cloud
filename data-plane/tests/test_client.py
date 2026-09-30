@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import paho.mqtt.client as mqtt
 
-from data_plane.connectivity.mqtt.broker import PlatformMqttClient
+from data_plane.client import PlatformMqttClient
 
 
 class _FakeBroker:

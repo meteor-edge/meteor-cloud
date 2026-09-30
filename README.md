@@ -6,10 +6,10 @@ Self-hosted Linux Edge Platform — control plane with modular AWS EC2 or GCP Cl
 
 | Area | Purpose |
 | --- | --- |
-| `control-plane/` | FastAPI domain (identity, tenancy, devices, audit) |
-| `data-plane/` | MQTT connectivity and future ingestion/messaging |
+| `control-plane/` | FastAPI domain (identity, tenancy, devices, audit, MQTT policy/ingest) |
+| `data-plane/` | MQTT gateway process (EMQX client, publish/watch, ingest HTTP) |
 | `device-plane/` | On-device agent (`meteorcli` / `edge-agent`) |
-| `frontend/` | React operator UI |
+| `console/` | React operator console (talks only to the control-plane API) |
 | `infrastructure/` | Terraform, Ansible, installer, Docker, observability |
 | `docs/` | Architecture, deployment, and development guides |
 
@@ -21,8 +21,9 @@ make dev
 make seed      # optional: owner@example.com / dev-password-123
 ```
 
-- Frontend: http://localhost:5173
-- Backend: http://localhost:8000/health
+- Console: http://localhost:5173
+- Control plane: http://localhost:8000/health
+- Data plane: http://localhost:8081/health
 - API docs: http://localhost:8000/docs
 - MQTT TLS: mqtts://localhost:8883
 - EMQX dashboard (dev): http://localhost:18083
@@ -64,9 +65,11 @@ make ansible-check
 
 ```text
 ├── control-plane/              # FastAPI app (app.*)
-├── data-plane/                 # MQTT adapter (data_plane.*)
+├── data-plane/                 # MQTT gateway (data_plane.*)
 ├── device-plane/agent/         # edge-agent / meteorcli
-├── frontend/                   # React
+├── console/                    # React operator console
+├── compose/                    # separately deployable Compose files
+├── contracts/                  # HTTP JSON contracts (no codegen)
 ├── infrastructure/
 │   ├── terraform/
 │   ├── ansible/

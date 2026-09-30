@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.devices.models import Device, DeviceMqttCredential
 from app.devices.tokens import hash_token
-from data_plane.connectivity.mqtt.acl import mqtt_username_for
-from data_plane.connectivity.mqtt.schemas import MqttConnectInfo
+from app.mqtt.acl import mqtt_username_for
+from app.mqtt.schemas import MqttConnectInfo
 
 MQTT_PASSWORD_PREFIX = "mqtt_"
 

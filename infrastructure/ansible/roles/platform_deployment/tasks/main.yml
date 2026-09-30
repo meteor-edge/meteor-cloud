@@ -27,11 +27,11 @@
     chdir: /opt/edge-platform/src
   when: (image_source | default('git')) == 'git'
 
-- name: Build frontend image from repository
+- name: Build console image from repository
   ansible.builtin.command:
     cmd: >-
       docker build
-      -f infrastructure/docker/Dockerfile.frontend
+      -f infrastructure/docker/Dockerfile.console
       --build-arg VITE_API_BASE_URL={{ platform_public_url }}
       -t {{ frontend_image | default('edge-platform-frontend:0.2.0') }}
       .

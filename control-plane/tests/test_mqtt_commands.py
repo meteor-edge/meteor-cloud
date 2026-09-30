@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.devices.models import DeviceCommand
 from app.main import create_app
-from data_plane.connectivity.mqtt.broker import get_mqtt_publisher
-from data_plane.connectivity.mqtt.service import MqttService
+from app.mqtt.runtime import get_mqtt_publisher
+from app.mqtt.service import MqttService
 from tests.conftest import auth_header, create_org_with_owner, create_user
 
 

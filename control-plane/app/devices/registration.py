@@ -25,7 +25,7 @@ from app.devices.schemas import (
 )
 from app.devices.status import connectivity_status
 from app.devices.tokens import generate_device_token, hash_token
-from data_plane.connectivity.mqtt.credentials import issue_mqtt_credentials
+from app.mqtt.credentials import issue_mqtt_credentials
 
 
 class RegistrationService:

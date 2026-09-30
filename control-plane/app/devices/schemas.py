@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.devices.status import ConnectivityStatus
-from data_plane.connectivity.mqtt.schemas import MqttConnectInfo
+from app.mqtt.schemas import MqttConnectInfo
 
 
 def _strip_optional(value: str | None) -> str | None:

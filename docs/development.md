@@ -18,30 +18,57 @@ source .venv/bin/activate
 make install
 ```
 
-`make install` installs backend, frontend, and installer dependencies.
+`make install` installs control-plane, data-plane, console, installer, and agent dependencies.
 
 ## Running the stack
 
 ```bash
-make dev
+make dev                 # all three Compose files (shared network meteorcloud)
+make dev-control-plane   # postgres, redis, control-plane API
+make dev-data-plane      # EMQX + data-plane MQTT gateway
+make dev-console         # operator console
 ```
 
-This starts:
+Together this starts:
 
 | Service | URL |
 | --- | --- |
-| Frontend | http://localhost:5173 |
-| Backend | http://localhost:8000 |
+| Console | http://localhost:5173 |
+| Control plane | http://localhost:8000 |
+| Data plane health | http://localhost:8081/health |
 | API docs | http://localhost:8000/docs |
 | PostgreSQL | localhost:5432 |
 | MQTT TLS | mqtts://localhost:8883 |
 | EMQX dashboard | http://localhost:18083 (development only) |
 | Redis | internal Docker network |
 
+Compose files:
+
+| File | Services |
+| --- | --- |
+| `compose/control-plane.yml` | `postgres`, `redis`, `backend` |
+| `compose/data-plane.yml` | `emqx`, `data-plane` |
+| `compose/console.yml` | `console` |
+| `docker-compose.yml` | `include:` of all three |
+
+Same machine stacks **must** use network name `meteorcloud`.
+
+- Control plane alone: API works; MQTT/ping do not; console can still attach if `VITE_API_BASE_URL` points at that API.
+- Data plane alone: broker listens; device connect fails until control plane auth is reachable.
+- Console alone: static UI; unusable until a control plane is reachable at the configured API base URL.
+- Together: `DATA_PLANE_URL` and `CONTROL_PLANE_URL` use Compose service names, not `localhost`.
+- Console: `VITE_API_BASE_URL=http://localhost:8000` in the local browser (host port of the control plane). Never a data-plane host.
+- Host-only (no Compose between them): `DATA_PLANE_URL=http://127.0.0.1:8081` and `CONTROL_PLANE_URL=http://127.0.0.1:8000`. Console `npm run dev` with `VITE_API_BASE_URL` at the control-plane origin.
+
+Telemetry today is **PostgreSQL last-value** on `Device` (`TELEMETRY_PROVIDER=postgresql`). Timescale and ClickHouse are reserved names and fail fast.
+
 Stop with:
 
 ```bash
 make stop
+make stop-control-plane
+make stop-data-plane
+make stop-console
 ```
 
 View logs:
@@ -52,23 +79,33 @@ make logs
 
 ## Running services without Docker (optional)
 
-### Backend
+### Control plane
 
 ```bash
-# Start PostgreSQL somehow, then:
 cd control-plane
-export PYTHONPATH=.:../data-plane
 export DATABASE_URL=postgresql+psycopg://edge:edge@localhost:5432/edge_platform
+export DATA_PLANE_URL=http://127.0.0.1:8081
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-### Frontend
+### Data plane
 
 ```bash
-cd frontend
+cd data-plane
+export CONTROL_PLANE_URL=http://127.0.0.1:8000
+export MQTT_BROKER_HOST=127.0.0.1
+uvicorn data_plane.main:app --host 0.0.0.0 --port 8081 --reload
+```
+
+### Console
+
+```bash
+cd console
 npm run dev
 ```
+
+The browser talks only to the control-plane API (`VITE_API_BASE_URL`).
 
 ### Installer
 
@@ -82,16 +119,19 @@ edge-installer validate --config config/examples/installation.yaml
 ```bash
 make test
 make backend-test
-make frontend-test
+make data-plane-test
+make console-test
 ```
 
 Runs:
 
 1. Installer Pytest suite
-2. Backend Pytest suite (requires PostgreSQL; use `make dev` first)
-3. Frontend Vitest suite
+2. Control-plane Pytest suite (requires PostgreSQL; use `make dev` first)
+3. Data-plane Pytest suite
+4. Agent Pytest suite
+5. Console Vitest suite
 
-Backend tests **never** use `DATABASE_URL` / `edge_platform`. They rewrite the
+Control-plane tests **never** use `DATABASE_URL` / `edge_platform`. They rewrite the
 connection to a sibling `edge_platform_test` database and refuse to start if
 that rewrite would target a non-local host. `make dev` keeps using
 `edge_platform`, so registering a device and then running tests will not wipe
@@ -129,11 +169,16 @@ Copy `.env.example` to `.env` and adjust as needed. Important values:
 | `TEST_DATABASE_URL` | Optional pytest database (must end in `_test`) |
 | `JWT_SECRET_KEY` | Signing key for JWT utilities |
 | `BACKEND_CORS_ORIGINS` | Allowed browser origins |
-| `VITE_API_BASE_URL` | Frontend → backend base URL |
+| `VITE_API_BASE_URL` | Console → control-plane API origin |
+| `DATA_PLANE_URL` | Control plane → data-plane HTTP API |
+| `CONTROL_PLANE_URL` | Data plane → control-plane ingest/auth origin |
+| `TELEMETRY_PROVIDER` | Last-value store (`postgresql` only; timescale/clickhouse reserved) |
 | `DATABASE_PROVIDER` | Persistence adapter (`postgresql` only) |
 | `CACHE_PROVIDER` | Rate-limit adapter (`redis` only) |
 | `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
 | `OTA_PROVIDER` | OTA adapter (`none` until a provider exists) |
+
+HTTP JSON between planes is documented in [`contracts/mqtt-http.md`](../contracts/mqtt-http.md).
 
 ## Adding a backend module later
 
@@ -149,6 +194,13 @@ Copy `.env.example` to `.env` and adjust as needed. Important values:
 1. Implement `PlatformComponent` in `infrastructure/installer/` as needed
 2. Register it in the installer service registry
 3. Wire enablement through configuration models
+
+## Kubernetes later
+
+Do not add manifests in this repo yet. A later split would be three Deployments:
+`control-plane`, `data-plane`, and `console`. Scale the API and console independently.
+Keep the data-plane MQTT consumer at 1 until shared subscriptions / a consumer group exist.
+`infrastructure/kubernetes` stays empty.
 
 ## Coding standards
 

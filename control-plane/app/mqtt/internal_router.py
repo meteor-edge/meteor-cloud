@@ -13,13 +13,16 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.exceptions import UnauthorizedError
-from data_plane.connectivity.mqtt.schemas import (
+from app.mqtt.ingest import ingest_mqtt_message
+from app.mqtt.schemas import (
     MqttAuthorizeRequest,
     MqttAuthorizeResponse,
     MqttAuthRequest,
     MqttAuthResponse,
+    MqttIngestRequest,
+    MqttIngestResponse,
 )
-from data_plane.connectivity.mqtt.service import MqttService
+from app.mqtt.service import MqttService
 
 router = APIRouter(prefix="/internal/mqtt", tags=["internal-mqtt"], include_in_schema=False)
 
@@ -58,3 +61,14 @@ def mqtt_authorize(
         action=payload.action,
         topic=payload.topic,
     )
+
+
+@router.post("/ingest", response_model=MqttIngestResponse)
+def mqtt_ingest(
+    payload: MqttIngestRequest,
+    session: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    _: Annotated[None, Depends(_require_internal_token)],
+) -> MqttIngestResponse:
+    ingest_mqtt_message(session, settings, topic=payload.topic, payload=payload.payload)
+    return MqttIngestResponse(ok=True)

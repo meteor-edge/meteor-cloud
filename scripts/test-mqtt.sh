@@ -45,7 +45,7 @@ dump_emqx() {
   $COMPOSE exec -T emqx emqx ctl listeners || true
 }
 
-echo "==> Starting postgres, redis, backend, emqx"
+echo "==> Starting postgres, redis, backend, emqx, data-plane"
 BUILD_ARGS=()
 if [[ "${MQTT_COMPOSE_BUILD:-}" == "1" ]]; then
   BUILD_ARGS+=(--build)
@@ -53,14 +53,14 @@ fi
 # shellcheck disable=SC2086
 if $COMPOSE up --help 2>&1 | grep -q -- '--wait'; then
   # shellcheck disable=SC2086
-  if ! $COMPOSE up -d "${BUILD_ARGS[@]}" --wait --wait-timeout 180 postgres redis backend emqx; then
+  if ! $COMPOSE up -d "${BUILD_ARGS[@]}" --wait --wait-timeout 180 postgres redis backend emqx data-plane; then
     dump_emqx
     exit 1
   fi
 else
   echo "==> Compose --wait unavailable; starting without --wait"
   # shellcheck disable=SC2086
-  $COMPOSE up -d "${BUILD_ARGS[@]}" postgres redis backend emqx
+  $COMPOSE up -d "${BUILD_ARGS[@]}" postgres redis backend emqx data-plane
 fi
 
 cleanup() {
@@ -72,15 +72,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> Waiting for backend and MQTT TLS"
+echo "==> Waiting for backend, data-plane, and MQTT TLS"
 if ! "$PYTHON" - <<'PY'
 from mqtt_live.config import load_config
 from mqtt_live.http import wait_http, wait_mqtt_tls
 
 cfg = load_config()
 wait_http(f"{cfg.platform_url}/health", timeout_seconds=180)
+wait_http("http://127.0.0.1:8081/health", timeout_seconds=180)
 wait_mqtt_tls(cfg.mqtt_host, cfg.mqtt_port, cfg.mqtt_ca_file, timeout_seconds=180)
-print("backend and MQTT TLS are ready")
+print("backend, data-plane, and MQTT TLS are ready")
 PY
 then
   echo "==> EMQX did not become reachable on MQTT TLS"

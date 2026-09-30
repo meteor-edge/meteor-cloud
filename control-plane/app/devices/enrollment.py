@@ -35,8 +35,8 @@ from app.devices.schemas import (
     AgentEnrollResponse,
 )
 from app.devices.tokens import generate_claim_secret, generate_device_token, hash_token
+from app.mqtt.credentials import issue_mqtt_credentials
 from app.tenancy.models import Organization
-from data_plane.connectivity.mqtt.credentials import issue_mqtt_credentials
 
 
 class EnrollmentService:

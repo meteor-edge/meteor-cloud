@@ -7,9 +7,9 @@ from queue import Empty
 
 from sqlalchemy.orm import Session
 
+from app.mqtt.hub import MqttEventHub, MqttTestEvent
+from app.mqtt.topics import mqtt_topic_matches, validate_mqtt_topic
 from app.tenancy.models import Organization, OrganizationRole
-from data_plane.connectivity.mqtt.hub import MqttEventHub, MqttTestEvent
-from data_plane.connectivity.mqtt.topics import mqtt_topic_matches, validate_mqtt_topic
 from tests.conftest import add_member, auth_header, create_user
 from tests.test_mqtt_commands import RecordingPublisher, _client_with_publisher, _register
 

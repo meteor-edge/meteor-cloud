@@ -2,13 +2,17 @@ services:
   backend:
     volumes:
       - ./control-plane:/app
-      - ./data-plane/data_plane:/app/data_plane
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
-  frontend:
+  data-plane:
     volumes:
-      - ./frontend:/app
+      - ./data-plane:/app
+    command: uvicorn data_plane.main:app --host 0.0.0.0 --port 8081 --reload
+
+  console:
+    volumes:
+      - ./console:/app
       - /app/node_modules
     command: npm run dev -- --host 0.0.0.0 --port 5173

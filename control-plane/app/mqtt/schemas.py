@@ -73,3 +73,12 @@ class MqttTestPublishRequest(BaseModel):
 class MqttTestPublishResponse(BaseModel):
     topic: str
     payload: str
+
+
+class MqttIngestRequest(BaseModel):
+    topic: str
+    payload: str
+
+
+class MqttIngestResponse(BaseModel):
+    ok: bool = True

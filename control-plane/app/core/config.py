@@ -16,6 +16,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_name: str = Field(default="edge-platform", alias="APP_NAME")
@@ -105,6 +106,8 @@ class Settings(BaseSettings):
     mqtt_internal_token: str = Field(default="dev-mqtt-internal", alias="MQTT_INTERNAL_TOKEN")
     mqtt_ca_cert_path: str = Field(default="certs/ca.crt", alias="MQTT_CA_CERT_PATH")
     mqtt_ping_timeout_seconds: float = Field(default=8.0, alias="MQTT_PING_TIMEOUT_SECONDS")
+    data_plane_url: str = Field(default="http://127.0.0.1:8081", alias="DATA_PLANE_URL")
+    telemetry_provider: str = Field(default="postgresql", alias="TELEMETRY_PROVIDER")
 
     database_provider: Literal["postgresql"] = Field(default="postgresql", alias="DATABASE_PROVIDER")
     cache_provider: Literal["redis"] = Field(default="redis", alias="CACHE_PROVIDER")
@@ -134,6 +137,17 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_env(cls, value: str) -> str:
         return value.lower()
+
+    @field_validator("telemetry_provider")
+    @classmethod
+    def require_postgresql_telemetry(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider != "postgresql":
+            raise ValueError(
+                f"Unsupported telemetry.provider={value!r}; only 'postgresql' is implemented "
+                "(timescale and clickhouse are reserved)"
+            )
+        return provider
 
     @field_validator("log_format", mode="before")
     @classmethod
