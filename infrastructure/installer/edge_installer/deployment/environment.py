@@ -36,8 +36,6 @@ def build_ansible_extra_vars(
         "image_source": config.deployment.image_source,
         "backend_image": config.deployment.backend_image,
         "frontend_image": config.deployment.frontend_image,
-        "ui_repository_url": config.deployment.ui_repository_url,
-        "ui_git_ref": config.deployment.ui_git_ref,
         "image_pull_policy": config.deployment.image_pull_policy,
         "postgres_database": config.components.postgres.database_name,
         "postgres_username": config.components.postgres.username,

@@ -13,6 +13,6 @@ services:
 
   console:
     volumes:
-      - ./ui/console:/app
+      - ./console:/app
       - /app/node_modules
     command: npm run dev -- --host 0.0.0.0 --port 5173

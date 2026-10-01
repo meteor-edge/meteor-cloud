@@ -15,11 +15,10 @@ cp .env.example .env
 python -m venv .venv
 source .venv/bin/activate
 
-make checkout-ui     # private git@github.com:meteor-edge/meteor-ui.git
 make install
 ```
 
-`make checkout-ui` clones the private UI repo into `ui/` (git remote meteor-ui). `make install` installs control-plane, data-plane, installer, and agent dependencies, plus console when `ui/console` is present. The public website is not in this tree; clone `meteor-ui` (or `git -C ui sparse-checkout add website`) for that app.
+`make install` installs control-plane, data-plane, installer, agent, and console dependencies. The public website is not in this tree; clone `meteor-ui` for that app.
 
 ## Running the stack
 
@@ -138,7 +137,7 @@ Runs:
 2. Control-plane Pytest suite (requires PostgreSQL; use `make dev` first)
 3. Data-plane Pytest suite
 4. Agent Pytest suite
-5. Console Vitest suite (after `make checkout-ui`)
+5. Console Vitest suite (`make install-console` first)
 
 Control-plane Pytest uses a sibling `*_test` database, never `DATABASE_URL` / `edge_platform`.
 
@@ -199,7 +198,7 @@ HTTP JSON between planes is documented in [`contracts/mqtt-http.md`](../contract
 ## Kubernetes later
 
 Do not add manifests in this repo yet. A later split would be Deployments:
-`control-plane`, `data-plane`, and `console`. Scale the API and console independently. The public website is a separate deploy from `meteor-ui`.
+`control-plane`, `data-plane`, and `console`. Scale the API and console independently. The public website is a separate deploy from private `meteor-ui`.
 Keep the data-plane MQTT consumer at 1 until shared subscriptions / a consumer group exist.
 `infrastructure/kubernetes` stays empty.
 

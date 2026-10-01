@@ -10,7 +10,7 @@ Each of these is its own process and has its own Compose file under `compose/`.
 | --- | --- | --- |
 | Control plane | `src/control-plane/` | Identity, organizations, device registry, enrollment, MQTT policy and ingest, operator API |
 | Data plane | `src/data-plane/` | EMQX platform client: publish, subscribe, forward inbound MQTT to the control plane |
-| Console | `console/` | Operator UI (source: private `meteor-edge/meteor-ui`). Browser talks only to the control-plane API |
+| Console | `console/` | Operator UI. Browser talks only to the control-plane API |
 | Device plane | `src/device-plane/agent/` | On-device agent (`meteorcli`) |
 | Infrastructure | `infrastructure/` | Terraform, Ansible, installer, Docker, observability |
 
@@ -45,7 +45,7 @@ Public website (clone `meteor-ui`, not this tree): `make dev-website` inside tha
 
 Stop: `make stop`
 
-Product documentation for operators and integrators lives on the website under **Docs**. The operator console links there (`VITE_DOCS_BASE_URL`). Console and website source is in the private repo [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui). This tree keeps an empty `console/` placeholder. `make checkout-ui` clones meteor-ui into `ui/` (gitignored). Push console with `git -C ui push`. Details: [docs/frontends.md](docs/frontends.md).
+Product documentation for operators and integrators lives on the website under **Docs**. The operator console links there (`VITE_DOCS_BASE_URL`). Console source is `console/` in this repo. The public website stays in the private repo [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui). Details: [docs/frontends.md](docs/frontends.md).
 
 ## Cloud deployment
 
@@ -76,7 +76,7 @@ AWS production Compose currently runs the control plane and console on one host.
 │   ├── control-plane/          # FastAPI (app.*)
 │   ├── data-plane/             # MQTT gateway (data_plane.*)
 │   └── device-plane/agent/     # meteorcli
-├── console/                    # operator UI (placeholder; source in meteor-ui)
+├── console/                    # operator UI
 ├── compose/                    # one Compose file per module
 ├── contracts/                  # HTTP JSON between planes
 ├── infrastructure/

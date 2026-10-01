@@ -30,7 +30,6 @@ AR=$REGION-docker.pkg.dev/$PROJECT/production-app
 
 gcloud auth configure-docker $REGION-docker.pkg.dev
 docker build -f infrastructure/docker/Dockerfile.backend -t $AR/backend:0.2.0 .
-# From a meteor-ui checkout:
 docker build -f infrastructure/docker/Dockerfile.console -t $AR/console:0.2.0 .
 docker push $AR/backend:0.2.0
 docker push $AR/frontend:0.2.0

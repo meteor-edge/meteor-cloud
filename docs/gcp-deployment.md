@@ -25,7 +25,7 @@ Required APIs (Terraform enables them when `gcp.enable_apis` is true): Run, Clou
 
 ## Images
 
-Push backend and console images **before** Cloud Run can become healthy. Build the console from [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui). First apply can create Artifact Registry; then build/push; then apply again (or push first if the repo already exists).
+Push backend and console images **before** Cloud Run can become healthy. Build both from this repository. First apply can create Artifact Registry; then build/push; then apply again (or push first if the repo already exists).
 
 ```bash
 REGION=europe-west1

@@ -41,7 +41,7 @@ Canonical public docs are served by the **website** (`/docs`). This tree is the 
 
 ## Related
 
-- [Frontends (console + website, private source)](frontends.md)
+- [Frontends (console in this repo, private website)](frontends.md)
 - Device agent: [`src/device-plane/agent/README.md`](../src/device-plane/agent/README.md)
 - MQTT HTTP contract: [`contracts/mqtt-http.md`](../contracts/mqtt-http.md)
 - Installer: [`infrastructure/installer/README.md`](../infrastructure/installer/README.md)

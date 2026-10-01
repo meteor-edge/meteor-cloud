@@ -91,8 +91,6 @@ deployment:
   image_source: git
   backend_image: edge-platform-backend:0.2.0
   frontend_image: edge-platform-frontend:0.2.0
-  ui_repository_url: git@github.com:meteor-edge/meteor-ui.git
-  ui_git_ref: main
   image_pull_policy: never
   health_check_timeout_seconds: 180
 ```

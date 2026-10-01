@@ -110,7 +110,8 @@ class DeploymentSettings(BaseModel):
     image_source: Literal["git", "registry"] = "git"
     backend_image: str = Field(min_length=1)
     frontend_image: str = Field(min_length=1)
-    ui_repository_url: str = "git@github.com:meteor-edge/meteor-ui.git"
+    # Older installation.yaml files may still set these. Console source is in this repo.
+    ui_repository_url: str = ""
     ui_git_ref: str = "main"
     image_pull_policy: Literal["always", "if-not-present", "never"] = "always"
     health_check_timeout_seconds: int = Field(default=180, ge=30, le=900)
