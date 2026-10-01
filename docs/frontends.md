@@ -60,4 +60,4 @@ Ansible clones `ui_repository_url` (default `git@github.com:meteor-edge/meteor-u
 onto the host and overlays `console/` before `Dockerfile.console`. The EC2 instance
 needs a deploy key (or HTTPS token URL) that can read that private repo.
 
-Website is not part of `cloud_app`; deploy it from `meteor-ui` separately.
+Website is not part of `cloud_app`; deploy it from `meteor-ui` separately (Cloud Run, JSON content on S3). See `website/README.md` in that repo.

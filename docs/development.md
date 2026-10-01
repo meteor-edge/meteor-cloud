@@ -65,7 +65,7 @@ Same machine stacks **must** use network name `meteorcloud`.
 
 Telemetry is **PostgreSQL last-value** on `Device` (`TELEMETRY_PROVIDER=postgresql`). Timescale and ClickHouse are reserved names and fail fast.
 
-Website content lives in `meteor-ui` under `website/content` (`WEBSITE_CONTENT_SOURCE=filesystem`). A later CMS should use its own database, not the control-plane Postgres.
+Website content lives in `meteor-ui` under `website/content`. Marketing copy is JSON (`content/site.json`); docs are Markdown. Production uses `WEBSITE_CONTENT_SOURCE=s3` (JSON + `.md` + images on object storage), not control-plane Postgres. `/admin` edits that file set.
 
 Stop with:
 
@@ -170,7 +170,7 @@ Copy `.env.example` to `.env` and adjust as needed. Important values:
 | `BACKEND_CORS_ORIGINS` | Allowed browser origins |
 | `VITE_DOCS_BASE_URL` | Console → public docs site (`/docs`) |
 | `SITE_URL` | Public website origin (canonical URLs, sitemap) |
-| `WEBSITE_CONTENT_SOURCE` | `filesystem` (implemented) or `database` (reserved, website-owned DB) |
+| `WEBSITE_CONTENT_SOURCE` | Website content: `filesystem` (local JSON + Markdown) or `s3` (JSON file + docs + images on object storage) |
 | `DATA_PLANE_URL` | Control plane → data-plane HTTP API |
 | `CONTROL_PLANE_URL` | Data plane → control-plane ingest/auth origin |
 | `TELEMETRY_PROVIDER` | Last-value store (`postgresql` only; timescale/clickhouse reserved) |
