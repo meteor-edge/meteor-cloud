@@ -41,7 +41,7 @@ dev: ## Start control-plane, data-plane, and console
 	@echo "  MQTT TLS:     mqtts://localhost:8883"
 	@echo "  EMQX UI:      http://localhost:18083  (admin / public)"
 	@echo "  MinIO API:    http://localhost:9000   (S3 endpoint for artifacts)"
-	@echo "  MinIO files:  docker compose exec minio mc ls -r local/meteorcloud-artifacts"
+	@echo "  MinIO UI:     http://localhost:9001   (meteorcloud / meteorcloud-dev-secret)"
 	@echo "  Seed:         make seed"
 	@$(MAKE) --no-print-directory join-help
 
@@ -49,7 +49,7 @@ dev-control-plane: ## Start postgres, redis, and the control-plane API
 	@test -f .env || cp .env.example .env
 	$(CP_COMPOSE) up --build -d
 	@echo "Control plane: http://localhost:8000  (MQTT/ping need the data plane on network meteorcloud)"
-	@echo "MinIO API:     http://localhost:9000  (artifact storage)"
+	@echo "MinIO UI:      http://localhost:9001  (meteorcloud / meteorcloud-dev-secret)"
 
 dev-data-plane: ## Start EMQX and the data-plane MQTT gateway
 	@test -f .env || cp .env.example .env

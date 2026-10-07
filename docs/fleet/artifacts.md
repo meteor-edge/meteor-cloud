@@ -20,7 +20,10 @@ organizations/{organization_id}/artifacts/{artifact_id}/{file_name}
 ```
 
 The only adapter today is `s3` (`app/adapters/s3_storage.py`), which works with
-any S3-compatible service. Local Compose runs MinIO.
+any S3-compatible service. Local Compose runs MinIO
+(`bitnamilegacy/minio:2024.12.18-debian-12-r1`): API on port 9000, browser
+console on port 9001 (`meteorcloud` / `meteorcloud-dev-secret`). Override the
+image with `MINIO_IMAGE` if needed.
 
 | Setting | Default | Notes |
 |---------|---------|-------|
