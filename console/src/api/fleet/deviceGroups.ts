@@ -15,6 +15,7 @@ export function listDeviceGroups(token: string, organizationId: string): Promise
   });
 }
 
+/** Fetch group metadata and device count; reject on API, network, or response parsing errors. */
 export function getDeviceGroup(
   token: string,
   organizationId: string,

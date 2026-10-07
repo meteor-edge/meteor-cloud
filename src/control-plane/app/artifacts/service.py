@@ -40,6 +40,7 @@ _UNSAFE_FILE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
 class ArtifactTooLargeError(AppError):
     def __init__(self, max_bytes: int) -> None:
+        """Report an exceeded upload limit in bytes with HTTP status 413."""
         super().__init__(
             "artifact_too_large",
             f"The file exceeds the maximum artifact size of {max_bytes} bytes.",
@@ -51,12 +52,18 @@ class _HashingReader:
     """File-like wrapper that hashes and counts bytes as storage reads them."""
 
     def __init__(self, source: BinaryIO, max_bytes: int) -> None:
+        """Wrap the source at its current position with an inclusive byte limit."""
         self._source = source
         self._max_bytes = max_bytes
         self._digest = hashlib.sha256()
         self.size = 0
 
     def read(self, size: int = -1) -> bytes:
+        """Read and hash bytes, raising ArtifactTooLargeError above the byte limit.
+
+        Size counts all bytes read, including the chunk that exceeds the limit;
+        that chunk is not hashed or returned. Source read errors propagate.
+        """
         chunk = self._source.read(size)
         self.size += len(chunk)
         if self.size > self._max_bytes:
@@ -65,6 +72,7 @@ class _HashingReader:
         return chunk
 
     def hexdigest(self) -> str:
+        """Return the SHA-256 hex digest of bytes accepted by read so far."""
         return self._digest.hexdigest()
 
 
@@ -77,6 +85,7 @@ def safe_file_name(file_name: str | None) -> str:
 
 def build_storage_key(organization_id: uuid.UUID, artifact_id: uuid.UUID, file_name: str) -> str:
     # IDs, not slugs, so renaming an organization or device type never orphans content.
+    """Build an organization/artifact ID path using an already sanitized file name."""
     return f"organizations/{organization_id}/artifacts/{artifact_id}/{file_name}"
 
 
@@ -92,12 +101,14 @@ class ArtifactService:
 
     # ---------------------------------------------------------------- helpers
     def _require_membership(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMembership:
+        """Return membership or raise NotFoundError for a missing organization or membership."""
         result = self.organizations.get_for_user(organization_id=organization_id, user_id=user_id)
         if result is None:
             raise NotFoundError("organization_not_found", "Organization was not found.")
         return result[1]
 
     def _require_manage(self, membership: OrganizationMembership) -> None:
+        """Raise ForbiddenError unless the membership belongs to an owner or admin."""
         if not can_manage_fleet(membership.role):
             raise ForbiddenError(
                 "insufficient_permission",
@@ -105,6 +116,7 @@ class ArtifactService:
             )
 
     def _require_artifact(self, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> Artifact:
+        """Return an artifact in the organization or raise NotFoundError."""
         artifact = self.artifacts.get(organization_id=organization_id, artifact_id=artifact_id)
         if artifact is None:
             raise NotFoundError("artifact_not_found", "Artifact was not found.")
@@ -123,6 +135,12 @@ class ArtifactService:
         page: int = 1,
         page_size: int = 20,
     ) -> Page[ArtifactResponse]:
+        """Return a filtered metadata page after checking organization membership.
+
+        Page numbers are one-based. Version and name/file-name search use
+        case-insensitive SQL LIKE matching. Raise NotFoundError if the actor
+        cannot access the organization; database errors propagate.
+        """
         self._require_membership(organization_id, actor.id)
         items, total = self.artifacts.list_paginated(
             organization_id=organization_id,
@@ -141,6 +159,11 @@ class ArtifactService:
         )
 
     def get_artifact(self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> ArtifactResponse:
+        """Return metadata for an organization member.
+
+        Raise NotFoundError if membership or the artifact is absent;
+        database and response validation errors propagate.
+        """
         self._require_membership(organization_id, actor.id)
         return ArtifactResponse.model_validate(self._require_artifact(organization_id, artifact_id))
 
@@ -156,6 +179,21 @@ class ArtifactService:
         content_type: str | None,
         declared_size: int | None = None,
     ) -> ArtifactResponse:
+        """Store content, commit metadata and an audit event, and return metadata.
+
+        Read data from its current position while computing byte size and
+        SHA-256. declared_size is only an early size check; the configured
+        inclusive byte limit is also enforced during reads. Sanitize file_name.
+
+        Raise NotFoundError for missing membership or a foreign/missing device
+        type, ForbiddenError for a non-manager, ArtifactTooLargeError above the
+        limit, ConflictError for a duplicate or database integrity violation,
+        and AppError for empty content (422) or storage/read failure (503).
+        Other errors creating metadata or committing propagate after rollback
+        and attempted object cleanup. Errors refreshing or validating committed
+        metadata also propagate. Cleanup failures are suppressed, so objects may
+        remain.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self._require_manage(membership)
 
@@ -245,6 +283,12 @@ class ArtifactService:
 
     # ----------------------------------------------------------------- delete
     def delete_artifact(self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> None:
+        """Commit metadata deletion and an audit event, then attempt object deletion.
+
+        Raise NotFoundError for missing membership or artifact and ForbiddenError
+        for a non-manager. Database errors propagate; object deletion errors
+        are suppressed and may leave orphaned content.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self._require_manage(membership)
         artifact = self._require_artifact(organization_id, artifact_id)
@@ -263,6 +307,7 @@ class ArtifactService:
         self._discard_object(key)
 
     def _discard_object(self, key: str) -> None:
+        """Attempt object deletion, suppressing storage errors that may leave an orphan."""
         try:
             self.storage.delete(key)
         except Exception:
@@ -272,6 +317,12 @@ class ArtifactService:
     def open_download(
         self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID
     ) -> tuple[Artifact, StoredObject]:
+        """Return metadata and an open content stream for an organization member.
+
+        Raise NotFoundError for missing membership, artifact, or stored content,
+        and AppError (503) for other errors opening storage. Database errors and
+        later stream-read errors propagate.
+        """
         self._require_membership(organization_id, actor.id)
         artifact = self._require_artifact(organization_id, artifact_id)
         return artifact, self._open(artifact)
@@ -279,6 +330,13 @@ class ArtifactService:
     def create_download_link(
         self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID
     ) -> ArtifactDownloadLinkResponse:
+        """Return a relative download URL and its UTC expiry for a member.
+
+        The ticket is bound to the actor, organization, and artifact; its lifetime
+        is configured in seconds. This does not check stored content. Raise
+        NotFoundError for absent membership or artifact; database and signing
+        errors propagate.
+        """
         self._require_membership(organization_id, actor.id)
         artifact = self._require_artifact(organization_id, artifact_id)
         expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.artifact_download_link_ttl_seconds)
@@ -302,6 +360,13 @@ class ArtifactService:
     def open_download_with_ticket(
         self, *, organization_id: uuid.UUID, artifact_id: uuid.UUID, ticket: str
     ) -> tuple[Artifact, StoredObject]:
+        """Validate a download ticket and return metadata and an open content stream.
+
+        Recheck the ticket user's membership. Raise UnauthorizedError for an
+        invalid, expired, mismatched ticket or removed membership, NotFoundError
+        for missing metadata/content, and AppError (503) for other storage-open
+        failures. Database and later stream-read errors propagate.
+        """
         invalid = UnauthorizedError("invalid_download_link", "The download link is invalid or has expired.")
         try:
             claims = jwt.decode(ticket, self.settings.jwt_secret_key, algorithms=[self.settings.jwt_algorithm])
@@ -321,6 +386,10 @@ class ArtifactService:
         return artifact, self._open(artifact)
 
     def _open(self, artifact: Artifact) -> StoredObject:
+        """Open content, mapping missing objects to NotFoundError and other failures to AppError (503).
+
+        Errors raised later by the chunk iterator are not converted.
+        """
         try:
             return self.storage.get(artifact.storage_key)
         except StoredObjectNotFoundError as exc:

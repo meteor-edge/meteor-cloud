@@ -18,6 +18,11 @@ _MISSING_CODES = {"404", "NoSuchKey", "NotFound"}
 
 class S3ObjectStorage:
     def __init__(self, settings: Settings) -> None:
+        """Configure a client without contacting the bucket.
+
+        Empty endpoint or credential settings use boto3 defaults. Client
+        initialization errors propagate.
+        """
         self._bucket = settings.object_storage_bucket
         self._region = settings.object_storage_region
         # Empty endpoint/credentials fall back to AWS defaults (e.g. an EC2 instance role).
@@ -35,12 +40,23 @@ class S3ObjectStorage:
         self._lock = threading.Lock()
 
     def put(self, key: str, data: BinaryIO, *, content_type: str | None = None) -> None:
+        """Upload from the stream's current position, replacing the object at key.
+
+        Create the bucket first when configured to do so. Storage and stream-read
+        errors propagate to the caller.
+        """
         self._ensure_bucket()
         extra_args = {"ContentType": content_type} if content_type else None
         # upload_fileobj streams and switches to multipart upload for large files.
         self._client.upload_fileobj(data, self._bucket, key, ExtraArgs=extra_args)
 
     def get(self, key: str) -> StoredObject:
+        """Open an object and return its byte size, content type, and chunk iterator.
+
+        Raise StoredObjectNotFoundError for a missing key and propagate other
+        storage errors. Errors during iteration propagate from the iterator,
+        which closes the response body on exit once iteration has started.
+        """
         try:
             response = self._client.get_object(Bucket=self._bucket, Key=key)
         except ClientError as exc:
@@ -50,6 +66,10 @@ class S3ObjectStorage:
         body = response["Body"]
 
         def _chunks():
+            """Yield content in chunks of up to 1 MiB and close the body on exit.
+
+            Stream-read errors propagate to the consumer.
+            """
             try:
                 yield from body.iter_chunks(chunk_size=_CHUNK_SIZE)
             finally:
@@ -62,9 +82,11 @@ class S3ObjectStorage:
         )
 
     def delete(self, key: str) -> None:
+        """Delete the object, tolerating a missing key; propagate storage errors."""
         self._client.delete_object(Bucket=self._bucket, Key=key)
 
     def exists(self, key: str) -> bool:
+        """Return False for a missing key; propagate other storage errors."""
         try:
             self._client.head_object(Bucket=self._bucket, Key=key)
         except ClientError as exc:
@@ -74,6 +96,10 @@ class S3ObjectStorage:
         return True
 
     def _ensure_bucket(self) -> None:
+        """Check or create the bucket once when automatic creation is enabled.
+
+        Propagate bucket access and creation errors without marking it ready.
+        """
         if self._bucket_ready or not self._auto_create_bucket:
             return
         with self._lock:
@@ -92,4 +118,5 @@ class S3ObjectStorage:
 
 
 def _error_code(exc: ClientError) -> str:
+    """Return the storage error code as text, or an empty string if absent."""
     return str(exc.response.get("Error", {}).get("Code", ""))

@@ -26,6 +26,11 @@ from app.devices.models import (
 
 
 def _device_counts(session: Session, organization_id: uuid.UUID, column) -> dict[uuid.UUID, int]:
+    """Count assigned devices per value of a Device classification column.
+
+    Restrict counts to the organization and omit null assignments and
+    classifications with no devices.
+    """
     statement = (
         select(column, func.count())
         .where(Device.organization_id == organization_id, column.is_not(None))
@@ -53,6 +58,7 @@ class DeviceTypeRepository:
         return self.session.scalar(statement)
 
     def get_by_slug(self, *, organization_id: uuid.UUID, slug: str) -> DeviceType | None:
+        """Return the type matching the exact slug in the organization, or None."""
         statement = select(DeviceType).where(
             DeviceType.organization_id == organization_id,
             DeviceType.slug == slug,
@@ -66,6 +72,7 @@ class DeviceTypeRepository:
         return list(self.session.scalars(statement).all())
 
     def device_counts(self, *, organization_id: uuid.UUID) -> dict[uuid.UUID, int]:
+        """Return assigned device counts by type, omitting types with no devices."""
         return _device_counts(self.session, organization_id, Device.device_type_id)
 
     def create(self, device_type: DeviceType) -> DeviceType:
@@ -113,6 +120,7 @@ class DeviceGroupRepository:
         return self.session.scalar(statement)
 
     def get_by_slug(self, *, organization_id: uuid.UUID, slug: str) -> DeviceGroup | None:
+        """Return the group matching the exact slug in the organization, or None."""
         statement = select(DeviceGroup).where(
             DeviceGroup.organization_id == organization_id,
             DeviceGroup.slug == slug,
@@ -126,6 +134,7 @@ class DeviceGroupRepository:
         return list(self.session.scalars(statement).all())
 
     def device_counts(self, *, organization_id: uuid.UUID) -> dict[uuid.UUID, int]:
+        """Return assigned device counts by group, omitting groups with no devices."""
         return _device_counts(self.session, organization_id, Device.device_group_id)
 
     def create(self, group: DeviceGroup) -> DeviceGroup:

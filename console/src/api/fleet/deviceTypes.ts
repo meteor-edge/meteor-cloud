@@ -18,6 +18,7 @@ export function listDeviceTypes(token: string, organizationId: string): Promise<
   });
 }
 
+/** Fetch type metadata and device/artifact counts; reject on API, network, or parsing errors. */
 export function getDeviceType(
   token: string,
   organizationId: string,

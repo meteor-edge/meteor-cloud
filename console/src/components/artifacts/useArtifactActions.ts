@@ -11,6 +11,7 @@ export function useArtifactActions(
 ) {
   const queryClient = useQueryClient();
 
+  /** Invalidate artifact lists and type metadata so artifact counts refresh after mutations. */
   async function refresh() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["artifacts", organizationId] }),

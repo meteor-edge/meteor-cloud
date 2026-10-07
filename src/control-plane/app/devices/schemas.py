@@ -21,12 +21,18 @@ def _strip_optional(value: str | None) -> str | None:
 
 
 def _validate_optional_slug(value: str | None) -> str | None:
+    """Preserve None; otherwise trim/lowercase the slug and validate its format.
+
+    Raise ValueError unless it contains ASCII letters/digits separated by
+    single hyphens and is at most 100 characters after normalization.
+    """
     if value is None:
         return None
     return validate_slug(value)
 
 
 def _strip_name_value(value: str | None) -> str | None:
+    """Preserve None or trim the name, raising ValueError for blank text."""
     if value is None:
         return None
     cleaned = value.strip()
@@ -48,11 +54,13 @@ class _DeviceTypeFields(BaseModel):
     @field_validator("slug")
     @classmethod
     def _validate_slug(cls, value: str | None) -> str | None:
+        """Normalize an optional slug, raising ValueError for invalid format or length."""
         return _validate_optional_slug(value)
 
     @field_validator("description", "manufacturer", "model", "architecture")
     @classmethod
     def _strip_text(cls, value: str | None) -> str | None:
+        """Trim optional catalog text, returning None for missing or blank values."""
         return _strip_optional(value)
 
 
@@ -66,6 +74,7 @@ class DeviceTypeCreateRequest(_DeviceTypeFields):
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str) -> str:
+        """Trim the name and raise ValueError if it is blank."""
         return _strip_name_value(value)  # type: ignore[return-value]
 
 
@@ -79,6 +88,7 @@ class DeviceTypeUpdateRequest(_DeviceTypeFields):
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str | None) -> str | None:
+        """Preserve None or trim the name, raising ValueError for blank text."""
         return _strip_name_value(value)
 
 
@@ -111,6 +121,7 @@ class _DeviceGroupFields(BaseModel):
     @field_validator("slug")
     @classmethod
     def _validate_slug(cls, value: str | None) -> str | None:
+        """Normalize an optional slug, raising ValueError for invalid format or length."""
         return _validate_optional_slug(value)
 
     @field_validator("description")
@@ -129,6 +140,7 @@ class DeviceGroupCreateRequest(_DeviceGroupFields):
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str) -> str:
+        """Trim the name and raise ValueError if it is blank."""
         return _strip_name_value(value)  # type: ignore[return-value]
 
 
@@ -142,6 +154,7 @@ class DeviceGroupUpdateRequest(_DeviceGroupFields):
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str | None) -> str | None:
+        """Preserve None or trim the name, raising ValueError for blank text."""
         return _strip_name_value(value)
 
 

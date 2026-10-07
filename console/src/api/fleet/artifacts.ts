@@ -11,6 +11,7 @@ export type ArtifactUploadPayload = {
   description?: string | null;
 };
 
+/** Encode filters, omitting null, undefined, and empty strings; include '?' only when needed. */
 function buildQuery(params: ArtifactListParams): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -22,6 +23,10 @@ function buildQuery(params: ArtifactListParams): string {
   return query ? `?${query}` : "";
 }
 
+/**
+ * Fetch a one-based artifact page. Version and name/file-name search use case-insensitive
+ * SQL LIKE matching. API, network, and response parsing errors reject the promise.
+ */
 export function listArtifacts(
   token: string,
   organizationId: string,
@@ -33,6 +38,7 @@ export function listArtifacts(
   );
 }
 
+/** Delete artifact metadata and request content cleanup; reject on API, network, or parsing errors. */
 export function deleteArtifact(
   token: string,
   organizationId: string,
@@ -47,6 +53,12 @@ export function deleteArtifact(
 /**
  * Uploads with XMLHttpRequest because fetch cannot report upload progress,
  * which matters for multi-gigabyte OS images.
+ *
+ * Progress reports bytes sent in the multipart request, including form overhead;
+ * reaching total does not mean server storage has finished. Progress is reported
+ * only when the browser can compute the total. Resolves after a successful HTTP
+ * response; malformed response JSON becomes null. Rejects with ApiError for HTTP
+ * failures, network errors, or cancellation via signal (including an already aborted signal).
  */
 export function uploadArtifact(
   token: string,

@@ -159,6 +159,10 @@ class FleetService:
         device_count: int | None = None,
         artifact_count: int | None = None,
     ) -> DeviceTypeResponse:
+        """Return catalog metadata with device and artifact counts.
+
+        Query any count passed as None; use explicitly supplied counts unchanged.
+        """
         organization_id = device_type.organization_id
         if device_count is None:
             device_count = self.device_types.count_devices(organization_id=organization_id, type_id=device_type.id)
@@ -174,6 +178,11 @@ class FleetService:
         actor: User,
         organization_id: uuid.UUID,
     ) -> list[DeviceTypeResponse]:
+        """Return types ordered by name with assigned device and artifact counts.
+
+        Raise NotFoundError for missing organization membership;
+        database and response validation errors propagate.
+        """
         self._require_membership(organization_id, actor.id)
         device_counts = self.device_types.device_counts(organization_id=organization_id)
         artifact_counts = self.artifacts.count_by_device_type(organization_id=organization_id)
@@ -193,6 +202,10 @@ class FleetService:
         organization_id: uuid.UUID,
         type_id: uuid.UUID,
     ) -> DeviceTypeResponse:
+        """Return type metadata and counts, raising NotFoundError for missing access or type.
+
+        Database and response validation errors propagate.
+        """
         self._require_membership(organization_id, actor.id)
         device_type = self._require_device_type(organization_id, type_id)
         return self._to_device_type_response(device_type)
@@ -204,6 +217,12 @@ class FleetService:
         organization_id: uuid.UUID,
         payload: DeviceTypeCreateRequest,
     ) -> DeviceTypeResponse:
+        """Commit a type with an explicit slug or one derived uniquely from its name.
+
+        Raise NotFoundError for absent membership, ForbiddenError for a non-manager,
+        and ConflictError for an existing name or explicit slug. Database and
+        response validation errors propagate.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self._require_manage(membership.role)
         if self.device_types.get_by_name(organization_id=organization_id, name=payload.name):
@@ -243,6 +262,15 @@ class FleetService:
         type_id: uuid.UUID,
         payload: DeviceTypeUpdateRequest,
     ) -> DeviceTypeResponse:
+        """Commit catalog changes and return metadata with current counts.
+
+        Omitted fields remain unchanged. Explicit null clears description,
+        manufacturer, model, or architecture; other null fields are ignored.
+        Renaming preserves the slug unless a new slug is supplied. Raise
+        NotFoundError for missing membership/type, ForbiddenError for a non-manager,
+        and ConflictError for a name or slug collision. Database and response
+        validation errors propagate.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self._require_manage(membership.role)
         device_type = self._require_device_type(organization_id, type_id)
@@ -285,6 +313,12 @@ class FleetService:
         organization_id: uuid.UUID,
         type_id: uuid.UUID,
     ) -> None:
+        """Commit deletion of a type only if it has neither devices nor artifacts.
+
+        Raise NotFoundError for missing membership/type, ForbiddenError for a
+        non-manager, and ConflictError if the type is in use. Database errors
+        propagate.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self._require_manage(membership.role)
         device_type = self._require_device_type(organization_id, type_id)
@@ -309,6 +343,7 @@ class FleetService:
 
     # ------------------------------------------------------------ device groups
     def _to_device_group_response(self, group: DeviceGroup, *, device_count: int | None = None) -> DeviceGroupResponse:
+        """Return group metadata, querying the device count only when it is None."""
         if device_count is None:
             device_count = self.device_groups.count_devices(organization_id=group.organization_id, group_id=group.id)
         return DeviceGroupResponse.model_validate(group).model_copy(update={"device_count": device_count})
@@ -319,6 +354,11 @@ class FleetService:
         actor: User,
         organization_id: uuid.UUID,
     ) -> list[DeviceGroupResponse]:
+        """Return groups ordered by name with assigned device counts.
+
+        Raise NotFoundError for missing organization membership;
+        database and response validation errors propagate.
+        """
         self._require_membership(organization_id, actor.id)
         counts = self.device_groups.device_counts(organization_id=organization_id)
         return [
@@ -333,6 +373,10 @@ class FleetService:
         organization_id: uuid.UUID,
         group_id: uuid.UUID,
     ) -> DeviceGroupResponse:
+        """Return group metadata and count, raising NotFoundError for missing access or group.
+
+        Database and response validation errors propagate.
+        """
         self._require_membership(organization_id, actor.id)
         group = self._require_device_group(organization_id, group_id)
         return self._to_device_group_response(group)
@@ -344,6 +388,12 @@ class FleetService:
         organization_id: uuid.UUID,
         payload: DeviceGroupCreateRequest,
     ) -> DeviceGroupResponse:
+        """Commit a group with an explicit slug or one derived uniquely from its name.
+
+        Raise NotFoundError for absent membership, ForbiddenError for a non-manager,
+        and ConflictError for an existing name or explicit slug. Database and
+        response validation errors propagate.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self._require_manage(membership.role)
         if self.device_groups.get_by_name(organization_id=organization_id, name=payload.name):
@@ -380,6 +430,14 @@ class FleetService:
         group_id: uuid.UUID,
         payload: DeviceGroupUpdateRequest,
     ) -> DeviceGroupResponse:
+        """Commit group changes and return metadata with the current device count.
+
+        Explicit null clears description; other null or omitted fields are ignored.
+        Renaming preserves the slug unless a new slug is supplied. Raise
+        NotFoundError for missing membership/group, ForbiddenError for a non-manager,
+        and ConflictError for a name or slug collision. Database and response
+        validation errors propagate.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self._require_manage(membership.role)
         group = self._require_device_group(organization_id, group_id)

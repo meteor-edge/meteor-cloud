@@ -48,6 +48,11 @@ def ota_provider(settings: Settings) -> OTAProvider | None:
 
 
 def object_storage(settings: Settings) -> ObjectStorage:
+    """Build the configured S3-compatible storage adapter.
+
+    Raise RuntimeError for an unsupported provider; adapter initialization errors
+    propagate to the caller.
+    """
     if settings.object_storage_provider != "s3":
         raise RuntimeError(
             f"Unsupported object_storage.provider={settings.object_storage_provider!r}; only 's3' is implemented"

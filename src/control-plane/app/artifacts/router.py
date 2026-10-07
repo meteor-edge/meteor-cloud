@@ -34,6 +34,7 @@ def list_artifacts(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> Page[ArtifactResponse]:
+    """Return a filtered artifact page for an organization member."""
     return service.list_artifacts(
         actor=current_user,
         organization_id=organization_id,
@@ -59,6 +60,12 @@ def upload_artifact(
     description: Annotated[str | None, Form()] = None,
     metadata: Annotated[str | None, Form(description="JSON object")] = None,
 ) -> ArtifactResponse:
+    """Validate multipart metadata and upload the file for an owner or admin.
+
+    Metadata is a JSON object; an empty device type means no assignment.
+    Raise RequestValidationError for invalid JSON or metadata fields;
+    upload and authorization errors propagate from the service.
+    """
     try:
         parsed_metadata = json.loads(metadata) if metadata else {}
         payload = ArtifactCreate(
@@ -97,6 +104,7 @@ def get_artifact(
     current_user: CurrentUser,
     service: ArtifactSvc,
 ) -> ArtifactResponse:
+    """Return artifact metadata after checking organization membership."""
     return service.get_artifact(actor=current_user, organization_id=organization_id, artifact_id=artifact_id)
 
 
@@ -107,6 +115,7 @@ def delete_artifact(
     current_user: CurrentUser,
     service: ArtifactSvc,
 ) -> None:
+    """Delete an artifact for an owner or admin, returning no response body."""
     service.delete_artifact(actor=current_user, organization_id=organization_id, artifact_id=artifact_id)
 
 
@@ -117,6 +126,7 @@ def download_artifact(
     current_user: CurrentUser,
     service: ArtifactSvc,
 ) -> StreamingResponse:
+    """Stream an attachment after checking the user's organization membership."""
     artifact, stored = service.open_download(
         actor=current_user, organization_id=organization_id, artifact_id=artifact_id
     )
@@ -130,6 +140,7 @@ def create_download_link(
     current_user: CurrentUser,
     service: ArtifactSvc,
 ) -> ArtifactDownloadLinkResponse:
+    """Issue a temporary download URL bound to the current user and artifact."""
     return service.create_download_link(actor=current_user, organization_id=organization_id, artifact_id=artifact_id)
 
 
@@ -148,6 +159,11 @@ def download_artifact_with_link(
 
 
 def _stream(artifact: Artifact, stored: StoredObject) -> StreamingResponse:
+    """Return an attachment stream with byte length and SHA-256 headers.
+
+    Use the artifact's content type before the stored type, disable caching,
+    and pass through errors raised while consuming the content iterator.
+    """
     return StreamingResponse(
         stored.chunks,
         media_type=artifact.content_type or stored.content_type or "application/octet-stream",

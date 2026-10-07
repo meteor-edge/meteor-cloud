@@ -16,6 +16,10 @@ export function formatDateTime(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
+/**
+ * Format bytes using powers of 1024 and labels B through TB, with one decimal above B.
+ * Return an em dash for negative or non-finite values.
+ */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) {
     return "—";
@@ -30,7 +34,10 @@ export function formatBytes(bytes: number): string {
   return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
 }
 
-/** "8 s", "3 min 20 s", "1 h 5 min". */
+/**
+ * Format seconds as "8 s", "3 min 20 s", or "1 h 5 min".
+ * Round to the nearest second and clamp negative values to zero; omit seconds at one hour or more.
+ */
 export function formatDuration(totalSeconds: number): string {
   const seconds = Math.max(0, Math.round(totalSeconds));
   if (seconds < 60) {
@@ -46,7 +53,11 @@ export function formatDuration(totalSeconds: number): string {
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-/** "just now", "2 min ago", "3 h ago", "5 d ago"; falls back to a date after a month. */
+/**
+ * Format "just now", "2 min ago", "3 h ago", or "5 d ago"; use a local date at 30 days.
+ * now is Unix time in milliseconds. Future times display "just now"; missing or invalid dates
+ * display an em dash.
+ */
 export function formatRelativeTime(value: string | null | undefined, now = Date.now()): string {
   if (!value) {
     return "—";

@@ -28,6 +28,7 @@ class ArtifactCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str) -> str:
+        """Trim the name and raise ValueError if it is blank."""
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("Name must not be blank")
@@ -36,6 +37,11 @@ class ArtifactCreate(BaseModel):
     @field_validator("version")
     @classmethod
     def _validate_version(cls, value: str) -> str:
+        """Trim a free-form version and reject unsafe or empty values with ValueError.
+
+        The first character must be an ASCII letter or digit; later characters
+        may also be periods, underscores, plus signs, or hyphens.
+        """
         cleaned = value.strip()
         if not _VERSION_PATTERN.fullmatch(cleaned):
             raise ValueError("Version may only contain letters, numbers, '.', '_', '+', and '-'")
@@ -44,6 +50,7 @@ class ArtifactCreate(BaseModel):
     @field_validator("description")
     @classmethod
     def _strip_description(cls, value: str | None) -> str | None:
+        """Trim the description, returning None for missing or blank text."""
         if value is None:
             return None
         return value.strip() or None

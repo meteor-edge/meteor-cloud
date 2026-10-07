@@ -7,6 +7,10 @@ export type UploadProgressState = {
   bytesPerSecond: number | null;
 };
 
+/**
+ * Show bytes sent, transfer speed in bytes/second, and estimated seconds remaining.
+ * Once a positive total is reached, show storage processing without estimating its duration.
+ */
 export function UploadProgress({
   fileName,
   state,

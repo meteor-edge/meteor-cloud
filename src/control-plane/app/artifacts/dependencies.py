@@ -17,10 +17,12 @@ from app.ports.storage import ObjectStorage
 
 @lru_cache
 def _build_object_storage() -> ObjectStorage:
+    """Build and cache the configured storage adapter; propagate setup errors."""
     return build_object_storage(get_settings())
 
 
 def get_object_storage() -> ObjectStorage:
+    """Return the cached storage adapter; propagate adapter setup errors."""
     return _build_object_storage()
 
 
@@ -29,6 +31,7 @@ def get_artifact_service(
     storage: Annotated[ObjectStorage, Depends(get_object_storage)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ArtifactService:
+    """Bind artifact operations to the request's session, storage, and settings."""
     return ArtifactService(session, storage, settings=settings)
 
 

@@ -22,6 +22,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def _jsonb_column(name: str) -> sa.Column:
+    """Define a non-null JSONB column with an empty-object database default."""
     return sa.Column(name, postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False)
 
 
@@ -41,6 +42,7 @@ def _backfill_slugs(table: str, fallback: str) -> None:
 
 
 def upgrade() -> None:
+    """Add catalog fields, backfill organization-unique slugs, and create artifact metadata storage."""
     op.add_column("device_types", sa.Column("slug", sa.String(length=120), nullable=True))
     op.add_column("device_types", sa.Column("manufacturer", sa.String(length=120), nullable=True))
     op.add_column("device_types", sa.Column("model", sa.String(length=120), nullable=True))
@@ -100,6 +102,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop artifact metadata and the added catalog fields, discarding their data.
+
+    Stored artifact objects are not deleted.
+    """
     op.drop_index("ix_artifacts_org_type", table_name="artifacts")
     op.drop_index("ix_artifacts_org_device_type_id", table_name="artifacts")
     op.drop_index("ix_artifacts_organization_id", table_name="artifacts")

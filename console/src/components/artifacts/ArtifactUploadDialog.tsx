@@ -27,6 +27,11 @@ const MIN_SPEED_SAMPLE_MS = 1000;
 const SELECT_CLASS =
   "flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm";
 
+/**
+ * Collect metadata and upload a file with progress and optional fixed device type assignment.
+ * Confirm cancellation during upload, warn before tab unload, and abort when unmounted.
+ * Report upload failures in the dialog; call onUploaded after the server responds successfully.
+ */
 export function ArtifactUploadDialog({
   token,
   organizationId,
@@ -61,6 +66,7 @@ export function ArtifactUploadDialog({
     return () => window.removeEventListener("beforeunload", warn);
   }, [uploading]);
 
+  /** Estimate bytes/second over recent samples, leaving speed unknown for the first second. */
   function onProgress({ loaded, total }: { loaded: number; total: number }) {
     const now = performance.now();
     const samples = samplesRef.current;
