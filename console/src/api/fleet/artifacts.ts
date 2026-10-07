@@ -102,7 +102,11 @@ export function uploadArtifact(
     };
     xhr.onerror = () => reject(new ApiError(0, "network_error", "The upload could not be sent."));
     xhr.onabort = () => reject(new ApiError(0, "aborted", "The upload was cancelled."));
-    options.signal?.addEventListener("abort", () => xhr.abort());
+    if (options.signal?.aborted) {
+      reject(new ApiError(0, "aborted", "The upload was cancelled."));
+      return;
+    }
+    options.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
 
     xhr.send(form);
   });
