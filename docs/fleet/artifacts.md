@@ -51,8 +51,8 @@ Reading requires organization membership. Uploading and deleting require the
 | `GET` | `/api/v1/organizations/{org}/artifacts/{id}` | |
 | `DELETE` | `/api/v1/organizations/{org}/artifacts/{id}` | Removes the row, then the stored object |
 | `GET` | `/api/v1/organizations/{org}/artifacts/{id}/download` | Bearer auth; streams the file |
-| `POST` | `/api/v1/organizations/{org}/artifacts/{id}/download-link` | Returns a short-lived URL for browser downloads |
-| `GET` | `/api/v1/organizations/{org}/artifacts/{id}/download/{ticket}` | No auth header; the ticket is bound to user, organization, and artifact, and membership is re-checked |
+| `POST` | `/api/v1/organizations/{org}/artifacts/{id}/download-link` | Returns `url` and a short-lived `ticket` for browser downloads |
+| `POST` | `/api/v1/organizations/{org}/artifacts/{id}/download` | Form field `ticket`, no auth header. The ticket is bound to user, organization, and artifact, and membership is re-checked. It travels in the body so it never appears in URLs or request logs |
 
 Types: `os_image`, `firmware`, `docker_compose`, `systemd`, `configuration`, `other`.
 

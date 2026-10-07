@@ -52,7 +52,14 @@ export function DeviceListTable({
                 </td>
               </tr>
             )}
-            {!devicesQuery.isLoading && devices.length === 0 && (
+            {devicesQuery.isError && (
+              <tr>
+                <td className="px-4 py-6 text-center text-muted-foreground" colSpan={4}>
+                  Could not load devices.
+                </td>
+              </tr>
+            )}
+            {!devicesQuery.isLoading && !devicesQuery.isError && devices.length === 0 && (
               <tr>
                 <td className="px-4 py-6 text-center text-muted-foreground" colSpan={4}>
                   No devices yet.

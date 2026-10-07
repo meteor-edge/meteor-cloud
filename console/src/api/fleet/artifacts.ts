@@ -125,7 +125,7 @@ export function uploadArtifact(
 }
 
 /**
- * Starts a browser download via a short-lived link, so large files stream to
+ * Starts a browser download with a short-lived ticket, so large files stream to
  * disk instead of being buffered in memory.
  */
 export async function downloadArtifact(
@@ -133,9 +133,21 @@ export async function downloadArtifact(
   organizationId: string,
   artifactId: string,
 ): Promise<void> {
-  const link = await apiRequest<{ url: string; expires_at: string }>(
+  const link = await apiRequest<{ url: string; ticket: string; expires_at: string }>(
     `/api/v1/organizations/${organizationId}/artifacts/${artifactId}/download-link`,
     { method: "POST", token },
   );
-  window.location.assign(`${resolveApiBaseUrl()}${link.url}`);
+  // A form POST keeps the ticket out of the URL (history, download list, proxy logs).
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = `${resolveApiBaseUrl()}${link.url}`;
+  form.style.display = "none";
+  const field = document.createElement("input");
+  field.type = "hidden";
+  field.name = "ticket";
+  field.value = link.ticket;
+  form.append(field);
+  document.body.append(form);
+  form.submit();
+  form.remove();
 }

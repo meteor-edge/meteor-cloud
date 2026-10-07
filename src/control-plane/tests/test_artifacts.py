@@ -213,15 +213,17 @@ def test_download_link_works_without_bearer_and_is_scoped(client: TestClient, db
     second = _upload(client, org.id, headers, version="1.2").json()
 
     link = client.post(f"/api/v1/organizations/{org.id}/artifacts/{first['id']}/download-link", headers=headers).json()
-    assert client.get(link["url"]).content == IMAGE
+    ticket = link["ticket"]
+    assert ticket not in link["url"]
+    assert client.post(link["url"], data={"ticket": ticket}).content == IMAGE
 
-    ticket = link["url"].rsplit("/", 1)[-1]
     # The ticket only opens the artifact it was issued for…
-    other = client.get(f"/api/v1/organizations/{org.id}/artifacts/{second['id']}/download/{ticket}")
+    other = client.post(f"/api/v1/organizations/{org.id}/artifacts/{second['id']}/download", data={"ticket": ticket})
     assert other.status_code == 401
     assert other.json()["error"]["code"] == "invalid_download_link"
-    # …is rejected when tampered with…
-    assert client.get(f"{link['url']}x").status_code == 401
+    # …is rejected when tampered with or missing…
+    assert client.post(link["url"], data={"ticket": f"{ticket}x"}).status_code == 401
+    assert client.post(link["url"]).status_code == 422
     # …and is never accepted as a user access token.
     me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {ticket}"})
     assert me.status_code == 401

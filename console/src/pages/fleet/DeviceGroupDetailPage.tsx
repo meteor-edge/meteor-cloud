@@ -110,6 +110,7 @@ export function DeviceGroupDetailPage() {
 
       {tab === "overview" && (
         <DeviceGroupOverview
+          key={group.updated_at}
           group={group}
           canManage={canManage}
           token={token!}
@@ -117,7 +118,12 @@ export function DeviceGroupDetailPage() {
           onError={setError}
           onDelete={onDelete}
           onSaved={() =>
-            queryClient.invalidateQueries({ queryKey: ["device-group", organizationId, groupId] })
+            Promise.all([
+              queryClient.invalidateQueries({
+                queryKey: ["device-group", organizationId, groupId],
+              }),
+              queryClient.invalidateQueries({ queryKey: ["device-groups", organizationId] }),
+            ])
           }
         />
       )}

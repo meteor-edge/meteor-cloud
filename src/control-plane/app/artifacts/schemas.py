@@ -77,7 +77,12 @@ class ArtifactResponse(BaseModel):
 
 
 class ArtifactDownloadLinkResponse(BaseModel):
-    """A short-lived URL that downloads the artifact without a bearer header."""
+    """A short-lived ticket that downloads the artifact without a bearer header.
+
+    Browsers redeem it by submitting a form POST to ``url`` with a ``ticket`` field,
+    so the ticket never appears in a URL, browser history, or proxy request logs.
+    """
 
     url: str
+    ticket: str
     expires_at: datetime

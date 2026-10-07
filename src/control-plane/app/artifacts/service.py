@@ -353,7 +353,8 @@ class ArtifactService:
             algorithm=self.settings.jwt_algorithm,
         )
         return ArtifactDownloadLinkResponse(
-            url=f"/api/v1/organizations/{organization_id}/artifacts/{artifact.id}/download/{ticket}",
+            url=f"/api/v1/organizations/{organization_id}/artifacts/{artifact.id}/download",
+            ticket=ticket,
             expires_at=expires_at,
         )
 

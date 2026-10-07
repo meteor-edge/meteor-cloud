@@ -22,7 +22,7 @@ export function MqttTestPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">MQTT test</h1>
         <p className="mt-2 text-muted-foreground">
-          Monitoring · live MQTT traffic for {orgQuery.data?.name}
+          Monitoring · live MQTT traffic for {orgQuery.data?.name ?? "this organization"}
         </p>
       </div>
 

@@ -245,6 +245,17 @@ describe("Device groups", () => {
   });
 });
 
+describe("Device group detail", () => {
+  it("shows an error instead of the empty state when devices fail to load", async () => {
+    vi.mocked(fleetApi.getDeviceGroup).mockResolvedValue(deviceGroup);
+    vi.mocked(fleetApi.listDevices).mockRejectedValue(new Error("boom"));
+
+    renderApp(["/organizations/org-1/device-groups/group-1?tab=devices"]);
+    expect(await screen.findByText("Could not load devices.")).toBeInTheDocument();
+    expect(screen.queryByText("No devices yet.")).not.toBeInTheDocument();
+  });
+});
+
 describe("Artifacts", () => {
   it("opens the OS Images view from the menu link", async () => {
     vi.mocked(fleetApi.listArtifacts).mockResolvedValue({

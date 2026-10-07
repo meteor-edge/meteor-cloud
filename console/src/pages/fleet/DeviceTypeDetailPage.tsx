@@ -143,11 +143,15 @@ export function DeviceTypeDetailPage() {
 
       {tab === "overview" && (
         <DeviceTypeOverview
+          key={deviceType.updated_at}
           deviceType={deviceType}
           canManage={canManage}
           onError={setError}
           onSaved={() =>
-            queryClient.invalidateQueries({ queryKey: ["device-type", organizationId, typeId] })
+            Promise.all([
+              queryClient.invalidateQueries({ queryKey: ["device-type", organizationId, typeId] }),
+              queryClient.invalidateQueries({ queryKey: ["device-types", organizationId] }),
+            ])
           }
           onDelete={async () => {
             if (!window.confirm(`Delete device type "${deviceType.name}"?`)) {
@@ -206,6 +210,14 @@ export function DeviceTypeDetailPage() {
               />
             </div>
           ))}
+          {artifactsQuery.data && artifactsQuery.data.total > artifactsQuery.data.items.length && (
+            <p className="text-sm text-muted-foreground">
+              Showing {artifactsQuery.data.items.length} of {artifactsQuery.data.total} artifacts.{" "}
+              <Link to={`/organizations/${organizationId}/artifacts`} className="text-link">
+                View all in Artifacts
+              </Link>
+            </p>
+          )}
         </div>
       )}
 

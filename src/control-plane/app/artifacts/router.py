@@ -140,18 +140,18 @@ def create_download_link(
     current_user: CurrentUser,
     service: ArtifactSvc,
 ) -> ArtifactDownloadLinkResponse:
-    """Issue a temporary download URL bound to the current user and artifact."""
+    """Issue a temporary download ticket bound to the current user and artifact."""
     return service.create_download_link(actor=current_user, organization_id=organization_id, artifact_id=artifact_id)
 
 
-@router.get("/{artifact_id}/download/{ticket}")
-def download_artifact_with_link(
+@router.post("/{artifact_id}/download")
+def download_artifact_with_ticket(
     organization_id: uuid.UUID,
     artifact_id: uuid.UUID,
-    ticket: str,
+    ticket: Annotated[str, Form()],
     service: ArtifactSvc,
 ) -> StreamingResponse:
-    """Download via a short-lived link so browsers can stream without a bearer header."""
+    """Download with a ticket from a form POST, so browsers can stream without a bearer header."""
     artifact, stored = service.open_download_with_ticket(
         organization_id=organization_id, artifact_id=artifact_id, ticket=ticket
     )
