@@ -228,6 +228,13 @@ class ArtifactService:
                 metadata={"name": artifact.name, "version": artifact.version, "type": artifact.type.value},
             )
             self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            self._discard_object(key)
+            raise ConflictError(
+                "artifact_exists",
+                "An artifact with this name, type, and version already exists.",
+            ) from exc
         except Exception:
             self.session.rollback()
             self._discard_object(key)
