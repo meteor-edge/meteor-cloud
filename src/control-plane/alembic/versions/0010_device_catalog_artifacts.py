@@ -115,7 +115,7 @@ def downgrade() -> None:
     op.drop_index("ix_artifacts_org_type", table_name="artifacts")
     op.drop_index("ix_artifacts_org_device_type_id", table_name="artifacts")
     op.drop_index("ix_artifacts_organization_id", table_name="artifacts")
-    op.drop_index("uq_artifacts_org_type_name_version", table_name="artifacts")
+    # Unique index/constraint is removed with the table.
     op.drop_table("artifacts")
 
     op.drop_constraint("uq_device_groups_org_slug", "device_groups", type_="unique")
