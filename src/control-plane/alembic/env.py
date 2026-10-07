@@ -7,6 +7,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from app.artifacts import models as artifact_models  # noqa: F401
 from app.audit import models as audit_models  # noqa: F401
 from app.core.config import get_settings
 from app.core.models import Base

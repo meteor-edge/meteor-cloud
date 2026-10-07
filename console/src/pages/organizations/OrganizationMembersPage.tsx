@@ -90,7 +90,11 @@ export function OrganizationMembersPage() {
   }
 
   if (!orgQuery.data) {
-    return <p className="text-red-700">Organization was not found.</p>;
+    return (
+      <p className="bg-ember text-midnight hover:bg-ember hover:text-midnight">
+        Organization was not found.
+      </p>
+    );
   }
 
   return (
@@ -107,7 +111,7 @@ export function OrganizationMembersPage() {
 
       {canManage && (
         <form
-          className="grid gap-3 rounded-lg border border-border bg-white/80 p-5 shadow-sm md:grid-cols-[1fr_160px_auto]"
+          className="grid gap-3 rounded-lg border border-border bg-card p-5 shadow-glow md:grid-cols-[1fr_160px_auto]"
           onSubmit={onAdd}
         >
           <div>
@@ -124,7 +128,7 @@ export function OrganizationMembersPage() {
             <Label htmlFor="member-role">Role</Label>
             <select
               id="member-role"
-              className="flex h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+              className="flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm"
               value={role}
               onChange={(event) => setRole(event.target.value as OrganizationRole)}
             >
@@ -143,11 +147,13 @@ export function OrganizationMembersPage() {
         </form>
       )}
 
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error && (
+        <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+      )}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-white/80 shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-glow">
         <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-border bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+          <thead className="border-b border-border bg-background text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-semibold">Name</th>
               <th className="px-4 py-3 font-semibold">Email</th>
@@ -164,13 +170,13 @@ export function OrganizationMembersPage() {
                   (actorRole === "admin" &&
                     (member.role === "member" || member.role === "viewer")));
               return (
-                <tr key={member.id} className="border-b border-border/70">
+                <tr key={member.id} className="border-b border-border">
                   <td className="px-4 py-3 font-medium">{member.full_name}</td>
                   <td className="px-4 py-3 text-muted-foreground">{member.email}</td>
                   <td className="px-4 py-3">
                     {editable ? (
                       <select
-                        className="rounded-md border border-input bg-white px-2 py-1"
+                        className="rounded-md border border-input bg-field text-foreground px-2 py-1"
                         value={member.role}
                         onChange={(event) =>
                           onRoleChange(member.id, event.target.value as OrganizationRole)

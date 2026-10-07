@@ -11,12 +11,12 @@ export function Header() {
   const { selectedOrganization } = useOrganizationContext();
 
   return (
-    <header className="border-b border-border/70 bg-white/60 px-6 py-4 backdrop-blur">
+    <header className="border-b border-border bg-section px-6 py-4 backdrop-blur">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <BrandMark className="md:hidden" />
           <div>
-            <p className="text-sm text-muted-foreground">Self-hosted Linux edge control plane</p>
+            <p className="text-sm text-nav">Self-hosted Linux edge control plane</p>
             <h2 className="text-xl font-semibold tracking-tight text-foreground">
               {isAuthenticated ? "Organizations" : "Foundation"}
             </h2>
@@ -30,7 +30,7 @@ export function Header() {
           </Button>
           {isAuthenticated && selectedOrganization && (
             <span
-              className="inline-flex items-center gap-2 rounded-md border border-input bg-white px-3 py-1.5 text-sm font-medium text-foreground"
+              className="inline-flex items-center gap-2 rounded-md border border-input bg-field px-3 py-1.5 text-sm font-medium text-foreground"
               aria-label="Selected organization"
             >
               <span className="text-xs uppercase tracking-wide text-muted-foreground">Org</span>
@@ -39,7 +39,7 @@ export function Header() {
           )}
           {isAuthenticated ? (
             <>
-              <span className="text-sm text-muted-foreground">{user?.email}</span>
+              <span className="text-sm text-nav">{user?.email}</span>
               <Button variant="secondary" size="sm" onClick={logout}>
                 Log out
               </Button>

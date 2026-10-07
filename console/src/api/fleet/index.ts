@@ -6,3 +6,4 @@ export * from "@/api/fleet/devices";
 export * from "@/api/fleet/enrollmentKeys";
 export * from "@/api/fleet/enrollmentRequests";
 export * from "@/api/fleet/mqtt";
+export * from "@/api/fleet/artifacts";

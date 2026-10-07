@@ -12,13 +12,15 @@ import {
   listRegistrationTokens,
   revokeRegistrationToken,
   type ConnectivityStatus,
+  type Device,
   type DeviceListParams,
   type RegistrationTokenWithSecret,
 } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
-import { FleetNav } from "@/components/fleet/FleetNav";
+import { DeviceEditDialog } from "@/components/fleet/DeviceEditDialog";
+import { DevicesNav } from "@/components/fleet/DevicesNav";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { PendingEnrollmentRequests } from "@/components/fleet/PendingEnrollmentRequests";
 import { StatusBadge } from "@/components/fleet/StatusBadge";
@@ -26,16 +28,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { canManageFleet } from "@/lib/permissions";
-import { cn, formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime, formatRelativeTime } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
 
 function buildRegisterCommand(serverOrigin: string, token: string): string {
-  return [
-    "meteorcli register \\",
-    `  --server ${serverOrigin} \\`,
-    `  --token ${token}`,
-  ].join("\n");
+  return ["meteorcli register \\", `  --server ${serverOrigin} \\`, `  --token ${token}`].join(
+    "\n",
+  );
 }
 
 export function DevicesPage() {
@@ -59,6 +59,7 @@ export function DevicesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   // The plaintext token only ever lives in local UI state after creation.
   const [createdToken, setCreatedToken] = useState<RegistrationTokenWithSecret | null>(null);
+  const [editingDevice, setEditingDevice] = useState<Device | null>(null);
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -195,8 +196,19 @@ export function DevicesPage() {
     <section className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Fleet</h1>
-          <p className="mt-2 text-muted-foreground">{orgQuery.data?.name}</p>
+          <h1 className="text-3xl font-semibold tracking-tight">Devices</h1>
+          <p className="mt-2 text-muted-foreground">
+            Your fleet
+            {devicesQuery.data && (
+              <>
+                {" · "}
+                <span className="font-semibold text-foreground">
+                  {devicesQuery.data.total.toLocaleString()}
+                </span>{" "}
+                {devicesQuery.data.total === 1 ? "device" : "devices"}
+              </>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -221,11 +233,11 @@ export function DevicesPage() {
           )}
         </div>
       </div>
-      <FleetNav organizationId={organizationId} />
+      <DevicesNav organizationId={organizationId} />
 
       {canManage && showAddForm && (
         <form
-          className="grid gap-3 rounded-lg border border-border bg-white/80 p-5 shadow-sm md:grid-cols-2"
+          className="grid gap-3 rounded-lg border border-border bg-card p-5 shadow-glow md:grid-cols-2"
           onSubmit={onCreate}
         >
           <div className="md:col-span-2">
@@ -249,7 +261,7 @@ export function DevicesPage() {
             <Label htmlFor="device-type">Device type</Label>
             <select
               id="device-type"
-              className="flex h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+              className="flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm"
               value={newTypeId}
               onChange={(event) => setNewTypeId(event.target.value)}
             >
@@ -265,7 +277,7 @@ export function DevicesPage() {
             <Label htmlFor="device-group">Device group</Label>
             <select
               id="device-group"
-              className="flex h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+              className="flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm"
               value={newGroupId}
               onChange={(event) => setNewGroupId(event.target.value)}
             >
@@ -285,7 +297,11 @@ export function DevicesPage() {
         </form>
       )}
 
-      {formError && <p className="text-sm text-red-700">{formError}</p>}
+      {formError && (
+        <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">
+          {formError}
+        </p>
+      )}
 
       {token && (
         <PendingEnrollmentRequests
@@ -302,9 +318,9 @@ export function DevicesPage() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Pending registrations
           </h2>
-          <div className="overflow-hidden rounded-lg border border-border bg-white/80 shadow-sm">
+          <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-glow">
             <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-border bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+              <thead className="border-b border-border bg-background text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 font-semibold">Name</th>
                   <th className="px-4 py-3 font-semibold">Type</th>
@@ -317,20 +333,20 @@ export function DevicesPage() {
               </thead>
               <tbody>
                 {pendingTokens.map((entry) => (
-                  <tr key={entry.id} className="border-b border-border/70">
+                  <tr key={entry.id} className="border-b border-border">
                     <td className="px-4 py-3 font-medium">{entry.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {entry.device_type_id ? typeNames.get(entry.device_type_id) ?? "—" : "—"}
+                      {entry.device_type_id ? (typeNames.get(entry.device_type_id) ?? "—") : "—"}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {entry.device_group_id ? groupNames.get(entry.device_group_id) ?? "—" : "—"}
+                      {entry.device_group_id ? (groupNames.get(entry.device_group_id) ?? "—") : "—"}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">{entry.token_prefix}…</td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {formatDateTime(entry.created_at)}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                      <span className="rounded-full bg-ember px-2 py-0.5 text-xs font-medium text-midnight">
                         Awaiting registration
                       </span>
                     </td>
@@ -349,7 +365,7 @@ export function DevicesPage() {
         </div>
       )}
 
-      <div className="grid gap-3 rounded-lg border border-border bg-white/80 p-4 shadow-sm md:grid-cols-4">
+      <div className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-glow md:grid-cols-4">
         <Input
           aria-label="Search devices"
           placeholder="Search name, hostname, serial, MAC…"
@@ -361,7 +377,7 @@ export function DevicesPage() {
         />
         <select
           aria-label="Filter by status"
-          className="h-10 rounded-md border border-input bg-white px-3 text-sm"
+          className="h-10 rounded-md border border-input bg-field text-foreground px-3 text-sm"
           value={status}
           onChange={(event) => {
             setPage(1);
@@ -375,7 +391,7 @@ export function DevicesPage() {
         </select>
         <select
           aria-label="Filter by device type"
-          className="h-10 rounded-md border border-input bg-white px-3 text-sm"
+          className="h-10 rounded-md border border-input bg-field text-foreground px-3 text-sm"
           value={typeId}
           onChange={(event) => {
             setPage(1);
@@ -391,7 +407,7 @@ export function DevicesPage() {
         </select>
         <select
           aria-label="Filter by device group"
-          className="h-10 rounded-md border border-input bg-white px-3 text-sm"
+          className="h-10 rounded-md border border-input bg-field text-foreground px-3 text-sm"
           value={groupId}
           onChange={(event) => {
             setPage(1);
@@ -407,9 +423,9 @@ export function DevicesPage() {
         </select>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-white/80 shadow-sm">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-glow">
         <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-border bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+          <thead className="border-b border-border bg-background text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-semibold">
                 <button
@@ -423,8 +439,10 @@ export function DevicesPage() {
                   Name {sort === "name" ? (order === "asc" ? "↑" : "↓") : ""}
                 </button>
               </th>
+              <th className="px-4 py-3 font-semibold">Device ID</th>
+              <th className="px-4 py-3 font-semibold">Device Type</th>
+              <th className="px-4 py-3 font-semibold">Device Group</th>
               <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 font-semibold">Architecture</th>
               <th className="px-4 py-3 font-semibold">
                 <button
                   type="button"
@@ -434,12 +452,10 @@ export function DevicesPage() {
                     setOrder(order === "asc" ? "desc" : "asc");
                   }}
                 >
-                  Last seen {sort === "last_seen_at" ? (order === "asc" ? "↑" : "↓") : ""}
+                  Last Seen {sort === "last_seen_at" ? (order === "asc" ? "↑" : "↓") : ""}
                 </button>
               </th>
-              <th className="px-4 py-3 font-semibold">Registered</th>
-              <th className="px-4 py-3 font-semibold">Enabled</th>
-              {canManage && <th className="px-4 py-3 font-semibold">Actions</th>}
+              <th className="px-4 py-3 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -447,7 +463,7 @@ export function DevicesPage() {
               <tr>
                 <td
                   className="px-4 py-6 text-center text-muted-foreground"
-                  colSpan={canManage ? 7 : 6}
+                  colSpan={7}
                 >
                   Loading devices…
                 </td>
@@ -455,49 +471,69 @@ export function DevicesPage() {
             )}
             {!devicesQuery.isLoading &&
               (devicesQuery.data?.items ?? []).map((device) => (
-                <tr key={device.id} className="border-b border-border/70">
+                <tr key={device.id} className="border-b border-border">
                   <td className="px-4 py-3 font-medium">
                     <Link
                       to={`/organizations/${organizationId}/devices/${device.id}`}
-                      className="text-foreground hover:text-primary"
+                      className="text-foreground hover:text-link"
                     >
                       {device.name}
                     </Link>
+                    {!device.is_enabled && (
+                      <span className="ml-2 rounded-full bg-horizon px-2 py-0.5 text-xs text-star-dust">
+                        Disabled
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <code className="font-mono text-xs text-muted-foreground" title={device.id}>
+                      {device.id.slice(0, 8)}
+                    </code>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {device.device_type_id ? (typeNames.get(device.device_type_id) ?? "—") : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {device.device_group_id ? (groupNames.get(device.device_group_id) ?? "—") : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={device.status} />
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {device.architecture ?? "—"}
+                  <td
+                    className="px-4 py-3 text-muted-foreground"
+                    title={device.last_seen_at ? formatDateTime(device.last_seen_at) : undefined}
+                  >
+                    {device.last_seen_at ? formatRelativeTime(device.last_seen_at) : "Never"}
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {device.last_seen_at
-                      ? formatDateTime(device.last_seen_at)
-                      : "Never"}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {formatDateTime(device.registered_at ?? device.created_at)}
-                  </td>
-                  <td className="px-4 py-3">{device.is_enabled ? "Yes" : "No"}</td>
-                  {canManage && (
-                    <td className="px-4 py-3">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-700"
-                        onClick={() => onDeleteDevice(device.id, device.name)}
-                      >
-                        Delete
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link to={`/organizations/${organizationId}/devices/${device.id}`}>View</Link>
                       </Button>
-                    </td>
-                  )}
+                      {canManage && (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => setEditingDevice(device)}>
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="bg-ember text-midnight hover:bg-ember hover:text-midnight"
+                            onClick={() => onDeleteDevice(device.id, device.name)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             {!devicesQuery.isLoading && (devicesQuery.data?.items ?? []).length === 0 && (
               <tr>
                 <td
                   className="px-4 py-6 text-center text-muted-foreground"
-                  colSpan={canManage ? 7 : 6}
+                  colSpan={7}
                 >
                   No devices found.
                 </td>
@@ -531,6 +567,21 @@ export function DevicesPage() {
           </Button>
         </div>
       </div>
+
+      {editingDevice && token && (
+        <DeviceEditDialog
+          token={token}
+          organizationId={organizationId}
+          device={editingDevice}
+          deviceTypes={typesQuery.data ?? []}
+          deviceGroups={groupsQuery.data ?? []}
+          onClose={() => setEditingDevice(null)}
+          onSaved={async () => {
+            setEditingDevice(null);
+            await queryClient.invalidateQueries({ queryKey: ["devices", organizationId] });
+          }}
+        />
+      )}
 
       {createdToken && (
         <OneTimeSecretDialog

@@ -1,23 +1,70 @@
 export type ConnectivityStatus = "online" | "offline" | "never_seen";
 
+/** A hardware model (e.g. "Raspberry Pi 4"), not a physical device. */
 export type DeviceType = {
   id: string;
   organization_id: string;
   name: string;
+  slug: string;
   description: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  architecture: string | null;
   capabilities: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  device_count: number;
+  artifact_count: number;
   created_at: string;
   updated_at: string;
 };
 
+/** A logical collection of devices (e.g. "Production"). */
 export type DeviceGroup = {
   id: string;
   organization_id: string;
   name: string;
+  slug: string;
   description: string | null;
   labels: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  device_count: number;
   created_at: string;
   updated_at: string;
+};
+
+export type ArtifactType =
+  | "os_image"
+  | "firmware"
+  | "docker_compose"
+  | "systemd"
+  | "configuration"
+  | "other";
+
+export type Artifact = {
+  id: string;
+  organization_id: string;
+  device_type_id: string | null;
+  name: string;
+  version: string;
+  type: ArtifactType;
+  description: string | null;
+  file_name: string;
+  content_type: string | null;
+  size_bytes: number;
+  checksum_sha256: string;
+  metadata: Record<string, unknown>;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ArtifactListParams = {
+  type?: ArtifactType;
+  device_type_id?: string;
+  version?: string;
+  search?: string;
+  page?: number;
+  page_size?: number;
 };
 
 export type RegistrationToken = {

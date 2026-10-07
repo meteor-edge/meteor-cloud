@@ -5,12 +5,16 @@ and organize devices. They are optional: a device can register without either.
 
 ## Device types
 
-A **device type** describes a class of hardware/software (e.g. "Gateway",
-"Sensor Hub"). Each type has:
+A **device type** is a hardware model (e.g. "Raspberry Pi 4", "Jetson Orin").
+Each type has:
 
 - `name` — unique within the organization (case-insensitive)
-- `description` — optional free text
-- `capabilities` — optional JSON object for declared features
+- `slug` — unique within the organization; derived from the name when omitted
+- `description`, `manufacturer`, `model`, `architecture` — optional text
+- `capabilities` and `metadata` — optional JSON objects
+
+Responses also include `device_count` and `artifact_count`. A device type owns
+its [artifacts](artifacts.md) (OS images, firmware, …).
 
 ### API
 
@@ -27,13 +31,16 @@ members and viewers have read-only access.
 | `DELETE` | `/api/v1/organizations/{org}/device-types/{id}` |
 
 A device type that is still assigned to one or more devices cannot be deleted
-(`device_type_in_use`); reassign or remove those devices first.
+(`device_type_in_use`); reassign or remove those devices first. A device type
+that still has artifacts cannot be deleted either (`device_type_has_artifacts`).
+An explicit slug that is already taken returns `device_type_slug_exists`.
 
 ## Device groups
 
-A **device group** is a logical grouping (e.g. "Production", "Lab"). It has the
-same shape as a device type except it carries `labels` instead of
-`capabilities`. The routes mirror device types under `/device-groups`. A group
+A **device group** is a logical grouping (e.g. "Berlin", "Lab"), not hardware.
+A device belongs to at most one group; groups are flat (no nesting). A group has
+`name`, `slug`, `description`, `labels`, `metadata`, and a computed
+`device_count`. The routes mirror device types under `/device-groups`. A group
 that is still in use cannot be deleted (`device_group_in_use`).
 
 ## Assigning devices
@@ -47,5 +54,7 @@ Devices are assigned a type/group in three ways:
 
 ## UI
 
-Manage both from **Fleet → Device types** and **Fleet → Device groups**. The
+Manage both from **Devices → Device Types** and **Devices → Device Groups** in
+the organization menu. Each has a detail page: device types show Overview,
+Devices, and Artifacts tabs; device groups show Overview and Devices. The
 create/edit/delete controls are only shown to owners and admins.

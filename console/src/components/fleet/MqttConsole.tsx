@@ -132,7 +132,7 @@ export function MqttConsole({
           <Label htmlFor="mqtt-payload">Payload</Label>
           <textarea
             id="mqtt-payload"
-            className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 font-mono text-sm"
+            className="min-h-24 w-full rounded-md border border-input bg-field text-foreground px-3 py-2 font-mono text-sm"
             value={payload}
             onChange={(event) => setPayload(event.target.value)}
           />
@@ -159,10 +159,16 @@ export function MqttConsole({
           </Button>
         ) : null}
       </div>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      {listening ? <p className="text-sm text-muted-foreground">Listening on {topic.trim()}</p> : null}
+      {error ? (
+        <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+      ) : null}
+      {listening ? (
+        <p className="text-sm text-muted-foreground">Listening on {topic.trim()}</p>
+      ) : null}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Messages</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Messages
+        </p>
         {messages.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
             No messages yet. Listen, then publish from this page or a device.
@@ -173,25 +179,41 @@ export function MqttConsole({
               <li
                 key={`${message.at}-${index}`}
                 className={cn(
-                  "rounded-md p-3",
+                  "rounded-md p-3 text-foreground",
                   message.direction === "sent"
-                    ? "ml-8 border border-primary/30 bg-primary/10"
-                    : "mr-8 border border-border bg-secondary",
+                    ? "ml-8 border border-sent-border bg-sent"
+                    : "mr-8 border border-border bg-background",
                 )}
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span
                     className={cn(
                       "text-xs font-semibold uppercase tracking-wide",
-                      message.direction === "sent" ? "text-primary" : "text-muted-foreground",
+                      message.direction === "sent" ? "text-foreground" : "text-muted-foreground",
                     )}
                   >
                     {message.direction === "sent" ? "Sent" : "Received"}
                   </span>
-                  <span className="text-xs text-muted-foreground">{formatDateTime(message.at)}</span>
+                  <span
+                    className={cn(
+                      "text-xs",
+                      message.direction === "sent" ? "text-nav" : "text-muted-foreground",
+                    )}
+                  >
+                    {formatDateTime(message.at)}
+                  </span>
                 </div>
-                <p className="mt-1 font-mono text-xs text-muted-foreground">{message.topic}</p>
-                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-sm">{message.payload}</pre>
+                <p
+                  className={cn(
+                    "mt-1 font-mono text-xs",
+                    message.direction === "sent" ? "text-nav" : "text-muted-foreground",
+                  )}
+                >
+                  {message.topic}
+                </p>
+                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-sm">
+                  {message.payload}
+                </pre>
               </li>
             ))}
           </ol>
@@ -214,8 +236,6 @@ function isEchoOfSent(event: MqttTestEvent, sent: ConsoleMessage[]): boolean {
   const cutoff = Date.now() - 8000;
   return sent.some(
     (item) =>
-      item.topic === event.topic &&
-      item.payload === event.payload &&
-      Date.parse(item.at) >= cutoff,
+      item.topic === event.topic && item.payload === event.payload && Date.parse(item.at) >= cutoff,
   );
 }

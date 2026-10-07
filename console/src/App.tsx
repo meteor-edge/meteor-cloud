@@ -7,9 +7,12 @@ import { LoginPage } from "@/pages/auth/LoginPage";
 import { RegisterPage } from "@/pages/auth/RegisterPage";
 import { HealthPage } from "@/pages/HealthPage";
 import { LandingPage } from "@/pages/LandingPage";
+import { ArtifactsPage } from "@/pages/artifacts/ArtifactsPage";
 import { DeviceDetailPage } from "@/pages/fleet/DeviceDetailPage";
+import { DeviceGroupDetailPage } from "@/pages/fleet/DeviceGroupDetailPage";
 import { DeviceGroupsPage } from "@/pages/fleet/DeviceGroupsPage";
 import { DevicesPage } from "@/pages/fleet/DevicesPage";
+import { DeviceTypeDetailPage } from "@/pages/fleet/DeviceTypeDetailPage";
 import { DeviceTypesPage } from "@/pages/fleet/DeviceTypesPage";
 import { ApiKeysPage } from "@/pages/fleet/ApiKeysPage";
 import { MqttTestPage } from "@/pages/fleet/MqttTestPage";
@@ -99,6 +102,30 @@ export function App() {
           element={
             <ProtectedRoute>
               <DeviceGroupsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/device-groups/:groupId"
+          element={
+            <ProtectedRoute>
+              <DeviceGroupDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/device-types/:typeId"
+          element={
+            <ProtectedRoute>
+              <DeviceTypeDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/artifacts"
+          element={
+            <ProtectedRoute>
+              <ArtifactsPage />
             </ProtectedRoute>
           }
         />

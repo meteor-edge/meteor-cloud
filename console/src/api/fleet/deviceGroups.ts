@@ -3,14 +3,28 @@ import type { DeviceGroup } from "@/api/fleet/types";
 
 export type DeviceGroupPayload = {
   name: string;
+  slug?: string;
   description?: string | null;
   labels?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 };
 
 export function listDeviceGroups(token: string, organizationId: string): Promise<DeviceGroup[]> {
   return apiRequest<DeviceGroup[]>(`/api/v1/organizations/${organizationId}/device-groups`, {
     token,
   });
+}
+
+/** Fetch group metadata and device count; reject on API, network, or response parsing errors. */
+export function getDeviceGroup(
+  token: string,
+  organizationId: string,
+  groupId: string,
+): Promise<DeviceGroup> {
+  return apiRequest<DeviceGroup>(
+    `/api/v1/organizations/${organizationId}/device-groups/${groupId}`,
+    { token },
+  );
 }
 
 export function createDeviceGroup(

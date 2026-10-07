@@ -1,32 +1,28 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
-import {
-  createDeviceType,
-  deleteDeviceType,
-  listDeviceTypes,
-  updateDeviceType,
-} from "@/api/fleet";
+import { createDeviceType, listDeviceTypes } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
-import { FleetNav } from "@/components/fleet/FleetNav";
+import { DevicesNav } from "@/components/fleet/DevicesNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { canManageFleet } from "@/lib/permissions";
-import { formatDateTime } from "@/lib/utils";
 
 export function DeviceTypesPage() {
   const { organizationId = "" } = useParams();
   const { token } = useAuth();
   const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
+  const [manufacturer, setManufacturer] = useState("");
+  const [model, setModel] = useState("");
+  const [architecture, setArchitecture] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -42,66 +38,62 @@ export function DeviceTypesPage() {
 
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["device-types", organizationId] });
-
   const createMutation = useMutation({
     mutationFn: () =>
       createDeviceType(token!, organizationId, {
         name,
+        manufacturer: manufacturer || undefined,
+        model: model || undefined,
+        architecture: architecture || undefined,
         description: description || undefined,
       }),
     onSuccess: async () => {
       setName("");
+      setManufacturer("");
+      setModel("");
+      setArchitecture("");
       setDescription("");
       setError(null);
-      await invalidate();
+      setShowForm(false);
+      await queryClient.invalidateQueries({ queryKey: ["device-types", organizationId] });
     },
     onError: (err: unknown) => {
       setError(err instanceof ApiError ? err.message : "Could not create device type.");
     },
   });
 
-  async function onCreate(event: FormEvent) {
+  function onCreate(event: FormEvent) {
     event.preventDefault();
     createMutation.mutate();
   }
 
-  async function onSaveEdit(typeId: string) {
-    setError(null);
-    try {
-      await updateDeviceType(token!, organizationId, typeId, { name: editName });
-      setEditingId(null);
-      await invalidate();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not update device type.");
-    }
-  }
-
-  async function onDelete(typeId: string) {
-    if (!window.confirm("Delete this device type?")) {
-      return;
-    }
-    setError(null);
-    try {
-      await deleteDeviceType(token!, organizationId, typeId);
-      await invalidate();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not delete device type.");
-    }
-  }
+  const types = typesQuery.data ?? [];
 
   return (
-    <section className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Fleet</h1>
-        <p className="mt-2 text-muted-foreground">{orgQuery.data?.name}</p>
+    <section className="mx-auto max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Device Types</h1>
+          <p className="mt-2 text-muted-foreground">
+            The hardware models in your fleet. Each type holds its OS images and other artifacts.
+          </p>
+        </div>
+        {canManage && (
+          <Button
+            onClick={() => {
+              setError(null);
+              setShowForm((open) => !open);
+            }}
+          >
+            {showForm ? "Close" : "Add device type"}
+          </Button>
+        )}
       </div>
-      <FleetNav organizationId={organizationId} />
+      <DevicesNav organizationId={organizationId} />
 
-      {canManage && (
+      {canManage && showForm && (
         <form
-          className="grid gap-3 rounded-lg border border-border bg-white/80 p-5 shadow-sm md:grid-cols-[1fr_1fr_auto]"
+          className="grid gap-3 rounded-lg border border-border bg-card p-5 shadow-glow md:grid-cols-2"
           onSubmit={onCreate}
         >
           <div>
@@ -110,10 +102,38 @@ export function DeviceTypesPage() {
               id="type-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Raspberry Pi 4"
               required
             />
           </div>
           <div>
+            <Label htmlFor="type-manufacturer">Manufacturer</Label>
+            <Input
+              id="type-manufacturer"
+              value={manufacturer}
+              onChange={(event) => setManufacturer(event.target.value)}
+              placeholder="e.g. Raspberry Pi Ltd"
+            />
+          </div>
+          <div>
+            <Label htmlFor="type-model">Model</Label>
+            <Input
+              id="type-model"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="e.g. 4 Model B"
+            />
+          </div>
+          <div>
+            <Label htmlFor="type-architecture">Architecture</Label>
+            <Input
+              id="type-architecture"
+              value={architecture}
+              onChange={(event) => setArchitecture(event.target.value)}
+              placeholder="e.g. arm64"
+            />
+          </div>
+          <div className="md:col-span-2">
             <Label htmlFor="type-description">Description</Label>
             <Input
               id="type-description"
@@ -123,66 +143,66 @@ export function DeviceTypesPage() {
           </div>
           <div className="flex items-end">
             <Button type="submit" disabled={createMutation.isPending}>
-              Add type
+              Create device type
             </Button>
           </div>
         </form>
       )}
 
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error && (
+        <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+      )}
 
       {typesQuery.isLoading ? (
         <p className="text-muted-foreground">Loading device types…</p>
-      ) : (typesQuery.data ?? []).length === 0 ? (
-        <p className="text-muted-foreground">No device types yet.</p>
+      ) : types.length === 0 ? (
+        <p className="text-muted-foreground">
+          No device types yet. Add one for each kind of hardware you run, e.g. Raspberry Pi 4.
+        </p>
       ) : (
-        <ul className="space-y-3">
-          {(typesQuery.data ?? []).map((type) => (
-            <li
-              key={type.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-white/80 p-4 shadow-sm"
-            >
-              {editingId === type.id ? (
-                <div className="flex flex-1 items-center gap-2">
-                  <Input value={editName} onChange={(event) => setEditName(event.target.value)} />
-                  <Button size="sm" onClick={() => onSaveEdit(type.id)}>
-                    Save
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <div>
-                  <p className="font-medium">{type.name}</p>
-                  {type.description && (
-                    <p className="text-sm text-muted-foreground">{type.description}</p>
-                  )}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Created {formatDateTime(type.created_at)}
-                  </p>
-                </div>
-              )}
-              {canManage && editingId !== type.id && (
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      setEditingId(type.id);
-                      setEditName(type.name);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => onDelete(type.id)}>
-                    Delete
-                  </Button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-glow">
+          <table className="min-w-full text-left text-sm">
+            <thead className="border-b border-border bg-background text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-semibold">Name</th>
+                <th className="px-4 py-3 font-semibold">Manufacturer / Model</th>
+                <th className="px-4 py-3 font-semibold">Architecture</th>
+                <th className="px-4 py-3 font-semibold">Devices</th>
+                <th className="px-4 py-3 font-semibold">Artifacts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {types.map((type) => (
+                <tr key={type.id} className="border-b border-border">
+                  <td className="px-4 py-3">
+                    <Link
+                      to={`/organizations/${organizationId}/device-types/${type.id}`}
+                      className="font-medium text-foreground hover:text-link"
+                    >
+                      {type.name}
+                    </Link>
+                    {type.description && (
+                      <p className="text-xs text-muted-foreground">{type.description}</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {[type.manufacturer, type.model].filter(Boolean).join(" · ") || "—"}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{type.architecture ?? "—"}</td>
+                  <td className="px-4 py-3">{type.device_count}</td>
+                  <td className="px-4 py-3">
+                    <Link
+                      to={`/organizations/${organizationId}/device-types/${type.id}?tab=artifacts`}
+                      className="text-link hover:underline"
+                    >
+                      {type.artifact_count}
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

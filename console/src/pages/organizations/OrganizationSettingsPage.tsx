@@ -47,7 +47,11 @@ export function OrganizationSettingsPage() {
   }
 
   if (!orgQuery.data) {
-    return <p className="text-red-700">Organization was not found.</p>;
+    return (
+      <p className="bg-ember text-midnight hover:bg-ember hover:text-midnight">
+        Organization was not found.
+      </p>
+    );
   }
 
   const role = orgQuery.data.current_user_role;
@@ -127,9 +131,18 @@ export function OrganizationSettingsPage() {
         </Button>
       </div>
 
+      <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-card p-4 shadow-glow">
+        <Button variant="secondary" asChild>
+          <Link to={`/organizations/${organizationId}/members`}>Members</Link>
+        </Button>
+        <Button variant="secondary" asChild>
+          <Link to={`/organizations/${organizationId}/api-keys`}>Enrollment API keys</Link>
+        </Button>
+      </div>
+
       {canUpdate ? (
         <form
-          className="space-y-4 rounded-lg border border-border bg-white/80 p-6 shadow-sm"
+          className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-glow"
           onSubmit={onSubmit}
         >
           <div>
@@ -148,8 +161,16 @@ export function OrganizationSettingsPage() {
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
-          {error && <p className="text-sm text-red-700">{error}</p>}
-          {message && <p className="text-sm text-primary">{message}</p>}
+          {error && (
+            <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">
+              {error}
+            </p>
+          )}
+          {message && (
+            <p className="text-sm font-medium text-midnight bg-aurora rounded-md px-2 py-1">
+              {message}
+            </p>
+          )}
           <Button type="submit" disabled={submitting}>
             Save changes
           </Button>
@@ -160,19 +181,25 @@ export function OrganizationSettingsPage() {
         </p>
       )}
 
-      <div className="space-y-3 rounded-lg border border-border bg-white/80 p-6 shadow-sm">
+      <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
         <h2 className="text-lg font-semibold">Danger zone</h2>
         <Button variant="outline" onClick={onLeave}>
           Leave organization
         </Button>
         {canDelete && (
           <div>
-            <Button variant="ghost" className="text-red-700" onClick={onDelete}>
+            <Button
+              variant="ghost"
+              className="bg-ember text-midnight hover:bg-ember hover:text-midnight"
+              onClick={onDelete}
+            >
               Delete organization
             </Button>
           </div>
         )}
-        {error && <p className="text-sm text-red-700">{error}</p>}
+        {error && (
+          <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+        )}
       </div>
     </section>
   );

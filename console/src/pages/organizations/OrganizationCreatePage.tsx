@@ -59,7 +59,7 @@ export function OrganizationCreatePage() {
         </p>
       </div>
       <form
-        className="space-y-4 rounded-lg border border-border bg-white/80 p-6 shadow-sm"
+        className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-glow"
         onSubmit={onSubmit}
       >
         <div>
@@ -91,7 +91,9 @@ export function OrganizationCreatePage() {
             onChange={(event) => setDescription(event.target.value)}
           />
         </div>
-        {error && <p className="text-sm text-red-700">{error}</p>}
+        {error && (
+          <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+        )}
         <Button type="submit" disabled={submitting}>
           {submitting ? "Creating…" : "Create organization"}
         </Button>

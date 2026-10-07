@@ -38,12 +38,12 @@ export function OneTimeSecretDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
-      <div className="w-full max-w-lg space-y-4 rounded-lg border border-border bg-white p-6 shadow-lg">
+      <div className="w-full max-w-lg space-y-4 rounded-lg border border-border bg-card p-6 shadow-glow">
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
@@ -54,10 +54,15 @@ export function OneTimeSecretDialog({
             Secret (shown once)
           </p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 overflow-x-auto rounded-md border border-border bg-secondary/60 px-3 py-2 text-sm">
+            <code className="flex-1 overflow-x-auto rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground">
               {secret}
             </code>
-            <Button type="button" variant="secondary" size="sm" onClick={() => onCopy("secret", secret)}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => onCopy("secret", secret)}
+            >
               {copied === "secret" ? "Copied" : "Copy"}
             </Button>
           </div>
@@ -69,7 +74,7 @@ export function OneTimeSecretDialog({
               Register command
             </p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 overflow-x-auto whitespace-pre rounded-md border border-border bg-secondary/60 px-3 py-2 text-xs">
+              <code className="flex-1 overflow-x-auto whitespace-pre rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground">
                 {command}
               </code>
               <Button

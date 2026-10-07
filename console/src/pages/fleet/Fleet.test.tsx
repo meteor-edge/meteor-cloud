@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,8 +58,46 @@ const deviceType = {
   id: "type-1",
   organization_id: "org-1",
   name: "Gateway",
+  slug: "gateway",
   description: null,
+  manufacturer: "Raspberry Pi",
+  model: "4B",
+  architecture: "arm64",
   capabilities: {},
+  metadata: {},
+  device_count: 1,
+  artifact_count: 1,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
+
+const deviceGroup = {
+  id: "group-1",
+  organization_id: "org-1",
+  name: "Berlin",
+  slug: "berlin",
+  description: null,
+  labels: {},
+  metadata: {},
+  device_count: 3,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
+
+const osImage = {
+  id: "artifact-1",
+  organization_id: "org-1",
+  device_type_id: "type-1",
+  name: "Raspberry Pi OS",
+  version: "1.0.0",
+  type: "os_image" as const,
+  description: null,
+  file_name: "rpi-os.img",
+  content_type: "application/octet-stream",
+  size_bytes: 2048,
+  checksum_sha256: "a".repeat(64),
+  metadata: {},
+  created_by_user_id: "user-1",
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
@@ -92,7 +130,12 @@ const device = {
   mqtt_configured: true,
   mqtt_status: "online" as const,
   mqtt_status_at: new Date().toISOString(),
-  mqtt_metrics: { cpu_percent: 18.4, memory_percent: 42.1, disk_percent: 61.3, temperature_c: 54.2 },
+  mqtt_metrics: {
+    cpu_percent: 18.4,
+    memory_percent: 42.1,
+    disk_percent: 61.3,
+    temperature_c: 54.2,
+  },
   mqtt_metrics_at: new Date().toISOString(),
 };
 
@@ -127,13 +170,17 @@ describe("Device types", () => {
     vi.mocked(fleetApi.createDeviceType).mockResolvedValue(deviceType);
 
     renderApp(["/organizations/org-1/device-types"]);
-    const nameInput = await screen.findByLabelText(/^name$/i);
-    await user.type(nameInput, "Gateway");
-    await user.click(screen.getByRole("button", { name: /add type/i }));
+    await user.click(await screen.findByRole("button", { name: /add device type/i }));
+    await user.type(screen.getByLabelText(/^name$/i), "Gateway");
+    await user.type(screen.getByLabelText(/^architecture$/i), "arm64");
+    await user.click(screen.getByRole("button", { name: /create device type/i }));
 
     await waitFor(() => {
       expect(fleetApi.createDeviceType).toHaveBeenCalledWith("token-123", "org-1", {
         name: "Gateway",
+        manufacturer: undefined,
+        model: undefined,
+        architecture: "arm64",
         description: undefined,
       });
     });
@@ -145,7 +192,198 @@ describe("Device types", () => {
 
     renderApp(["/organizations/org-1/device-types"]);
     expect(await screen.findByText("Gateway")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /add type/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add device type/i })).not.toBeInTheDocument();
+  });
+
+  it("uploads an OS image from the device type artifacts tab", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fleetApi.getDeviceType).mockResolvedValue(deviceType);
+    vi.mocked(fleetApi.listArtifacts).mockResolvedValue({
+      items: [osImage],
+      total: 1,
+      page: 1,
+      page_size: 100,
+    });
+    vi.mocked(fleetApi.uploadArtifact).mockResolvedValue({ ...osImage, id: "artifact-2" });
+
+    renderApp(["/organizations/org-1/device-types/type-1?tab=artifacts"]);
+    expect(await screen.findByText("Raspberry Pi OS")).toBeInTheDocument();
+    expect(screen.getByText("rpi-os.img")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /upload os image/i }));
+    const dialog = await screen.findByRole("dialog");
+    const file = new File(["image-bytes"], "rpi-os-2.img", { type: "application/octet-stream" });
+    await user.upload(within(dialog).getByLabelText(/^file$/i), file);
+    await user.type(within(dialog).getByLabelText(/^version$/i), "2.0.0");
+    await user.click(within(dialog).getByRole("button", { name: /^upload$/i }));
+
+    await waitFor(() => {
+      expect(fleetApi.uploadArtifact).toHaveBeenCalledWith(
+        "token-123",
+        "org-1",
+        expect.objectContaining({
+          file,
+          version: "2.0.0",
+          type: "os_image",
+          device_type_id: "type-1",
+        }),
+        expect.anything(),
+      );
+    });
+  });
+});
+
+describe("Device groups", () => {
+  it("shows the device count per group", async () => {
+    vi.mocked(fleetApi.listDeviceGroups).mockResolvedValue([deviceGroup]);
+
+    renderApp(["/organizations/org-1/device-groups"]);
+    expect(await screen.findByText("Berlin")).toBeInTheDocument();
+    const card = screen.getByRole("link", { name: /berlin/i });
+    expect(card).toHaveTextContent(/3 devices/i);
+    expect(card).toHaveAttribute("href", "/organizations/org-1/device-groups/group-1");
+  });
+});
+
+describe("Device group detail", () => {
+  it("shows an error instead of the empty state when devices fail to load", async () => {
+    vi.mocked(fleetApi.getDeviceGroup).mockResolvedValue(deviceGroup);
+    vi.mocked(fleetApi.listDevices).mockRejectedValue(new Error("boom"));
+
+    renderApp(["/organizations/org-1/device-groups/group-1?tab=devices"]);
+    expect(await screen.findByText("Could not load devices.")).toBeInTheDocument();
+    expect(screen.queryByText("No devices yet.")).not.toBeInTheDocument();
+  });
+});
+
+describe("Artifacts", () => {
+  it("opens the OS Images view from the menu link", async () => {
+    vi.mocked(fleetApi.listArtifacts).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+    });
+
+    renderApp(["/organizations/org-1/artifacts?type=os_image"]);
+    expect(await screen.findByRole("tab", { name: "OS Images" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await waitFor(() => {
+      expect(fleetApi.listArtifacts).toHaveBeenCalledWith(
+        "token-123",
+        "org-1",
+        expect.objectContaining({ type: "os_image" }),
+      );
+    });
+  });
+
+  it("shows upload progress for a large image and lets the user cancel", async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    let reportProgress: (progress: { loaded: number; total: number }) => void = () => {};
+    let uploadSignal: AbortSignal | undefined;
+    vi.mocked(fleetApi.listArtifacts).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+    });
+    vi.mocked(fleetApi.uploadArtifact).mockImplementation((_token, _org, _payload, options) => {
+      reportProgress = options?.onProgress ?? reportProgress;
+      uploadSignal = options?.signal;
+      return new Promise(() => {});
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderApp(["/organizations/org-1/artifacts?type=os_image"]);
+    await user.click(await screen.findByRole("button", { name: /upload os image/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.upload(
+      within(dialog).getByLabelText(/^file$/i),
+      new File(["image"], "meteor-os.img", { type: "application/octet-stream" }),
+    );
+    await user.type(within(dialog).getByLabelText(/^version$/i), "1.0.0");
+    await user.click(within(dialog).getByRole("button", { name: /^upload$/i }));
+
+    act(() => reportProgress({ loaded: GiB / 2, total: GiB }));
+    const bar = within(dialog).getByRole("progressbar", { name: /upload progress/i });
+    expect(bar).toHaveAttribute("aria-valuenow", "50");
+    expect(within(dialog).getByText("512.0 MB of 1.0 GB")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /uploading/i })).toBeDisabled();
+
+    act(() => reportProgress({ loaded: GiB, total: GiB }));
+    expect(within(dialog).getByText(/saving to storage/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: /cancel upload/i }));
+    expect(uploadSignal?.aborted).toBe(true);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    vi.mocked(window.confirm).mockRestore();
+  });
+
+  it("lists artifacts and filters by type and version", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fleetApi.listDeviceTypes).mockResolvedValue([deviceType]);
+    vi.mocked(fleetApi.listArtifacts).mockResolvedValue({
+      items: [osImage],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    renderApp(["/organizations/org-1/artifacts"]);
+    expect(await screen.findByText("Raspberry Pi OS")).toBeInTheDocument();
+    const row = screen.getByText("Raspberry Pi OS").closest("tr") as HTMLElement;
+    expect(within(row).getByText("OS Image")).toBeInTheDocument();
+    expect(within(row).getByText("Gateway")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "OS Images" }));
+    expect(screen.getByRole("button", { name: /upload os image/i })).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/filter by version/i), "1.0");
+    await waitFor(() => {
+      expect(fleetApi.listArtifacts).toHaveBeenCalledWith(
+        "token-123",
+        "org-1",
+        expect.objectContaining({ type: "os_image", version: "1.0", page: 1 }),
+      );
+    });
+  });
+});
+
+describe("Navigation", () => {
+  it("shows the organization menu with devices sub-pages", async () => {
+    renderApp(["/organizations/org-1/devices"]);
+    const nav = await screen.findByRole("navigation", { name: /main/i });
+    await within(nav).findByText("Acme Energy");
+    for (const label of [
+      "Overview",
+      "All Devices",
+      "Groups",
+      "Types",
+      "All Artifacts",
+      "OS Images",
+      "Monitoring",
+      "Settings",
+    ]) {
+      expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
+    }
+    expect(within(nav).queryByRole("link", { name: /^fleet$/i })).not.toBeInTheDocument();
+    expect(within(nav).getAllByText("Devices")).toHaveLength(1);
+    expect(within(nav).getByRole("link", { name: "All Devices" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    const devicesSection = within(nav).getByRole("button", { name: "Devices" });
+    expect(devicesSection).toHaveAttribute("aria-expanded", "true");
+    await userEvent.setup().click(devicesSection);
+    expect(devicesSection).toHaveAttribute("aria-expanded", "false");
+    expect(within(nav).queryByRole("link", { name: "Groups" })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "OS Images" })).toHaveAttribute(
+      "href",
+      "/organizations/org-1/artifacts?type=os_image",
+    );
   });
 });
 
@@ -258,7 +496,9 @@ describe("Add device flow", () => {
     ]);
 
     renderApp(["/organizations/org-1/devices"]);
-    expect(await screen.findByRole("heading", { name: /pending enrollment requests/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /pending enrollment requests/i }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("edge-01").length).toBeGreaterThan(0);
     expect(screen.getByRole("columnheader", { name: /requested/i })).toBeInTheDocument();
   });
@@ -267,8 +507,10 @@ describe("Add device flow", () => {
 describe("Devices list", () => {
   it("renders devices and applies search filter", async () => {
     const user = userEvent.setup();
+    vi.mocked(fleetApi.listDeviceTypes).mockResolvedValue([deviceType]);
+    vi.mocked(fleetApi.listDeviceGroups).mockResolvedValue([deviceGroup]);
     vi.mocked(fleetApi.listDevices).mockResolvedValue({
-      items: [device],
+      items: [{ ...device, device_type_id: "type-1", device_group_id: "group-1" }],
       total: 1,
       page: 1,
       page_size: 10,
@@ -279,6 +521,9 @@ describe("Devices list", () => {
     const row = deviceLink.closest("tr");
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText("Online")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("Gateway")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("Berlin")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByRole("link", { name: "View" })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/search devices/i), "edge");
     await waitFor(() => {
@@ -332,6 +577,34 @@ describe("Devices list", () => {
       expect(fleetApi.deleteDevice).toHaveBeenCalledWith("token-123", "org-1", "device-1");
     });
     vi.mocked(window.confirm).mockRestore();
+  });
+
+  it("edits a device type and group from the list", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fleetApi.listDeviceTypes).mockResolvedValue([deviceType]);
+    vi.mocked(fleetApi.listDeviceGroups).mockResolvedValue([deviceGroup]);
+    vi.mocked(fleetApi.listDevices).mockResolvedValue({
+      items: [device],
+      total: 1,
+      page: 1,
+      page_size: 10,
+    });
+    vi.mocked(fleetApi.updateDevice).mockResolvedValue(device);
+
+    renderApp(["/organizations/org-1/devices"]);
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText(/device type/i), "type-1");
+    await user.selectOptions(within(dialog).getByLabelText(/device group/i), "group-1");
+    await user.click(within(dialog).getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(fleetApi.updateDevice).toHaveBeenCalledWith("token-123", "org-1", "device-1", {
+        name: "edge-01",
+        device_type_id: "type-1",
+        device_group_id: "group-1",
+      });
+    });
   });
 
   it("hides device delete for viewers", async () => {

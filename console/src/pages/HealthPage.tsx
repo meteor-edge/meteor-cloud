@@ -18,12 +18,14 @@ export function HealthPage() {
         </p>
       </div>
 
-      <div className="rounded-lg border border-border bg-white/80 p-6 shadow-sm">
+      <div className="rounded-lg border border-border bg-card p-6 shadow-glow">
         {healthQuery.isLoading && <p className="text-muted-foreground">Checking backend…</p>}
 
         {healthQuery.isError && (
           <div className="space-y-3">
-            <p className="font-medium text-red-700">Backend unreachable</p>
+            <p className="font-medium text-midnight bg-ember rounded-md px-2 py-1">
+              Backend unreachable
+            </p>
             <p className="text-sm text-muted-foreground">
               {healthQuery.error instanceof Error
                 ? healthQuery.error.message
@@ -48,7 +50,9 @@ function HealthDetails({ data }: { data: HealthResponse }) {
         <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Status
         </dt>
-        <dd className="mt-1 text-lg font-semibold capitalize text-primary">{data.status}</dd>
+        <dd className="mt-1 inline-flex rounded-md bg-aurora px-2 py-0.5 text-lg font-semibold capitalize text-midnight">
+          {data.status}
+        </dd>
       </div>
       <div>
         <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

@@ -114,6 +114,32 @@ class Settings(BaseSettings):
     mqtt_provider: Literal["emqx"] = Field(default="emqx", alias="MQTT_PROVIDER")
     ota_provider: Literal["none"] = Field(default="none", alias="OTA_PROVIDER")
 
+    # Object storage for artifacts. "s3" covers MinIO, AWS S3, and other S3 APIs.
+    object_storage_provider: Literal["s3"] = Field(default="s3", alias="OBJECT_STORAGE_PROVIDER")
+    # Empty endpoint means the provider default (AWS S3); MinIO needs an explicit URL.
+    object_storage_endpoint_url: str = Field(
+        default="http://localhost:9000",
+        alias="OBJECT_STORAGE_ENDPOINT_URL",
+    )
+    object_storage_region: str = Field(default="us-east-1", alias="OBJECT_STORAGE_REGION")
+    object_storage_bucket: str = Field(default="meteorcloud-artifacts", alias="OBJECT_STORAGE_BUCKET")
+    # Empty credentials fall back to the provider's default chain (e.g. an instance role).
+    object_storage_access_key_id: str = Field(default="", alias="OBJECT_STORAGE_ACCESS_KEY_ID")
+    object_storage_secret_access_key: str = Field(default="", alias="OBJECT_STORAGE_SECRET_ACCESS_KEY")
+    object_storage_auto_create_bucket: bool = Field(
+        default=True,
+        alias="OBJECT_STORAGE_AUTO_CREATE_BUCKET",
+    )
+
+    artifact_max_upload_bytes: int = Field(
+        default=8 * 1024 * 1024 * 1024,
+        alias="ARTIFACT_MAX_UPLOAD_BYTES",
+    )
+    artifact_download_link_ttl_seconds: int = Field(
+        default=300,
+        alias="ARTIFACT_DOWNLOAD_LINK_TTL_SECONDS",
+    )
+
     # When True, agent registration over plain HTTP is rejected. Left False for
     # now (Milestone 4) but available so HTTPS can be enforced later.
     registration_require_https: bool = Field(

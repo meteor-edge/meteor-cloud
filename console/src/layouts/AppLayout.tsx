@@ -14,16 +14,23 @@ export function AppLayout() {
         <main className="flex-1 px-6 py-8">
           <Outlet />
         </main>
-        <footer className="border-t border-border/70 px-6 py-4 text-sm text-muted-foreground">
+        <footer className="border-t border-border px-6 py-4 text-sm text-muted-foreground">
           <div className="flex items-center justify-between gap-4">
             <span>MeteorCloud · operator console</span>
             <div className="flex items-center gap-4">
-              <a href={resolveDocsBaseUrl()} target="_blank" rel="noreferrer" className="hover:text-foreground">
+              <a
+                href={resolveDocsBaseUrl()}
+                target="_blank"
+                rel="noreferrer"
+                className="text-link hover:underline"
+              >
                 Documentation
               </a>
               <NavLink
                 to="/health"
-                className={({ isActive }) => cn("hover:text-foreground", isActive && "text-foreground")}
+                className={({ isActive }) =>
+                  cn("text-link hover:underline", isActive && "text-foreground")
+                }
               >
                 System health
               </NavLink>

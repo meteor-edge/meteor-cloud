@@ -22,7 +22,7 @@ export function OrganizationListPage() {
       {isLoading && <p className="text-muted-foreground">Loading organizations…</p>}
 
       {!isLoading && organizations.length === 0 && (
-        <div className="rounded-lg border border-dashed border-border bg-white/70 p-8 text-center">
+        <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center">
           <p className="font-medium">No organizations yet</p>
           <p className="mt-2 text-sm text-muted-foreground">
             Create one to start managing members and roles.
@@ -34,13 +34,13 @@ export function OrganizationListPage() {
         {organizations.map((organization) => (
           <li
             key={organization.id}
-            className="rounded-lg border border-border bg-white/80 p-5 shadow-sm"
+            className="rounded-lg border border-border bg-card p-5 shadow-glow"
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <Link
                   to={`/organizations/${organization.id}`}
-                  className="text-lg font-semibold text-foreground hover:text-primary"
+                  className="text-lg font-semibold text-foreground hover:text-link"
                   onClick={() => selectOrganization(organization.id)}
                 >
                   {organization.name}

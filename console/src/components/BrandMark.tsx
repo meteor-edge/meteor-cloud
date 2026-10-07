@@ -18,7 +18,7 @@ export function BrandMark({ className, iconClassName, showName = true }: BrandMa
       />
       {showName && (
         <span className="text-lg font-semibold leading-none tracking-tight text-foreground">
-          Meteor<span className="text-primary">Edge</span>
+          Meteor<span className="text-link">Edge</span>
         </span>
       )}
     </Link>
