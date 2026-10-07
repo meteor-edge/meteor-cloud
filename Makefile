@@ -23,8 +23,8 @@ join-help:
 	@echo "  Control plane alone: API works; MQTT/ping do not; console can attach if VITE_API_BASE_URL points at that API."
 	@echo "  Data plane alone: broker listens; device connect fails until control plane auth is reachable."
 	@echo "  Console alone: static UI; unusable until a control plane is reachable at the configured API base URL."
-  @echo "  Website: clone meteor-ui and run make dev-website there (not this tree)."
-  @echo "  Together: DATA_PLANE_URL and CONTROL_PLANE_URL use Compose service names, not localhost."
+	@echo "  Website: clone meteor-ui and run make dev-website there (not this tree)."
+	@echo "  Together: DATA_PLANE_URL and CONTROL_PLANE_URL use Compose service names, not localhost."
 	@echo "  Console: VITE_API_BASE_URL=http://localhost:8000 in local browser. Never a data-plane host."
 	@echo "  Host-only: DATA_PLANE_URL=http://127.0.0.1:8081 and CONTROL_PLANE_URL=http://127.0.0.1:8000."
 
@@ -40,6 +40,8 @@ dev: ## Start control-plane, data-plane, and console
 	@echo "  OpenAPI:      http://localhost:8000/docs"
 	@echo "  MQTT TLS:     mqtts://localhost:8883"
 	@echo "  EMQX UI:      http://localhost:18083  (admin / public)"
+	@echo "  MinIO API:    http://localhost:9000   (S3 endpoint for artifacts)"
+	@echo "  MinIO files:  docker compose exec minio mc ls -r local/meteorcloud-artifacts"
 	@echo "  Seed:         make seed"
 	@$(MAKE) --no-print-directory join-help
 
@@ -47,6 +49,7 @@ dev-control-plane: ## Start postgres, redis, and the control-plane API
 	@test -f .env || cp .env.example .env
 	$(CP_COMPOSE) up --build -d
 	@echo "Control plane: http://localhost:8000  (MQTT/ping need the data plane on network meteorcloud)"
+	@echo "MinIO API:     http://localhost:9000  (artifact storage)"
 
 dev-data-plane: ## Start EMQX and the data-plane MQTT gateway
 	@test -f .env || cp .env.example .env
