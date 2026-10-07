@@ -7,6 +7,7 @@ import hashlib
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.artifacts.repository import ArtifactRepository
 from app.core.config import get_settings
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
@@ -101,6 +102,22 @@ def test_duplicate_version_rejected_but_other_device_type_allowed(client: TestCl
     # Organization-wide artifacts (no device type) are unique as well.
     assert _upload(client, org.id, headers, type="configuration").status_code == 201
     assert _upload(client, org.id, headers, type="configuration").status_code == 409
+
+
+def test_concurrent_duplicate_upload_hits_unique_constraint(
+    client: TestClient, db_session: Session, object_storage: InMemoryObjectStorage, monkeypatch
+) -> None:
+    org, headers = _owner_setup(client, db_session)
+    assert _upload(client, org.id, headers).status_code == 201
+
+    # Simulate a second upload that passed the pre-check before the first one committed.
+    monkeypatch.setattr(ArtifactRepository, "find_duplicate", lambda *args, **kwargs: None)
+    duplicate = _upload(client, org.id, headers)
+
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "artifact_exists"
+    assert len(object_storage.objects) == 1
+    assert client.get(f"/api/v1/organizations/{org.id}/artifacts", headers=headers).json()["total"] == 1
 
 
 def test_upload_validation(client: TestClient, db_session: Session, object_storage: InMemoryObjectStorage) -> None:

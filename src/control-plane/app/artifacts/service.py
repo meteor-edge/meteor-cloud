@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import BinaryIO
 
 from jose import JWTError, jwt
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.artifacts.models import Artifact, ArtifactType
