@@ -103,6 +103,12 @@ def test_duplicate_version_rejected_but_other_device_type_allowed(client: TestCl
     assert _upload(client, org.id, headers, type="configuration").status_code == 201
     assert _upload(client, org.id, headers, type="configuration").status_code == 409
 
+    # Name and version uniqueness ignore case (DB unique index uses lower()).
+    assert _upload(client, org.id, headers, name="Case OS", version="2.0").status_code == 201
+    case_dup = _upload(client, org.id, headers, name="case os", version="2.0")
+    assert case_dup.status_code == 409
+    assert case_dup.json()["error"]["code"] == "artifact_exists"
+
 
 def test_concurrent_duplicate_upload_hits_unique_constraint(
     client: TestClient, db_session: Session, object_storage: InMemoryObjectStorage, monkeypatch
@@ -118,6 +124,12 @@ def test_concurrent_duplicate_upload_hits_unique_constraint(
     assert duplicate.json()["error"]["code"] == "artifact_exists"
     assert len(object_storage.objects) == 1
     assert client.get(f"/api/v1/organizations/{org.id}/artifacts", headers=headers).json()["total"] == 1
+
+    # The unique index is on lower(name)/lower(version), not the raw columns.
+    assert _upload(client, org.id, headers, name="Race OS", version="9.0").status_code == 201
+    case_race = _upload(client, org.id, headers, name="race os", version="9.0")
+    assert case_race.status_code == 409
+    assert case_race.json()["error"]["code"] == "artifact_exists"
 
 
 def test_upload_validation(client: TestClient, db_session: Session, object_storage: InMemoryObjectStorage) -> None:

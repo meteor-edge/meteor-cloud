@@ -12,7 +12,7 @@ import enum
 import uuid
 from typing import Any
 
-from sqlalchemy import BigInteger, Enum, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Enum, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,22 +30,6 @@ class ArtifactType(enum.StrEnum):
 
 class Artifact(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "artifacts"
-    __table_args__ = (
-        # NULLS NOT DISTINCT so org-wide artifacts (no device type) are unique too.
-        UniqueConstraint(
-            "organization_id",
-            "device_type_id",
-            "type",
-            "name",
-            "version",
-            name="uq_artifacts_org_type_name_version",
-            postgresql_nulls_not_distinct=True,
-        ),
-        UniqueConstraint("storage_key", name="uq_artifacts_storage_key"),
-        Index("ix_artifacts_organization_id", "organization_id"),
-        Index("ix_artifacts_org_device_type_id", "organization_id", "device_type_id"),
-        Index("ix_artifacts_org_type", "organization_id", "type"),
-    )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -90,4 +74,22 @@ class Artifact(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+    )
+
+    __table_args__ = (
+        # Case-insensitive name/version; NULLS NOT DISTINCT so org-wide rows stay unique.
+        Index(
+            "uq_artifacts_org_type_name_version",
+            "organization_id",
+            "device_type_id",
+            "type",
+            func.lower(name),
+            func.lower(version),
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
+        UniqueConstraint("storage_key", name="uq_artifacts_storage_key"),
+        Index("ix_artifacts_organization_id", "organization_id"),
+        Index("ix_artifacts_org_device_type_id", "organization_id", "device_type_id"),
+        Index("ix_artifacts_org_type", "organization_id", "type"),
     )

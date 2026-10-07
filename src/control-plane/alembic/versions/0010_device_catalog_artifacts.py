@@ -80,16 +80,22 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["device_type_id"], ["device_types.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
+        sa.UniqueConstraint("storage_key", name="uq_artifacts_storage_key"),
+    )
+    # Unique on lower(name)/lower(version) so the DB matches the case-insensitive
+    # pre-check; NULLS NOT DISTINCT keeps org-wide (null device_type_id) unique.
+    op.create_index(
+        "uq_artifacts_org_type_name_version",
+        "artifacts",
+        [
             "organization_id",
             "device_type_id",
             "type",
-            "name",
-            "version",
-            name="uq_artifacts_org_type_name_version",
-            postgresql_nulls_not_distinct=True,
-        ),
-        sa.UniqueConstraint("storage_key", name="uq_artifacts_storage_key"),
+            sa.text("lower(name)"),
+            sa.text("lower(version)"),
+        ],
+        unique=True,
+        postgresql_nulls_not_distinct=True,
     )
     op.create_index("ix_artifacts_organization_id", "artifacts", ["organization_id"], unique=False)
     op.create_index(
@@ -109,6 +115,7 @@ def downgrade() -> None:
     op.drop_index("ix_artifacts_org_type", table_name="artifacts")
     op.drop_index("ix_artifacts_org_device_type_id", table_name="artifacts")
     op.drop_index("ix_artifacts_organization_id", table_name="artifacts")
+    op.drop_index("uq_artifacts_org_type_name_version", table_name="artifacts")
     op.drop_table("artifacts")
 
     op.drop_constraint("uq_device_groups_org_slug", "device_groups", type_="unique")
