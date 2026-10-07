@@ -4,14 +4,17 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        outline: "border border-input bg-white hover:bg-secondary",
-        ghost: "hover:bg-secondary hover:text-foreground",
+        default:
+          "border border-transparent text-[19px] font-bold leading-none text-primary-foreground [background-clip:padding-box,border-box] [background-image:linear-gradient(var(--primary),var(--primary)),var(--gradient-meteor)] [background-origin:border-box] hover:[background-image:linear-gradient(var(--cosmic-blue),var(--cosmic-blue)),var(--gradient-meteor)]",
+        secondary:
+          "border border-border bg-secondary text-sm font-medium text-secondary-foreground hover:bg-secondary-hover",
+        outline:
+          "border border-border bg-transparent text-sm font-medium text-foreground hover:bg-secondary",
+        ghost: "text-sm font-medium hover:bg-secondary hover:text-foreground",
       },
       size: {
         default: "h-10 px-4 py-2",

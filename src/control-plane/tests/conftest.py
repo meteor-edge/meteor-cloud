@@ -14,6 +14,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 # Ensure metadata includes domain models.
+from app.artifacts import models as _artifact_models  # noqa: F401
+from app.artifacts.dependencies import get_object_storage
 from app.audit import models as _audit_models  # noqa: F401
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -32,6 +34,7 @@ from app.main import create_app
 from app.tenancy import models as _organization_models  # noqa: F401
 from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole
 from tests.db_guard import assert_safe_test_database_url, ensure_database_exists
+from tests.storage import InMemoryObjectStorage
 
 
 @pytest.fixture(scope="session")
@@ -69,7 +72,12 @@ def db_session(engine) -> Generator[Session]:
 
 
 @pytest.fixture
-def client(db_session: Session) -> Generator[TestClient]:
+def object_storage() -> InMemoryObjectStorage:
+    return InMemoryObjectStorage()
+
+
+@pytest.fixture
+def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Generator[TestClient]:
     application = create_app()
 
     def override_get_db() -> Generator[Session]:
@@ -79,6 +87,7 @@ def client(db_session: Session) -> Generator[TestClient]:
             pass
 
     application.dependency_overrides[get_db] = override_get_db
+    application.dependency_overrides[get_object_storage] = lambda: object_storage
     # Permissive limiter by default; tests that exercise rate limiting override
     # this on ``client.app.dependency_overrides``.
     application.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(limit=10_000, window_seconds=60)

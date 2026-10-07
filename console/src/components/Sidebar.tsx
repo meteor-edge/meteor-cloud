@@ -3,15 +3,22 @@ import {
   BookOpen,
   Boxes,
   Building2,
-  Cpu,
-  KeyRound,
+  ChevronDown,
+  CircuitBoard,
+  HardDrive,
+  House,
   Layers,
   LayoutDashboard,
+  List,
   LogIn,
-  Radio,
+  Package,
+  Router,
+  Settings,
   UserPlus,
+  type LucideIcon,
 } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { useState, type ReactNode } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
 import { BrandMark } from "@/components/BrandMark";
@@ -21,67 +28,182 @@ import { cn } from "@/lib/utils";
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   cn(
-    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground",
+    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-nav transition hover:bg-secondary hover:text-foreground",
     isActive && "bg-accent text-accent-foreground",
   );
+
+const subLinkClass = (isActive: boolean) =>
+  cn(
+    "flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm font-medium text-nav transition hover:bg-secondary hover:text-foreground",
+    isActive && "bg-accent text-accent-foreground",
+  );
+
+// Members and enrollment API keys are reached from the Settings page.
+function isSettingsSection(pathname: string, orgId: string): boolean {
+  return ["members", "api-keys"].some((page) =>
+    pathname.startsWith(`/organizations/${orgId}/${page}`),
+  );
+}
+
+/** A collapsible menu group. The heading names the area; the pages live underneath. */
+function NavSection({
+  icon: Icon,
+  label,
+  active,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  active: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={cn(
+          "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-nav transition hover:bg-secondary hover:text-foreground",
+          active && "text-foreground",
+        )}
+      >
+        <Icon className="h-4 w-4" />
+        <span className="flex-1 text-left">{label}</span>
+        <ChevronDown
+          className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <div className="ml-5 mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Activity is computed by the caller because OS Images and All Artifacts share a path
+// and differ only by query string, which NavLink ignores.
+function SubLink({
+  to,
+  icon: Icon,
+  active,
+  children,
+}: {
+  to: string;
+  icon: LucideIcon;
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Link to={to} className={subLinkClass(active)} aria-current={active ? "page" : undefined}>
+      <Icon className="h-3.5 w-3.5" />
+      {children}
+    </Link>
+  );
+}
 
 export function Sidebar() {
   const { isAuthenticated } = useAuth();
   const { selectedOrganization } = useOrganizationContext();
+  const { pathname, search } = useLocation();
 
   const orgId = selectedOrganization?.id;
+  const orgPath = `/organizations/${orgId}`;
+  const isPage = (page: string) => pathname.startsWith(`${orgPath}/${page}`);
+  const artifactType = new URLSearchParams(search).get("type");
 
   return (
-    <aside className="hidden w-64 shrink-0 border-r border-border/70 bg-white/70 backdrop-blur md:flex md:flex-col">
-      <div className="border-b border-border/70 px-6 py-5">
+    <aside className="hidden w-64 shrink-0 border-r border-border bg-section backdrop-blur md:flex md:flex-col">
+      <div className="border-b border-border px-6 py-5">
         <BrandMark iconClassName="h-9 w-9" />
-        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-link">
           Edge · Data · OTA
         </p>
-        <h1 className="mt-1 text-sm font-medium text-muted-foreground">Control plane</h1>
+        <h1 className="mt-1 text-sm font-medium text-nav">Control plane</h1>
       </div>
-      <nav className="flex flex-1 flex-col gap-1 p-4">
-        <NavLink to="/" end className={linkClass}>
-          <LayoutDashboard className="h-4 w-4" />
-          Overview
-        </NavLink>
-        <NavLink to="/health" className={linkClass}>
-          <Activity className="h-4 w-4" />
-          Health
-        </NavLink>
+      <nav aria-label="Main" className="flex flex-1 flex-col gap-1 p-4">
+        {!orgId && (
+          <NavLink to="/" end className={linkClass}>
+            <House className="h-4 w-4" />
+            Home
+          </NavLink>
+        )}
 
         {isAuthenticated && (
           <>
-            <NavLink to="/organizations" className={linkClass}>
+            <NavLink to="/organizations" end className={linkClass}>
               <Building2 className="h-4 w-4" />
               Organizations
             </NavLink>
 
-            {/* Once an organization is selected the fleet menu is scoped to it. */}
+            {/* Once an organization is selected the menu is scoped to it. */}
             {orgId && (
-              <div className="mt-4">
-                <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Fleet
+              <div className="mt-4 flex flex-col gap-1">
+                <p className="truncate px-3 pb-1 text-xs font-semibold uppercase tracking-[0.14em] text-nav">
+                  {selectedOrganization?.name}
                 </p>
-                <NavLink to={`/organizations/${orgId}/device-types`} className={linkClass}>
-                  <Boxes className="h-4 w-4" />
-                  Device types
+                <NavLink to={`/organizations/${orgId}`} end className={linkClass}>
+                  <LayoutDashboard className="h-4 w-4" />
+                  Overview
                 </NavLink>
-                <NavLink to={`/organizations/${orgId}/device-groups`} className={linkClass}>
-                  <Layers className="h-4 w-4" />
-                  Device groups
-                </NavLink>
-                <NavLink to={`/organizations/${orgId}/devices`} className={linkClass}>
-                  <Cpu className="h-4 w-4" />
-                  Devices
-                </NavLink>
+
+                <NavSection
+                  icon={Router}
+                  label="Devices"
+                  active={["devices", "device-groups", "device-types"].some(isPage)}
+                >
+                  <SubLink to={`${orgPath}/devices`} icon={List} active={isPage("devices")}>
+                    All Devices
+                  </SubLink>
+                  <SubLink
+                    to={`${orgPath}/device-groups`}
+                    icon={Layers}
+                    active={isPage("device-groups")}
+                  >
+                    Groups
+                  </SubLink>
+                  <SubLink
+                    to={`${orgPath}/device-types`}
+                    icon={CircuitBoard}
+                    active={isPage("device-types")}
+                  >
+                    Types
+                  </SubLink>
+                </NavSection>
+
+                <NavSection icon={Package} label="Artifacts" active={isPage("artifacts")}>
+                  <SubLink
+                    to={`${orgPath}/artifacts`}
+                    icon={Boxes}
+                    active={isPage("artifacts") && !artifactType}
+                  >
+                    All Artifacts
+                  </SubLink>
+                  <SubLink
+                    to={`${orgPath}/artifacts?type=os_image`}
+                    icon={HardDrive}
+                    active={isPage("artifacts") && artifactType === "os_image"}
+                  >
+                    OS Images
+                  </SubLink>
+                </NavSection>
+
                 <NavLink to={`/organizations/${orgId}/mqtt`} className={linkClass}>
-                  <Radio className="h-4 w-4" />
-                  MQTT test
+                  <Activity className="h-4 w-4" />
+                  Monitoring
                 </NavLink>
-                <NavLink to={`/organizations/${orgId}/api-keys`} className={linkClass}>
-                  <KeyRound className="h-4 w-4" />
-                  API keys
+                <NavLink
+                  to={`/organizations/${orgId}/settings`}
+                  className={({ isActive }) =>
+                    linkClass({ isActive: isActive || isSettingsSection(pathname, orgId) })
+                  }
+                >
+                  <Settings className="h-4 w-4" />
+                  Settings
                 </NavLink>
               </div>
             )}
@@ -101,12 +223,12 @@ export function Sidebar() {
           </>
         )}
       </nav>
-      <div className="border-t border-border/70 p-4">
+      <div className="border-t border-border p-4">
         <a
           href={resolveDocsBaseUrl()}
           target="_blank"
           rel="noreferrer"
-          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-nav transition hover:bg-secondary hover:text-foreground"
         >
           <BookOpen className="h-4 w-4" />
           Documentation

@@ -11,6 +11,7 @@ from app.mqtt.service import NoopPublisher
 from app.ports.cache import RateLimiter
 from app.ports.mqtt import MQTTGateway
 from app.ports.ota import OTAProvider
+from app.ports.storage import ObjectStorage
 
 
 def mqtt_gateway(settings: Settings) -> MQTTGateway:
@@ -46,4 +47,14 @@ def ota_provider(settings: Settings) -> OTAProvider | None:
     raise RuntimeError(f"Unsupported ota.provider={settings.ota_provider!r}; no OTA adapter is implemented")
 
 
-__all__ = ["InMemoryRateLimiter", "mqtt_gateway", "ota_provider", "rate_limiter"]
+def object_storage(settings: Settings) -> ObjectStorage:
+    if settings.object_storage_provider != "s3":
+        raise RuntimeError(
+            f"Unsupported object_storage.provider={settings.object_storage_provider!r}; only 's3' is implemented"
+        )
+    from app.adapters.s3_storage import S3ObjectStorage
+
+    return S3ObjectStorage(settings)
+
+
+__all__ = ["InMemoryRateLimiter", "mqtt_gateway", "object_storage", "ota_provider", "rate_limiter"]

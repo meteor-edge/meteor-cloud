@@ -32,6 +32,28 @@ services:
     networks:
       - meteorcloud
 
+  # S3-compatible object storage for artifacts. The backend talks plain S3, so
+  # AWS S3 or another S3 API can replace this without code changes.
+  # Upstream minio/minio images are no longer published on Docker Hub.
+  minio:
+    image: ${MINIO_IMAGE:-bitnamilegacy/minio:2025.5.24-debian-12-r5}
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY_ID:-meteorcloud}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-meteorcloud-dev-secret}
+      MINIO_DEFAULT_BUCKETS: ${OBJECT_STORAGE_BUCKET:-meteorcloud-artifacts}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - meteorcloud
+
   backend:
     build:
       context: .
@@ -52,6 +74,11 @@ services:
       MQTT_PLATFORM_PASSWORD: ${MQTT_PLATFORM_PASSWORD:-dev-mqtt-platform}
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-dev-mqtt-internal}
       MQTT_CA_CERT_PATH: /certs/ca.crt
+      OBJECT_STORAGE_PROVIDER: s3
+      OBJECT_STORAGE_ENDPOINT_URL: http://minio:9000
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-meteorcloud-artifacts}
+      OBJECT_STORAGE_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID:-meteorcloud}
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-meteorcloud-dev-secret}
     volumes:
       - ./certs:/certs:ro
     ports:
@@ -61,6 +88,8 @@ services:
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
@@ -72,3 +101,4 @@ services:
 
 volumes:
   postgres_data:
+  minio_data:

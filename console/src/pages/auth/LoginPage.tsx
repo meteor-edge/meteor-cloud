@@ -37,7 +37,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md rounded-lg border border-border bg-white/80 p-8 shadow-sm">
+    <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 shadow-glow">
       <BrandMark className="mb-6" iconClassName="h-10 w-10" />
       <h1 className="text-2xl font-semibold">Sign in</h1>
       <p className="mt-2 text-sm text-muted-foreground">Access your MeteorEdge organizations.</p>
@@ -64,14 +64,16 @@ export function LoginPage() {
             required
           />
         </div>
-        {error && <p className="text-sm text-red-700">{error}</p>}
+        {error && (
+          <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+        )}
         <Button type="submit" className="w-full" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </form>
       <p className="mt-4 text-sm text-muted-foreground">
         Need an account?{" "}
-        <Link className="text-primary hover:underline" to="/register">
+        <Link className="text-link hover:underline" to="/register">
           Register
         </Link>
       </p>

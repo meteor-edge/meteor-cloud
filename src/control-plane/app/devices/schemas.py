@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.devices.status import ConnectivityStatus
 from app.mqtt.schemas import MqttConnectInfo
+from app.tenancy.schemas import validate_slug
 
 
 def _strip_optional(value: str | None) -> str | None:
@@ -19,47 +20,66 @@ def _strip_optional(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _validate_optional_slug(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return validate_slug(value)
+
+
+def _strip_name_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError("Name must not be blank")
+    return cleaned
+
+
 # --------------------------------------------------------------------------- #
 # Device types
 # --------------------------------------------------------------------------- #
-class DeviceTypeCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
+class _DeviceTypeFields(BaseModel):
+    slug: str | None = Field(default=None, max_length=100)
     description: str | None = Field(default=None, max_length=2000)
+    manufacturer: str | None = Field(default=None, max_length=120)
+    model: str | None = Field(default=None, max_length=120)
+    architecture: str | None = Field(default=None, max_length=64)
+
+    @field_validator("slug")
+    @classmethod
+    def _validate_slug(cls, value: str | None) -> str | None:
+        return _validate_optional_slug(value)
+
+    @field_validator("description", "manufacturer", "model", "architecture")
+    @classmethod
+    def _strip_text(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+
+class DeviceTypeCreateRequest(_DeviceTypeFields):
+    """``slug`` is derived from ``name`` when omitted."""
+
+    name: str = Field(min_length=1, max_length=120)
     capabilities: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Name must not be blank")
-        return cleaned
-
-    @field_validator("description")
-    @classmethod
-    def _strip_description(cls, value: str | None) -> str | None:
-        return _strip_optional(value)
+        return _strip_name_value(value)  # type: ignore[return-value]
 
 
-class DeviceTypeUpdateRequest(BaseModel):
+class DeviceTypeUpdateRequest(_DeviceTypeFields):
+    """Only fields present in the request are changed; text fields accept null to clear."""
+
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=2000)
     capabilities: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
 
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Name must not be blank")
-        return cleaned
-
-    @field_validator("description")
-    @classmethod
-    def _strip_description(cls, value: str | None) -> str | None:
-        return _strip_optional(value)
+        return _strip_name_value(value)
 
 
 class DeviceTypeResponse(BaseModel):
@@ -68,8 +88,15 @@ class DeviceTypeResponse(BaseModel):
     id: uuid.UUID
     organization_id: uuid.UUID
     name: str
+    slug: str
     description: str | None
+    manufacturer: str | None
+    model: str | None
+    architecture: str | None
     capabilities: dict[str, Any]
+    metadata: dict[str, Any] = Field(validation_alias="metadata_")
+    device_count: int = 0
+    artifact_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -77,44 +104,45 @@ class DeviceTypeResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 # Device groups
 # --------------------------------------------------------------------------- #
-class DeviceGroupCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
+class _DeviceGroupFields(BaseModel):
+    slug: str | None = Field(default=None, max_length=100)
     description: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("slug")
+    @classmethod
+    def _validate_slug(cls, value: str | None) -> str | None:
+        return _validate_optional_slug(value)
+
+    @field_validator("description")
+    @classmethod
+    def _strip_description(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+
+class DeviceGroupCreateRequest(_DeviceGroupFields):
+    """``slug`` is derived from ``name`` when omitted."""
+
+    name: str = Field(min_length=1, max_length=120)
     labels: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Name must not be blank")
-        return cleaned
-
-    @field_validator("description")
-    @classmethod
-    def _strip_description(cls, value: str | None) -> str | None:
-        return _strip_optional(value)
+        return _strip_name_value(value)  # type: ignore[return-value]
 
 
-class DeviceGroupUpdateRequest(BaseModel):
+class DeviceGroupUpdateRequest(_DeviceGroupFields):
+    """Only fields present in the request are changed; description accepts null to clear."""
+
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=2000)
     labels: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
 
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Name must not be blank")
-        return cleaned
-
-    @field_validator("description")
-    @classmethod
-    def _strip_description(cls, value: str | None) -> str | None:
-        return _strip_optional(value)
+        return _strip_name_value(value)
 
 
 class DeviceGroupResponse(BaseModel):
@@ -123,8 +151,11 @@ class DeviceGroupResponse(BaseModel):
     id: uuid.UUID
     organization_id: uuid.UUID
     name: str
+    slug: str
     description: str | None
     labels: dict[str, Any]
+    metadata: dict[str, Any] = Field(validation_alias="metadata_")
+    device_count: int = 0
     created_at: datetime
     updated_at: datetime
 

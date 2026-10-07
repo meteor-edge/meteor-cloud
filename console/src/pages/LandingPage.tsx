@@ -9,12 +9,10 @@ export function LandingPage() {
 
   return (
     <section className="mx-auto max-w-3xl">
-      <img
-        src="/brand/banner.png"
-        alt="MeteorEdge — Edge, Data, OTA"
-        className="mb-8 w-full rounded-lg shadow-sm"
-      />
-      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">
+      <div className="highlight-meteor mb-8 overflow-hidden rounded-lg">
+        <img src="/brand/banner.png" alt="MeteorEdge — Edge, Data, OTA" className="w-full" />
+      </div>
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-link">
         Edge · Data · OTA
       </p>
       <h1 className="mt-3 text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">

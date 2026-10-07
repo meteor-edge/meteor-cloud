@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 import {
   createEnrollmentKey,
@@ -11,7 +11,6 @@ import {
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
-import { FleetNav } from "@/components/fleet/FleetNav";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { PendingEnrollmentRequests } from "@/components/fleet/PendingEnrollmentRequests";
 import { Button } from "@/components/ui/button";
@@ -21,11 +20,7 @@ import { canManageFleet } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 function buildConfigCommand(domain: string, apiKey: string): string {
-  return [
-    "meteorcli config \\",
-    `  --domain ${domain} \\`,
-    `  --api-key ${apiKey}`,
-  ].join("\n");
+  return ["meteorcli config \\", `  --domain ${domain} \\`, `  --api-key ${apiKey}`].join("\n");
 }
 
 export function ApiKeysPage() {
@@ -88,13 +83,21 @@ export function ApiKeysPage() {
 
   return (
     <section className="mx-auto max-w-6xl space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Fleet</h1>
-        <p className="mt-2 text-muted-foreground">{orgQuery.data?.name}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Enrollment API keys</h1>
+          <p className="mt-2 text-muted-foreground">
+            Keys that let devices request enrollment into {orgQuery.data?.name ?? "this organization"}.
+          </p>
+        </div>
+        <Button variant="secondary" asChild>
+          <Link to={`/organizations/${organizationId}/settings`}>Back to settings</Link>
+        </Button>
       </div>
-      <FleetNav organizationId={organizationId} />
 
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error && (
+        <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+      )}
 
       {token && (
         <PendingEnrollmentRequests
@@ -107,15 +110,15 @@ export function ApiKeysPage() {
 
       {canManage && (
         <form
-          className="grid gap-3 rounded-lg border border-border bg-white/80 p-5 shadow-sm md:grid-cols-2"
+          className="grid gap-3 rounded-lg border border-border bg-card p-5 shadow-glow md:grid-cols-2"
           onSubmit={onCreateKey}
         >
           <div className="md:col-span-2">
             <p className="text-sm font-medium">API keys</p>
             <p className="text-xs text-muted-foreground">
               Devices use a key with <code>meteorcli config</code> and{" "}
-              <code>meteorcli request-token</code> to request a device token
-              and connect to this organization.
+              <code>meteorcli request-token</code> to request a device token and connect to this
+              organization.
             </p>
           </div>
           <div>
@@ -135,9 +138,9 @@ export function ApiKeysPage() {
         </form>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-white/80 shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-glow">
         <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-border bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+          <thead className="border-b border-border bg-background text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-semibold">Name</th>
               <th className="px-4 py-3 font-semibold">Prefix</th>
@@ -148,7 +151,7 @@ export function ApiKeysPage() {
           </thead>
           <tbody>
             {(keysQuery.data ?? []).map((entry) => (
-              <tr key={entry.id} className="border-b border-border/70">
+              <tr key={entry.id} className="border-b border-border">
                 <td className="px-4 py-3 font-medium">{entry.name}</td>
                 <td className="px-4 py-3 font-mono text-xs">{entry.key_prefix}…</td>
                 <td className="px-4 py-3 text-muted-foreground">

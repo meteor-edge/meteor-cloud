@@ -43,7 +43,7 @@ export function RegisterPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md rounded-lg border border-border bg-white/80 p-8 shadow-sm">
+    <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 shadow-glow">
       <BrandMark className="mb-6" iconClassName="h-10 w-10" />
       <h1 className="text-2xl font-semibold">Create account</h1>
       <p className="mt-2 text-sm text-muted-foreground">
@@ -81,14 +81,16 @@ export function RegisterPage() {
           />
           <p className="mt-1 text-xs text-muted-foreground">Minimum 10 characters.</p>
         </div>
-        {error && <p className="text-sm text-red-700">{error}</p>}
+        {error && (
+          <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+        )}
         <Button type="submit" className="w-full" disabled={submitting}>
           {submitting ? "Creating account…" : "Register"}
         </Button>
       </form>
       <p className="mt-4 text-sm text-muted-foreground">
         Already registered?{" "}
-        <Link className="text-primary hover:underline" to="/login">
+        <Link className="text-link hover:underline" to="/login">
           Sign in
         </Link>
       </p>

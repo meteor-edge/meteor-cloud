@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.artifacts.repository import ArtifactRepository
 from app.audit.service import AuditRecorder
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
@@ -67,6 +68,7 @@ from app.mqtt.schemas import DevicePingResponse, MqttTestPublishResponse
 from app.mqtt.service import MqttPublisher, MqttService
 from app.tenancy.models import OrganizationMembership, OrganizationRole
 from app.tenancy.repository import OrganizationRepository
+from app.tenancy.schemas import slugify
 
 
 class FleetService:
@@ -80,6 +82,7 @@ class FleetService:
         self.devices = DeviceRepository(session)
         self.api_keys = EnrollmentApiKeyRepository(session)
         self.enrollment_requests = DeviceEnrollmentRequestRepository(session)
+        self.artifacts = ArtifactRepository(session)
         self.audit = AuditRecorder(session)
 
     def _record_audit(
@@ -122,7 +125,49 @@ class FleetService:
                 "You do not have permission to manage fleet resources.",
             )
 
+    def _resolve_slug(
+        self,
+        *,
+        requested: str | None,
+        name: str,
+        fallback: str,
+        repository: DeviceTypeRepository | DeviceGroupRepository,
+        organization_id: uuid.UUID,
+        conflict_code: str,
+    ) -> str:
+        """Use an explicit slug (must be free) or derive a unique one from the name."""
+
+        def taken(slug: str) -> bool:
+            return repository.get_by_slug(organization_id=organization_id, slug=slug) is not None
+
+        if requested is not None:
+            if taken(requested):
+                raise ConflictError(conflict_code, "This slug is already in use.")
+            return requested
+        base = (slugify(name) or fallback)[:90].strip("-") or fallback
+        candidate, suffix = base, 2
+        while taken(candidate):
+            candidate = f"{base}-{suffix}"
+            suffix += 1
+        return candidate
+
     # ------------------------------------------------------------- device types
+    def _to_device_type_response(
+        self,
+        device_type: DeviceType,
+        *,
+        device_count: int | None = None,
+        artifact_count: int | None = None,
+    ) -> DeviceTypeResponse:
+        organization_id = device_type.organization_id
+        if device_count is None:
+            device_count = self.device_types.count_devices(organization_id=organization_id, type_id=device_type.id)
+        if artifact_count is None:
+            artifact_count = self.artifacts.count_by_device_type(organization_id=organization_id).get(device_type.id, 0)
+        return DeviceTypeResponse.model_validate(device_type).model_copy(
+            update={"device_count": device_count, "artifact_count": artifact_count}
+        )
+
     def list_device_types(
         self,
         *,
@@ -130,8 +175,15 @@ class FleetService:
         organization_id: uuid.UUID,
     ) -> list[DeviceTypeResponse]:
         self._require_membership(organization_id, actor.id)
+        device_counts = self.device_types.device_counts(organization_id=organization_id)
+        artifact_counts = self.artifacts.count_by_device_type(organization_id=organization_id)
         return [
-            DeviceTypeResponse.model_validate(item) for item in self.device_types.list(organization_id=organization_id)
+            self._to_device_type_response(
+                item,
+                device_count=device_counts.get(item.id, 0),
+                artifact_count=artifact_counts.get(item.id, 0),
+            )
+            for item in self.device_types.list(organization_id=organization_id)
         ]
 
     def get_device_type(
@@ -143,7 +195,7 @@ class FleetService:
     ) -> DeviceTypeResponse:
         self._require_membership(organization_id, actor.id)
         device_type = self._require_device_type(organization_id, type_id)
-        return DeviceTypeResponse.model_validate(device_type)
+        return self._to_device_type_response(device_type)
 
     def create_device_type(
         self,
@@ -159,16 +211,29 @@ class FleetService:
                 "device_type_exists",
                 "A device type with this name already exists.",
             )
+        slug = self._resolve_slug(
+            requested=payload.slug,
+            name=payload.name,
+            fallback="device-type",
+            repository=self.device_types,
+            organization_id=organization_id,
+            conflict_code="device_type_slug_exists",
+        )
         device_type = DeviceType(
             organization_id=organization_id,
             name=payload.name,
+            slug=slug,
             description=payload.description,
+            manufacturer=payload.manufacturer,
+            model=payload.model,
+            architecture=payload.architecture,
             capabilities=payload.capabilities,
+            metadata_=payload.metadata,
         )
         self.device_types.create(device_type)
         self.session.commit()
         self.session.refresh(device_type)
-        return DeviceTypeResponse.model_validate(device_type)
+        return self._to_device_type_response(device_type, device_count=0, artifact_count=0)
 
     def update_device_type(
         self,
@@ -189,17 +254,29 @@ class FleetService:
                     "device_type_exists",
                     "A device type with this name already exists.",
                 )
+        if payload.slug is not None and payload.slug != device_type.slug:
+            device_type.slug = self._resolve_slug(
+                requested=payload.slug,
+                name=device_type.name,
+                fallback="device-type",
+                repository=self.device_types,
+                organization_id=organization_id,
+                conflict_code="device_type_slug_exists",
+            )
         if payload.name is not None:
             device_type.name = payload.name
-        if payload.description is not None:
-            device_type.description = payload.description
+        for field in ("description", "manufacturer", "model", "architecture"):
+            if field in payload.model_fields_set:
+                setattr(device_type, field, getattr(payload, field))
         if payload.capabilities is not None:
             device_type.capabilities = payload.capabilities
+        if payload.metadata is not None:
+            device_type.metadata_ = payload.metadata
 
         self.device_types.update(device_type)
         self.session.commit()
         self.session.refresh(device_type)
-        return DeviceTypeResponse.model_validate(device_type)
+        return self._to_device_type_response(device_type)
 
     def delete_device_type(
         self,
@@ -216,6 +293,11 @@ class FleetService:
                 "device_type_in_use",
                 "This device type is still assigned to devices.",
             )
+        if self.artifacts.count_by_device_type(organization_id=organization_id).get(type_id):
+            raise ConflictError(
+                "device_type_has_artifacts",
+                "This device type still has artifacts. Delete them first.",
+            )
         self.device_types.delete(device_type)
         self.session.commit()
 
@@ -226,6 +308,11 @@ class FleetService:
         return device_type
 
     # ------------------------------------------------------------ device groups
+    def _to_device_group_response(self, group: DeviceGroup, *, device_count: int | None = None) -> DeviceGroupResponse:
+        if device_count is None:
+            device_count = self.device_groups.count_devices(organization_id=group.organization_id, group_id=group.id)
+        return DeviceGroupResponse.model_validate(group).model_copy(update={"device_count": device_count})
+
     def list_device_groups(
         self,
         *,
@@ -233,8 +320,9 @@ class FleetService:
         organization_id: uuid.UUID,
     ) -> list[DeviceGroupResponse]:
         self._require_membership(organization_id, actor.id)
+        counts = self.device_groups.device_counts(organization_id=organization_id)
         return [
-            DeviceGroupResponse.model_validate(item)
+            self._to_device_group_response(item, device_count=counts.get(item.id, 0))
             for item in self.device_groups.list(organization_id=organization_id)
         ]
 
@@ -247,7 +335,7 @@ class FleetService:
     ) -> DeviceGroupResponse:
         self._require_membership(organization_id, actor.id)
         group = self._require_device_group(organization_id, group_id)
-        return DeviceGroupResponse.model_validate(group)
+        return self._to_device_group_response(group)
 
     def create_device_group(
         self,
@@ -263,16 +351,26 @@ class FleetService:
                 "device_group_exists",
                 "A device group with this name already exists.",
             )
+        slug = self._resolve_slug(
+            requested=payload.slug,
+            name=payload.name,
+            fallback="device-group",
+            repository=self.device_groups,
+            organization_id=organization_id,
+            conflict_code="device_group_slug_exists",
+        )
         group = DeviceGroup(
             organization_id=organization_id,
             name=payload.name,
+            slug=slug,
             description=payload.description,
             labels=payload.labels,
+            metadata_=payload.metadata,
         )
         self.device_groups.create(group)
         self.session.commit()
         self.session.refresh(group)
-        return DeviceGroupResponse.model_validate(group)
+        return self._to_device_group_response(group, device_count=0)
 
     def update_device_group(
         self,
@@ -293,17 +391,28 @@ class FleetService:
                     "device_group_exists",
                     "A device group with this name already exists.",
                 )
+        if payload.slug is not None and payload.slug != group.slug:
+            group.slug = self._resolve_slug(
+                requested=payload.slug,
+                name=group.name,
+                fallback="device-group",
+                repository=self.device_groups,
+                organization_id=organization_id,
+                conflict_code="device_group_slug_exists",
+            )
         if payload.name is not None:
             group.name = payload.name
-        if payload.description is not None:
+        if "description" in payload.model_fields_set:
             group.description = payload.description
         if payload.labels is not None:
             group.labels = payload.labels
+        if payload.metadata is not None:
+            group.metadata_ = payload.metadata
 
         self.device_groups.update(group)
         self.session.commit()
         self.session.refresh(group)
-        return DeviceGroupResponse.model_validate(group)
+        return self._to_device_group_response(group)
 
     def delete_device_group(
         self,

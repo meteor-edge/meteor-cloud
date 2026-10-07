@@ -1,0 +1,88 @@
+/* MeteorEdge Sky & Meteor palette. Hex values match meteor-edge.com. */
+
+:root {
+  color-scheme: dark;
+
+  /* Brand */
+  --meteor-cyan: #02c5fe;
+  --sky-blue: #0498fd;
+  --cloud-blue: #007afd; /* primary */
+  --cosmic-blue: #003cfa;
+  --midnight: #0f1b33;
+  --slate: #607090;
+
+  /* Sky & space (dark UI) */
+  --night-sky: #060e1f; /* page bg */
+  --deep-space: #0b1730; /* section bg */
+  --panel: #12213f; /* cards */
+  --horizon: #1f3358; /* borders */
+  --star-dust: #9db0d0; /* secondary text on dark */
+
+  /* Light UI */
+  --cloud-white: #f4f8ff;
+  --mist: #e3eeff;
+  --paper: #ffffff;
+  --link-on-light: #0062d6; /* small text/links on white (5.6:1) */
+
+  /* Accents (use sparingly) */
+  --ember: #ffb547; /* warnings only */
+  --aurora: #2ee6b8; /* success / live data */
+
+  --gradient-meteor: linear-gradient(135deg, #02c5fe 0%, #007afd 55%, #003cfa 100%);
+  --glow: 0 0 40px color-mix(in srgb, var(--meteor-cyan) 15%, transparent);
+  --radius: 16px;
+
+  /* Dark theme is the default. Cloud Blue fails AA for small text on panel
+     and deep space, so links use Sky Blue there. Buttons stay Cloud Blue. */
+  --background: var(--night-sky);
+  --foreground: var(--cloud-white);
+  --section: var(--deep-space);
+  --card: var(--panel);
+  --card-foreground: var(--cloud-white);
+  --muted: var(--deep-space);
+  --muted-foreground: var(--star-dust);
+  --nav: var(--star-dust);
+  --border: var(--horizon);
+  --input: var(--horizon);
+  --field: var(--night-sky);
+  --ring: var(--meteor-cyan);
+  --primary: var(--cloud-blue);
+  --primary-foreground: var(--paper);
+  --secondary: var(--panel);
+  --secondary-foreground: var(--cloud-white);
+  --secondary-hover: var(--horizon);
+  --accent: var(--horizon);
+  --accent-foreground: var(--cloud-white);
+  --link: var(--sky-blue);
+  --overlay: color-mix(in srgb, var(--night-sky) 72%, transparent);
+  --sent: color-mix(in srgb, var(--sky-blue) 18%, transparent);
+  --sent-border: color-mix(in srgb, var(--sky-blue) 55%, transparent);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --background: var(--cloud-white);
+    --foreground: var(--midnight);
+    --section: var(--mist);
+    --card: var(--paper);
+    --card-foreground: var(--midnight);
+    --muted: var(--mist);
+    --muted-foreground: var(--slate);
+    /* Slate on Mist is below AA, so chrome on Mist uses Midnight. */
+    --nav: var(--midnight);
+    --border: var(--slate);
+    --input: var(--slate);
+    --field: var(--paper);
+    --ring: var(--cosmic-blue);
+    --primary: var(--cloud-blue);
+    --primary-foreground: var(--paper);
+    --secondary: var(--paper);
+    --secondary-foreground: var(--midnight);
+    --secondary-hover: var(--mist);
+    --accent: var(--cosmic-blue);
+    --accent-foreground: var(--cloud-white);
+    --link: var(--link-on-light);
+  }
+}

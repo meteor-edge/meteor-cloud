@@ -106,9 +106,9 @@ export function PendingEnrollmentRequests({
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-semibold">Pending enrollment requests</h2>
-      <div className="overflow-hidden rounded-lg border border-border bg-white/80 shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-glow">
         <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-border bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+          <thead className="border-b border-border bg-background text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-semibold">Name</th>
               <th className="px-4 py-3 font-semibold">Hostname</th>
@@ -121,7 +121,7 @@ export function PendingEnrollmentRequests({
           </thead>
           <tbody>
             {activeRequests.map((entry) => (
-              <tr key={entry.id} className="border-b border-border/70">
+              <tr key={entry.id} className="border-b border-border">
                 <td className="px-4 py-3 font-medium">
                   {entry.assigned_name ?? entry.requested_name ?? "—"}
                 </td>
@@ -135,11 +135,11 @@ export function PendingEnrollmentRequests({
                 </td>
                 <td className="px-4 py-3">
                   {entry.status === "approved" ? (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    <span className="rounded-full bg-ember px-2 py-0.5 text-xs font-medium text-midnight">
                       Awaiting device
                     </span>
                   ) : (
-                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
+                    <span className="rounded-full bg-sky-blue px-2 py-0.5 text-xs font-medium text-midnight">
                       Pending approval
                     </span>
                   )}
@@ -186,13 +186,13 @@ export function PendingEnrollmentRequests({
 
       {canManage && approveId && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Approve device"
         >
           <form
-            className="grid w-full max-w-lg gap-3 rounded-lg border border-border bg-white p-6 shadow-lg"
+            className="grid w-full max-w-lg gap-3 rounded-lg border border-border bg-card p-6 shadow-glow"
             onSubmit={onApprove}
           >
             <div>
@@ -214,7 +214,7 @@ export function PendingEnrollmentRequests({
               <Label htmlFor="approve-type">Device type</Label>
               <select
                 id="approve-type"
-                className="flex h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                className="flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm"
                 value={approveTypeId}
                 onChange={(event) => setApproveTypeId(event.target.value)}
               >
@@ -230,7 +230,7 @@ export function PendingEnrollmentRequests({
               <Label htmlFor="approve-group">Device group</Label>
               <select
                 id="approve-group"
-                className="flex h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                className="flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm"
                 value={approveGroupId}
                 onChange={(event) => setApproveGroupId(event.target.value)}
               >

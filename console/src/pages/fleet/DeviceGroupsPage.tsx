@@ -1,22 +1,16 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
-import {
-  createDeviceGroup,
-  deleteDeviceGroup,
-  listDeviceGroups,
-  updateDeviceGroup,
-} from "@/api/fleet";
+import { createDeviceGroup, listDeviceGroups } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
-import { FleetNav } from "@/components/fleet/FleetNav";
+import { DevicesNav } from "@/components/fleet/DevicesNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { canManageFleet } from "@/lib/permissions";
-import { formatDateTime } from "@/lib/utils";
 
 export function DeviceGroupsPage() {
   const { organizationId = "" } = useParams();
@@ -25,8 +19,6 @@ export function DeviceGroupsPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -42,9 +34,6 @@ export function DeviceGroupsPage() {
 
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["device-groups", organizationId] });
-
   const createMutation = useMutation({
     mutationFn: () =>
       createDeviceGroup(token!, organizationId, {
@@ -55,53 +44,33 @@ export function DeviceGroupsPage() {
       setName("");
       setDescription("");
       setError(null);
-      await invalidate();
+      await queryClient.invalidateQueries({ queryKey: ["device-groups", organizationId] });
     },
     onError: (err: unknown) => {
       setError(err instanceof ApiError ? err.message : "Could not create device group.");
     },
   });
 
-  async function onCreate(event: FormEvent) {
+  function onCreate(event: FormEvent) {
     event.preventDefault();
     createMutation.mutate();
   }
 
-  async function onSaveEdit(groupId: string) {
-    setError(null);
-    try {
-      await updateDeviceGroup(token!, organizationId, groupId, { name: editName });
-      setEditingId(null);
-      await invalidate();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not update device group.");
-    }
-  }
-
-  async function onDelete(groupId: string) {
-    if (!window.confirm("Delete this device group?")) {
-      return;
-    }
-    setError(null);
-    try {
-      await deleteDeviceGroup(token!, organizationId, groupId);
-      await invalidate();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not delete device group.");
-    }
-  }
+  const groups = groupsQuery.data ?? [];
 
   return (
     <section className="mx-auto max-w-4xl space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Fleet</h1>
-        <p className="mt-2 text-muted-foreground">{orgQuery.data?.name}</p>
+        <h1 className="text-3xl font-semibold tracking-tight">Device Groups</h1>
+        <p className="mt-2 text-muted-foreground">
+          Organize your fleet logically, e.g. Production, Testing, or Berlin Heating.
+        </p>
       </div>
-      <FleetNav organizationId={organizationId} />
+      <DevicesNav organizationId={organizationId} />
 
       {canManage && (
         <form
-          className="grid gap-3 rounded-lg border border-border bg-white/80 p-5 shadow-sm md:grid-cols-[1fr_1fr_auto]"
+          className="grid gap-3 rounded-lg border border-border bg-card p-5 shadow-glow md:grid-cols-[1fr_1fr_auto]"
           onSubmit={onCreate}
         >
           <div>
@@ -110,6 +79,7 @@ export function DeviceGroupsPage() {
               id="group-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Production"
               required
             />
           </div>
@@ -129,57 +99,35 @@ export function DeviceGroupsPage() {
         </form>
       )}
 
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error && (
+        <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+      )}
 
       {groupsQuery.isLoading ? (
         <p className="text-muted-foreground">Loading device groups…</p>
-      ) : (groupsQuery.data ?? []).length === 0 ? (
+      ) : groups.length === 0 ? (
         <p className="text-muted-foreground">No device groups yet.</p>
       ) : (
         <ul className="space-y-3">
-          {(groupsQuery.data ?? []).map((group) => (
-            <li
-              key={group.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-white/80 p-4 shadow-sm"
-            >
-              {editingId === group.id ? (
-                <div className="flex flex-1 items-center gap-2">
-                  <Input value={editName} onChange={(event) => setEditName(event.target.value)} />
-                  <Button size="sm" onClick={() => onSaveEdit(group.id)}>
-                    Save
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
+          {groups.map((group) => (
+            <li key={group.id}>
+              <Link
+                to={`/organizations/${organizationId}/device-groups/${group.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4 shadow-glow transition hover:border-link"
+              >
                 <div>
                   <p className="font-medium">{group.name}</p>
                   {group.description && (
                     <p className="text-sm text-muted-foreground">{group.description}</p>
                   )}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Created {formatDateTime(group.created_at)}
-                  </p>
                 </div>
-              )}
-              {canManage && editingId !== group.id && (
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      setEditingId(group.id);
-                      setEditName(group.name);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => onDelete(group.id)}>
-                    Delete
-                  </Button>
-                </div>
-              )}
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-semibold text-foreground">
+                    {group.device_count.toLocaleString()}
+                  </span>{" "}
+                  {group.device_count === 1 ? "device" : "devices"}
+                </p>
+              </Link>
             </li>
           ))}
         </ul>

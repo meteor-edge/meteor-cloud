@@ -3,12 +3,27 @@ import type { DeviceType } from "@/api/fleet/types";
 
 export type DeviceTypePayload = {
   name: string;
+  slug?: string;
   description?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  architecture?: string | null;
   capabilities?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 };
 
 export function listDeviceTypes(token: string, organizationId: string): Promise<DeviceType[]> {
   return apiRequest<DeviceType[]>(`/api/v1/organizations/${organizationId}/device-types`, {
+    token,
+  });
+}
+
+export function getDeviceType(
+  token: string,
+  organizationId: string,
+  typeId: string,
+): Promise<DeviceType> {
+  return apiRequest<DeviceType>(`/api/v1/organizations/${organizationId}/device-types/${typeId}`, {
     token,
   });
 }

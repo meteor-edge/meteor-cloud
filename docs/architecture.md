@@ -76,8 +76,9 @@ See [Frontends](frontends.md).
 | `MQTTGateway` | Data-plane HTTP → EMQX | other broker names |
 | Telemetry last-value | PostgreSQL columns on `Device` | `timescale`, `clickhouse` |
 | `OTAProvider` | `none` | `mender` and others later |
+| `ObjectStorage` | `s3` (S3-compatible: MinIO locally, AWS S3, GCS interop) | — |
 
-Kafka, object storage, and Mender SDKs are not in the product.
+Artifact binaries (OS images, firmware, …) live in object storage; PostgreSQL keeps only their metadata and storage key. See [Artifacts](fleet/artifacts.md). Kafka and Mender SDKs are not in the product.
 
 ## Kubernetes
 

@@ -146,3 +146,78 @@ def test_device_group_crud(client: TestClient, db_session: Session) -> None:
 
     deleted = client.delete(f"/api/v1/organizations/{org.id}/device-groups/{group_id}", headers=headers)
     assert deleted.status_code == 204
+
+
+def test_device_type_hardware_fields_and_slugs(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    url = f"/api/v1/organizations/{org.id}/device-types"
+
+    created = client.post(
+        url,
+        headers=headers,
+        json={
+            "name": "Raspberry Pi 4",
+            "manufacturer": "Raspberry Pi Ltd",
+            "model": "4 Model B",
+            "architecture": "arm64",
+            "metadata": {"ram_gb": 4},
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["slug"] == "raspberry-pi-4"
+    assert body["manufacturer"] == "Raspberry Pi Ltd"
+    assert body["architecture"] == "arm64"
+    assert body["metadata"] == {"ram_gb": 4}
+    assert body["device_count"] == 0
+    assert body["artifact_count"] == 0
+
+    # A different name that derives the same slug gets a suffix.
+    second = client.post(url, headers=headers, json={"name": "Raspberry-Pi 4"}).json()
+    assert second["slug"] == "raspberry-pi-4-2"
+
+    # An explicit slug that is taken is a conflict.
+    taken = client.post(url, headers=headers, json={"name": "Other", "slug": "raspberry-pi-4"})
+    assert taken.status_code == 409
+    assert taken.json()["error"]["code"] == "device_type_slug_exists"
+    invalid = client.post(url, headers=headers, json={"name": "Other", "slug": "Not A Slug"})
+    assert invalid.status_code == 422
+
+    # Explicit null clears a text field; omitted fields stay untouched.
+    updated = client.patch(f"{url}/{body['id']}", headers=headers, json={"manufacturer": None}).json()
+    assert updated["manufacturer"] is None
+    assert updated["model"] == "4 Model B"
+    assert updated["slug"] == "raspberry-pi-4"
+
+
+def test_device_group_slug_and_device_count(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+
+    group = client.post(
+        f"/api/v1/organizations/{org.id}/device-groups",
+        headers=headers,
+        json={"name": "Berlin Heating", "metadata": {"site": "berlin"}},
+    ).json()
+    assert group["slug"] == "berlin-heating"
+    assert group["metadata"] == {"site": "berlin"}
+
+    token = client.post(
+        f"/api/v1/organizations/{org.id}/registration-tokens",
+        headers=headers,
+        json={"name": "Bootstrap", "max_uses": 10, "device_group_id": group["id"]},
+    ).json()["token"]
+    for i in range(2):
+        response = client.post(
+            "/api/v1/agent/register",
+            json={"token": token, "name": f"rpi4-00{i}", "mac_addresses": [f"aa:bb:cc:dd:ee:0{i}"]},
+        )
+        assert response.status_code == 201, response.text
+
+    listed = client.get(f"/api/v1/organizations/{org.id}/device-groups", headers=headers).json()
+    assert listed[0]["device_count"] == 2
+    detail = client.get(f"/api/v1/organizations/{org.id}/device-groups/{group['id']}", headers=headers).json()
+    assert detail["device_count"] == 2
