@@ -2,17 +2,16 @@ import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
-import { createDeviceGroup, listDeviceGroups } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
+import { createTeam, listTeams } from "@/api/teams";
 import { useAuth } from "@/auth/AuthContext";
-import { DevicesNav } from "@/components/fleet/DevicesNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { canManageDeviceGroups } from "@/lib/permissions";
+import { canManageTeams } from "@/lib/permissions";
 
-export function DeviceGroupsPage() {
+export function TeamsPage() {
   const { organizationId = "" } = useParams();
   const { token } = useAuth();
   const queryClient = useQueryClient();
@@ -26,28 +25,25 @@ export function DeviceGroupsPage() {
     enabled: Boolean(token && organizationId),
   });
 
-  const groupsQuery = useQuery({
-    queryKey: ["device-groups", organizationId, token],
-    queryFn: () => listDeviceGroups(token!, organizationId),
+  const teamsQuery = useQuery({
+    queryKey: ["teams", organizationId, token],
+    queryFn: () => listTeams(token!, organizationId),
     enabled: Boolean(token && organizationId),
   });
 
-  const canManage = canManageDeviceGroups(orgQuery.data?.current_user_role);
+  const canManage = canManageTeams(orgQuery.data?.current_user_role);
 
   const createMutation = useMutation({
     mutationFn: () =>
-      createDeviceGroup(token!, organizationId, {
-        name,
-        description: description || undefined,
-      }),
+      createTeam(token!, organizationId, { name, description: description || undefined }),
     onSuccess: async () => {
       setName("");
       setDescription("");
       setError(null);
-      await queryClient.invalidateQueries({ queryKey: ["device-groups", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["teams", organizationId] });
     },
     onError: (err: unknown) => {
-      setError(err instanceof ApiError ? err.message : "Could not create device group.");
+      setError(err instanceof ApiError ? err.message : "Could not create team.");
     },
   });
 
@@ -56,17 +52,17 @@ export function DeviceGroupsPage() {
     createMutation.mutate();
   }
 
-  const groups = groupsQuery.data ?? [];
+  const teams = teamsQuery.data ?? [];
 
   return (
     <section className="mx-auto max-w-4xl space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Device Groups</h1>
-        <p className="mt-2 text-muted-foreground">
-          Organize your fleet logically, e.g. Production, Testing, or Berlin Heating.
+        <h1 className="text-3xl font-semibold tracking-tight">Teams</h1>
+        <p className="mt-2 max-w-xl text-muted-foreground">
+          Group members by how they work together, e.g. Berlin on-call or Firmware. Teams do not
+          change what anyone can do; roles and device groups on each member still decide that.
         </p>
       </div>
-      <DevicesNav organizationId={organizationId} />
 
       {canManage && (
         <form
@@ -74,58 +70,62 @@ export function DeviceGroupsPage() {
           onSubmit={onCreate}
         >
           <div>
-            <Label htmlFor="group-name">Name</Label>
+            <Label htmlFor="team-name">Name</Label>
             <Input
-              id="group-name"
+              id="team-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Production"
+              placeholder="e.g. Berlin on-call"
+              maxLength={120}
               required
             />
           </div>
           <div>
-            <Label htmlFor="group-description">Description</Label>
+            <Label htmlFor="team-description">Description</Label>
             <Input
-              id="group-description"
+              id="team-description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
             />
           </div>
           <div className="flex items-end">
             <Button type="submit" disabled={createMutation.isPending}>
-              Add group
+              Add team
             </Button>
           </div>
         </form>
       )}
 
-      {error && (
-        <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+      {(error || teamsQuery.error) && (
+        <p className="rounded-md bg-ember px-2 py-1 text-sm font-medium text-midnight">
+          {error ??
+            (teamsQuery.error instanceof ApiError
+              ? teamsQuery.error.message
+              : "Could not load teams.")}
+        </p>
       )}
 
-      {groupsQuery.isLoading ? (
-        <p className="text-muted-foreground">Loading device groups…</p>
-      ) : groups.length === 0 ? (
-        <p className="text-muted-foreground">No device groups yet.</p>
+      {teamsQuery.isLoading ? (
+        <p className="text-muted-foreground">Loading teams…</p>
+      ) : teamsQuery.error ? null : teams.length === 0 ? (
+        <p className="text-muted-foreground">No teams yet.</p>
       ) : (
         <ul className="space-y-3">
-          {groups.map((group) => (
-            <li key={group.id}>
+          {teams.map((team) => (
+            <li key={team.id}>
               <Link
-                to={`/organizations/${organizationId}/device-groups/${group.id}`}
+                to={`/organizations/${organizationId}/teams/${team.id}`}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4 shadow-glow transition hover:border-link"
               >
                 <div>
-                  <p className="font-medium">{group.name}</p>
-                  {group.description && (
-                    <p className="text-sm text-muted-foreground">{group.description}</p>
+                  <p className="font-medium">{team.name}</p>
+                  {team.description && (
+                    <p className="text-sm text-muted-foreground">{team.description}</p>
                   )}
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  <span className="font-semibold text-foreground">
-                    {group.device_count.toLocaleString()}
-                  </span>{" "}
-                  {group.device_count === 1 ? "device" : "devices"}
+                  <span className="font-semibold text-foreground">{team.member_count}</span>{" "}
+                  {team.member_count === 1 ? "member" : "members"}
                 </p>
               </Link>
             </li>

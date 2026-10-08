@@ -7,6 +7,7 @@ import uuid
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.authorization.roles import get_system_role_id
 from app.tenancy.models import OrganizationMembership, OrganizationRole
 from tests.conftest import auth_header, create_org_with_owner, create_user
 
@@ -56,7 +57,7 @@ def test_get_organization_as_member(client: TestClient, db_session: Session) -> 
         OrganizationMembership(
             organization_id=organization.id,
             user_id=member.id,
-            role=OrganizationRole.MEMBER,
+            role_id=get_system_role_id(db_session, OrganizationRole.OPERATOR.value),
         )
     )
     db_session.commit()
@@ -64,7 +65,7 @@ def test_get_organization_as_member(client: TestClient, db_session: Session) -> 
     headers = auth_header(client, "member@example.com")
     response = client.get(f"/api/v1/organizations/{organization.id}", headers=headers)
     assert response.status_code == 200
-    assert response.json()["current_user_role"] == "member"
+    assert response.json()["current_user_role"] == "operator"
 
 
 def test_unauthorized_organization_access_returns_404(
@@ -103,7 +104,7 @@ def test_update_organization_as_admin(client: TestClient, db_session: Session) -
         OrganizationMembership(
             organization_id=organization.id,
             user_id=admin.id,
-            role=OrganizationRole.ADMIN,
+            role_id=get_system_role_id(db_session, OrganizationRole.ADMIN.value),
         )
     )
     db_session.commit()
@@ -129,7 +130,7 @@ def test_update_organization_denied_for_member(
         OrganizationMembership(
             organization_id=organization.id,
             user_id=member.id,
-            role=OrganizationRole.MEMBER,
+            role_id=get_system_role_id(db_session, OrganizationRole.OPERATOR.value),
         )
     )
     db_session.commit()
@@ -161,7 +162,7 @@ def test_delete_denied_for_admin(client: TestClient, db_session: Session) -> Non
         OrganizationMembership(
             organization_id=organization.id,
             user_id=admin.id,
-            role=OrganizationRole.ADMIN,
+            role_id=get_system_role_id(db_session, OrganizationRole.ADMIN.value),
         )
     )
     db_session.commit()

@@ -5,10 +5,13 @@ Unsupported provider names fail fast. Future providers are not implemented.
 
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from app.core.config import Settings
 from app.devices.rate_limit import InMemoryRateLimiter, RedisRateLimiter
 from app.mqtt.service import NoopPublisher
 from app.ports.cache import RateLimiter
+from app.ports.identity import IdentityDirectory
 from app.ports.mqtt import MQTTGateway
 from app.ports.ota import OTAProvider
 from app.ports.storage import ObjectStorage
@@ -47,6 +50,16 @@ def ota_provider(settings: Settings) -> OTAProvider | None:
     raise RuntimeError(f"Unsupported ota.provider={settings.ota_provider!r}; no OTA adapter is implemented")
 
 
+def identity_directory(settings: Settings, session: Session) -> IdentityDirectory:
+    if settings.identity_provider != "local":
+        raise RuntimeError(
+            f"Unsupported identity.provider={settings.identity_provider!r}; only 'local' is implemented"
+        )
+    from app.adapters.local_identity import LocalIdentityDirectory
+
+    return LocalIdentityDirectory(session)
+
+
 def object_storage(settings: Settings) -> ObjectStorage:
     """Build the configured S3-compatible storage adapter.
 
@@ -62,4 +75,11 @@ def object_storage(settings: Settings) -> ObjectStorage:
     return S3ObjectStorage(settings)
 
 
-__all__ = ["InMemoryRateLimiter", "mqtt_gateway", "object_storage", "ota_provider", "rate_limiter"]
+__all__ = [
+    "InMemoryRateLimiter",
+    "identity_directory",
+    "mqtt_gateway",
+    "object_storage",
+    "ota_provider",
+    "rate_limiter",
+]

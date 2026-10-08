@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.rest.health import router as health_router
 from app.artifacts.router import router as artifacts_router
 from app.audit.router import router as audit_router
+from app.authorization.router import router as authorization_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
@@ -62,6 +63,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(application)
     application.include_router(health_router)
     application.include_router(identity_router)
+    application.include_router(authorization_router)
     application.include_router(organizations_router)
     application.include_router(fleet_router)
     application.include_router(artifacts_router)

@@ -76,7 +76,10 @@ def test_artifact_metadata_normalization_and_independent_defaults():
 def catalog(request):
     service = FleetService(Mock(spec=Session))
     service.organizations = Mock(spec=OrganizationRepository)
-    service.organizations.get_for_user.return_value = (Mock(), OrganizationMembership(role=OrganizationRole.OWNER))
+    service.organizations.get_for_user.return_value = (Mock(), Mock(role=OrganizationRole.OWNER, status="active"))
+    service.authz = Mock()
+    service.authz.require = Mock()
+    service.authz.scope_for.return_value = Mock(mode="organization", device_group_ids=())
     now = datetime.now(UTC)
     common = dict(
         id=uuid.uuid4(),

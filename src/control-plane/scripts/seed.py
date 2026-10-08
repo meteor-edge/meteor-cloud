@@ -7,6 +7,7 @@ import sys
 
 from sqlalchemy.orm import Session
 
+from app.authorization.seed import seed_authorization_catalog
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.logging import configure_logging
@@ -48,6 +49,7 @@ ORG_DESCRIPTION = "Development organization for Edge Platform"
 
 
 def seed(session: Session) -> None:
+    seed_authorization_catalog(session)
     users = UserRepository(session)
     organizations = OrganizationRepository(session)
     memberships = MembershipRepository(session)
@@ -82,7 +84,7 @@ def seed(session: Session) -> None:
     role_map = {
         "owner@example.com": OrganizationRole.OWNER,
         "admin@example.com": OrganizationRole.ADMIN,
-        "member@example.com": OrganizationRole.MEMBER,
+        "member@example.com": OrganizationRole.OPERATOR,
         "viewer@example.com": OrganizationRole.VIEWER,
     }
     for email, role in role_map.items():

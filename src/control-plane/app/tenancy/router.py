@@ -8,8 +8,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.adapters import identity_directory as build_identity_directory
+from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.identity.dependencies import CurrentUser
+from app.ports.identity import IdentityDirectory
 from app.tenancy.schemas import (
     MemberAddRequest,
     MemberResponse,
@@ -17,19 +20,40 @@ from app.tenancy.schemas import (
     OrganizationCreateRequest,
     OrganizationResponse,
     OrganizationUpdateRequest,
+    TeamCreateRequest,
+    TeamMemberAddRequest,
+    TeamResponse,
+    TeamSummaryResponse,
+    TeamUpdateRequest,
 )
 from app.tenancy.service import OrganizationService
+from app.tenancy.teams import TeamService
 
 router = APIRouter(prefix="/api/v1/organizations", tags=["organizations"])
 
 
+def get_identity_directory(
+    session: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> IdentityDirectory:
+    return build_identity_directory(settings, session)
+
+
 def get_organization_service(
     session: Annotated[Session, Depends(get_db)],
+    identity: Annotated[IdentityDirectory, Depends(get_identity_directory)],
 ) -> OrganizationService:
-    return OrganizationService(session)
+    return OrganizationService(session, identity)
 
 
 OrgService = Annotated[OrganizationService, Depends(get_organization_service)]
+
+
+def get_team_service(session: Annotated[Session, Depends(get_db)]) -> TeamService:
+    return TeamService(session)
+
+
+TeamSvc = Annotated[TeamService, Depends(get_team_service)]
 
 
 @router.get("", response_model=list[OrganizationResponse])
@@ -133,6 +157,93 @@ def remove_member(
     service.remove_member(
         actor=current_user,
         organization_id=organization_id,
+        membership_id=membership_id,
+    )
+
+
+@router.get("/{organization_id}/teams", response_model=list[TeamSummaryResponse])
+def list_teams(
+    organization_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: TeamSvc,
+) -> list[TeamSummaryResponse]:
+    return service.list_teams(actor=current_user, organization_id=organization_id)
+
+
+@router.post("/{organization_id}/teams", response_model=TeamResponse, status_code=201)
+def create_team(
+    organization_id: uuid.UUID,
+    payload: TeamCreateRequest,
+    current_user: CurrentUser,
+    service: TeamSvc,
+) -> TeamResponse:
+    return service.create_team(actor=current_user, organization_id=organization_id, payload=payload)
+
+
+@router.get("/{organization_id}/teams/{team_id}", response_model=TeamResponse)
+def get_team(
+    organization_id: uuid.UUID,
+    team_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: TeamSvc,
+) -> TeamResponse:
+    return service.get_team(actor=current_user, organization_id=organization_id, team_id=team_id)
+
+
+@router.patch("/{organization_id}/teams/{team_id}", response_model=TeamResponse)
+def update_team(
+    organization_id: uuid.UUID,
+    team_id: uuid.UUID,
+    payload: TeamUpdateRequest,
+    current_user: CurrentUser,
+    service: TeamSvc,
+) -> TeamResponse:
+    return service.update_team(
+        actor=current_user,
+        organization_id=organization_id,
+        team_id=team_id,
+        payload=payload,
+    )
+
+
+@router.delete("/{organization_id}/teams/{team_id}", status_code=204)
+def delete_team(
+    organization_id: uuid.UUID,
+    team_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: TeamSvc,
+) -> None:
+    service.delete_team(actor=current_user, organization_id=organization_id, team_id=team_id)
+
+
+@router.post("/{organization_id}/teams/{team_id}/members", response_model=TeamResponse)
+def add_team_member(
+    organization_id: uuid.UUID,
+    team_id: uuid.UUID,
+    payload: TeamMemberAddRequest,
+    current_user: CurrentUser,
+    service: TeamSvc,
+) -> TeamResponse:
+    return service.add_member(
+        actor=current_user,
+        organization_id=organization_id,
+        team_id=team_id,
+        membership_id=payload.membership_id,
+    )
+
+
+@router.delete("/{organization_id}/teams/{team_id}/members/{membership_id}", response_model=TeamResponse)
+def remove_team_member(
+    organization_id: uuid.UUID,
+    team_id: uuid.UUID,
+    membership_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: TeamSvc,
+) -> TeamResponse:
+    return service.remove_member(
+        actor=current_user,
+        organization_id=organization_id,
+        team_id=team_id,
         membership_id=membership_id,
     )
 

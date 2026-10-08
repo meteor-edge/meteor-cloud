@@ -17,7 +17,7 @@ import { useArtifactActions } from "@/components/artifacts/useArtifactActions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
-import { canManageFleet } from "@/lib/permissions";
+import { canManageArtifacts } from "@/lib/permissions";
 
 const PAGE_SIZE = 20;
 
@@ -70,7 +70,7 @@ export function ArtifactsPage() {
     enabled: Boolean(token && organizationId),
   });
 
-  const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const canManage = canManageArtifacts(orgQuery.data?.current_user_role);
   const { onDownload, onDelete, refresh } = useArtifactActions(token, organizationId, setError);
   const deviceTypeNames = useMemo(
     () => new Map((typesQuery.data ?? []).map((item) => [item.id, item.name])),

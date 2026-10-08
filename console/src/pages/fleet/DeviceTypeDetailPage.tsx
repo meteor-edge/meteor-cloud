@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs } from "@/components/ui/tabs";
-import { canManageFleet } from "@/lib/permissions";
+import { canManageArtifacts, canManageDeviceTypes } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 type Tab = "overview" | "devices" | "artifacts";
@@ -75,7 +75,8 @@ export function DeviceTypeDetailPage() {
     enabled: Boolean(token && organizationId && typeId),
   });
 
-  const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const canManageType = canManageDeviceTypes(orgQuery.data?.current_user_role);
+  const canManage = canManageArtifacts(orgQuery.data?.current_user_role);
   const { onDownload, onDelete, refresh } = useArtifactActions(token, organizationId, setError);
 
   const groupNames = useMemo(
@@ -145,7 +146,7 @@ export function DeviceTypeDetailPage() {
         <DeviceTypeOverview
           key={deviceType.updated_at}
           deviceType={deviceType}
-          canManage={canManage}
+          canManage={canManageType}
           onError={setError}
           onSaved={() =>
             Promise.all([

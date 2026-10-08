@@ -18,9 +18,12 @@ import { ApiKeysPage } from "@/pages/fleet/ApiKeysPage";
 import { MqttTestPage } from "@/pages/fleet/MqttTestPage";
 import { OrganizationCreatePage } from "@/pages/organizations/OrganizationCreatePage";
 import { OrganizationListPage } from "@/pages/organizations/OrganizationListPage";
+import { MemberAccessPage } from "@/pages/organizations/MemberAccessPage";
 import { OrganizationMembersPage } from "@/pages/organizations/OrganizationMembersPage";
 import { OrganizationOverviewPage } from "@/pages/organizations/OrganizationOverviewPage";
 import { OrganizationSettingsPage } from "@/pages/organizations/OrganizationSettingsPage";
+import { TeamDetailPage } from "@/pages/organizations/TeamDetailPage";
+import { TeamsPage } from "@/pages/organizations/TeamsPage";
 
 export function App() {
   return (
@@ -62,6 +65,30 @@ export function App() {
           element={
             <ProtectedRoute>
               <OrganizationMembersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/members/:membershipId/access"
+          element={
+            <ProtectedRoute>
+              <MemberAccessPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/teams"
+          element={
+            <ProtectedRoute>
+              <TeamsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/teams/:teamId"
+          element={
+            <ProtectedRoute>
+              <TeamDetailPage />
             </ProtectedRoute>
           }
         />

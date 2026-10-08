@@ -1,6 +1,6 @@
 import { apiRequest } from "@/api/http";
 
-export type OrganizationRole = "owner" | "admin" | "member" | "viewer";
+export type OrganizationRole = "owner" | "admin" | "operator" | "developer" | "viewer";
 
 export type Organization = {
   id: string;
@@ -14,6 +14,12 @@ export type Organization = {
   member_count: number | null;
 };
 
+export type MemberScope = {
+  mode: "organization" | "device_groups" | string;
+  device_group_ids: string[];
+  device_group_names: string[];
+};
+
 export type Member = {
   id: string;
   organization_id: string;
@@ -21,6 +27,10 @@ export type Member = {
   email: string;
   full_name: string;
   role: OrganizationRole;
+  role_name: string;
+  status: string;
+  scope: MemberScope;
+  teams: { id: string; name: string }[];
   created_at: string;
   updated_at: string;
 };
@@ -78,7 +88,14 @@ export function listMembers(token: string, organizationId: string): Promise<Memb
 export function addMember(
   token: string,
   organizationId: string,
-  payload: { email: string; role: OrganizationRole },
+  payload: {
+    email: string;
+    /** Required only when no account exists for the email yet. */
+    full_name?: string;
+    password?: string;
+    role: OrganizationRole;
+    scope?: { device_group_ids: string[] };
+  },
 ): Promise<Member> {
   return apiRequest<Member>(`/api/v1/organizations/${organizationId}/members`, {
     token,
@@ -96,6 +113,19 @@ export function updateMemberRole(
     method: "PATCH",
     token,
     body: { role },
+  });
+}
+
+export function updateMemberAccess(
+  token: string,
+  organizationId: string,
+  membershipId: string,
+  payload: { role?: OrganizationRole; scope?: { device_group_ids: string[] } },
+): Promise<Member> {
+  return apiRequest<Member>(`/api/v1/organizations/${organizationId}/members/${membershipId}`, {
+    method: "PATCH",
+    token,
+    body: payload,
   });
 }
 

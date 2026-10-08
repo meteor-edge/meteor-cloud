@@ -69,7 +69,7 @@ def test_audit_event_actor_set_null_when_user_deleted(db_session: Session) -> No
     owner = create_user(db_session, email="owner-audit-cascade@example.com")
     member = create_user(db_session, email="member-audit-cascade@example.com")
     org, _ = create_org_with_owner(db_session, owner)
-    add_member(db_session, org, member, OrganizationRole.MEMBER)
+    add_member(db_session, org, member, OrganizationRole.OPERATOR)
 
     event = AuditEvent(
         organization_id=org.id,

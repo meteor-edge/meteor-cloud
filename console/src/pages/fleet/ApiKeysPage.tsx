@@ -16,7 +16,7 @@ import { PendingEnrollmentRequests } from "@/components/fleet/PendingEnrollmentR
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { canManageFleet } from "@/lib/permissions";
+import { canManageEnrollmentKeys } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 function buildConfigCommand(domain: string, apiKey: string): string {
@@ -43,7 +43,7 @@ export function ApiKeysPage() {
     enabled: Boolean(token && organizationId),
   });
 
-  const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const canManage = canManageEnrollmentKeys(orgQuery.data?.current_user_role);
 
   const createMutation = useMutation({
     mutationFn: () =>

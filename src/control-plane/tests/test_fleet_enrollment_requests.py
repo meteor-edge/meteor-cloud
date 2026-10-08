@@ -165,11 +165,11 @@ def test_poll_rejects_wrong_claim_secret(client: TestClient, db_session: Session
     assert response.json()["error"]["code"] == "invalid_enrollment_request"
 
 
-def test_member_cannot_approve(client: TestClient, db_session: Session) -> None:
+def test_developer_cannot_approve(client: TestClient, db_session: Session) -> None:
     owner = create_user(db_session, email="owner@example.com")
-    member = create_user(db_session, email="member@example.com")
+    member = create_user(db_session, email="dev@example.com")
     org, _ = create_org_with_owner(db_session, owner)
-    add_member(db_session, org, member, OrganizationRole.MEMBER)
+    add_member(db_session, org, member, OrganizationRole.DEVELOPER)
     owner_headers = auth_header(client, "owner@example.com")
     key = _create_key(client, org.id, owner_headers)
     submitted = client.post(
@@ -178,7 +178,7 @@ def test_member_cannot_approve(client: TestClient, db_session: Session) -> None:
         json={"mac_addresses": ["aa:bb:cc:dd:ee:01"]},
     ).json()
 
-    member_headers = auth_header(client, "member@example.com")
+    member_headers = auth_header(client, "dev@example.com")
     response = client.post(
         f"/api/v1/organizations/{org.id}/enrollment-requests/{submitted['request_id']}/approve",
         headers=member_headers,
