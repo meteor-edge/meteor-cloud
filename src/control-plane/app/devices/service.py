@@ -365,7 +365,7 @@ class FleetService:
         database and response validation errors propagate.
         """
         membership = self._require_membership(organization_id, actor.id)
-        self._require(membership, "device_group.read")
+        self.authz.require_role_permission(membership, "device_group.read")
         counts = self.device_groups.device_counts(organization_id=organization_id)
         groups = self.device_groups.list(organization_id=organization_id)
         scope = self.authz.scope_for(membership)
@@ -797,21 +797,21 @@ class FleetService:
         page_size: int = 20,
     ) -> Page[DeviceResponse]:
         membership = self._require_membership(organization_id, actor.id)
-        self._require(membership, "device.read")
+        self.authz.require_role_permission(membership, "device.read")
         scope = self.authz.scope_for(membership)
+        allowed_group_ids: list[uuid.UUID] | None = None
         if scope.mode == "device_groups":
-            allowed = set(scope.device_group_ids)
-            if device_group_id is not None and device_group_id not in allowed:
+            if device_group_id is not None and device_group_id not in scope.device_group_ids:
                 return Page[DeviceResponse](items=[], total=0, page=page, page_size=page_size)
-            # Scoped members never see ungrouped devices; repository filters one group or we post-filter.
-            if device_group_id is None and len(allowed) == 1:
-                device_group_id = next(iter(allowed))
+            # Scoped members never see ungrouped devices.
+            allowed_group_ids = list(scope.device_group_ids)
         cutoff = offline_cutoff(offline_threshold_seconds=self.settings.device_offline_threshold_seconds)
         devices, total = self.devices.list_paginated(
             organization_id=organization_id,
             search=search,
             device_type_id=device_type_id,
             device_group_id=device_group_id,
+            allowed_group_ids=allowed_group_ids,
             architecture=architecture,
             enabled=enabled,
             status=status,
@@ -821,10 +821,6 @@ class FleetService:
             page=page,
             page_size=page_size,
         )
-        if scope.mode == "device_groups" and device_group_id is None:
-            allowed = set(scope.device_group_ids)
-            devices = [d for d in devices if d.device_group_id in allowed]
-            total = len(devices)
         return Page[DeviceResponse](
             items=[self._to_device_response(device) for device in devices],
             total=total,

@@ -298,6 +298,7 @@ class DeviceRepository:
         search: str | None = None,
         device_type_id: uuid.UUID | None = None,
         device_group_id: uuid.UUID | None = None,
+        allowed_group_ids: list[uuid.UUID] | None = None,
         architecture: str | None = None,
         enabled: bool | None = None,
         status: str | None = None,
@@ -307,6 +308,7 @@ class DeviceRepository:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Device], int]:
+        """``allowed_group_ids`` limits results to those groups (and excludes ungrouped devices)."""
         statement = self._base_query(
             organization_id=organization_id,
             search=search,
@@ -317,6 +319,8 @@ class DeviceRepository:
             online_cutoff=online_cutoff,
             status=status,
         )
+        if allowed_group_ids is not None:
+            statement = statement.where(Device.device_group_id.in_(allowed_group_ids))
 
         count_statement = select(func.count()).select_from(statement.subquery())
         total = int(self.session.scalar(count_statement) or 0)

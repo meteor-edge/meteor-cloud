@@ -300,7 +300,8 @@ Indexes: `(membership_id)`, `(scope_type, scope_id)`.
       "role": { "key": "operator", "name": "Operator", "is_system": true },
       "scope": {
         "mode": "device_groups",
-        "device_groups": [{ "id": "...", "name": "Berlin" }]
+        "device_group_ids": ["..."],
+        "device_group_names": ["Berlin"]
       },
       "permissions": ["device.read", "device.update", "device.reboot", "..."],
       "summary": {
@@ -324,22 +325,34 @@ Same shape as one org entry above, plus:
 
 ```json
 {
-  "member": { "user_id": "...", "email": "...", "full_name": "..." },
+  "membership_id": "...",
+  "user_id": "...",
+  "email": "...",
+  "full_name": "...",
   "permissions_detail": [
     {
       "id": "device.reboot",
       "label": "Reboot devices",
       "description": "...",
+      "resource": "device",
+      "action": "reboot",
       "granted": true,
       "source": "role",
       "role_key": "operator",
-      "scope": { "mode": "device_groups", "device_group_ids": ["..."] }
+      "reason": null,
+      "scope_mode": "device_groups"
     },
     {
       "id": "device.delete",
       "label": "Delete devices",
+      "description": "...",
+      "resource": "device",
+      "action": "delete",
       "granted": false,
-      "reason": "not_in_role"
+      "source": null,
+      "role_key": null,
+      "reason": "not_in_role",
+      "scope_mode": null
     }
   ]
 }
@@ -387,13 +400,11 @@ Response:
 ### Authz in handlers
 
 ```python
-authz.require(
-    actor=user,
-    organization_id=org_id,
-    permission="device.reboot",
-    resource=device,  # optional; supplies organization_id + device_group_id
-)
+membership = authz.require_membership(user_id=user.id, organization_id=org_id)
+authz.require(membership, "device.reboot", device_group_id=device.device_group_id)
 ```
+
+`require_membership` raises `NotFoundError` (404) when the user has no active membership. For collection reads, `require_role_permission(membership, "device.read")` checks the role only; the caller applies the device-group scope in the query.
 
 Raises `UnauthorizedError` (401) if no actor; `ForbiddenError` (403) if membership/permission/scope fails; uses `NotFoundError` (404) when the resource is outside the actor’s org (tenant isolation).
 

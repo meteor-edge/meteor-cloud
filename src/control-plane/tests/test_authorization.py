@@ -30,7 +30,7 @@ def test_me_access_lists_permissions_for_each_org(client: TestClient, db_session
     assert entry["scope"]["mode"] == "organization"
 
 
-def test_operator_can_reboot_but_not_delete_or_manage_members(
+def test_operator_can_read_device_but_not_delete_or_manage_members(
     client: TestClient, db_session: Session
 ) -> None:
     owner = create_user(db_session, email="owner@example.com")
@@ -118,6 +118,66 @@ def test_scoped_operator_cannot_access_other_device_group(
     assert client.get(f"/api/v1/organizations/{org.id}/devices/{device_berlin.id}", headers=headers).status_code == 200
     assert client.get(f"/api/v1/organizations/{org.id}/devices/{device_munich.id}", headers=headers).status_code == 403
     assert client.get(f"/api/v1/organizations/{org.id}/devices/{ungrouped.id}", headers=headers).status_code == 403
+
+
+def test_scoped_list_filters_before_pagination(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    operator = create_user(db_session, email="ops@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    membership = add_member(db_session, org, operator, OrganizationRole.OPERATOR)
+
+    berlin = DeviceGroup(organization_id=org.id, name="Berlin", slug="berlin", labels={}, metadata_={})
+    munich = DeviceGroup(organization_id=org.id, name="Munich", slug="munich", labels={}, metadata_={})
+    paris = DeviceGroup(organization_id=org.id, name="Paris", slug="paris", labels={}, metadata_={})
+    db_session.add_all([berlin, munich, paris])
+    db_session.flush()
+    AuthzService(db_session).replace_device_group_scope(membership, [berlin.id, munich.id])
+    assert {b.scope_id for b in membership.bindings} == {berlin.id, munich.id}
+
+    # Out-of-scope devices sort first so a post-pagination filter would return an empty first page.
+    for name, group_id in [("a-paris", paris.id), ("b-loose", None), ("c-berlin", berlin.id), ("d-munich", munich.id)]:
+        db_session.add(
+            Device(
+                organization_id=org.id,
+                name=name,
+                device_group_id=group_id,
+                is_enabled=True,
+                labels={},
+                metadata_={},
+                mac_addresses=[],
+            )
+        )
+    db_session.commit()
+
+    headers = auth_header(client, "ops@example.com")
+    response = client.get(f"/api/v1/organizations/{org.id}/devices?page_size=1", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 2
+    assert [item["name"] for item in body["items"]] == ["c-berlin"]
+
+    groups = client.get(f"/api/v1/organizations/{org.id}/device-groups", headers=headers)
+    assert groups.status_code == 200, groups.text
+    assert sorted(item["name"] for item in groups.json()) == ["Berlin", "Munich"]
+
+
+def test_preview_denies_inactive_membership(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    operator = create_user(db_session, email="ops@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    membership = add_member(db_session, org, operator, OrganizationRole.OPERATOR)
+    membership.status = "disabled"
+    db_session.commit()
+
+    preview = client.post(
+        f"/api/v1/organizations/{org.id}/access-preview",
+        headers=auth_header(client, "owner@example.com"),
+        json={"membership_id": str(membership.id), "permission": "device.read"},
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["allowed"] is False
+    assert body["steps"][0]["ok"] is False
 
 
 def test_member_access_and_preview(client: TestClient, db_session: Session) -> None:

@@ -7,7 +7,10 @@ so team changes never change what anyone can do.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.audit.service import AuditRecorder
@@ -23,6 +26,9 @@ from app.tenancy.schemas import (
     TeamSummaryResponse,
     TeamUpdateRequest,
 )
+
+_TEAM_EXISTS = ("team_exists", "A team with this name already exists.")
+_TEAM_MEMBER_EXISTS = ("team_member_exists", "This member is already on the team.")
 
 
 class TeamService:
@@ -53,18 +59,19 @@ class TeamService:
         members = self._require_members(organization_id, payload.membership_ids)
 
         team = Team(organization_id=organization_id, name=payload.name, description=payload.description)
-        self.teams.create(team)
-        for membership in members:
-            team.members.append(TeamMember(membership_id=membership.id))
-        self.audit.record(
-            actor=actor,
-            organization_id=organization_id,
-            action="team.create",
-            resource_type="team",
-            resource_id=team.id,
-            metadata={"name": team.name, "membership_ids": [str(item.id) for item in members]},
-        )
-        self.session.commit()
+        with self._conflict_on_integrity_error(*_TEAM_EXISTS):
+            self.teams.create(team)
+            for membership in members:
+                team.members.append(TeamMember(membership_id=membership.id))
+            self.audit.record(
+                actor=actor,
+                organization_id=organization_id,
+                action="team.create",
+                resource_type="team",
+                resource_id=team.id,
+                metadata={"name": team.name, "membership_ids": [str(item.id) for item in members]},
+            )
+            self.session.commit()
         self.session.refresh(team)
         return self._to_response(team)
 
@@ -84,15 +91,16 @@ class TeamService:
             team.name = payload.name
         if "description" in payload.model_fields_set:
             team.description = payload.description
-        self.audit.record(
-            actor=actor,
-            organization_id=organization_id,
-            action="team.update",
-            resource_type="team",
-            resource_id=team.id,
-            metadata={"name": team.name},
-        )
-        self.session.commit()
+        with self._conflict_on_integrity_error(*_TEAM_EXISTS):
+            self.audit.record(
+                actor=actor,
+                organization_id=organization_id,
+                action="team.update",
+                resource_type="team",
+                resource_id=team.id,
+                metadata={"name": team.name},
+            )
+            self.session.commit()
         self.session.refresh(team)
         return self._to_response(team)
 
@@ -122,17 +130,18 @@ class TeamService:
         team = self._require_team(organization_id, team_id)
         (membership,) = self._require_members(organization_id, [membership_id])
         if any(item.membership_id == membership.id for item in team.members):
-            raise ConflictError("team_member_exists", "This member is already on the team.")
-        team.members.append(TeamMember(membership_id=membership.id))
-        self.audit.record(
-            actor=actor,
-            organization_id=organization_id,
-            action="team.member_add",
-            resource_type="team",
-            resource_id=team.id,
-            metadata={"membership_id": str(membership.id)},
-        )
-        self.session.commit()
+            raise ConflictError(*_TEAM_MEMBER_EXISTS)
+        with self._conflict_on_integrity_error(*_TEAM_MEMBER_EXISTS):
+            team.members.append(TeamMember(membership_id=membership.id))
+            self.audit.record(
+                actor=actor,
+                organization_id=organization_id,
+                action="team.member_add",
+                resource_type="team",
+                resource_id=team.id,
+                metadata={"membership_id": str(membership.id)},
+            )
+            self.session.commit()
         self.session.refresh(team)
         return self._to_response(team)
 
@@ -188,7 +197,16 @@ class TeamService:
 
     def _ensure_name_free(self, organization_id: uuid.UUID, name: str) -> None:
         if self.teams.get_by_name(organization_id=organization_id, name=name):
-            raise ConflictError("team_exists", "A team with this name already exists.")
+            raise ConflictError(*_TEAM_EXISTS)
+
+    @contextmanager
+    def _conflict_on_integrity_error(self, code: str, message: str) -> Iterator[None]:
+        """Map a concurrent unique-constraint violation to the same conflict as the pre-check."""
+        try:
+            yield
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise ConflictError(code, message) from exc
 
     def _to_summary(self, team: Team) -> TeamSummaryResponse:
         return TeamSummaryResponse(

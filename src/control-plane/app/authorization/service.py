@@ -144,6 +144,14 @@ class AuthzService:
             return True
         return self.allows_device_group(membership, device_group_id)
 
+    def require_role_permission(self, membership: OrganizationMembership, permission: str) -> None:
+        """Role check only, for collection reads that apply device-group scope in the query."""
+        if not self.has_permission(membership, permission):
+            raise ForbiddenError(
+                "insufficient_permission",
+                "You do not have permission to perform this action.",
+            )
+
     def require(
         self,
         membership: OrganizationMembership,
@@ -213,6 +221,9 @@ class AuthzService:
     ) -> AccessPreview:
         steps: list[PreviewStep] = []
         role = membership.role_ref
+        if membership.status != MembershipStatus.ACTIVE.value:
+            steps.append(PreviewStep(False, f"Membership is {membership.status}, not active."))
+            return AccessPreview(False, tuple(steps))
         steps.append(
             PreviewStep(True, f"Active member with role {role.name} ({role.key}).")
         )
@@ -266,18 +277,15 @@ class AuthzService:
     def replace_device_group_scope(
         self, membership: OrganizationMembership, device_group_ids: list[uuid.UUID] | None
     ) -> None:
-        """Set scope. None or empty list means organization-wide."""
-        for binding in list(membership.bindings):
-            self.session.delete(binding)
+        """Set scope. None or empty list means organization-wide.
+
+        Edits go through ``membership.bindings`` (delete-orphan) so the loaded
+        collection matches the database for later ``scope_for`` calls.
+        """
+        membership.bindings.clear()
         self.session.flush()
-        if not device_group_ids:
-            return
-        for group_id in dict.fromkeys(device_group_ids):
-            self.session.add(
-                AccessBinding(
-                    membership_id=membership.id,
-                    scope_type=ScopeType.DEVICE_GROUP.value,
-                    scope_id=group_id,
-                )
+        for group_id in dict.fromkeys(device_group_ids or []):
+            membership.bindings.append(
+                AccessBinding(scope_type=ScopeType.DEVICE_GROUP.value, scope_id=group_id)
             )
         self.session.flush()
