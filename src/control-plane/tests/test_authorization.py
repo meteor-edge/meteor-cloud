@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 

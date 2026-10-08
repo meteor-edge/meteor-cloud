@@ -30,8 +30,12 @@ class SystemRoleDef:
 
 
 PERMISSIONS: tuple[PermissionDef, ...] = (
-    PermissionDef("organization", "read", "View organization", "See the organization overview and non-ownership settings."),
-    PermissionDef("organization", "update", "Update organization", "Change the organization name, description, and settings."),
+    PermissionDef(
+        "organization", "read", "View organization", "See the organization overview and non-ownership settings."
+    ),
+    PermissionDef(
+        "organization", "update", "Update organization", "Change the organization name, description, and settings."
+    ),
     PermissionDef("organization", "delete", "Delete organization", "Permanently delete the organization."),
     PermissionDef("member", "read", "View members", "List members and open their access details."),
     PermissionDef("member", "invite", "Invite members", "Add people to the organization as members."),

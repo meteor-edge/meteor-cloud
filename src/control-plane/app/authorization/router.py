@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -117,7 +118,7 @@ def get_authz_catalog(_: CurrentUser) -> AuthzCatalogResponse:
 
 
 @router.get("/api/v1/me/access", response_model=MeAccessResponse)
-def get_my_access(current_user: CurrentUser, db: Session = Depends(get_db)) -> MeAccessResponse:
+def get_my_access(current_user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> MeAccessResponse:
     """Return effective access for every organization the current user belongs to."""
     authz = AuthzService(db)
     rows = OrganizationRepository(db).list_for_user(current_user.id)
@@ -140,7 +141,7 @@ def get_member_access(
     organization_id: uuid.UUID,
     membership_id: uuid.UUID,
     current_user: CurrentUser,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> MemberAccessResponse:
     """Return a member's effective access for administrators."""
     authz = AuthzService(db)
@@ -174,7 +175,7 @@ def preview_access(
     organization_id: uuid.UUID,
     payload: AccessPreviewRequest,
     current_user: CurrentUser,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> AccessPreviewResponse:
     """Explain whether a member may perform a permission on an optional resource."""
     authz = AuthzService(db)

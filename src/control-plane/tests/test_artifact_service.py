@@ -20,7 +20,7 @@ from app.core.config import Settings
 from app.core.exceptions import AppError, ConflictError, UnauthorizedError
 from app.devices.repository import DeviceTypeRepository
 from app.identity.models import User
-from app.tenancy.models import OrganizationMembership, OrganizationRole
+from app.tenancy.models import OrganizationRole
 from app.tenancy.repository import OrganizationRepository
 from tests.storage import InMemoryObjectStorage
 

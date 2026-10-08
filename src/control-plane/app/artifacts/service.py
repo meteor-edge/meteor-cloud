@@ -22,9 +22,9 @@ from app.artifacts.models import Artifact, ArtifactType
 from app.artifacts.repository import ArtifactRepository
 from app.artifacts.schemas import ArtifactCreate, ArtifactDownloadLinkResponse, ArtifactResponse
 from app.audit.service import AuditRecorder
+from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError, ConflictError, NotFoundError, UnauthorizedError
-from app.authorization.service import AuthzService
 from app.devices.repository import DeviceTypeRepository
 from app.devices.schemas import Page
 from app.identity.models import User

@@ -20,7 +20,7 @@ from app.devices.schemas import (
 )
 from app.devices.service import FleetService
 from app.identity.models import User
-from app.tenancy.models import OrganizationMembership, OrganizationRole
+from app.tenancy.models import OrganizationRole
 from app.tenancy.repository import OrganizationRepository
 
 

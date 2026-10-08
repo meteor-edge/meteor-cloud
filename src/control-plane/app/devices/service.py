@@ -16,8 +16,9 @@ from sqlalchemy.orm import Session
 
 from app.artifacts.repository import ArtifactRepository
 from app.audit.service import AuditRecorder
+from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.devices.models import (
     Device,
     DeviceEnrollmentRequest,
@@ -27,7 +28,6 @@ from app.devices.models import (
     EnrollmentApiKey,
     RegistrationToken,
 )
-from app.authorization.service import AuthzService
 from app.devices.repository import (
     DeviceEnrollmentRequestRepository,
     DeviceGroupRepository,

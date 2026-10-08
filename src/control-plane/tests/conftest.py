@@ -17,6 +17,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.artifacts import models as _artifact_models  # noqa: F401
 from app.artifacts.dependencies import get_object_storage
 from app.audit import models as _audit_models  # noqa: F401
+from app.authorization import models as _authorization_models  # noqa: F401
+from app.authorization.roles import get_system_role_id
+from app.authorization.seed import seed_authorization_catalog
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Base
@@ -31,9 +34,6 @@ from app.devices.rate_limit import InMemoryRateLimiter
 from app.identity import models as _identity_models  # noqa: F401
 from app.identity.models import User
 from app.main import create_app
-from app.authorization import models as _authorization_models  # noqa: F401
-from app.authorization.roles import get_system_role_id
-from app.authorization.seed import seed_authorization_catalog
 from app.tenancy import models as _organization_models  # noqa: F401
 from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole
 from tests.db_guard import assert_safe_test_database_url, ensure_database_exists
