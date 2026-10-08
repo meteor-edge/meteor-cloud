@@ -54,6 +54,10 @@ echo "==> Importing images (tag $IMAGE_TAG)"
 k3d image import -c "$CLUSTER" "meteorcloud/backend:$IMAGE_TAG" "meteorcloud/console:$IMAGE_TAG"
 
 echo "==> helm install"
+if helm status "$RELEASE" --kube-context "$CTX" -n "$NAMESPACE" >/dev/null 2>&1; then
+  echo "error: Helm release $RELEASE already exists in namespace $NAMESPACE; refusing to modify it" >&2
+  exit 1
+fi
 if ! helm install "$RELEASE" "$CHART" --kube-context "$CTX" -n "$NAMESPACE" --create-namespace \
   -f "$CHART/values-ci.yaml" \
   --set "backend.image.tag=$IMAGE_TAG" --set "console.image.tag=$IMAGE_TAG" \

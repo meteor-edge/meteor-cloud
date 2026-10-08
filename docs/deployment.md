@@ -92,7 +92,7 @@ the smoke test, and removes it again.
 Back up PostgreSQL and the artifact store. Nothing else holds state:
 
 ```bash
-docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > postgres.dump
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > postgres.dump
 ```
 
 Artifact files live in `/opt/edge-platform/data/artifacts` or your bucket.

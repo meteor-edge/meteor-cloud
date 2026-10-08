@@ -30,7 +30,9 @@ all on this one chart:
 | `values-ci.yaml` | Pull-request CI only |
 
 ```bash
-helm upgrade --install meteorcloud . -f values-staging.yaml   # or values-dev / values-production
+helm upgrade --install meteorcloud deploy/kubernetes/helm/meteorcloud \
+  -n meteorcloud --create-namespace \
+  -f deploy/kubernetes/helm/meteorcloud/values-staging.yaml   # or values-dev / values-production
 ```
 
 Full guide, prerequisites, and per-provider notes: [docs/kubernetes.md](../../../../docs/kubernetes.md).
