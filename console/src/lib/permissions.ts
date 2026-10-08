@@ -34,6 +34,10 @@ export function canManageFleet(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "operator";
 }
 
+export function canDeleteDevices(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 export function canManageArtifacts(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "developer";
 }

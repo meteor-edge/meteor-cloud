@@ -27,7 +27,7 @@ import { StatusBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { canManageFleet } from "@/lib/permissions";
+import { canDeleteDevices, canManageFleet } from "@/lib/permissions";
 import { cn, formatDateTime, formatRelativeTime } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
@@ -83,6 +83,7 @@ export function DevicesPage() {
   });
 
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const canDelete = canDeleteDevices(orgQuery.data?.current_user_role);
 
   const typeNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -515,14 +516,16 @@ export function DevicesPage() {
                           <Button variant="ghost" size="sm" onClick={() => setEditingDevice(device)}>
                             Edit
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="bg-ember text-midnight hover:bg-ember hover:text-midnight"
-                            onClick={() => onDeleteDevice(device.id, device.name)}
-                          >
-                            Delete
-                          </Button>
+                          {canDelete && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="bg-ember text-midnight hover:bg-ember hover:text-midnight"
+                              onClick={() => onDeleteDevice(device.id, device.name)}
+                            >
+                              Delete
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>
