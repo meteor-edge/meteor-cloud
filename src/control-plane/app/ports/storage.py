@@ -1,7 +1,8 @@
 """Object storage port for large binary content (artifacts today).
 
-The current adapter is S3-compatible (``S3ObjectStorage``): MinIO for self-hosted
-deployments, AWS S3, or any other S3 API. PostgreSQL stores only the object key.
+Adapters: ``S3ObjectStorage`` (AWS S3 or any S3-compatible API such as MinIO, Ceph,
+or GCS interoperability) and ``FilesystemObjectStorage`` (a local or mounted
+directory). PostgreSQL stores only the object key.
 
 A future container registry is expected to run its own OCI distribution service
 on the same storage backend (e.g. a separate bucket); it does not go through

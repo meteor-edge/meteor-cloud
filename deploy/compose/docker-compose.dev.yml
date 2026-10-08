@@ -1,0 +1,19 @@
+# Hot reload: mount the source trees into the containers.
+services:
+  backend:
+    volumes:
+      - ../../src/control-plane:/app
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  data-plane:
+    volumes:
+      - ../../src/data-plane:/app
+    command: uvicorn data_plane.main:app --host 0.0.0.0 --port 8081 --reload
+
+  console:
+    volumes:
+      - ../../console:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 5173

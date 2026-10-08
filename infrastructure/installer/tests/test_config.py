@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from edge_installer.config.loader import load_configuration
-from edge_installer.config.models import ObservabilitySettings
+from edge_installer.config.models import InstallationSettings, ObservabilitySettings
 from edge_installer.config.validation import validate_configuration
 from edge_installer.exceptions import ConfigurationError
 
@@ -77,6 +77,45 @@ def test_empty_configuration_file(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="empty"):
         load_configuration(path)
+
+
+def test_validate_allows_external_postgres_with_database_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "key.pem"
+    key_path.write_text("key", encoding="utf-8")
+    monkeypatch.delenv("EDGE_PLATFORM_POSTGRES_PASSWORD", raising=False)
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+    monkeypatch.setenv(
+        "EDGE_PLATFORM_DATABASE_URL",
+        "postgresql+psycopg://edge:secret@db.example.com:5432/edge_platform",
+    )
+
+    config = load_configuration(EXAMPLE)
+    config.aws.ssh_private_key_path = str(key_path)
+    config.components.postgres.enabled = False
+    errors = validate_configuration(config)
+
+    assert not any("POSTGRES_PASSWORD" in item for item in errors)
+    assert not any("components.postgres must be enabled" in item for item in errors)
+    assert not any("EDGE_PLATFORM_DATABASE_URL" in item for item in errors)
+
+
+def test_validate_rejects_disabled_postgres_without_database_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "key.pem"
+    key_path.write_text("key", encoding="utf-8")
+    monkeypatch.delenv("EDGE_PLATFORM_POSTGRES_PASSWORD", raising=False)
+    monkeypatch.delenv("EDGE_PLATFORM_DATABASE_URL", raising=False)
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+
+    config = load_configuration(EXAMPLE)
+    config.aws.ssh_private_key_path = str(key_path)
+    config.components.postgres.enabled = False
+    errors = validate_configuration(config)
+
+    assert any("EDGE_PLATFORM_DATABASE_URL" in item for item in errors)
 
 
 def test_validate_reports_missing_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,53 +211,7 @@ def test_observability_settings_rejects_unknown_field() -> None:
         ObservabilitySettings(enabled=True, backend="prometheus", extra_field="nope")
 
 
-def test_load_gcp_example_configuration() -> None:
-    path = (
-        Path(__file__).resolve().parent.parent
-        / "edge_installer"
-        / "config"
-        / "examples"
-        / "installation.gcp.yaml"
-    )
-    config = load_configuration(path)
 
-    assert config.installation.provider == "gcp"
-    assert config.gcp is not None
-    assert config.gcp.project_id == "your-gcp-project"
-    assert config.aws is None
-    assert config.services.vpn.enabled is False
-
-
-def test_validate_gcp_skips_ssh_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "secret")
-    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
-    path = (
-        Path(__file__).resolve().parent.parent
-        / "edge_installer"
-        / "config"
-        / "examples"
-        / "installation.gcp.yaml"
-    )
-    config = load_configuration(path)
-    errors = validate_configuration(config)
-
-    assert not any("ssh_private_key_path" in item for item in errors)
-    assert not any("allowed_ssh_cidrs" in item for item in errors)
-
-
-def test_validate_rejects_vpn_on_gcp(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "secret")
-    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
-    path = (
-        Path(__file__).resolve().parent.parent
-        / "edge_installer"
-        / "config"
-        / "examples"
-        / "installation.gcp.yaml"
-    )
-    config = load_configuration(path)
-    config.services.vpn.enabled = True
-    errors = validate_configuration(config)
-
-    assert any("vpn is not supported on GCP" in item for item in errors)
-
+def test_gcp_provider_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        InstallationSettings(name="demo", environment="production", provider="gcp")

@@ -67,6 +67,32 @@ def test_build_ansible_extra_vars_includes_core_deployment_fields() -> None:
     assert extra["enabled_services"] == config.enabled_service_names()
 
 
+def test_build_ansible_extra_vars_maps_components_to_providers() -> None:
+    config = load_configuration(EXAMPLE)
+
+    extra = build_ansible_extra_vars(config, _outputs())
+    assert extra["postgres_provider"] == "bundled"
+    assert extra["cache_provider"] == "memory"
+
+    config.components.redis.enabled = True
+    config.components.postgres.enabled = False
+    extra = build_ansible_extra_vars(config, _outputs())
+    assert extra["postgres_provider"] == "external"
+    assert extra["cache_provider"] == "redis"
+
+
+def test_build_ansible_extra_vars_passes_external_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "EDGE_PLATFORM_DATABASE_URL",
+        "postgresql+psycopg://edge:secret@db.example.com:5432/edge_platform",
+    )
+    config = load_configuration(EXAMPLE)
+    extra = build_ansible_extra_vars(config, _outputs())
+    assert extra["external_database_url"].startswith("postgresql+psycopg://")
+
+
 def test_build_ansible_extra_vars_omits_vpn_key_when_not_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,0 +1,202 @@
+# MeteorCloud Helm chart. Installs into an existing cluster; it does not create
+# or manage clusters, node pools, load balancers, DNS, or cloud databases.
+#
+# Every dependency is one of: bundled in this chart (for evaluation and small
+# installs), or external (provided by you or your cloud). See README.md.
+
+nameOverride: ""
+fullnameOverride: ""
+imagePullSecrets: []
+
+# --- Application configuration (rendered into a ConfigMap) -----------------
+config:
+  appEnv: production
+  # Public URL of the console/API, used for CORS. Example: https://fleet.example.com
+  publicUrl: ""
+  logLevel: INFO
+  logFormat: json
+  registrationRequireHttps: true
+  # Extra non-secret environment variables for the API, e.g. rate limits:
+  #   DEVICE_OFFLINE_THRESHOLD_SECONDS: "150"
+  extraEnv: {}
+
+# --- Secrets ---------------------------------------------------------------
+# By default the chart creates a Secret and generates any value left empty
+# (kept across upgrades). Set existingSecret to manage it yourself (Sealed
+# Secrets, External Secrets, Vault, ...). Keys read from an existing Secret:
+#   JWT_SECRET_KEY, APP_SECRET_KEY, DATABASE_URL     always
+#   POSTGRES_PASSWORD                                postgresql.mode=bundled
+#   REDIS_URL                                        cache.provider=redis
+#   OBJECT_STORAGE_ACCESS_KEY_ID/SECRET_ACCESS_KEY   s3 with static keys (optional)
+#   MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN      mqtt.enabled
+#   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled broker
+#   EDGE_PLATFORM_ADMIN_EMAIL/PASSWORD               optional first administrator
+secrets:
+  existingSecret: ""
+  jwtSecret: ""
+  admin:
+    email: ""
+    password: ""
+
+# --- PostgreSQL (required) -------------------------------------------------
+postgresql:
+  # bundled: single-instance StatefulSet in this release (no HA, no backups).
+  # external: managed or customer PostgreSQL (Cloud SQL, RDS, Azure, on-prem).
+  mode: bundled
+  database: edge_platform
+  username: edge
+  bundled:
+    image:
+      repository: postgres
+      tag: "16-alpine"
+      pullPolicy: IfNotPresent
+    password: ""
+    persistence:
+      size: 8Gi
+      storageClass: ""
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 1Gi }
+  external:
+    # Either a full SQLAlchemy URL (postgresql+psycopg://user:pass@host:5432/db?sslmode=require)
+    url: ""
+    # ...or the parts (password is URL-encoded by the chart).
+    host: ""
+    port: 5432
+    password: ""
+    sslmode: require
+
+# --- Rate-limit cache (optional) -------------------------------------------
+cache:
+  # memory: per-API-pod counters, no extra service (fine for one replica).
+  # redis: shared counters for several replicas.
+  provider: memory
+  redis:
+    mode: bundled            # bundled | external
+    external:
+      url: ""                # rediss://:password@host:6379/0 (TLS required with credentials)
+    image:
+      repository: redis
+      tag: "7-alpine"
+      pullPolicy: IfNotPresent
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+
+# --- Artifact storage (required, pick one) ---------------------------------
+objectStorage:
+  # filesystem: a PersistentVolumeClaim mounted into the API pod.
+  # s3: AWS S3 or any S3-compatible API (MinIO, Ceph, Wasabi, R2, GCS
+  #     interoperability with HMAC keys, customer storage).
+  provider: filesystem
+  filesystem:
+    existingClaim: ""
+    size: 20Gi
+    storageClass: ""
+    # ReadWriteMany (e.g. NFS, EFS, Filestore) allows backend.replicaCount > 1.
+    accessModes: [ReadWriteOnce]
+    # Keep the claim when the release is uninstalled.
+    keep: true
+  s3:
+    endpointUrl: ""          # empty for AWS S3; https://storage.googleapis.com for GCS
+    region: us-east-1
+    bucket: ""
+    autoCreateBucket: false
+    # Leave empty to use the pod's identity (EKS IRSA / Pod Identity, see serviceAccount).
+    accessKeyId: ""
+    secretAccessKey: ""
+
+# --- Device MQTT (optional) ------------------------------------------------
+mqtt:
+  enabled: false
+  # bundled: single EMQX broker in this release. external: your EMQX cluster,
+  # configured for HTTP authn/authz against the API's /internal/mqtt endpoints.
+  broker: bundled
+  # Hostname devices connect to (must be in the server certificate).
+  publicHost: ""
+  port: 8883
+  platformUsername: platform
+  platformPassword: ""
+  internalToken: ""
+  tls:
+    # Secret with ca.crt (+ server.crt, server.key for the bundled broker). The
+    # server certificate needs SANs for publicHost and <release>-emqx.
+    existingSecret: ""
+  external:
+    host: ""
+  emqx:
+    image:
+      repository: emqx/emqx
+      tag: "5.8.6"
+      pullPolicy: IfNotPresent
+    dashboardPassword: ""
+    service:
+      # Devices reach 8883 through this Service. LoadBalancer needs a cloud or
+      # bare-metal load balancer (MetalLB, k3s servicelb).
+      type: LoadBalancer
+      annotations: {}
+      loadBalancerSourceRanges: []
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 1Gi }
+
+# --- Workloads --------------------------------------------------------------
+backend:
+  image:
+    repository: meteorcloud/backend
+    tag: ""                  # defaults to the chart appVersion
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile: { type: RuntimeDefault }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+console:
+  image:
+    repository: meteorcloud/console
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+dataPlane:
+  image:
+    repository: meteorcloud/data-plane
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+
+serviceAccount:
+  create: true
+  name: ""
+  # e.g. eks.amazonaws.com/role-arn for S3 access without static keys.
+  annotations: {}
+
+# --- Ingress ----------------------------------------------------------------
+# Routes /api and /health to the API and everything else to the console.
+# /internal and /metrics are never routed. Needs an ingress controller in the
+# cluster (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""                   # empty: match any host
+  tls: []
+  #  - secretName: meteorcloud-tls
+  #    hosts: [fleet.example.com]

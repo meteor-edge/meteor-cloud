@@ -1,0 +1,42 @@
+---
+# Allows only what MeteorCloud serves. SSH is allowed before UFW is enabled so
+# the run cannot lock itself out.
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Allow SSH
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_ssh_port | string }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+  loop: "{{ firewall_allowed_ssh_cidrs }}"
+
+- name: Allow HTTP and HTTPS
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: ["{{ http_port }}", "{{ https_port }}"]
+
+- name: Allow MQTT over TLS
+  community.general.ufw:
+    rule: allow
+    port: "{{ mqtt_broker_port | string }}"
+    proto: tcp
+  when: mqtt_enabled | bool and mqtt_broker == 'bundled'
+
+- name: Allow WireGuard
+  community.general.ufw:
+    rule: allow
+    port: "{{ vpn_listen_port | default(51820) | string }}"
+    proto: udp
+  when: "'vpn' in enabled_services"
+
+- name: Enable UFW with default deny for incoming traffic
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming

@@ -13,7 +13,7 @@ edge-installer upgrade installation.yaml
 
 1. Validates config and loads existing state
 2. Runs Ansible `upgrade.yml` for **enabled services**:
-   - **cloud_app**: re-render templates, pull/build images, restart stack, migrations
+   - **cloud_app**: copy the Compose bundle, re-render `.env`, pull or build images, `docker compose up --wait` (only changed services restart; the API runs migrations on start)
    - **vpn**: re-apply WireGuard role when enabled
 3. Health check (cloud_app)
 4. Updates installer state (`platform_version`, `enabled_services`)
@@ -37,6 +37,19 @@ Push Git changes first when using `image_source: git`.
 ## Idempotency
 
 Running `apply` again is safe — it will not duplicate EC2 instances or reset admin passwords.
+
+## Kubernetes
+
+`helm upgrade --install` with new image tags. The API's init container runs
+migrations before the new pods serve traffic. See [Kubernetes](kubernetes.md).
+
+## Upgrading hosts deployed before `deploy/compose/`
+
+Older installs ran a single generated `/opt/edge-platform/docker-compose.yml`. The
+first upgrade with the current playbooks stops that stack, removes the old generated
+files, and starts the new bundle from `/opt/edge-platform/compose` on the same data
+directories. Redis is no longer started by default (in-memory rate limits); set
+`components.redis.enabled: true` to keep it.
 
 ## Limitations
 

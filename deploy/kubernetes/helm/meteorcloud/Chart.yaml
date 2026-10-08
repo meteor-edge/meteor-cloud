@@ -1,0 +1,13 @@
+apiVersion: v2
+name: meteorcloud
+description: >-
+  MeteorCloud edge device management platform: API (control plane), web console,
+  and optional MQTT data plane. Installs into an existing Kubernetes cluster.
+type: application
+version: 0.1.0
+appVersion: "0.2.0"
+kubeVersion: ">=1.25.0-0"
+keywords:
+  - iot
+  - edge
+  - fleet-management

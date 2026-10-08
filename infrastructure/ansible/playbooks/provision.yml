@@ -1,7 +1,0 @@
-- name: Provision Edge Platform server
-  hosts: platform
-  become: true
-  roles:
-    - common
-    - docker
-    - platform_directories

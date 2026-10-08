@@ -1,4 +1,4 @@
-"""S3-compatible object storage adapter (MinIO, AWS S3, other S3 APIs)."""
+"""S3-compatible object storage adapter (AWS S3, MinIO, Ceph, GCS interoperability, ...)."""
 
 from __future__ import annotations
 
@@ -32,8 +32,14 @@ class S3ObjectStorage:
             region_name=settings.object_storage_region or None,
             aws_access_key_id=settings.object_storage_access_key_id or None,
             aws_secret_access_key=settings.object_storage_secret_access_key or None,
-            # Path-style addressing is required by MinIO and harmless for S3.
-            config=Config(s3={"addressing_style": "path"}, signature_version="s3v4"),
+            # Path-style addressing is required by MinIO and harmless for S3. boto3's default
+            # flexible checksums are rejected by some S3-compatible services (e.g. GCS).
+            config=Config(
+                s3={"addressing_style": "path"},
+                signature_version="s3v4",
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+            ),
         )
         self._auto_create_bucket = settings.object_storage_auto_create_bucket
         self._bucket_ready = False

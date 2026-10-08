@@ -6,8 +6,9 @@ OUT="${1:-$ROOT/certs}"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 
-if [[ -z "${MQTT_PUBLIC_HOST:-}" && -f "$ROOT/.env" ]]; then
-  MQTT_PUBLIC_HOST="$(awk -F= '/^MQTT_PUBLIC_HOST=/{print substr($0, index($0,"=")+1); exit}' "$ROOT/.env")"
+ENV_FILE="$ROOT/deploy/compose/.env"
+if [[ -z "${MQTT_PUBLIC_HOST:-}" && -f "$ENV_FILE" ]]; then
+  MQTT_PUBLIC_HOST="$(awk -F= '/^MQTT_PUBLIC_HOST=/{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")"
   MQTT_PUBLIC_HOST="${MQTT_PUBLIC_HOST%$'\r'}"
   case "$MQTT_PUBLIC_HOST" in
     \"*\") MQTT_PUBLIC_HOST="${MQTT_PUBLIC_HOST:1:-1}" ;;
@@ -48,6 +49,12 @@ add_host_san() {
 
 add_host_san "${MQTT_PUBLIC_HOST:-}"
 
+# Comma-separated, e.g. the in-cluster broker Service name for Kubernetes.
+IFS=',' read -r -a EXTRA_SANS <<< "${MQTT_EXTRA_SANS:-}"
+for extra in "${EXTRA_SANS[@]}"; do
+  add_host_san "$extra"
+done
+
 # LAN devices verify TLS against this machine's address, not 127.0.0.1.
 LAN_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')"
 add_host_san "$LAN_IP"
@@ -72,7 +79,10 @@ openssl x509 -req -in "$OUT/server.csr" -CA "$OUT/ca.crt" -CAkey "$OUT/ca.key" \
 chmod 0640 "$OUT/server.key"
 chmod 600 "$OUT/ca.key"
 chmod 644 "$OUT/ca.crt" "$OUT/server.crt"
-if ! chown 1000:1000 "$OUT/server.key" 2>/dev/null; then
+# Kubernetes reads the key into a Secret instead of bind-mounting it.
+if [[ "${MQTT_CERTS_SKIP_CHOWN:-}" == "1" ]]; then
+  :
+elif ! chown 1000:1000 "$OUT/server.key" 2>/dev/null; then
   if command -v docker >/dev/null 2>&1; then
     docker run --rm --user 0:0 -v "$OUT:/certs" busybox:1.36 \
       chown 1000:1000 /certs/server.key

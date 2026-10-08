@@ -1,0 +1,144 @@
+---
+- name: Check required secrets
+  ansible.builtin.assert:
+    that:
+      - jwt_secret | length >= 16
+      - postgres_provider != 'bundled' or postgres_password | length > 0
+      - postgres_provider != 'external' or external_database_url | length > 0
+      - cache_provider != 'redis' or redis_provider == 'bundled' or external_redis_url | length > 0
+      - not (mqtt_enabled | bool) or (mqtt_platform_password | length > 0 and mqtt_internal_token | length > 0)
+      - not (observability_enabled | bool) or grafana_admin_password | length > 0
+      - not (mqtt_enabled | bool) or mqtt_broker == 'bundled' or mqtt_broker_host | length > 0
+      - >-
+        not (object_storage_provider == 's3' and minio_enabled | bool)
+        or (object_storage_access_key_id | length > 0 and object_storage_secret_access_key | length >= 8)
+    fail_msg: >-
+      Missing configuration. Set EDGE_PLATFORM_JWT_SECRET (16+ chars), EDGE_PLATFORM_POSTGRES_PASSWORD
+      (or EDGE_PLATFORM_DATABASE_URL for postgres_provider=external), EDGE_PLATFORM_REDIS_URL for
+      redis_provider=external, EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD and EDGE_PLATFORM_MQTT_INTERNAL_TOKEN
+      when mqtt_enabled (plus mqtt_broker_host for an external broker),
+      EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID and EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY
+      (8+ chars) for bundled MinIO, and EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD when observability_enabled.
+    quiet: true
+
+- name: Check provider settings
+  ansible.builtin.assert:
+    that:
+      - postgres_provider in ['bundled', 'external']
+      - cache_provider in ['redis', 'memory']
+      - redis_provider in ['bundled', 'external']
+      - object_storage_provider in ['filesystem', 's3']
+      - mqtt_broker in ['bundled', 'external']
+      - image_source in ['git', 'registry']
+      # Devices and the data plane share MQTT_BROKER_PORT; the bundled EMQX listens on 8883.
+      - mqtt_broker == 'external' or (mqtt_broker_port | int) == 8883
+    fail_msg: >-
+      Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
+      redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external,
+      image_source git|registry; the bundled MQTT broker always uses port 8883.
+    quiet: true
+
+# Hosts deployed before the Compose files moved into the repository ran a stack
+# rendered to {{ platform_root }}/docker-compose.yml. Stop it once; data and
+# certificates stay in place and are reused by the new stack.
+- name: Check for the previous single-file stack
+  ansible.builtin.stat:
+    path: "{{ platform_root }}/docker-compose.yml"
+  register: legacy_compose
+
+- name: Stop the previous single-file stack
+  ansible.builtin.command:
+    cmd: docker compose -f {{ platform_root }}/docker-compose.yml down --remove-orphans
+  changed_when: true
+  when: legacy_compose.stat.exists
+
+- name: Remove previous stack files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ platform_root }}/docker-compose.yml"
+    - "{{ platform_root }}/config/platform.env"
+    - "{{ platform_root }}/traefik/traefik.yml"
+    - "{{ platform_root }}/traefik/dynamic.yml"
+  when: legacy_compose.stat.exists
+
+- name: Create Compose bundle directories
+  ansible.builtin.file:
+    path: "{{ platform_compose_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ platform_owner }}"
+    group: "{{ platform_owner }}"
+    mode: "0755"
+  loop: [traefik, config]
+
+# Explicit list: never copy a developer's local deploy/compose/.env.
+- name: Copy Compose files from the repository
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../compose/{{ item }}"
+    dest: "{{ platform_compose_dir }}/{{ item }}"
+    owner: "{{ platform_owner }}"
+    group: "{{ platform_owner }}"
+    mode: "0644"
+  loop:
+    - docker-compose.yml
+    - docker-compose.prod.yml
+    - docker-compose.observability.yml
+    - control-plane.yml
+    - data-plane.yml
+    - console.yml
+    - traefik/dynamic.yml
+
+- name: Copy service configuration
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../compose/config/"
+    dest: "{{ platform_compose_dir }}/config/"
+    owner: "{{ platform_owner }}"
+    group: "{{ platform_owner }}"
+    mode: "0644"
+    directory_mode: "0755"
+  register: platform_service_config
+
+- name: Render Compose environment file
+  ansible.builtin.template:
+    src: meteorcloud.env.j2
+    dest: "{{ platform_compose_dir }}/.env"
+    owner: "{{ platform_owner }}"
+    group: "{{ platform_owner }}"
+    mode: "0600"
+  no_log: true
+
+- name: Install MQTT broker certificates
+  when: mqtt_enabled | bool and mqtt_broker == 'bundled'
+  block:
+    - name: Copy provided broker certificates
+      ansible.builtin.copy:
+        src: "{{ mqtt_certs_src_dir }}/{{ item.name }}"
+        dest: "{{ platform_certs_dir }}/{{ item.name }}"
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { name: ca.crt, mode: "0644", owner: "root" }
+        - { name: server.crt, mode: "0644", owner: "root" }
+        # EMQX runs as UID 1000
+        - { name: server.key, mode: "0640", owner: "1000" }
+      when: mqtt_certs_src_dir | length > 0
+      register: platform_mqtt_certs
+
+    - name: Copy certificate generator
+      ansible.builtin.copy:
+        src: "{{ role_path }}/../../../../scripts/generate-local-mqtt-certs.sh"
+        dest: "{{ platform_root }}/generate-mqtt-certs.sh"
+        owner: "{{ platform_owner }}"
+        group: "{{ platform_owner }}"
+        mode: "0755"
+      when: mqtt_certs_src_dir | length == 0
+
+    - name: Generate a self-signed broker certificate once
+      ansible.builtin.command:
+        cmd: "{{ platform_root }}/generate-mqtt-certs.sh {{ platform_certs_dir }}"
+        creates: "{{ platform_certs_dir }}/server.crt"
+      environment:
+        MQTT_PUBLIC_HOST: "{{ mqtt_public_host }}"
+      when: mqtt_certs_src_dir | length == 0

@@ -20,7 +20,7 @@ make observability
 - Prometheus: http://localhost:9090
 - App metrics: http://localhost:8000/metrics
 
-`make dev` does **not** start this stack.
+`make dev` does **not** start this stack. The files are `deploy/compose/docker-compose.observability.yml` and `deploy/compose/config/observability/`; Prometheus and Grafana bind to 127.0.0.1. `GRAFANA_ADMIN_PASSWORD` is required.
 
 ## CloudWatch
 
@@ -36,6 +36,6 @@ observability:
 
 ## AWS install
 
-Set `observability.enabled: true` and `backend: prometheus` in `installation.yaml`. Grafana binds to `127.0.0.1:3001` on the instance (SSH tunnel; not on Traefik). Skip on `t3.small` if RAM is tight.
+Set `observability.enabled: true` and `backend: prometheus` in `installation.yaml` (with Ansible directly: `observability_enabled: true` and `EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD`). Grafana binds to `127.0.0.1:3001` on the instance (SSH tunnel; not on Traefik). Skip on `t3.small` if RAM is tight.
 
 Alerts (Alertmanager / CloudWatch Alarms) are not in this cut.

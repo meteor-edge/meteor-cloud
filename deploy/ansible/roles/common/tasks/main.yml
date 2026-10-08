@@ -1,0 +1,26 @@
+---
+- name: Check for a supported operating system
+  ansible.builtin.assert:
+    that: ansible_distribution in ['Ubuntu', 'Debian']
+    fail_msg: "MeteorCloud host setup supports Ubuntu and Debian (found {{ ansible_distribution }})."
+    quiet: true
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install common packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - git
+      - gnupg
+      - openssl
+      - iproute2
+    state: present
+
+- name: Set timezone to UTC
+  community.general.timezone:
+    name: UTC

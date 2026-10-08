@@ -1,0 +1,9 @@
+# Full MeteorCloud stack. From this directory:
+#   cp .env.example .env && docker compose up --build
+# Production: add -f docker-compose.prod.yml (see README.md here).
+name: meteorcloud
+
+include:
+  - control-plane.yml
+  - data-plane.yml
+  - console.yml

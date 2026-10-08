@@ -1,0 +1,39 @@
+# Pull-request CI on a temporary k3d cluster: the smallest install that still
+# exercises the API, console, database, migrations, ingress, and artifact
+# storage. No Redis, Kafka, ClickHouse, MinIO, or MQTT.
+config:
+  appEnv: ci
+  publicUrl: http://localhost:8088
+  registrationRequireHttps: false
+
+backend:
+  image: { repository: meteorcloud/backend, tag: ci, pullPolicy: IfNotPresent }
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 768Mi }
+console:
+  image: { repository: meteorcloud/console, tag: ci, pullPolicy: IfNotPresent }
+
+postgresql:
+  mode: bundled
+  bundled:
+    persistence: { size: 1Gi }
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 512Mi }
+
+cache:
+  provider: memory
+
+objectStorage:
+  provider: filesystem
+  filesystem:
+    size: 1Gi
+    keep: false
+
+mqtt:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: traefik

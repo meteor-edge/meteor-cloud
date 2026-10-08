@@ -32,8 +32,12 @@ def mqtt_gateway(settings: Settings) -> MQTTGateway:
 
 
 def rate_limiter(settings: Settings, *, limit: int, window_seconds: int, prefix: str) -> RateLimiter:
+    if settings.cache_provider == "memory":
+        return InMemoryRateLimiter(limit=limit, window_seconds=window_seconds)
     if settings.cache_provider != "redis":
-        raise RuntimeError(f"Unsupported cache.provider={settings.cache_provider!r}; only 'redis' is implemented")
+        raise RuntimeError(
+            f"Unsupported cache.provider={settings.cache_provider!r}; only 'redis' and 'memory' are implemented"
+        )
     import redis
 
     return RedisRateLimiter(
@@ -61,14 +65,19 @@ def identity_directory(settings: Settings, session: Session) -> IdentityDirector
 
 
 def object_storage(settings: Settings) -> ObjectStorage:
-    """Build the configured S3-compatible storage adapter.
+    """Build the configured storage adapter (S3-compatible or local filesystem).
 
     Raise RuntimeError for an unsupported provider; adapter initialization errors
     propagate to the caller.
     """
+    if settings.object_storage_provider == "filesystem":
+        from app.adapters.filesystem_storage import FilesystemObjectStorage
+
+        return FilesystemObjectStorage(settings)
     if settings.object_storage_provider != "s3":
         raise RuntimeError(
-            f"Unsupported object_storage.provider={settings.object_storage_provider!r}; only 's3' is implemented"
+            f"Unsupported object_storage.provider={settings.object_storage_provider!r}; "
+            "only 's3' and 'filesystem' are implemented"
         )
     from app.adapters.s3_storage import S3ObjectStorage
 

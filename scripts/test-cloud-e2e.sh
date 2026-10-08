@@ -36,7 +36,7 @@ INSTALLATION_NAME="${INSTALLATION_NAME:-e2e-test-$(date +%s)}"
 export INSTALLATION_NAME
 
 if [[ ! -x "$(command -v edge-installer || true)" ]]; then
-  "$PYTHON" -m pip install -e "installer/.[dev]" >/dev/null
+  "$PYTHON" -m pip install -e "infrastructure/installer/.[dev]" >/dev/null
 fi
 
 applied=0
@@ -44,16 +44,16 @@ applied=0
 destroy() {
   if [[ "$applied" -eq 1 ]]; then
     echo "==> Destroying AWS test infrastructure"
-    (cd "$ROOT/installer" && edge-installer destroy "$CONFIG" --yes) || true
+    (cd "$ROOT/infrastructure/installer" && edge-installer destroy "$CONFIG" --yes) || true
   fi
 }
 trap destroy EXIT
 
 echo "==> Terraform plan (no apply)"
-(cd "$ROOT/installer" && edge-installer plan "$CONFIG")
+(cd "$ROOT/infrastructure/installer" && edge-installer plan "$CONFIG")
 
 echo "==> Terraform apply + Ansible deploy ($INSTALLATION_NAME)"
-(cd "$ROOT/installer" && edge-installer apply "$CONFIG")
+(cd "$ROOT/infrastructure/installer" && edge-installer apply "$CONFIG")
 applied=1
 
 {
@@ -84,8 +84,7 @@ export PLATFORM_URL MQTT_HOST MQTT_PORT
 export MQTT_ALLOW_BROKER_RESTART=0
 
 echo "==> HTTPS health"
-chmod +x scripts/aws-ci-smoke.sh
-scripts/aws-ci-smoke.sh "$PLATFORM_URL"
+"$PYTHON" scripts/smoke_test.py "$PLATFORM_URL"
 
 echo "==> MQTT TLS :${MQTT_PORT}"
 if "$PYTHON" - <<'PY'

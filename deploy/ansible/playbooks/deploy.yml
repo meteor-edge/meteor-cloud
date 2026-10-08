@@ -1,0 +1,8 @@
+---
+- name: Deploy cloud application stack
+  import_playbook: services/cloud_app.yml
+  when: "'cloud_app' in enabled_services | default(['cloud_app'])"
+
+- name: Deploy VPN tunnel
+  import_playbook: services/vpn.yml
+  when: "'vpn' in enabled_services | default(['cloud_app'])"

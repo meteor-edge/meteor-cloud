@@ -1,6 +1,6 @@
 # Edge Platform Installer
 
-Standalone CLI (`edge-installer`) to install and maintain the Edge Platform on AWS EC2 or GCP Cloud Run. The platform application does not know how it was installed.
+Standalone CLI (`edge-installer`) to install and maintain MeteorCloud on an AWS EC2 host: Terraform (`infrastructure/terraform/aws`) creates the host, then the Ansible playbooks in `deploy/ansible/` deploy the Docker Compose stack. The platform application does not know how it was installed. For Kubernetes use the Helm chart instead ([Kubernetes](../../docs/kubernetes.md)).
 
 ## Quick start
 
@@ -46,7 +46,7 @@ services:
     enabled: true
 ```
 
-Service definitions live in `edge_installer/services/registry.py`. Each service maps to Terraform modules and Ansible playbooks under `infrastructure/`.
+Service definitions live in `edge_installer/services/registry.py`. Each service maps to Terraform modules under `infrastructure/terraform/aws/modules/` and Ansible playbooks under `deploy/ansible/playbooks/services/`.
 
 See [Modular services](../../docs/services.md).
 
@@ -58,7 +58,6 @@ infrastructure/installer/edge_installer/
 ├── config/           # YAML loading and validation
 ├── services/         # Service registry (cloud_app, vpn, ...)
 ├── providers/aws/    # EC2 Terraform
-├── providers/gcp/    # Cloud Run Terraform
 ├── deployment/       # Ansible, SSH, orchestration
 ├── state/            # Local state and locking
 ├── health/           # Post-deploy checks

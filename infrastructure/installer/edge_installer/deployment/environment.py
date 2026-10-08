@@ -14,8 +14,6 @@ def platform_url(config: InstallationConfig, outputs: TerraformOutputs) -> str:
     if config.platform.domain:
         scheme = "https" if config.network.allow_https else "http"
         return f"{scheme}://{config.platform.domain}"
-    if outputs.platform_url:
-        return outputs.platform_url.rstrip("/")
     return f"http://{outputs.connect_ip}"
 
 
@@ -37,6 +35,8 @@ def build_ansible_extra_vars(
         "backend_image": config.deployment.backend_image,
         "frontend_image": config.deployment.frontend_image,
         "image_pull_policy": config.deployment.image_pull_policy,
+        "postgres_provider": "bundled" if config.components.postgres.enabled else "external",
+        "cache_provider": "redis" if config.components.redis.enabled else "memory",
         "postgres_database": config.components.postgres.database_name,
         "postgres_username": config.components.postgres.username,
         "platform_env": config.installation.environment,
@@ -50,12 +50,15 @@ def build_ansible_extra_vars(
     vpn_key = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY", "")
     if vpn_key:
         extra["vpn_server_private_key"] = vpn_key
+    if db_url := os.environ.get("EDGE_PLATFORM_DATABASE_URL", "").strip():
+        extra["external_database_url"] = db_url
     return extra
 
 
 def secret_env_vars() -> dict[str, str]:
     keys = (
         "EDGE_PLATFORM_POSTGRES_PASSWORD",
+        "EDGE_PLATFORM_DATABASE_URL",
         "EDGE_PLATFORM_JWT_SECRET",
         "EDGE_PLATFORM_ADMIN_EMAIL",
         "EDGE_PLATFORM_ADMIN_PASSWORD",

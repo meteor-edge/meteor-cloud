@@ -1,0 +1,112 @@
+---
+- name: Build the Compose command
+  ansible.builtin.set_fact:
+    platform_compose: >-
+      docker compose -f docker-compose.yml -f docker-compose.prod.yml
+      {{ '-f docker-compose.observability.yml' if observability_enabled | bool else '' }}
+
+- name: Fetch application source for image builds
+  when: image_source == 'git'
+  block:
+    - name: Clone or update platform repository
+      ansible.builtin.git:
+        repo: "{{ repository_url }}"
+        dest: "{{ platform_source_dir }}"
+        version: "{{ git_ref }}"
+        force: true
+      register: platform_source
+
+    - name: Check for existing application images
+      ansible.builtin.command:
+        cmd: docker image inspect {{ ([backend_image, frontend_image] + ([data_plane_image] if mqtt_enabled | bool else [])) | join(' ') }}
+      register: platform_images
+      changed_when: false
+      failed_when: false
+
+    - name: Build application images
+      ansible.builtin.command:
+        cmd: "{{ platform_compose }} build"
+        chdir: "{{ platform_compose_dir }}"
+      when: platform_source.changed or platform_images.rc != 0
+      changed_when: true
+
+- name: Pull container images
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} pull --quiet"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_pull
+  changed_when: false
+  when: image_source == 'registry' and image_pull_policy != 'never'
+
+- name: Start platform stack
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} up -d --remove-orphans --wait --wait-timeout {{ platform_start_timeout_seconds | default(300) }}"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_up
+  changed_when: platform_up.stderr is search('Creat|Recreat|Start(ed|ing)')
+  failed_when: false
+
+- name: Report a failed start with service logs
+  when: platform_up.rc != 0
+  block:
+    - name: Capture service logs
+      ansible.builtin.command:
+        cmd: "{{ platform_compose }} logs --tail=150"
+        chdir: "{{ platform_compose_dir }}"
+      register: platform_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Compose output and logs
+      ansible.builtin.fail:
+        msg: |
+          docker compose up failed (rc={{ platform_up.rc }}).
+          {{ platform_up.stderr }}
+          service logs:
+          {{ platform_logs.stdout | default('') }}
+
+# --remove-orphans keeps containers of services whose profile was switched off
+# (for example cache_provider redis -> memory), so remove those explicitly.
+- name: List services enabled by the current profiles
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} config --services"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_enabled_services
+  changed_when: false
+
+- name: List existing service containers
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} ps --all --services"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_existing_services
+  changed_when: false
+
+- name: Remove containers of disabled services
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} rm --stop --force {{ platform_disabled_services | join(' ') }}"
+    chdir: "{{ platform_compose_dir }}"
+  vars:
+    platform_disabled_services: "{{ platform_existing_services.stdout_lines | difference(platform_enabled_services.stdout_lines) }}"
+  when: platform_disabled_services | length > 0
+  changed_when: true
+
+# Bind-mounted config files are not part of the Compose config hash.
+- name: Restart services whose mounted configuration changed
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} restart {{ item }}"
+    chdir: "{{ platform_compose_dir }}"
+  loop: >-
+    {{ (['emqx'] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
+       + (['prometheus', 'loki', 'alloy', 'grafana'] if observability_enabled | bool else []) }}
+  when: >-
+    (platform_service_config is defined and platform_service_config.changed)
+    or (item == 'emqx' and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
+  changed_when: true
+
+- name: Create the initial administrator when configured
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} exec -T backend python -m app.cli create-admin"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_admin
+  changed_when: "'Created administrator' in (platform_admin.stdout + platform_admin.stderr)"
+  when: admin_email | length > 0 and admin_password | length > 0

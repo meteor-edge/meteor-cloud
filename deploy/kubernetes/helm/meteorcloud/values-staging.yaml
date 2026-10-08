@@ -1,0 +1,59 @@
+# Example staging values: same chart and secret model as production, sized for
+# one replica. Copy and adjust; nothing here is cloud-specific.
+# Prerequisites you provide (see docs/kubernetes.md):
+#   - images pushed to your registry
+#   - PostgreSQL 14+ (managed or self-hosted)
+#   - an S3-compatible bucket
+#   - an ingress controller and a TLS certificate (e.g. cert-manager)
+#   - Secret "meteorcloud-secrets" with the keys listed in values.yaml
+config:
+  appEnv: staging
+  publicUrl: https://staging.fleet.example.com
+  logFormat: json
+  registrationRequireHttps: true
+
+secrets:
+  # Keys: JWT_SECRET_KEY, APP_SECRET_KEY, DATABASE_URL, and optionally
+  # OBJECT_STORAGE_ACCESS_KEY_ID / OBJECT_STORAGE_SECRET_ACCESS_KEY.
+  # Add the MQTT keys from values.yaml when mqtt.enabled is true.
+  existingSecret: meteorcloud-secrets
+
+imagePullSecrets: []
+backend:
+  image: { repository: registry.example.com/meteorcloud/backend, tag: "0.2.0" }
+console:
+  image: { repository: registry.example.com/meteorcloud/console, tag: "0.2.0" }
+dataPlane:
+  image: { repository: registry.example.com/meteorcloud/data-plane, tag: "0.2.0" }
+
+postgresql:
+  mode: external              # DATABASE_URL comes from the existing Secret
+
+# One API replica, so per-pod rate-limit counters are enough.
+cache:
+  provider: memory
+
+objectStorage:
+  provider: s3
+  s3:
+    endpointUrl: ""           # AWS S3; set for MinIO/Ceph/R2/GCS interoperability
+    region: eu-west-1
+    bucket: meteorcloud-artifacts-staging
+
+serviceAccount:
+  # Use a workload identity instead of static keys where your platform has one.
+  annotations: {}
+
+# Enable with publicHost and tls.existingSecret when testing devices.
+mqtt:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: nginx
+  host: staging.fleet.example.com
+  annotations: {}
+  #  cert-manager.io/cluster-issuer: letsencrypt-staging
+  tls:
+    - secretName: meteorcloud-staging-tls
+      hosts: [staging.fleet.example.com]

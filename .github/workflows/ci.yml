@@ -5,6 +5,12 @@ on:
     branches: [main, master]
   pull_request:
 
+# Validates both deployment paths without cloud credentials:
+#   Docker Compose (+ Ansible) and Kubernetes (Helm on a throwaway k3d cluster).
+# Images are built once, never pushed, and shared with later jobs as an artifact.
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -116,11 +122,93 @@ jobs:
       - name: Test (pytest)
         run: python -m pytest -q
 
+  console:
+    name: Console (lint, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+      - name: Lint (eslint)
+        run: npm run lint
+      - name: Test (vitest)
+        run: npm test -- --run
+      - name: Typecheck and build
+        run: npm run build
+
+  images:
+    name: Docker images (build, no push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend
+        uses: docker/build-push-action@v6
+        with:
+          context: src/control-plane
+          tags: meteorcloud/backend:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Build data plane
+        uses: docker/build-push-action@v6
+        with:
+          context: src/data-plane
+          tags: meteorcloud/data-plane:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=data-plane
+          cache-to: type=gha,mode=max,scope=data-plane
+      - name: Build console
+        uses: docker/build-push-action@v6
+        with:
+          context: console
+          tags: meteorcloud/console:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=console
+          cache-to: type=gha,mode=max,scope=console
+      - name: Export images
+        run: docker save meteorcloud/backend:ci meteorcloud/data-plane:ci meteorcloud/console:ci | gzip -1 > images.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: images
+          path: images.tar.gz
+          retention-days: 1
+
+  compose:
+    name: Docker Compose (config + smoke)
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: images
+      - name: Load images
+        run: gunzip -c images.tar.gz | docker load
+      - name: Compose config (base, dev, prod, observability)
+        run: make compose-config
+      - name: Minimal production stack smoke test
+        run: make compose-smoke IMAGE_TAG=ci
+
   mqtt:
     name: MQTT (local Compose)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v5
         with:
@@ -140,11 +228,10 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/tests
         run: make test-mqtt
 
-  infra:
-    name: Terraform / Ansible
+  ansible:
+    name: Ansible (lint, syntax, deploy to runner)
+    needs: images
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v5
         with:
@@ -152,13 +239,90 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+      - name: Install Ansible
+        run: python -m pip install ansible ansible-lint
+      - name: Syntax check
+        run: make ansible-check
+      - name: ansible-lint
+        run: make ansible-lint
+      - uses: actions/download-artifact@v5
+        with:
+          name: images
+      - name: Load images
+        run: gunzip -c images.tar.gz | docker load
+      # The runner already has Docker, so only the Compose deployment roles run
+      # (provision.yml would replace the runner's Docker packages).
+      - name: Deploy with Ansible, twice (second run must report no changes)
+        env:
+          EDGE_PLATFORM_POSTGRES_PASSWORD: ci-${{ github.run_id }}-pg
+          EDGE_PLATFORM_JWT_SECRET: ci-${{ github.run_id }}-jwt-secret-value
+        working-directory: deploy/ansible
+        run: |
+          printf '[platform]\nlocalhost ansible_connection=local ansible_python_interpreter=%s\n' "$(command -v python3)" > /tmp/inventory.ini
+          cat > /tmp/vars.yml <<'EOF'
+          platform_root: /tmp/meteorcloud
+          image_source: registry
+          image_pull_policy: never
+          backend_image: meteorcloud/backend:ci
+          frontend_image: meteorcloud/console:ci
+          data_plane_image: meteorcloud/data-plane:ci
+          EOF
+          ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml playbooks/services/cloud_app.yml
+          ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml playbooks/services/cloud_app.yml | tee /tmp/second-run.log
+          grep -Eq 'changed=0 .*failed=0' /tmp/second-run.log
+      - name: Smoke test the Ansible deployment
+        run: python scripts/smoke_test.py http://127.0.0.1
+      - name: Destroy with Ansible
+        if: always()
+        working-directory: deploy/ansible
+        run: ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml -e platform_destroy_data=true playbooks/destroy.yml
+
+  helm:
+    name: Helm (lint + template)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@v4
+      - name: Lint and render every values file
+        run: make helm-lint
+
+  terraform:
+    name: Terraform (fmt + validate, no credentials)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
-      - name: Install Ansible
-        run: python -m pip install ansible
       - name: Terraform check
         run: make terraform-check
-      - name: Ansible check
-        run: make ansible-check
+
+  kubernetes:
+    name: Kubernetes (k3d + Helm install + tests)
+    needs: [images, helm]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@v4
+      - name: Install k3d
+        env:
+          K3D_VERSION: v5.8.3
+        run: |
+          curl -fsSL -o /usr/local/bin/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          chmod +x /usr/local/bin/k3d
+          k3d version
+      - uses: actions/download-artifact@v5
+        with:
+          name: images
+      - name: Load images
+        run: gunzip -c images.tar.gz | docker load
+      - name: Create cluster, install, test, uninstall, delete cluster
+        run: IMAGE_TAG=ci ./scripts/k8s-smoke.sh

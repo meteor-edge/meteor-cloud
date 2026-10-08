@@ -1,0 +1,43 @@
+{{- include "meteorcloud.validate" . }}
+{{- $fullname := include "meteorcloud.fullname" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "meteorcloud.labels" . | nindent 4 }}
+data:
+  APP_NAME: edge-platform
+  APP_ENV: {{ .Values.config.appEnv | quote }}
+  APP_DEBUG: "false"
+  PLATFORM_VERSION: {{ .Chart.AppVersion | quote }}
+  BACKEND_HOST: "0.0.0.0"
+  BACKEND_PORT: "8000"
+  BACKEND_CORS_ORIGINS: {{ .Values.config.publicUrl | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  REGISTRATION_REQUIRE_HTTPS: {{ .Values.config.registrationRequireHttps | toString | quote }}
+  DATABASE_PROVIDER: postgresql
+  TELEMETRY_PROVIDER: postgresql
+  OTA_PROVIDER: none
+  IDENTITY_PROVIDER: local
+  CACHE_PROVIDER: {{ .Values.cache.provider | quote }}
+  OBJECT_STORAGE_PROVIDER: {{ .Values.objectStorage.provider | quote }}
+  OBJECT_STORAGE_PATH: /data/artifacts
+  {{- with .Values.objectStorage.s3 }}
+  OBJECT_STORAGE_ENDPOINT_URL: {{ .endpointUrl | quote }}
+  OBJECT_STORAGE_REGION: {{ .region | quote }}
+  OBJECT_STORAGE_BUCKET: {{ .bucket | quote }}
+  OBJECT_STORAGE_AUTO_CREATE_BUCKET: {{ .autoCreateBucket | toString | quote }}
+  {{- end }}
+  MQTT_ENABLED: {{ .Values.mqtt.enabled | toString | quote }}
+  MQTT_PROVIDER: emqx
+  MQTT_BROKER_HOST: {{ include "meteorcloud.mqttBrokerHost" . | quote }}
+  MQTT_BROKER_PORT: {{ .Values.mqtt.port | toString | quote }}
+  MQTT_PUBLIC_HOST: {{ .Values.mqtt.publicHost | quote }}
+  MQTT_PLATFORM_USERNAME: {{ .Values.mqtt.platformUsername | quote }}
+  MQTT_CA_CERT_PATH: /certs/ca.crt
+  DATA_PLANE_URL: {{ printf "http://%s-data-plane:8081" $fullname | quote }}
+  {{- range $key, $value := .Values.config.extraEnv }}
+  {{ $key }}: {{ $value | toString | quote }}
+  {{- end }}

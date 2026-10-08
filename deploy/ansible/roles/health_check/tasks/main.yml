@@ -1,0 +1,24 @@
+---
+# Runs on the host itself so it also works when the controller cannot reach the
+# public URL (private networks, on-prem). Set health_check_url to override.
+- name: Set the entry point URL
+  ansible.builtin.set_fact:
+    platform_health_url: "{{ health_check_url | default(('https://127.0.0.1:' ~ https_port) if platform_domain else ('http://127.0.0.1:' ~ http_port)) }}"
+
+- name: Check API health through the entry point
+  ansible.builtin.uri:
+    url: "{{ platform_health_url }}/health"
+    validate_certs: false
+  register: backend_health
+  retries: 20
+  delay: 5
+  until: backend_health.status == 200
+
+- name: Check console through the entry point
+  ansible.builtin.uri:
+    url: "{{ platform_health_url }}/"
+    validate_certs: false
+  register: frontend_health
+  retries: 20
+  delay: 5
+  until: frontend_health.status == 200

@@ -10,7 +10,6 @@ from edge_installer.exceptions import ConfigurationError
 from edge_installer.process.runner import command_exists
 
 REQUIRED_SECRET_VARS = (
-    "EDGE_PLATFORM_POSTGRES_PASSWORD",
     "EDGE_PLATFORM_JWT_SECRET",
 )
 
@@ -42,12 +41,6 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
         if not config.network.allowed_ssh_cidrs:
             errors.append("network.allowed_ssh_cidrs must not be empty")
 
-    if provider == "gcp":
-        if config.gcp is None:
-            errors.append("gcp settings are required when installation.provider is gcp")
-        if config.services.vpn.enabled:
-            errors.append("services.vpn is not supported on GCP Cloud Run; set services.vpn.enabled=false")
-
     enabled_services = config.enabled_service_names()
     if not enabled_services:
         errors.append("At least one service must be enabled under services")
@@ -56,9 +49,14 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
         errors.append("services.vpn requires services.cloud_app to be enabled")
 
     if config.services.cloud_app.enabled:
-        if not config.components.postgres.enabled:
-            errors.append("components.postgres must be enabled when cloud_app is enabled")
-        if provider == "aws" and not config.components.reverse_proxy.enabled:
+        if config.components.postgres.enabled:
+            if not os.environ.get("EDGE_PLATFORM_POSTGRES_PASSWORD"):
+                errors.append("EDGE_PLATFORM_POSTGRES_PASSWORD is not set")
+        elif not os.environ.get("EDGE_PLATFORM_DATABASE_URL"):
+            errors.append(
+                "EDGE_PLATFORM_DATABASE_URL must be set when components.postgres is disabled"
+            )
+        if not config.components.reverse_proxy.enabled:
             errors.append("components.reverse_proxy must be enabled when cloud_app is enabled")
         if not config.deployment.backend_image.strip():
             errors.append("deployment.backend_image must be configured")
@@ -82,10 +80,7 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
 
 def validate_dependencies(config: InstallationConfig | None = None) -> list[str]:
     errors: list[str] = []
-    tools = ["terraform"]
-    if config is None or config.installation.provider == "aws":
-        tools.extend(["ansible-playbook", "ssh"])
-    for tool in tools:
+    for tool in ("terraform", "ansible-playbook", "ssh"):
         if not command_exists(tool):
             errors.append(f"Required tool not found in PATH: {tool}")
     return errors
@@ -105,29 +100,10 @@ def validate_aws_credentials(profile: str | None = None) -> list[str]:
     return []
 
 
-def validate_gcp_credentials() -> list[str]:
-    adc_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if adc_env:
-        path = Path(adc_env).expanduser()
-        if not path.exists():
-            return [f"GOOGLE_APPLICATION_CREDENTIALS does not exist: {path}"]
-        return []
-    adc = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
-    if adc.exists():
-        return []
-    return [
-        "GCP credentials are not configured "
-        "(gcloud auth application-default login or GOOGLE_APPLICATION_CREDENTIALS)"
-    ]
-
-
 def ensure_valid(config: InstallationConfig) -> None:
     errors = validate_configuration(config) + validate_dependencies(config)
-    if config.installation.provider == "aws":
-        profile = config.aws.profile if config.aws else None
-        errors.extend(validate_aws_credentials(profile))
-    elif config.installation.provider == "gcp":
-        errors.extend(validate_gcp_credentials())
+    profile = config.aws.profile if config.aws else None
+    errors.extend(validate_aws_credentials(profile))
     if errors:
         message = "Configuration is invalid:\n\n" + "\n".join(f"- {item}" for item in errors)
         raise ConfigurationError(message, stage="validation")

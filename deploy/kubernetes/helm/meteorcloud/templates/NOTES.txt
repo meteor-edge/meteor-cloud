@@ -1,0 +1,29 @@
+MeteorCloud {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  helm -n {{ .Release.Namespace }} test {{ .Release.Name }}
+
+{{- if .Values.ingress.enabled }}
+
+Console and API: {{ if .Values.ingress.host }}{{ if .Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}{{ else }}the address of your ingress controller{{ end }}
+{{- else }}
+
+Ingress is disabled. The console calls the API on the same origin, so route
+/api and /health to service {{ include "meteorcloud.fullname" . }}-backend:8000 and / to
+{{ include "meteorcloud.fullname" . }}-console:80 with your own gateway or proxy.
+{{- end }}
+{{- if .Values.mqtt.enabled }}
+
+Devices connect to mqtts://{{ .Values.mqtt.publicHost }}:{{ .Values.mqtt.port }}
+{{- if eq .Values.mqtt.broker "bundled" }} (service {{ include "meteorcloud.fullname" . }}-emqx, type {{ .Values.mqtt.emqx.service.type }}){{ end }}.
+{{- end }}
+{{- if and (eq .Values.cache.provider "memory") (gt (int .Values.backend.replicaCount) 1) }}
+
+WARNING: cache.provider=memory keeps rate-limit counters per pod; with
+{{ .Values.backend.replicaCount }} replicas the effective limits are {{ .Values.backend.replicaCount }}x higher. Use cache.provider=redis.
+{{- end }}
+{{- if eq .Values.postgresql.mode "bundled" }}
+
+PostgreSQL runs inside this release without backups. Use postgresql.mode=external
+for production data.
+{{- end }}

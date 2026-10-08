@@ -1,0 +1,40 @@
+{{- $fullname := include "meteorcloud.fullname" . }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $fullname }}-test-health
+  labels:
+    {{- include "meteorcloud.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+    - name: health
+      image: {{ include "meteorcloud.image" (dict "ctx" . "image" .Values.backend.image) }}
+      imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+      command:
+        - python
+        - -c
+        - |
+          import json, urllib.request
+          api = json.load(urllib.request.urlopen("http://{{ $fullname }}-backend:8000/api/v1/health", timeout=10))
+          print("api:", api)
+          html = urllib.request.urlopen("http://{{ $fullname }}-console/", timeout=10).read().decode()
+          assert "<div id=\"root\">" in html or "<html" in html, "console did not return HTML"
+          print("console: ok")
+          {{- if .Values.mqtt.enabled }}
+          dp = urllib.request.urlopen("http://{{ $fullname }}-data-plane:8081/health", timeout=10).status
+          assert dp == 200, dp
+          print("data-plane: ok")
+          {{- end }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]

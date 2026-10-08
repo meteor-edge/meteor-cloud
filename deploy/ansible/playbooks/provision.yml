@@ -1,0 +1,11 @@
+---
+- name: Prepare MeteorCloud host
+  hosts: platform
+  become: true
+  roles:
+    - meteorcloud
+    - common
+    - docker
+    - role: firewall
+      when: firewall_enabled | bool
+    - platform_directories

@@ -12,23 +12,27 @@ else
   PYTHON="${PYTHON:-python3}"
 fi
 
-COMPOSE="${MQTT_COMPOSE:-docker compose -f docker-compose.yml}"
+ENV_FILE="$ROOT/deploy/compose/.env"
+COMPOSE="${MQTT_COMPOSE:-docker compose -f $ROOT/deploy/compose/docker-compose.yml}"
 export MQTT_COMPOSE="$COMPOSE"
 export PLATFORM_URL="${PLATFORM_URL:-http://127.0.0.1:8000}"
 export MQTT_HOST="${MQTT_HOST:-127.0.0.1}"
 export MQTT_PORT="${MQTT_PORT:-8883}"
 export MQTT_CA_FILE="${MQTT_CA_FILE:-$ROOT/certs/ca.crt}"
 export MQTT_ALLOW_BROKER_RESTART="${MQTT_ALLOW_BROKER_RESTART:-1}"
+# The suite registers many devices from one address within a minute.
+export REGISTRATION_RATE_LIMIT_REQUESTS="${REGISTRATION_RATE_LIMIT_REQUESTS:-1000}"
+export ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS="${ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS:-1000}"
 
-if [[ ! -f .env && -f .env.example ]]; then
-  cp .env.example .env
+if [[ ! -f "$ENV_FILE" ]]; then
+  cp "$ROOT/deploy/compose/.env.example" "$ENV_FILE"
 fi
-if [[ -z "${MQTT_INTERNAL_TOKEN:-}" && -f .env ]]; then
-  MQTT_INTERNAL_TOKEN="$(awk -F= '/^MQTT_INTERNAL_TOKEN=/{print substr($0, index($0,"=")+1); exit}' .env)"
+if [[ -z "${MQTT_INTERNAL_TOKEN:-}" ]]; then
+  MQTT_INTERNAL_TOKEN="$(awk -F= '/^MQTT_INTERNAL_TOKEN=/{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")"
   export MQTT_INTERNAL_TOKEN
 fi
 if [[ -z "${MQTT_INTERNAL_TOKEN:-}" ]]; then
-  echo "error: MQTT_INTERNAL_TOKEN must be set (environment or .env)" >&2
+  echo "error: MQTT_INTERNAL_TOKEN must be set (environment or deploy/compose/.env)" >&2
   exit 1
 fi
 ./scripts/generate-local-mqtt-certs.sh

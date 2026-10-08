@@ -1,5 +1,0 @@
-- name: Deploy VPN tunnel (WireGuard)
-  hosts: platform
-  become: true
-  roles:
-    - vpn
