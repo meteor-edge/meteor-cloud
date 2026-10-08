@@ -106,6 +106,7 @@
     owner: "{{ platform_owner }}"
     group: "{{ platform_owner }}"
     mode: "0600"
+  no_log: true
 
 - name: Install MQTT broker certificates
   when: mqtt_enabled | bool and mqtt_broker == 'bundled'

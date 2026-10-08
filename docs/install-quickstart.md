@@ -79,4 +79,5 @@ open http://<public-ip>/
 
 - [Installer configuration](installer-configuration.md)
 - [AWS deployment](aws-deployment.md)
+- [EC2 smoke test](aws-ci.md) (manual GitHub Actions: Terraform + Ansible + destroy)
 - [Troubleshooting](troubleshooting.md)

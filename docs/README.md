@@ -38,7 +38,7 @@ Canonical public docs are served by the **website** (`/docs`). This tree is the 
 | [Destroy](destroy.md) | |
 | [Observability](observability.md) | |
 | [Troubleshooting](troubleshooting.md) | |
-| [AWS CI](aws-ci.md) | Throwaway EC2 workflow |
+| [EC2 smoke test](aws-ci.md) | Manual GitHub Actions run: Terraform + Ansible on a throwaway EC2 instance |
 
 ## Related
 

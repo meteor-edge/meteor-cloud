@@ -79,6 +79,45 @@ def test_empty_configuration_file(tmp_path: Path) -> None:
         load_configuration(path)
 
 
+def test_validate_allows_external_postgres_with_database_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "key.pem"
+    key_path.write_text("key", encoding="utf-8")
+    monkeypatch.delenv("EDGE_PLATFORM_POSTGRES_PASSWORD", raising=False)
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+    monkeypatch.setenv(
+        "EDGE_PLATFORM_DATABASE_URL",
+        "postgresql+psycopg://edge:secret@db.example.com:5432/edge_platform",
+    )
+
+    config = load_configuration(EXAMPLE)
+    config.aws.ssh_private_key_path = str(key_path)
+    config.components.postgres.enabled = False
+    errors = validate_configuration(config)
+
+    assert not any("POSTGRES_PASSWORD" in item for item in errors)
+    assert not any("components.postgres must be enabled" in item for item in errors)
+    assert not any("EDGE_PLATFORM_DATABASE_URL" in item for item in errors)
+
+
+def test_validate_rejects_disabled_postgres_without_database_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "key.pem"
+    key_path.write_text("key", encoding="utf-8")
+    monkeypatch.delenv("EDGE_PLATFORM_POSTGRES_PASSWORD", raising=False)
+    monkeypatch.delenv("EDGE_PLATFORM_DATABASE_URL", raising=False)
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+
+    config = load_configuration(EXAMPLE)
+    config.aws.ssh_private_key_path = str(key_path)
+    config.components.postgres.enabled = False
+    errors = validate_configuration(config)
+
+    assert any("EDGE_PLATFORM_DATABASE_URL" in item for item in errors)
+
+
 def test_validate_reports_missing_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     key_path = tmp_path / "key.pem"
     key_path.write_text("key", encoding="utf-8")

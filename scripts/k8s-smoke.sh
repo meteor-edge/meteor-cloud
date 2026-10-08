@@ -15,14 +15,19 @@ NAMESPACE=meteorcloud
 RELEASE=meteorcloud
 CTX="k3d-$CLUSTER"
 KUBECTL=(kubectl --context "$CTX" -n "$NAMESPACE")
+CREATED_CLUSTER=0
 
 cleanup() {
   if [[ "${KEEP_CLUSTER:-}" == "1" ]]; then
     echo "==> Keeping cluster $CLUSTER (k3d cluster delete $CLUSTER)"
-  else
-    echo "==> Deleting cluster $CLUSTER"
-    k3d cluster delete "$CLUSTER" || true
+    return
   fi
+  if [[ "$CREATED_CLUSTER" != "1" ]]; then
+    echo "==> Not deleting cluster $CLUSTER (not created by this run)"
+    return
+  fi
+  echo "==> Deleting cluster $CLUSTER"
+  k3d cluster delete "$CLUSTER" || true
 }
 trap cleanup EXIT
 
@@ -36,9 +41,14 @@ diagnostics() {
   done
 }
 
-echo "==> Creating k3d cluster $CLUSTER (ingress on localhost:$HTTP_PORT)"
-k3d cluster create "$CLUSTER" --agents 0 --wait --timeout 300s \
-  --kubeconfig-switch-context=false -p "$HTTP_PORT:80@loadbalancer"
+echo "==> Creating k3d cluster $CLUSTER (ingress on 127.0.0.1:$HTTP_PORT)"
+if k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -qx "$CLUSTER"; then
+  echo "==> Cluster $CLUSTER already exists; leaving it in place"
+else
+  k3d cluster create "$CLUSTER" --agents 0 --wait --timeout 300s \
+    --kubeconfig-switch-context=false -p "127.0.0.1:$HTTP_PORT:80@loadbalancer"
+  CREATED_CLUSTER=1
+fi
 
 echo "==> Importing images (tag $IMAGE_TAG)"
 k3d image import -c "$CLUSTER" "meteorcloud/backend:$IMAGE_TAG" "meteorcloud/console:$IMAGE_TAG"

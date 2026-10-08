@@ -219,7 +219,7 @@ HTTP JSON between planes is documented in [`contracts/mqtt-http.md`](../contract
 
 ```bash
 make k8s-up        # k3d cluster (development tool only)
-make k8s-deploy    # build images, import, helm upgrade --install with values-local.yaml
+make k8s-deploy    # build images, import, helm upgrade --install with values-dev.yaml
 make k8s-status
 make k8s-test
 make k8s-down

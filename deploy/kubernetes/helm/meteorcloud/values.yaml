@@ -74,7 +74,7 @@ cache:
   redis:
     mode: bundled            # bundled | external
     external:
-      url: ""                # redis://:password@host:6379/0 or rediss://...
+      url: ""                # rediss://:password@host:6379/0 (TLS required with credentials)
     image:
       repository: redis
       tag: "7-alpine"
@@ -193,7 +193,7 @@ serviceAccount:
 # /internal and /metrics are never routed. Needs an ingress controller in the
 # cluster (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
 ingress:
-  enabled: true
+  enabled: false
   className: ""
   annotations: {}
   host: ""                   # empty: match any host

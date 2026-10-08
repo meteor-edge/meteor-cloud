@@ -50,12 +50,15 @@ def build_ansible_extra_vars(
     vpn_key = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY", "")
     if vpn_key:
         extra["vpn_server_private_key"] = vpn_key
+    if db_url := os.environ.get("EDGE_PLATFORM_DATABASE_URL", "").strip():
+        extra["external_database_url"] = db_url
     return extra
 
 
 def secret_env_vars() -> dict[str, str]:
     keys = (
         "EDGE_PLATFORM_POSTGRES_PASSWORD",
+        "EDGE_PLATFORM_DATABASE_URL",
         "EDGE_PLATFORM_JWT_SECRET",
         "EDGE_PLATFORM_ADMIN_EMAIL",
         "EDGE_PLATFORM_ADMIN_PASSWORD",

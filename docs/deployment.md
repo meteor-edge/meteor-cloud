@@ -67,7 +67,9 @@ Upgrade: change `git_ref` (git builds) or image tags (registry), then run
 `-e platform_destroy_data=true` to delete data).
 
 On AWS, `edge-installer` creates the EC2 instance with Terraform and runs the same
-playbooks: [aws-deployment.md](aws-deployment.md).
+playbooks: [aws-deployment.md](aws-deployment.md). To check that a fresh instance
+still installs cleanly, run the manual **EC2 smoke test** workflow
+([aws-ci.md](aws-ci.md)).
 
 ## Option 2: Docker Compose by hand
 
@@ -87,5 +89,10 @@ the smoke test, and removes it again.
 
 ## Backups
 
-Back up PostgreSQL (`docker compose exec postgres pg_dump`) and the artifact store
-(`/opt/edge-platform/data/artifacts` or your bucket). Nothing else holds state.
+Back up PostgreSQL and the artifact store. Nothing else holds state:
+
+```bash
+docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > postgres.dump
+```
+
+Artifact files live in `/opt/edge-platform/data/artifacts` or your bucket.

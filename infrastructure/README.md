@@ -54,7 +54,7 @@ inventory and extra-vars.
 cd .installer-state/production/terraform
 terraform plan -var-file=terraform.tfvars.json
 
-cd deploy/ansible
+cd ../../../deploy/ansible
 ansible-playbook playbooks/site.yml \
   -i ../../.installer-state/production/inventory.ini \
   -e @../../.installer-state/production/extra-vars.json

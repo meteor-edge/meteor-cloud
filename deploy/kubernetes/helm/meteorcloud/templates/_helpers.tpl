@@ -83,6 +83,10 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq $v.cache.provider "redis") (eq $v.cache.redis.mode "external") (not $v.secrets.existingSecret) (not $v.cache.redis.external.url) }}
 {{- fail "cache.redis.mode=external needs cache.redis.external.url or secrets.existingSecret with REDIS_URL" }}
 {{- end }}
+{{- $redisUrl := $v.cache.redis.external.url | default "" }}
+{{- if and (eq $v.cache.provider "redis") (eq $v.cache.redis.mode "external") $redisUrl (hasPrefix "redis://" $redisUrl) (contains "@" $redisUrl) }}
+{{- fail "cache.redis.external.url with credentials must use rediss:// (TLS)" }}
+{{- end }}
 {{- if not (has $v.objectStorage.provider (list "filesystem" "s3")) }}
 {{- fail "objectStorage.provider must be filesystem or s3" }}
 {{- end }}

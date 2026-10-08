@@ -122,16 +122,16 @@ stop-website: ## Website is not in this repo
 
 up: ## Deploy all enabled AWS services (Terraform + Ansible)
 	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
-	cd $(INSTALLER_DIR) && edge-installer apply $(CONFIG)
+	cd $(INSTALLER_DIR) && edge-installer apply $(abspath $(CONFIG))
 
 down: ## Destroy the installation
-	cd $(INSTALLER_DIR) && edge-installer destroy $(CONFIG) --yes
+	cd $(INSTALLER_DIR) && edge-installer destroy $(abspath $(CONFIG)) --yes
 
 plan: ## Preview infrastructure changes for enabled services
-	cd $(INSTALLER_DIR) && edge-installer plan $(CONFIG)
+	cd $(INSTALLER_DIR) && edge-installer plan $(abspath $(CONFIG))
 
 status-aws: ## Show AWS installation status and health
-	cd $(INSTALLER_DIR) && edge-installer status $(CONFIG)
+	cd $(INSTALLER_DIR) && edge-installer status $(abspath $(CONFIG))
 
 logs: ## Tail development stack logs
 	$(COMPOSE) logs -f
@@ -255,9 +255,9 @@ compose-smoke: ## Start the minimal production Compose stack, smoke-test it, rem
 
 helm-lint: ## Lint the Helm chart and render it with every values file
 	helm lint --strict $(CHART)
-	for f in values-local.yaml values-ci.yaml values-production.yaml; do \
-		helm lint --strict $(CHART) -f $(CHART)/$$f && \
-		helm template meteorcloud $(CHART) -f $(CHART)/$$f > /dev/null || exit 1; done
+	for f in $(CHART)/values-*.yaml; do \
+		helm lint --strict $(CHART) -f $$f && \
+		helm template meteorcloud $(CHART) -f $$f > /dev/null || exit 1; done
 
 images: ## Build the backend, data-plane, and console images (IMAGE_TAG=dev)
 	docker build -t meteorcloud/backend:$(IMAGE_TAG) $(BACKEND_DIR)
@@ -284,7 +284,7 @@ k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --ins
 		--from-file=ca.crt=$(K8S_CERTS_DIR)/ca.crt --from-file=server.crt=$(K8S_CERTS_DIR)/server.crt \
 		--from-file=server.key=$(K8S_CERTS_DIR)/server.key --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
 	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
-		-f $(CHART)/values-local.yaml --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
+		-f $(CHART)/values-dev.yaml --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
 		--set dataPlane.image.tag=$(IMAGE_TAG) --set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
 		--wait --timeout 10m
 	# Restart so pods pick up images re-imported under the same tag.
@@ -306,13 +306,13 @@ k8s-down: ## Delete the local k3d cluster (and everything in it)
 	k3d cluster delete $(K8S_CLUSTER)
 
 installer-validate: ## Validate installer configuration
-	cd $(INSTALLER_DIR) && edge-installer validate $(CONFIG)
+	cd $(INSTALLER_DIR) && edge-installer validate $(abspath $(CONFIG))
 
 installer-plan: ## Plan infrastructure and deployment
-	cd $(INSTALLER_DIR) && edge-installer plan $(CONFIG)
+	cd $(INSTALLER_DIR) && edge-installer plan $(abspath $(CONFIG))
 
 installer-apply: ## Apply infrastructure and deploy platform
-	cd $(INSTALLER_DIR) && edge-installer apply $(CONFIG)
+	cd $(INSTALLER_DIR) && edge-installer apply $(abspath $(CONFIG))
 
 clean: ## Remove local build artifacts
 	$(COMPOSE) down -v --remove-orphans || true

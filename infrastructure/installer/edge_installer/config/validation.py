@@ -10,7 +10,6 @@ from edge_installer.exceptions import ConfigurationError
 from edge_installer.process.runner import command_exists
 
 REQUIRED_SECRET_VARS = (
-    "EDGE_PLATFORM_POSTGRES_PASSWORD",
     "EDGE_PLATFORM_JWT_SECRET",
 )
 
@@ -50,8 +49,13 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
         errors.append("services.vpn requires services.cloud_app to be enabled")
 
     if config.services.cloud_app.enabled:
-        if not config.components.postgres.enabled:
-            errors.append("components.postgres must be enabled when cloud_app is enabled")
+        if config.components.postgres.enabled:
+            if not os.environ.get("EDGE_PLATFORM_POSTGRES_PASSWORD"):
+                errors.append("EDGE_PLATFORM_POSTGRES_PASSWORD is not set")
+        elif not os.environ.get("EDGE_PLATFORM_DATABASE_URL"):
+            errors.append(
+                "EDGE_PLATFORM_DATABASE_URL must be set when components.postgres is disabled"
+            )
         if not config.components.reverse_proxy.enabled:
             errors.append("components.reverse_proxy must be enabled when cloud_app is enabled")
         if not config.deployment.backend_image.strip():

@@ -12,7 +12,7 @@ k3d, GKE, EKS, AKS, OpenShift, and customer clusters.
 | --- | --- | --- |
 | API (`backend`) | Deployment + Service; init container runs `alembic upgrade head` and the optional first-admin step | always |
 | Console | Deployment + Service (nginx) | always |
-| Ingress | `/api`, `/health` -> API; `/` -> console | `ingress.enabled` (default) |
+| Ingress | `/api`, `/health` -> API; `/` -> console | `ingress.enabled` (off by default; overlays turn it on) |
 | PostgreSQL | StatefulSet + PVC (single instance, no backups) | `postgresql.mode=bundled` (default) |
 | Artifact volume | PVC | `objectStorage.provider=filesystem` (default) |
 | Data plane | Deployment (1 replica) | `mqtt.enabled` |
@@ -33,10 +33,22 @@ The chart refuses to render unsupported combinations, for example several API re
 
 | File | Use |
 | --- | --- |
-| `values.yaml` | Defaults: bundled PostgreSQL, filesystem storage, in-memory rate limits, MQTT off |
-| `values-local.yaml` | k3d development: local images, Traefik ingress, bundled EMQX |
-| `values-ci.yaml` | Pull-request CI: minimal (no Redis, MinIO, MQTT, Kafka, ClickHouse) |
-| `values-production.yaml` | Example: external PostgreSQL, S3, Redis, existing Secret, TLS ingress |
+| `values.yaml` | Defaults: bundled PostgreSQL, filesystem storage, in-memory rate limits, MQTT off, ingress off |
+| `values-dev.yaml` | Local and dev (one model): local images, bundled PostgreSQL and EMQX, Traefik ingress |
+| `values-staging.yaml` | Example staging: external PostgreSQL, S3, existing Secret, one replica, MQTT off |
+| `values-production.yaml` | Example production: external PostgreSQL, S3, Redis, existing Secret, two replicas, TLS ingress |
+| `values-ci.yaml` | Pull-request CI only: minimal (no Redis, MinIO, MQTT, Kafka, ClickHouse) |
+
+Environments are overlays on one chart (local/dev, then staging, then production):
+
+```bash
+helm upgrade --install meteorcloud deploy/kubernetes/helm/meteorcloud \
+  -n meteorcloud --create-namespace \
+  -f deploy/kubernetes/helm/meteorcloud/values-staging.yaml   # or values-dev / values-production
+```
+
+Copy the staging or production file, replace the `example.com` placeholders, and
+create the Secret it references before installing. Never commit real secrets.
 
 ## Local cluster (k3d)
 
@@ -101,7 +113,7 @@ in the API's init container before the new version serves traffic.
 ## Staging options
 
 - **k3s on a VM.** Install k3s (`curl -sfL https://get.k3s.io | sh -`). It includes
-  Traefik and servicelb, so `values-local.yaml`-style settings work: set
+  Traefik and servicelb, so `values-dev.yaml`-style settings work: set
   `ingress.className: traefik` and point `mqtt.publicHost` at the VM. Push images to
   a registry or import them with `k3s ctr images import`.
 - **GKE.** Create the cluster yourself (console, gcloud, or your own Terraform).

@@ -1,8 +1,9 @@
-name: AWS CI
+name: EC2 smoke test
 
-# Optional: store AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, then run this
-# workflow. It runs tests and infra checks, launches a throwaway EC2 install,
-# smoke-checks it, and always destroys the instance.
+# Manual: store AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, then run this
+# workflow. It runs tests and infra checks, creates a throwaway EC2 instance
+# with Terraform, deploys it with Ansible (Docker Compose), smoke-tests it, and
+# always destroys it. See docs/aws-ci.md.
 on:
   workflow_dispatch:
 

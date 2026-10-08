@@ -1,4 +1,6 @@
-# Example production values. Copy and adjust; nothing here is cloud-specific.
+# Example production values: same chart as dev and staging, with external
+# PostgreSQL/Redis/S3 and two replicas. Copy and adjust; nothing here is
+# cloud-specific.
 # Prerequisites you provide (see docs/kubernetes.md):
 #   - images pushed to your registry
 #   - PostgreSQL 14+ (managed or self-hosted)

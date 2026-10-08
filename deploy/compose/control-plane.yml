@@ -17,7 +17,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-edge}
       POSTGRES_DB: ${POSTGRES_DB:-edge_platform}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - ${POSTGRES_DATA:-postgres_data}:/var/lib/postgresql/data
       - ./config/postgres/init-test-db.sh:/docker-entrypoint-initdb.d/02-init-test-db.sh:ro
@@ -56,8 +56,8 @@ services:
       MINIO_SERVER_URL: http://localhost:${MINIO_API_PORT:-9000}
       MINIO_BROWSER_REDIRECT_URL: http://localhost:${MINIO_CONSOLE_PORT:-9001}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${MINIO_BIND:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_BIND:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - ${MINIO_DATA:-minio_data}:/bitnami/minio/data
     healthcheck:

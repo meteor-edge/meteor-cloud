@@ -14,6 +14,8 @@ make up
 
 Equivalent: `edge-installer apply installation.yaml`
 
+This is the EC2 path only (Terraform creates the host, Ansible deploys Compose). Kubernetes uses Helm ([kubernetes.md](kubernetes.md)). To smoke-test a throwaway instance from GitHub Actions, see [EC2 smoke test](aws-ci.md).
+
 ## Configure services
 
 ```yaml

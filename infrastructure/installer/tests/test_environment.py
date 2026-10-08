@@ -81,6 +81,18 @@ def test_build_ansible_extra_vars_maps_components_to_providers() -> None:
     assert extra["cache_provider"] == "redis"
 
 
+def test_build_ansible_extra_vars_passes_external_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "EDGE_PLATFORM_DATABASE_URL",
+        "postgresql+psycopg://edge:secret@db.example.com:5432/edge_platform",
+    )
+    config = load_configuration(EXAMPLE)
+    extra = build_ansible_extra_vars(config, _outputs())
+    assert extra["external_database_url"].startswith("postgresql+psycopg://")
+
+
 def test_build_ansible_extra_vars_omits_vpn_key_when_not_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

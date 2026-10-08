@@ -26,6 +26,8 @@ There are two independent ways to run MeteorCloud. Both use the same container i
 
 Ansible only prepares servers and runs Docker Compose; it never deploys to Kubernetes. Terraform ([`infrastructure/terraform/aws`](infrastructure/terraform/aws/)) only creates the AWS EC2 host for the Compose path.
 
+On AWS, `make up` (or `edge-installer apply`) runs Terraform then Ansible. To prove a fresh instance still installs, run GitHub Actions → **EC2 smoke test** (manual; needs `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`). Details: [docs/aws-ci.md](docs/aws-ci.md). Helm is a separate path for clusters you already have (`values-dev.yaml`, `values-staging.yaml`, `values-production.yaml`).
+
 ### Dependencies
 
 | Dependency | Status | Options |
@@ -63,7 +65,7 @@ Kubernetes (k3d + Helm, needs [k3d](https://k3d.io), kubectl, and helm):
 
 ```bash
 make k8s-up       # local k3d cluster: ingress on localhost:8088, MQTT on localhost:18883
-make k8s-deploy   # build images, import into k3d, helm upgrade --install (values-local.yaml)
+make k8s-deploy   # build images, import into k3d, helm upgrade --install (values-dev.yaml)
 make k8s-status   # pods, services, ingress, volumes
 make k8s-test     # helm test + HTTP smoke test
 make k8s-down     # delete the cluster

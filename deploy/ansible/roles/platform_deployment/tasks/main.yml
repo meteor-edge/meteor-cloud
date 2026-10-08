@@ -10,7 +10,7 @@
   block:
     - name: Clone or update platform repository
       ansible.builtin.git:
-        repo: "{{ repository_url | regex_replace('^git@github\\.com:', 'https://github.com/') }}"
+        repo: "{{ repository_url }}"
         dest: "{{ platform_source_dir }}"
         version: "{{ git_ref }}"
         force: true
@@ -99,7 +99,7 @@
     {{ (['emqx'] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
        + (['prometheus', 'loki', 'alloy', 'grafana'] if observability_enabled | bool else []) }}
   when: >-
-    (platform_service_config is defined and platform_service_config.changed and not platform_up.changed)
+    (platform_service_config is defined and platform_service_config.changed)
     or (item == 'emqx' and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
   changed_when: true
 
