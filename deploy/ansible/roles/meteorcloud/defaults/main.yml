@@ -1,0 +1,100 @@
+---
+# Every MeteorCloud deployment setting and its default. Override in inventory
+# group_vars (see inventory/example/) or with extra-vars (edge-installer does this).
+# Secrets default to EDGE_PLATFORM_* environment variables on the Ansible
+# controller so nothing secret has to be written into the inventory.
+
+# Host layout
+platform_root: /opt/edge-platform
+platform_compose_dir: "{{ platform_root }}/compose"
+platform_source_dir: "{{ platform_root }}/src"
+platform_certs_dir: "{{ platform_root }}/certs"
+# Owner of the bundle and config files (the env file holds secrets, mode 0600).
+platform_owner: root
+# Compose project and network name; change only to run two stacks on one host.
+compose_project_name: meteorcloud
+
+# Public entry point (Traefik)
+http_port: 80
+https_port: 443
+
+# Application
+platform_env: production
+platform_version: "0.2.0"
+platform_public_url: http://127.0.0.1
+platform_domain: ""
+acme_email: "{{ EDGE_PLATFORM_ACME_EMAIL | default(lookup('env', 'EDGE_PLATFORM_ACME_EMAIL'), true) }}"
+log_format: console
+log_level: INFO
+registration_require_https: false
+docs_public_url: http://localhost:3000/docs
+
+# Images. image_source=git clones repository_url and builds on the host;
+# image_source=registry pulls the image references below.
+image_source: git
+repository_url: https://github.com/shahabkamali/MeteorCloud.git
+git_ref: master
+backend_image: edge-platform-backend:0.2.0
+data_plane_image: edge-platform-data-plane:0.2.0
+frontend_image: edge-platform-frontend:0.2.0
+image_pull_policy: if-not-present
+
+# PostgreSQL: bundled (container on this host) or external (set external_database_url)
+postgres_provider: bundled
+postgres_database: edge_platform
+postgres_username: edge_platform
+postgres_password: "{{ EDGE_PLATFORM_POSTGRES_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_POSTGRES_PASSWORD'), true) }}"
+external_database_url: "{{ EDGE_PLATFORM_DATABASE_URL | default(lookup('env', 'EDGE_PLATFORM_DATABASE_URL'), true) }}"
+
+# Rate limiting: memory is enough for one API process on one host; use redis
+# (bundled or external) when several API processes share the limits.
+cache_provider: memory
+redis_provider: bundled
+external_redis_url: "{{ EDGE_PLATFORM_REDIS_URL | default(lookup('env', 'EDGE_PLATFORM_REDIS_URL'), true) }}"
+
+# Artifact storage: filesystem ({{ platform_root }}/data/artifacts) or s3 (AWS S3 or
+# any S3-compatible service). minio_enabled runs a bundled MinIO for the s3 provider.
+object_storage_provider: filesystem
+minio_enabled: false
+object_storage_endpoint_url: ""
+object_storage_region: us-east-1
+object_storage_bucket: meteorcloud-artifacts
+object_storage_auto_create_bucket: true
+object_storage_access_key_id: "{{ EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID | default(lookup('env', 'EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID'), true) }}"
+object_storage_secret_access_key: >-
+  {{ EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY | default(lookup('env', 'EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY'), true) }}
+
+# MQTT device connectivity (data plane). mqtt_broker: bundled EMQX or external.
+mqtt_enabled: false
+mqtt_broker: bundled
+mqtt_broker_host: emqx
+mqtt_broker_port: 8883
+mqtt_public_host: "{{ platform_domain if platform_domain else ansible_host | default(inventory_hostname) }}"
+# Controller directory with ca.crt, server.crt, server.key for the bundled broker.
+# Empty: a self-signed CA is generated on the host once (devices receive the CA
+# from the control plane when they register).
+mqtt_certs_src_dir: ""
+mqtt_platform_password: "{{ EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD'), true) }}"
+mqtt_internal_token: "{{ EDGE_PLATFORM_MQTT_INTERNAL_TOKEN | default(lookup('env', 'EDGE_PLATFORM_MQTT_INTERNAL_TOKEN'), true) }}"
+
+# Observability (Prometheus, Loki, Grafana on this host; UIs bind to localhost)
+observability_enabled: false
+observability_backend: prometheus
+grafana_admin_user: admin
+grafana_admin_password: "{{ EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD'), true) }}"
+
+# Other secrets
+jwt_secret: "{{ EDGE_PLATFORM_JWT_SECRET | default(lookup('env', 'EDGE_PLATFORM_JWT_SECRET'), true) }}"
+admin_email: "{{ EDGE_PLATFORM_ADMIN_EMAIL | default(lookup('env', 'EDGE_PLATFORM_ADMIN_EMAIL'), true) }}"
+admin_password: "{{ EDGE_PLATFORM_ADMIN_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_ADMIN_PASSWORD'), true) }}"
+
+# Host firewall (UFW). Off by default: cloud security groups usually do this.
+firewall_enabled: false
+firewall_ssh_port: 22
+firewall_allowed_ssh_cidrs: ["0.0.0.0/0"]
+
+# Services selected by edge-installer; standalone runs deploy the application only.
+enabled_services: [cloud_app]
+
+# Destroy: also delete {{ platform_root }} (database, artifacts, certificates).
+platform_destroy_data: false

@@ -19,16 +19,25 @@ Storage keys use IDs, not names, so renames never orphan content:
 organizations/{organization_id}/artifacts/{artifact_id}/{file_name}
 ```
 
-The only adapter today is `s3` (`app/adapters/s3_storage.py`), which works with
-any S3-compatible service. Local Compose runs MinIO
-(`bitnamilegacy/minio:2024.12.18-debian-12-r1`): API on port 9000, browser
+Two adapters exist, selected with `OBJECT_STORAGE_PROVIDER`:
+
+- `s3` (`app/adapters/s3_storage.py`) works with AWS S3 and any S3-compatible
+  service: MinIO, Ceph, Cloudflare R2, Google Cloud Storage interoperability
+  (`https://storage.googleapis.com` with HMAC keys), and customer storage.
+- `filesystem` (`app/adapters/filesystem_storage.py`) stores files under
+  `OBJECT_STORAGE_PATH` on a local or shared volume. Writes are atomic.
+
+Local development Compose runs MinIO (profile `minio`,
+`bitnamilegacy/minio:2024.12.18-debian-12-r1`): API on port 9000, browser
 console on port 9001 (`meteorcloud` / `meteorcloud-dev-secret`). Override the
-image with `MINIO_IMAGE` if needed.
+image with `MINIO_IMAGE` if needed. Production installs do not need MinIO:
+Ansible and the Helm chart default to `filesystem`.
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| `OBJECT_STORAGE_PROVIDER` | `s3` | |
-| `OBJECT_STORAGE_ENDPOINT_URL` | `http://localhost:9000` | Empty uses AWS S3 |
+| `OBJECT_STORAGE_PROVIDER` | `s3` | `s3` or `filesystem` |
+| `OBJECT_STORAGE_PATH` | `/data/artifacts` | `filesystem` only |
+| `OBJECT_STORAGE_ENDPOINT_URL` | empty | Empty uses AWS S3; `http://minio:9000` for bundled MinIO |
 | `OBJECT_STORAGE_REGION` | `us-east-1` | |
 | `OBJECT_STORAGE_BUCKET` | `meteorcloud-artifacts` | |
 | `OBJECT_STORAGE_ACCESS_KEY_ID` / `OBJECT_STORAGE_SECRET_ACCESS_KEY` | empty | Empty uses the default AWS credential chain. Keep real values in your secret manager. |

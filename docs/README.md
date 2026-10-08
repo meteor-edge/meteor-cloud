@@ -28,11 +28,12 @@ Canonical public docs are served by the **website** (`/docs`). This tree is the 
 
 | Doc | Topic |
 | --- | --- |
-| [Install quickstart](install-quickstart.md) | AWS or GCP |
+| [Deployment (Compose + Ansible)](deployment.md) | VMs, EC2, on-prem servers |
+| [Kubernetes (Helm)](kubernetes.md) | Existing clusters: k3s, GKE, EKS, AKS, customer |
+| [Install quickstart](install-quickstart.md) | `edge-installer` on AWS EC2 |
 | [Installer configuration](installer-configuration.md) | `installation.yaml` |
 | [AWS prerequisites](aws-prerequisites.md) | Accounts and keys |
 | [AWS deployment](aws-deployment.md) | EC2 path |
-| [GCP Cloud Run](gcp-deployment.md) | Cloud Run path |
 | [Upgrades](upgrades.md) | |
 | [Destroy](destroy.md) | |
 | [Observability](observability.md) | |

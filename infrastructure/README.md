@@ -1,104 +1,75 @@
 # Infrastructure
 
-Terraform and Ansible for deploying modular services to AWS, plus a Terraform-only GCP Cloud Run stack.
+Provisioning for the **Docker Compose path on AWS**: Terraform creates the EC2
+host, and `edge-installer` ties Terraform and Ansible together. Everything that
+runs the application lives in [`deploy/`](../deploy/):
+
+| Path | Purpose |
+|------|---------|
+| [`deploy/compose/`](../deploy/compose/) | Docker Compose files, `.env.example`, service config (EMQX, Traefik, observability) |
+| [`deploy/ansible/`](../deploy/ansible/) | Server preparation and Compose deployment (any SSH host) |
+| [`deploy/kubernetes/helm/meteorcloud/`](../deploy/kubernetes/helm/meteorcloud/) | Helm chart for existing clusters |
+
+Terraform here provisions infrastructure only. It does not deploy the
+application, and it does not create Kubernetes clusters: MeteorCloud does not
+provision or manage Kubernetes clusters.
 
 ## Layout
 
 ```text
 infrastructure/
-├── installer/                  # edge-installer CLI
-├── docker/                     # control-plane, data-plane, console images
-├── databases/                  # postgres init; clickhouse/redis placeholders
-├── networking/                 # EMQX config; WireGuard placeholder
-├── storage/                    # object-storage placeholder
-├── kubernetes/                 # deployment placeholder
-├── observability/              # Prometheus, Loki, Grafana, Alloy
-├── terraform/
-│   ├── aws/                    # EC2 root stack — orchestrates modules
-│   ├── gcp/                    # Cloud Run root stack
-│   └── modules/
-│       ├── cloud_app/          # EC2, security group, Elastic IP
-│       ├── vpn/                # WireGuard UDP ingress rules
-│       └── gcp_cloud_run/      # Cloud Run, Cloud SQL, Redis, load balancer
-└── ansible/                    # AWS only
-```
-
-## Providers
-
-| Provider | Path | How it runs |
-|----------|------|-------------|
-| AWS | `terraform/aws` + Ansible | EC2, Docker Compose, Traefik, optional VPN |
-| GCP | `terraform/gcp` | Cloud Run, Cloud SQL, Memorystore, HTTP(S) LB |
-
-See [GCP Cloud Run](../docs/gcp-deployment.md) and [AWS deployment](../docs/aws-deployment.md).
-
-## AWS Ansible layout
-
-```text
-ansible/
-    ├── ansible.cfg
-    ├── playbooks/
-    │   ├── site.yml            # Entry: provision + deploy
-    │   ├── provision.yml       # Shared host setup (Docker, dirs)
-    │   ├── deploy.yml          # Imports enabled service playbooks
-    │   ├── upgrade.yml
-    │   ├── destroy.yml
-    │   └── services/
-    │       ├── cloud_app.yml
-    │       └── vpn.yml
-    ├── roles/
-    │   ├── common/
-    │   ├── docker/
-    │   ├── platform_*/
-    │   └── vpn/
+├── installer/                  # edge-installer CLI (AWS: Terraform + Ansible)
+└── terraform/
+    └── aws/                    # EC2 root stack
+        └── modules/
+            ├── cloud_app/      # EC2, security group, Elastic IP
+            └── vpn/            # WireGuard UDP ingress rule
 ```
 
 ## Services
 
 | Service | Terraform module | Ansible playbook | Description |
 |---------|------------------|------------------|-------------|
-| `cloud_app` | `modules/cloud_app` | `services/cloud_app.yml` | Edge Platform (Docker, Traefik, Postgres, Redis) |
-| `vpn` | `modules/vpn` | `services/vpn.yml` | WireGuard VPN on the same EC2 host |
+| `cloud_app` | `aws/modules/cloud_app` | `deploy/ansible/playbooks/services/cloud_app.yml` | MeteorCloud via Docker Compose (Traefik, API, console, PostgreSQL; optional Redis, MQTT) |
+| `vpn` | `aws/modules/vpn` | `deploy/ansible/playbooks/services/vpn.yml` | WireGuard VPN on the same EC2 host |
 
-Enable or disable services in `installation.yaml` under `services:`. The installer passes `enabled_services` to Terraform and Ansible.
-
-See [Modular services](../docs/services.md) for configuration and adding new services.
+Enable or disable services in `installation.yaml` under `services:`. The installer
+passes `enabled_services` to Terraform and Ansible. See [Modular services](../docs/services.md).
 
 ## How it is run
 
-Normally you do **not** run Terraform or Ansible directly. Use:
-
 ```bash
-make up      # edge-installer apply — Terraform + Ansible for enabled services
-make down    # destroy
+make up      # edge-installer apply: Terraform + Ansible for enabled services
 make plan    # preview
+make down    # destroy
 ```
 
-The installer copies Terraform modules into `.installer-state/<name>/terraform/` and runs playbooks with generated inventory and extra-vars.
+The installer copies `terraform/aws` (with its modules and lock file) into
+`.installer-state/<name>/terraform/` and runs the playbooks with a generated
+inventory and extra-vars.
 
 ## Manual use (debugging)
 
 ```bash
-# Terraform (after installer has prepared workdir)
 cd .installer-state/production/terraform
 terraform plan -var-file=terraform.tfvars.json
 
-# Ansible
-cd infrastructure/ansible
+cd deploy/ansible
 ansible-playbook playbooks/site.yml \
   -i ../../.installer-state/production/inventory.ini \
   -e @../../.installer-state/production/extra-vars.json
 ```
 
-## Validation
+## Validation (no cloud credentials needed)
 
 ```bash
-make terraform-check
-make ansible-check
+make terraform-check   # fmt -check -recursive, init -backend=false, validate
+make ansible-check ansible-lint
 ```
 
 ## Further reading
 
-- [GCP Cloud Run](../docs/gcp-deployment.md)
+- [Deployment (Compose + Ansible)](../docs/deployment.md)
+- [Kubernetes](../docs/kubernetes.md)
 - [AWS deployment](../docs/aws-deployment.md)
 - [AWS prerequisites](../docs/aws-prerequisites.md)

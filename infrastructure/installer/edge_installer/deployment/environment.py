@@ -14,8 +14,6 @@ def platform_url(config: InstallationConfig, outputs: TerraformOutputs) -> str:
     if config.platform.domain:
         scheme = "https" if config.network.allow_https else "http"
         return f"{scheme}://{config.platform.domain}"
-    if outputs.platform_url:
-        return outputs.platform_url.rstrip("/")
     return f"http://{outputs.connect_ip}"
 
 
@@ -37,6 +35,8 @@ def build_ansible_extra_vars(
         "backend_image": config.deployment.backend_image,
         "frontend_image": config.deployment.frontend_image,
         "image_pull_policy": config.deployment.image_pull_policy,
+        "postgres_provider": "bundled" if config.components.postgres.enabled else "external",
+        "cache_provider": "redis" if config.components.redis.enabled else "memory",
         "postgres_database": config.components.postgres.database_name,
         "postgres_username": config.components.postgres.username,
         "platform_env": config.installation.environment,

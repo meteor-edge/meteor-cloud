@@ -1,0 +1,76 @@
+# Production overlay: prebuilt images, restart policies, no dev ports, Traefik in front.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Only Traefik (80/443) and the MQTT TLS listener (8883, profile emqx) are published.
+services:
+  postgres:
+    restart: unless-stopped
+    ports: !reset []
+    volumes: !override
+      - ${POSTGRES_DATA:-postgres_data}:/var/lib/postgresql/data
+
+  redis:
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  minio:
+    restart: unless-stopped
+    ports: !reset []
+
+  backend:
+    restart: unless-stopped
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    ports: !reset []
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_DEBUG: "false"
+
+  emqx:
+    restart: unless-stopped
+    ports: !override
+      - "${MQTT_PORT:-8883}:8883"
+
+  data-plane:
+    restart: unless-stopped
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    ports: !reset []
+
+  console:
+    image: ${CONSOLE_IMAGE:-meteorcloud/console:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/console
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+        VITE_DOCS_BASE_URL: ${VITE_DOCS_BASE_URL:-http://localhost:3000/docs}
+    restart: unless-stopped
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    environment: !reset {}
+    ports: !reset []
+
+  traefik:
+    image: traefik:v3.3
+    restart: unless-stopped
+    command:
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}
+      - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+    environment:
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ${TRAEFIK_ACME_DATA:-traefik_acme}:/acme
+    depends_on:
+      - backend
+      - console
+    networks:
+      - meteorcloud
+
+volumes:
+  traefik_acme:

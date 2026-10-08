@@ -1,0 +1,19 @@
+# Operator console. This file runs the Vite dev server; docker-compose.prod.yml
+# swaps in the static nginx image.
+networks:
+  meteorcloud:
+    # Shared name so separately started module projects can join each other.
+    name: ${COMPOSE_NETWORK_NAME:-meteorcloud}
+
+services:
+  console:
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/console
+      dockerfile: Dockerfile.dev
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_DOCS_BASE_URL: ${VITE_DOCS_BASE_URL:-http://localhost:3000/docs}
+    ports:
+      - "5173:5173"
+    networks:
+      - meteorcloud

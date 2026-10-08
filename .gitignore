@@ -30,6 +30,7 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.smoke
 
 # IDE
 .idea/
@@ -80,3 +81,10 @@ override.tf.json
 # Local MQTT TLS material (private keys must never be committed)
 certs/*
 !certs/.gitkeep
+
+# Ansible inventories with real hosts (keep the example)
+deploy/ansible/inventory/*
+!deploy/ansible/inventory/example/
+
+# Local k3d MQTT certificates
+.k8s/

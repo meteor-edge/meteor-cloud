@@ -1,0 +1,132 @@
+{{- if and .Values.mqtt.enabled (eq .Values.mqtt.broker "bundled") }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $emqx := .Values.mqtt.emqx }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-emqx
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "emqx") | nindent 4 }}
+data:
+  emqx.conf: |
+    {{- include "meteorcloud.emqxConf" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-emqx
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "emqx") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "emqx") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "emqx") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "meteorcloud.emqxConf" . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: emqx
+          image: {{ printf "%s:%s" $emqx.image.repository $emqx.image.tag }}
+          imagePullPolicy: {{ $emqx.image.pullPolicy }}
+          ports:
+            - name: mqtts
+              containerPort: 8883
+            - name: dashboard
+              containerPort: 18083
+          env:
+            - name: MQTT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ include "meteorcloud.secretName" . }}, key: MQTT_INTERNAL_TOKEN }
+            # emqx.conf cannot read environment variables, so the token header
+            # is injected through EMQX's env overrides.
+            - name: EMQX_AUTHENTICATION__1__HEADERS
+              value: '{"content-type" = "application/json", "x-mqtt-internal-token" = "$(MQTT_INTERNAL_TOKEN)"}'
+            - name: EMQX_AUTHORIZATION__SOURCES__1__HEADERS
+              value: '{"content-type" = "application/json", "x-mqtt-internal-token" = "$(MQTT_INTERNAL_TOKEN)"}'
+            # Pod IPs are reachable cluster-wide, so the Erlang cookie must be secret.
+            - name: EMQX_NODE__COOKIE
+              valueFrom:
+                secretKeyRef: { name: {{ include "meteorcloud.secretName" . }}, key: EMQX_NODE_COOKIE }
+            - name: EMQX_DASHBOARD__DEFAULT_USERNAME
+              value: admin
+            - name: EMQX_DASHBOARD__DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "meteorcloud.secretName" . }}, key: EMQX_DASHBOARD_PASSWORD }
+          readinessProbe:
+            tcpSocket: { port: mqtts }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: mqtts }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml $emqx.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /opt/emqx/etc/emqx.conf
+              subPath: emqx.conf
+              readOnly: true
+            - name: certs
+              mountPath: /opt/emqx/etc/certs
+              readOnly: true
+            - name: data
+              mountPath: /opt/emqx/data
+            - name: log
+              mountPath: /opt/emqx/log
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullname }}-emqx
+        - name: certs
+          secret:
+            secretName: {{ .Values.mqtt.tls.existingSecret }}
+            defaultMode: 0440
+        # Sessions and retained messages are not persisted; devices reconnect
+        # and the API holds desired state.
+        - name: data
+          emptyDir: {}
+        - name: log
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-emqx
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "emqx") | nindent 4 }}
+  {{- with $emqx.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $emqx.service.type }}
+  {{- with $emqx.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "emqx") | nindent 4 }}
+  ports:
+    - name: mqtts
+      port: {{ .Values.mqtt.port }}
+      targetPort: mqtts
+{{- end }}

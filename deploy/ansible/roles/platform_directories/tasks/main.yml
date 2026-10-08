@@ -1,0 +1,24 @@
+---
+- name: Create platform directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(platform_owner) }}"
+    group: "{{ item.group | default(platform_owner) }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ platform_root }}", mode: "0755" }
+    - { path: "{{ platform_compose_dir }}", mode: "0750" }
+    - { path: "{{ platform_certs_dir }}", mode: "0750" }
+    - { path: "{{ platform_root }}/data", mode: "0750" }
+    # postgres:16-alpine runs as UID/GID 70
+    - { path: "{{ platform_root }}/data/postgres", mode: "0700", owner: "70", group: "70" }
+    - { path: "{{ platform_root }}/data/redis", mode: "0750" }
+    - { path: "{{ platform_root }}/data/artifacts", mode: "0750" }
+    # bitnami MinIO runs as UID 1001
+    - { path: "{{ platform_root }}/data/minio", mode: "0750", owner: "1001", group: "root" }
+    # prom/prometheus runs as nobody (65534)
+    - { path: "{{ platform_root }}/data/prometheus", mode: "0750", owner: "65534", group: "65534" }
+    - { path: "{{ platform_root }}/traefik", mode: "0700" }
+    - { path: "{{ platform_root }}/backups", mode: "0750" }
+    - { path: "{{ platform_source_dir }}", mode: "0755" }

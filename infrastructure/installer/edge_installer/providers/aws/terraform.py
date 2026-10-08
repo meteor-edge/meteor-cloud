@@ -23,9 +23,9 @@ class TerraformRunner:
 
     def prepare(self) -> None:
         source = infrastructure_root() / "terraform" / "aws"
-        modules_source = infrastructure_root() / "terraform" / "modules"
+        modules_source = source / "modules"
         self.workdir.mkdir(parents=True, exist_ok=True)
-        for name in ("main.tf", "variables.tf", "outputs.tf", "versions.tf"):
+        for name in ("main.tf", "variables.tf", "outputs.tf", "versions.tf", ".terraform.lock.hcl"):
             src = source / name
             if src.exists():
                 shutil.copy2(src, self.workdir / name)

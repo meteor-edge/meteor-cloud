@@ -1,18 +1,17 @@
 # Installer configuration
 
-Single YAML file, typically `installation.yaml` at the repo root.
+Single YAML file, typically `installation.yaml` at the repo root. `edge-installer` uses it to create an AWS EC2 host (Terraform) and deploy the Docker Compose stack on it (Ansible).
 
 ## Sections
 
 | Section | Purpose |
 |---------|---------|
-| `installation` | Name, environment, provider (`aws` or `gcp`) |
+| `installation` | Name, environment, provider (`aws`) |
 | `platform` | App version, optional domain / public URL |
-| `aws` | Required for `provider: aws` — region, instance type, SSH key, Elastic IP |
-| `gcp` | Required for `provider: gcp` — project, region, Cloud Run/SQL sizing |
+| `aws` | Region, instance type, SSH key, Elastic IP |
 | `network` | SSH CIDRs, HTTP/HTTPS exposure |
 | `services` | **Which stacks to deploy** (cloud_app, vpn, ...) |
-| `components` | In-app components when cloud_app is enabled (Postgres, Redis, Traefik) |
+| `components` | Bundled PostgreSQL (off = external via `EDGE_PLATFORM_DATABASE_URL`), Redis (off by default = in-memory rate limits), Traefik |
 | `deployment` | Git repo / container images, health timeout |
 | `secrets` | Must be `environment` — values from env vars |
 
@@ -41,22 +40,12 @@ When `cloud_app` is disabled, Postgres/JWT secrets are not required.
 
 See [Modular services](services.md).
 
-## GCP Cloud Run
+## Settings beyond this file
 
-Example: `installer/edge_installer/config/examples/installation.gcp.yaml`
-
-```yaml
-installation:
-  provider: gcp
-
-gcp:
-  project_id: your-gcp-project
-  region: europe-west1
-```
-
-`services.vpn` must be disabled. Images must already be in a registry Cloud Run can pull. Secrets stay in `EDGE_PLATFORM_*` env vars.
-
-See [GCP Cloud Run deployment](gcp-deployment.md).
+Storage, MQTT, firewall, and other Compose options are Ansible settings
+(`deploy/ansible/roles/meteorcloud/defaults/main.yml`). The installer deploys
+with their defaults: filesystem artifact storage and MQTT off. To change them,
+run the playbooks with your own inventory; see [Deployment](deployment.md).
 
 ## AWS settings
 
@@ -119,7 +108,7 @@ export EDGE_PLATFORM_ADMIN_EMAIL='admin@example.com'
 export EDGE_PLATFORM_ADMIN_PASSWORD='...'
 export EDGE_PLATFORM_ACME_EMAIL='ops@example.com'      # HTTPS + domain
 export EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY='...'    # activate WireGuard
-export EDGE_PLATFORM_REDIS_PASSWORD='...'
+export EDGE_PLATFORM_DATABASE_URL='postgresql+psycopg://...'   # components.postgres.enabled: false
 ```
 
 Never put secrets in `installation.yaml` or commit them.

@@ -12,7 +12,6 @@ from edge_installer.config.validation import (
     validate_aws_credentials,
     validate_configuration,
     validate_dependencies,
-    validate_gcp_credentials,
 )
 from edge_installer.deployment.service import PlatformDeploymentService
 from edge_installer.exceptions import ConfigurationError, InstallerError
@@ -40,11 +39,8 @@ def run_validate(*, config_path: Path, console: Console) -> None:
     try:
         config = load_configuration(config_path)
         errors = validate_configuration(config) + validate_dependencies(config)
-        if config.installation.provider == "gcp":
-            errors.extend(validate_gcp_credentials())
-        else:
-            profile = config.aws.profile if config.aws else None
-            errors.extend(validate_aws_credentials(profile))
+        profile = config.aws.profile if config.aws else None
+        errors.extend(validate_aws_credentials(profile))
         if errors:
             console.print("[red]Configuration is invalid:[/red]")
             for item in errors:
@@ -80,14 +76,9 @@ def run_apply(*, config_path: Path, console: Console) -> None:
     console.print(f"Installation: {config.installation.name}")
     console.print(f"Services: {', '.join(config.enabled_service_names())}")
     console.print(f"Provider: {config.installation.provider}")
-    if config.installation.provider == "gcp" and config.gcp is not None:
-        console.print(f"Project: {config.gcp.project_id}")
-        console.print(f"Region: {config.gcp.region}")
-        console.print(f"Load balancer IP: {result.outputs.public_ip}")
-    else:
-        console.print(f"Region: {config.aws.region if config.aws else result.outputs.region}")
-        console.print(f"Instance ID: {result.outputs.instance_id}")
-        console.print(f"Public IP: {result.outputs.public_ip}")
+    console.print(f"Region: {config.aws.region if config.aws else result.outputs.region}")
+    console.print(f"Instance ID: {result.outputs.instance_id}")
+    console.print(f"Public IP: {result.outputs.public_ip}")
     console.print(f"Platform URL: {result.state.platform_url}")
     for key, value in result.health.items():
         console.print(f"{key.replace('_', ' ').title()}: {value}")

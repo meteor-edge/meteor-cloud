@@ -6,7 +6,8 @@ MeteorCloud is a modular self-hosted fleet platform. Application modules do not 
 
 ```text
 Browser ──► Console ──► Control plane (FastAPI) ──► PostgreSQL
-                              │                         Redis
+                              │                         Redis (optional)
+                              │                         Object storage (filesystem or S3)
 meteor-agent HTTPS ───────────┤
                               │
 meteor-agent MQTT ──► EMQX ───┼── HTTP auth/authorize
@@ -21,20 +22,20 @@ The public **website** is not in this path. It is a marketing and documentation 
 
 | Module | Deployable unit | Compose |
 | --- | --- | --- |
-| Control plane | Identity, tenancy, devices, audit, MQTT policy, ingest, operator API | `compose/control-plane.yml` |
-| Data plane | EMQX client, publish/watch, ingest forward | `compose/data-plane.yml` |
-| Console | Operator UI | `compose/console.yml` |
+| Control plane | Identity, tenancy, devices, audit, MQTT policy, ingest, operator API | `deploy/compose/control-plane.yml` |
+| Data plane | EMQX client, publish/watch, ingest forward | `deploy/compose/data-plane.yml` |
+| Console | Operator UI | `deploy/compose/console.yml` |
 | Website | Landing, about, contact, docs | private `meteor-ui` (not this tree) |
 | Device agent | `meteorcli` on the edge device | not a Compose service |
 
-Installer-managed **cloud services** (AWS/GCP) are separate from these application modules:
+The modules are deployed in one of two ways, with the same images and settings:
 
-| Service | AWS | GCP Cloud Run |
-|---------|-----|----------------|
-| `cloud_app` | EC2 + Docker Compose + Traefik | Cloud Run + Cloud SQL + Memorystore + HTTPS LB |
-| `vpn` | WireGuard on the EC2 host | Not supported |
+| Path | Where | Files |
+|------|-------|-------|
+| Docker Compose + Ansible | One VM, EC2 instance, or on-prem server | `deploy/compose/`, `deploy/ansible/` |
+| Kubernetes + Helm | An existing cluster (MeteorCloud does not provision or manage clusters) | `deploy/kubernetes/helm/meteorcloud/` |
 
-See [Modular services](services.md).
+On AWS, `edge-installer` creates the EC2 host with Terraform and runs the Ansible path. See [Deployment](deployment.md), [Kubernetes](kubernetes.md), and [Modular services](services.md).
 
 ## Control plane
 
@@ -42,7 +43,7 @@ See [Modular services](services.md).
 src/control-plane/app/
 ├── api/rest/         # health
 ├── ports/            # MQTTGateway, RateLimiter, OTAProvider
-├── adapters/         # emqx (via data-plane HTTP), redis, ota=none
+├── adapters/         # emqx (via data-plane HTTP), redis/memory, s3/filesystem, ota=none
 ├── identity/
 ├── tenancy/
 ├── devices/
@@ -72,14 +73,14 @@ See [Frontends](frontends.md).
 | Port | Implemented | Reserved (fail fast) |
 |------|-------------|----------------------|
 | Persistence | PostgreSQL | — |
-| `RateLimiter` | Redis | — |
+| `RateLimiter` | `redis`, `memory` (per process) | — |
 | `MQTTGateway` | Data-plane HTTP → EMQX | other broker names |
 | Telemetry last-value | PostgreSQL columns on `Device` | `timescale`, `clickhouse` |
 | `OTAProvider` | `none` | `mender` and others later |
-| `ObjectStorage` | `s3` (S3-compatible: MinIO locally, AWS S3, GCS interop) | — |
+| `ObjectStorage` | `s3` (AWS S3, MinIO, GCS interop, any S3-compatible API), `filesystem` (local or shared volume) | — |
 
 Artifact binaries (OS images, firmware, …) live in object storage; PostgreSQL keeps only their metadata and storage key. See [Artifacts](fleet/artifacts.md). Kafka and Mender SDKs are not in the product.
 
 ## Kubernetes
 
-No manifests in this repo. A later split would be Deployments: `control-plane`, `data-plane`, `console`, `website`. Scale API, console, and website independently. Keep the data-plane MQTT consumer at 1 until a consumer group exists.
+The Helm chart deploys `backend`, `console`, and, with MQTT enabled, `data-plane` and EMQX as separate Deployments. The API and console scale independently; the data-plane MQTT consumer stays at 1 replica until shared subscriptions exist. See [Kubernetes](kubernetes.md).

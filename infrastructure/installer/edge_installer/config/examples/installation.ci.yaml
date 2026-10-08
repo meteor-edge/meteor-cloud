@@ -37,8 +37,9 @@ components:
     provider: local
     database_name: edge_platform
     username: edge_platform
+  # Only needed for shared rate limits across several API processes.
   redis:
-    enabled: true
+    enabled: false
     provider: local
   reverse_proxy:
     enabled: true

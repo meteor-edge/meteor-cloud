@@ -1,20 +1,34 @@
-.PHONY: help join-help dev stop up down plan status-aws test lint format typecheck install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down
 
-COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
-OBS_COMPOSE := $(COMPOSE) -f docker-compose.observability.yml
-CP_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-cp docker compose --project-directory . -f compose/control-plane.yml
-DP_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-dp docker compose --project-directory . -f compose/data-plane.yml
-CONSOLE_COMPOSE := COMPOSE_PROJECT_NAME=meteorcloud-console docker compose --project-directory . -f compose/console.yml
+COMPOSE_DIR := deploy/compose
+ENV_FILE := $(COMPOSE_DIR)/.env
+COMPOSE := docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.dev.yml
+OBS_COMPOSE := $(COMPOSE) -f $(COMPOSE_DIR)/docker-compose.observability.yml
+CP_COMPOSE := docker compose -p meteorcloud-cp -f $(COMPOSE_DIR)/control-plane.yml
+DP_COMPOSE := docker compose -p meteorcloud-dp -f $(COMPOSE_DIR)/data-plane.yml
+CONSOLE_COMPOSE := docker compose -p meteorcloud-console -f $(COMPOSE_DIR)/console.yml
 BACKEND_DIR := src/control-plane
 DATA_PLANE_DIR := src/data-plane
 CONSOLE_DIR := console
 INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := src/device-plane/agent
 INFRA_DIR := infrastructure
+ANSIBLE_DIR := deploy/ansible
+ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml
+CHART := deploy/kubernetes/helm/meteorcloud
 CONFIG ?= installation.yaml
 
+# Local Kubernetes (k3d). The cluster is a development tool only.
+K8S_CLUSTER ?= meteorcloud
+K8S_NAMESPACE ?= meteorcloud
+K8S_RELEASE ?= meteorcloud
+K8S_HTTP_PORT ?= 8088
+K8S_MQTT_PORT ?= 18883
+K8S_CERTS_DIR := .k8s/certs
+IMAGE_TAG ?= dev
+
 help: ## Show available commands
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 	@$(MAKE) --no-print-directory join-help
 
 join-help:
@@ -29,7 +43,7 @@ join-help:
 	@echo "  Host-only: DATA_PLANE_URL=http://127.0.0.1:8081 and CONTROL_PLANE_URL=http://127.0.0.1:8000."
 
 dev: ## Start control-plane, data-plane, and console
-	@test -f .env || cp .env.example .env
+	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
 	$(COMPOSE) up --build -d
 	@echo ""
@@ -46,19 +60,19 @@ dev: ## Start control-plane, data-plane, and console
 	@$(MAKE) --no-print-directory join-help
 
 dev-control-plane: ## Start postgres, redis, and the control-plane API
-	@test -f .env || cp .env.example .env
+	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	$(CP_COMPOSE) up --build -d
 	@echo "Control plane: http://localhost:8000  (MQTT/ping need the data plane on network meteorcloud)"
 	@echo "MinIO UI:      http://localhost:9001  (meteorcloud / meteorcloud-dev-secret)"
 
 dev-data-plane: ## Start EMQX and the data-plane MQTT gateway
-	@test -f .env || cp .env.example .env
+	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
 	$(DP_COMPOSE) up --build -d
 	@echo "Data plane: http://localhost:8081/health  MQTT: mqtts://localhost:8883"
 
 dev-console: ## Start the operator console
-	@test -f .env || cp .env.example .env
+	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	$(CONSOLE_COMPOSE) up --build -d
 	@echo "Console: http://localhost:5173  (needs VITE_API_BASE_URL pointing at a control plane)"
 
@@ -80,7 +94,7 @@ test-cloud-e2e: ## Terraform+Ansible AWS deploy, same MQTT tests, always destroy
 	./scripts/test-cloud-e2e.sh
 
 observability: ## Start the development stack plus Prometheus, Loki, and Grafana
-	@test -f .env || cp .env.example .env
+	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
 	$(OBS_COMPOSE) up --build -d
 	@echo ""
@@ -92,8 +106,7 @@ observability: ## Start the development stack plus Prometheus, Loki, and Grafana
 	@echo "  Grafana:    http://localhost:3001  (set GRAFANA_ADMIN_USER/PASSWORD)"
 
 stop: ## Stop the full development stack
-	$(COMPOSE) down
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.observability.yml down 2>/dev/null
+	$(OBS_COMPOSE) down 2>/dev/null || $(COMPOSE) down
 
 stop-control-plane: ## Stop the control-plane Compose project
 	$(CP_COMPOSE) down
@@ -217,30 +230,80 @@ typecheck: ## Run static type checks where configured
 installer-test: ## Run installer tests only
 	cd $(INSTALLER_DIR) && python -m pytest -q
 
-terraform-check: ## Validate Terraform formatting and syntax
-	rm -rf $(INFRA_DIR)/terraform/aws/modules
-	cp -r $(INFRA_DIR)/terraform/modules $(INFRA_DIR)/terraform/aws/modules
-	cd $(INFRA_DIR)/terraform/aws && terraform fmt -check
+terraform-check: ## Validate Terraform formatting and syntax (no cloud credentials)
+	cd $(INFRA_DIR)/terraform && terraform fmt -check -recursive
 	cd $(INFRA_DIR)/terraform/aws && terraform init -backend=false -input=false
 	cd $(INFRA_DIR)/terraform/aws && terraform validate
-	rm -rf $(INFRA_DIR)/terraform/aws/modules
-	rm -rf $(INFRA_DIR)/terraform/gcp/modules
-	mkdir -p $(INFRA_DIR)/terraform/gcp/modules
-	cp -r $(INFRA_DIR)/terraform/modules/gcp_cloud_run $(INFRA_DIR)/terraform/gcp/modules/gcp_cloud_run
-	cd $(INFRA_DIR)/terraform/gcp && terraform fmt -check
-	cd $(INFRA_DIR)/terraform/gcp && terraform init -backend=false -input=false
-	cd $(INFRA_DIR)/terraform/gcp && terraform validate
-	cd $(INFRA_DIR)/terraform/modules/gcp_cloud_run && terraform fmt -check
-	rm -rf $(INFRA_DIR)/terraform/gcp/modules
 
-ansible-check: ## Run Ansible syntax checks
-	cd $(INFRA_DIR)/ansible && ansible-playbook --syntax-check playbooks/site.yml
-	cd $(INFRA_DIR)/ansible && ansible-playbook --syntax-check playbooks/provision.yml
-	cd $(INFRA_DIR)/ansible && ansible-playbook --syntax-check playbooks/deploy.yml
-	cd $(INFRA_DIR)/ansible && ansible-playbook --syntax-check playbooks/services/cloud_app.yml
-	cd $(INFRA_DIR)/ansible && ansible-playbook --syntax-check playbooks/services/vpn.yml
-	cd $(INFRA_DIR)/ansible && ansible-playbook --syntax-check playbooks/upgrade.yml
-	cd $(INFRA_DIR)/ansible && ansible-playbook --syntax-check playbooks/destroy.yml
+ansible-check: ## Syntax-check every Ansible playbook
+	cd $(ANSIBLE_DIR) && for p in $(ANSIBLE_PLAYBOOKS); do \
+		ansible-playbook -i inventory/example/hosts.yml --syntax-check playbooks/$$p || exit 1; done
+
+ansible-lint: ## Run ansible-lint (production profile)
+	cd $(ANSIBLE_DIR) && ansible-lint
+
+compose-config: ## Validate the Compose files and overlays
+	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
+	docker compose -f $(COMPOSE_DIR)/docker-compose.yml config --quiet
+	$(COMPOSE) config --quiet
+	docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml config --quiet
+	GRAFANA_ADMIN_PASSWORD=check docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml \
+		-f $(COMPOSE_DIR)/docker-compose.observability.yml config --quiet
+
+compose-smoke: ## Start the minimal production Compose stack, smoke-test it, remove it
+	IMAGE_TAG=$(IMAGE_TAG) ./scripts/compose-smoke.sh
+
+helm-lint: ## Lint the Helm chart and render it with every values file
+	helm lint --strict $(CHART)
+	for f in values-local.yaml values-ci.yaml values-production.yaml; do \
+		helm lint --strict $(CHART) -f $(CHART)/$$f && \
+		helm template meteorcloud $(CHART) -f $(CHART)/$$f > /dev/null || exit 1; done
+
+images: ## Build the backend, data-plane, and console images (IMAGE_TAG=dev)
+	docker build -t meteorcloud/backend:$(IMAGE_TAG) $(BACKEND_DIR)
+	docker build -t meteorcloud/data-plane:$(IMAGE_TAG) $(DATA_PLANE_DIR)
+	docker build -t meteorcloud/console:$(IMAGE_TAG) $(CONSOLE_DIR)
+
+smoke: ## End-to-end HTTP smoke test (URL=http://localhost:8088)
+	python3 scripts/smoke_test.py $(or $(URL),http://localhost:$(K8S_HTTP_PORT))
+
+k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
+	@command -v k3d >/dev/null || (echo "k3d is required: https://k3d.io" && exit 1)
+	@k3d cluster list $(K8S_CLUSTER) >/dev/null 2>&1 && echo "Cluster $(K8S_CLUSTER) already exists." || \
+		k3d cluster create $(K8S_CLUSTER) --agents 0 --wait \
+			-p "$(K8S_HTTP_PORT):80@loadbalancer" -p "$(K8S_MQTT_PORT):8883@loadbalancer"
+	kubectl config use-context k3d-$(K8S_CLUSTER)
+
+k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install
+	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
+	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
+	@test -f $(K8S_CERTS_DIR)/server.crt || MQTT_CERTS_SKIP_CHOWN=1 MQTT_PUBLIC_HOST=localhost \
+		MQTT_EXTRA_SANS=$(K8S_RELEASE)-emqx,$(K8S_RELEASE)-emqx.$(K8S_NAMESPACE).svc \
+		./scripts/generate-local-mqtt-certs.sh $(K8S_CERTS_DIR)
+	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) create secret generic meteorcloud-mqtt-tls \
+		--from-file=ca.crt=$(K8S_CERTS_DIR)/ca.crt --from-file=server.crt=$(K8S_CERTS_DIR)/server.crt \
+		--from-file=server.key=$(K8S_CERTS_DIR)/server.key --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
+	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
+		-f $(CHART)/values-local.yaml --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
+		--set dataPlane.image.tag=$(IMAGE_TAG) --set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
+		--wait --timeout 10m
+	# Restart so pods pick up images re-imported under the same tag.
+	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) rollout restart deployment
+	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) rollout status deployment --timeout 5m
+	@echo ""
+	@echo "Console and API: http://localhost:$(K8S_HTTP_PORT)  (admin@meteorcloud.local / LocalAdmin123!)"
+	@echo "MQTT TLS:        mqtts://localhost:$(K8S_MQTT_PORT)  (CA: $(K8S_CERTS_DIR)/ca.crt)"
+
+k8s-status: ## Show MeteorCloud pods, services, ingress, and volumes in k3d
+	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) get pods,services,ingress,pvc
+	helm --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) status $(K8S_RELEASE)
+
+k8s-test: ## Run helm test and the HTTP smoke test against k3d
+	helm --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) test $(K8S_RELEASE) --logs
+	python3 scripts/smoke_test.py http://localhost:$(K8S_HTTP_PORT)
+
+k8s-down: ## Delete the local k3d cluster (and everything in it)
+	k3d cluster delete $(K8S_CLUSTER)
 
 installer-validate: ## Validate installer configuration
 	cd $(INSTALLER_DIR) && edge-installer validate $(CONFIG)
@@ -256,6 +319,7 @@ clean: ## Remove local build artifacts
 	$(CP_COMPOSE) down -v --remove-orphans || true
 	$(DP_COMPOSE) down -v --remove-orphans || true
 	$(CONSOLE_COMPOSE) down -v --remove-orphans || true
+	rm -rf .k8s
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true

@@ -8,9 +8,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "generate-local-mqtt-certs.sh"
-COMPOSE_CONTROL = ROOT / "compose" / "control-plane.yml"
-COMPOSE_DATA = ROOT / "compose" / "data-plane.yml"
-EMQX_CONF = ROOT / "infrastructure" / "networking" / "emqx" / "emqx.conf"
+COMPOSE_DIR = ROOT / "deploy" / "compose"
+COMPOSE_DATA = COMPOSE_DIR / "data-plane.yml"
+ENV_EXAMPLE = COMPOSE_DIR / ".env.example"
+EMQX_CONF = COMPOSE_DIR / "config" / "emqx" / "emqx.conf"
 
 
 def test_certificate_script_generates_localhost_san(tmp_path: Path) -> None:
@@ -56,11 +57,11 @@ def test_certificate_script_adds_lan_ip_san(tmp_path: Path, monkeypatch) -> None
 
 
 def test_broker_tls_config_exists() -> None:
-    control = COMPOSE_CONTROL.read_text(encoding="utf-8")
+    env_example = ENV_EXAMPLE.read_text(encoding="utf-8")
     data = COMPOSE_DATA.read_text(encoding="utf-8")
     conf = EMQX_CONF.read_text(encoding="utf-8")
-    assert "8883:8883" in data
-    assert "MQTT_PUBLIC_HOST: ${MQTT_PUBLIC_HOST:-localhost}" in control
+    assert '"${MQTT_PORT:-8883}:8883"' in data
+    assert "MQTT_PUBLIC_HOST=localhost" in env_example
     assert "1883:1883" not in data
     assert "listeners.ssl.default" in conf
     assert 'bind = "0.0.0.0:8883"' in conf
@@ -69,6 +70,8 @@ def test_broker_tls_config_exists() -> None:
     assert "EMQX_AUTHENTICATION__1__HEADERS" in data
     assert "EMQX_AUTHORIZATION__SOURCES__1__HEADERS" in data
     assert "EMQXVAR_MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-dev-mqtt-internal}" not in data
-    assert "${MQTT_INTERNAL_TOKEN:?MQTT_INTERNAL_TOKEN is required}" in data
+    # No default token in Compose: an empty token makes the API reject every broker call.
+    assert '"x-mqtt-internal-token" = "${MQTT_INTERNAL_TOKEN:-}"' in data
+    assert "dev-mqtt-internal" not in data
     assert "getenv(" not in conf
     assert 'x-mqtt-internal-token = "dev-mqtt-internal"' not in conf

@@ -1,0 +1,9 @@
+---
+- name: Deploy MeteorCloud with Docker Compose
+  hosts: platform
+  become: true
+  roles:
+    - meteorcloud
+    - platform_config
+    - platform_deployment
+    - health_check

@@ -1,0 +1,34 @@
+---
+- name: Stop MeteorCloud services
+  hosts: platform
+  become: true
+  roles:
+    - meteorcloud
+  tasks:
+    - name: Stop WireGuard
+      ansible.builtin.systemd:
+        name: wg-quick@wg0
+        state: stopped
+        enabled: false
+      failed_when: false
+      when: "'vpn' in enabled_services"
+
+    - name: Check for the Compose bundle
+      ansible.builtin.stat:
+        path: "{{ platform_compose_dir }}/docker-compose.yml"
+      register: platform_bundle
+
+    - name: Stop the Docker Compose stack
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.observability.yml down --remove-orphans
+        chdir: "{{ platform_compose_dir }}"
+      environment:
+        GRAFANA_ADMIN_PASSWORD: unused-during-down
+      changed_when: true
+      when: platform_bundle.stat.exists
+
+    - name: Delete MeteorCloud data
+      ansible.builtin.file:
+        path: "{{ platform_root }}"
+        state: absent
+      when: platform_destroy_data | bool

@@ -1,7 +1,0 @@
-- name: Deploy cloud application stack
-  hosts: platform
-  become: true
-  roles:
-    - platform_config
-    - platform_deployment
-    - health_check

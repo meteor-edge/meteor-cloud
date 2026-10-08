@@ -74,7 +74,7 @@ def test_agent_reconnects_after_broker_restart(api, live_config):
         assert session.wait_connected() is True
         compose = os.environ.get(
             "MQTT_COMPOSE",
-            "docker compose -f docker-compose.yml -f docker-compose.dev.yml",
+            "docker compose -f deploy/compose/docker-compose.yml",
         )
         result = subprocess.run(
             [*compose.split(), "restart", "emqx"],

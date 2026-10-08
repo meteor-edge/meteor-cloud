@@ -1,19 +1,12 @@
 # Install the platform (short guide)
 
-Deploy modular services to **AWS EC2** or **GCP Cloud Run**.
+Deploy MeteorCloud to an **AWS EC2** host with `edge-installer` (Terraform + Ansible + Docker Compose). For other servers run Ansible directly ([Deployment](deployment.md)); for Kubernetes use Helm ([Kubernetes](kubernetes.md)).
 
 ## AWS (EC2)
 
-- Python 3.13+, Terraform 1.5+, Ansible 2.15+, AWS credentials, SSH key pair
-- Copy `installer/edge_installer/config/examples/installation.yaml`
+- Python 3.13+, Terraform 1.5+, ansible-core 2.15+, AWS credentials, SSH key pair
+- Copy `infrastructure/installer/edge_installer/config/examples/installation.yaml`
 - See [AWS prerequisites](aws-prerequisites.md)
-
-## GCP (Cloud Run)
-
-- Terraform 1.5+, GCP credentials (`gcloud auth application-default login`)
-- Copy `installer/edge_installer/config/examples/installation.gcp.yaml`
-- Push container images, then `make up`
-- See [GCP Cloud Run](gcp-deployment.md)
 
 ## 2. Configure (AWS)
 

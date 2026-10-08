@@ -110,19 +110,19 @@ class Settings(BaseSettings):
     telemetry_provider: str = Field(default="postgresql", alias="TELEMETRY_PROVIDER")
 
     database_provider: Literal["postgresql"] = Field(default="postgresql", alias="DATABASE_PROVIDER")
-    cache_provider: Literal["redis"] = Field(default="redis", alias="CACHE_PROVIDER")
+    # "memory" keeps rate-limit counters per process: fine for one API replica, no Redis needed.
+    cache_provider: Literal["redis", "memory"] = Field(default="redis", alias="CACHE_PROVIDER")
     mqtt_provider: Literal["emqx"] = Field(default="emqx", alias="MQTT_PROVIDER")
     ota_provider: Literal["none"] = Field(default="none", alias="OTA_PROVIDER")
     # "local" = accounts in the PostgreSQL users table.
     identity_provider: Literal["local"] = Field(default="local", alias="IDENTITY_PROVIDER")
 
-    # Object storage for artifacts. "s3" covers MinIO, AWS S3, and other S3 APIs.
-    object_storage_provider: Literal["s3"] = Field(default="s3", alias="OBJECT_STORAGE_PROVIDER")
-    # Empty endpoint means the provider default (AWS S3); MinIO needs an explicit URL.
-    object_storage_endpoint_url: str = Field(
-        default="http://localhost:9000",
-        alias="OBJECT_STORAGE_ENDPOINT_URL",
-    )
+    # Object storage for artifacts. "s3" covers AWS S3 and any S3-compatible API (MinIO,
+    # Ceph, GCS interoperability, ...). "filesystem" stores files under object_storage_path.
+    object_storage_provider: Literal["s3", "filesystem"] = Field(default="s3", alias="OBJECT_STORAGE_PROVIDER")
+    # Empty endpoint means the AWS S3 default; other S3-compatible services need an explicit URL.
+    object_storage_endpoint_url: str = Field(default="", alias="OBJECT_STORAGE_ENDPOINT_URL")
+    object_storage_path: str = Field(default="/data/artifacts", alias="OBJECT_STORAGE_PATH")
     object_storage_region: str = Field(default="us-east-1", alias="OBJECT_STORAGE_REGION")
     object_storage_bucket: str = Field(default="meteorcloud-artifacts", alias="OBJECT_STORAGE_BUCKET")
     # Empty credentials fall back to the provider's default chain (e.g. an instance role).

@@ -1,0 +1,49 @@
+# Local k3d cluster (make k8s-up && make k8s-deploy). Images are built locally
+# and imported into the cluster with `k3d image import`.
+config:
+  appEnv: development
+  publicUrl: http://localhost:8088
+  logFormat: console
+  registrationRequireHttps: false
+  # Relaxed for local testing (tests/mqtt_live registers many devices at once).
+  extraEnv:
+    REGISTRATION_RATE_LIMIT_REQUESTS: "1000"
+    ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS: "1000"
+
+secrets:
+  # Development-only credentials; never reuse outside a local cluster.
+  admin:
+    email: admin@meteorcloud.local
+    password: LocalAdmin123!
+
+backend:
+  image: { repository: meteorcloud/backend, tag: dev, pullPolicy: IfNotPresent }
+console:
+  image: { repository: meteorcloud/console, tag: dev, pullPolicy: IfNotPresent }
+dataPlane:
+  image: { repository: meteorcloud/data-plane, tag: dev, pullPolicy: IfNotPresent }
+
+postgresql:
+  bundled:
+    persistence: { size: 2Gi }
+
+objectStorage:
+  provider: filesystem
+  filesystem:
+    size: 2Gi
+    keep: false
+
+mqtt:
+  enabled: true
+  broker: bundled
+  publicHost: localhost
+  # Created by `make k8s-deploy` from scripts/generate-local-mqtt-certs.sh.
+  tls:
+    existingSecret: meteorcloud-mqtt-tls
+  emqx:
+    # k3s servicelb publishes it on the k3d load balancer (port 8883 on the host).
+    service: { type: LoadBalancer }
+
+ingress:
+  enabled: true
+  className: traefik

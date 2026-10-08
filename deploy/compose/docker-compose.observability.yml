@@ -1,0 +1,102 @@
+# Loki, Prometheus, Grafana, Alloy, and node_exporter.
+# Start with: make observability (dev) or add -f docker-compose.observability.yml in production.
+# Not used by `make dev` so small machines skip the extra RAM. UIs bind to localhost only.
+
+services:
+  backend:
+    environment:
+      LOG_FORMAT: json
+      OBSERVABILITY_BACKEND: prometheus
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    pid: host
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host/root"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    networks:
+      - meteorcloud
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    volumes:
+      - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${PROMETHEUS_DATA:-prometheus_data}:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - backend
+      - node-exporter
+    networks:
+      - meteorcloud
+
+  loki:
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./config/observability/loki.yml:/etc/loki/loki.yml:ro
+    ports:
+      - "127.0.0.1:3100:3100"
+    networks:
+      - meteorcloud
+
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      INFO: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker_proxy
+
+  alloy:
+    image: grafana/alloy:v1.8.3
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+    volumes:
+      - ./config/observability/config.alloy:/etc/alloy/config.alloy:ro
+    depends_on:
+      - loki
+      - docker-socket-proxy
+    networks:
+      - meteorcloud
+      - docker_proxy
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./config/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - meteorcloud
+
+volumes:
+  prometheus_data:
+
+networks:
+  meteorcloud:
+    name: ${COMPOSE_NETWORK_NAME:-meteorcloud}
+  docker_proxy:
+    internal: true

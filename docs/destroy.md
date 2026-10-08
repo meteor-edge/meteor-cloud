@@ -21,7 +21,7 @@ make down                                         # same as destroy --yes
 
 ## Warnings
 
-- **All data on the EC2 instance is lost** (PostgreSQL, Redis, VPN config)
+- **All data on the EC2 instance is lost** (PostgreSQL, artifacts, VPN config)
 - Elastic IP is released
 - Cannot be undone
 

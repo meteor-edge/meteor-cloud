@@ -9,14 +9,14 @@ from pathlib import Path
 from edge_installer.deployment.environment import secret_env_vars
 from edge_installer.exceptions import AnsibleExecutionError
 from edge_installer.process.runner import require_success, run_command
-from edge_installer.state.paths import infrastructure_root
+from edge_installer.state import paths
 
 logger = logging.getLogger(__name__)
 
 
 class AnsibleRunner:
     def __init__(self, ansible_root: Path | None = None) -> None:
-        self.ansible_root = ansible_root or (infrastructure_root() / "ansible")
+        self.ansible_root = ansible_root or paths.ansible_root()
 
     def run_playbook(
         self,

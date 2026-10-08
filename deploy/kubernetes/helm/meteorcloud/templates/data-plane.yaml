@@ -1,0 +1,104 @@
+{{- if .Values.mqtt.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $secretName := include "meteorcloud.secretName" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-data-plane
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "data-plane") | nindent 4 }}
+spec:
+  # One MQTT subscriber; a second replica would process every message twice.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "data-plane") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "data-plane") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        # Talks to the control plane only over HTTP and to the broker over MQTT;
+        # it gets just the MQTT credentials, not the API's database secrets.
+        - name: data-plane
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" .Values.dataPlane.image) }}
+          imagePullPolicy: {{ .Values.dataPlane.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: CONTROL_PLANE_URL
+              value: {{ printf "http://%s-backend:8000" $fullname | quote }}
+            - name: HTTP_ADDR
+              value: ":8081"
+            - name: MQTT_ENABLED
+              value: "true"
+            - name: MQTT_PROVIDER
+              value: emqx
+            - name: MQTT_BROKER_HOST
+              value: {{ include "meteorcloud.mqttBrokerHost" . | quote }}
+            - name: MQTT_BROKER_PORT
+              value: {{ .Values.mqtt.port | toString | quote }}
+            - name: MQTT_PLATFORM_USERNAME
+              value: {{ .Values.mqtt.platformUsername | quote }}
+            - name: MQTT_CA_CERT_PATH
+              value: /certs/ca.crt
+            - name: MQTT_PLATFORM_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: MQTT_PLATFORM_PASSWORD }
+            - name: MQTT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: MQTT_INTERNAL_TOKEN }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.dataPlane.resources | nindent 12 }}
+          volumeMounts:
+            - name: mqtt-ca
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: mqtt-ca
+          secret:
+            secretName: {{ .Values.mqtt.tls.existingSecret }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-data-plane
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "data-plane") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "data-plane") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+{{- end }}

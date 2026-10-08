@@ -44,49 +44,52 @@ ssh -i ~/.ssh/edge-platform.pem ubuntu@<ip> 'echo ok'
 Manual run:
 
 ```bash
-cd infrastructure/ansible
+cd deploy/ansible
 ansible-playbook playbooks/site.yml \
   -i ../../.installer-state/production/inventory.ini \
   -e @../../.installer-state/production/extra-vars.json
 ```
 
-## PostgreSQL / Docker Compose unhealthy
+## Docker Compose services unhealthy
 
-Common cause: Compose interpolated empty `${POSTGRES_*}` from the host instead of `platform.env`.
-
-Fix on server:
-
-```bash
-ssh -i ~/.ssh/edge-platform.pem ubuntu@<ip>
-sudo docker compose -f /opt/edge-platform/docker-compose.yml down
-sudo rm -rf /opt/edge-platform/data/postgres/*
-sudo chown -R 70:70 /opt/edge-platform/data/postgres
-exit
-edge-installer apply installation.yaml
-```
-
-Check logs:
-
-```bash
-sudo docker compose -f /opt/edge-platform/docker-compose.yml logs postgres
-sudo docker compose -f /opt/edge-platform/docker-compose.yml ps
-```
-
-## Platform health failures
+The stack lives in `/opt/edge-platform/compose` (Compose files plus the rendered
+`.env`). Run Compose there with both files:
 
 ```bash
 ssh -i ~/.ssh/edge-platform.pem ubuntu@<ip>
-sudo docker compose -f /opt/edge-platform/docker-compose.yml logs backend
-sudo docker compose -f /opt/edge-platform/docker-compose.yml logs traefik
-curl -s http://127.0.0.1/api/v1/health
+cd /opt/edge-platform/compose
+sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail 100 backend postgres traefik
+curl -s http://127.0.0.1/health
 ```
+
+Ansible prints the last 150 log lines of every service when `docker compose up --wait` fails.
 
 Common causes:
 
-- Images not built / wrong tag
-- Git repo not pushed before deploy
-- Database credential mismatch
-- DNS not pointing to server (HTTPS)
+- `POSTGRES_PASSWORD` changed after the database was initialised. PostgreSQL keeps the
+  first password; restore the old secret, or (losing all data) stop the stack and empty
+  `/opt/edge-platform/data/postgres`.
+- Images not built or wrong tag (`image_source: registry` needs pushed images).
+- Git ref not pushed before deploy (`image_source: git`).
+- DNS not pointing at the server, so Let's Encrypt cannot issue a certificate.
+
+## Kubernetes
+
+```bash
+kubectl -n meteorcloud get pods,svc,ingress,pvc
+kubectl -n meteorcloud logs deploy/meteorcloud-backend -c migrate   # migrations / first admin
+kubectl -n meteorcloud logs deploy/meteorcloud-backend
+helm -n meteorcloud test meteorcloud --logs
+```
+
+| Symptom | Fix |
+|---------|-----|
+| `helm install` fails with a values error | The chart rejects unsupported combinations; the message names the setting |
+| Backend stuck in `Init` | The `migrate` init container waits for the database; check `DATABASE_URL` and network policies |
+| Console loads but API calls fail | The Ingress must route `/api` to the backend; with `ingress.enabled=false` your own gateway must |
+| Data plane cannot connect to EMQX | The broker certificate needs a SAN for `<release>-emqx` |
+| `ImagePullBackOff` | Push images to a registry the cluster can reach and set `imagePullSecrets` |
 
 ## VPN
 
@@ -102,20 +105,9 @@ This deployment is suitable for demos and early production. Not included: full O
 
 Lock down `network.allowed_ssh_cidrs` to your IP in production.
 
-## GCP Cloud Run
-
-| Error | Fix |
-|-------|-----|
-| GCP credentials are not configured | `gcloud auth application-default login` or set `GOOGLE_APPLICATION_CREDENTIALS` |
-| `services.vpn is not supported` | Set `services.vpn.enabled: false` |
-| Cloud Run image not found | Push `deployment.backend_image` / `frontend_image` to Artifact Registry first |
-| Health check timeout | Images must exist; first boot runs migrations. Increase `health_check_timeout_seconds` |
-| Managed cert still provisioning | Point DNS at the load balancer IP; Google certs can take minutes |
-
-See [GCP Cloud Run](gcp-deployment.md).
-
 ## Related
 
-- [GCP Cloud Run](gcp-deployment.md)
+- [Deployment (Compose + Ansible)](deployment.md)
+- [Kubernetes](kubernetes.md)
 - [Install quickstart](install-quickstart.md)
 - [AWS deployment](aws-deployment.md)

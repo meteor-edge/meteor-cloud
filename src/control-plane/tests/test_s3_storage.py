@@ -47,6 +47,8 @@ def test_client_configuration_is_lazy_and_supports_aws_defaults(s3):
     assert kwargs["aws_secret_access_key"] is None
     assert kwargs["config"].s3 == {"addressing_style": "path"}
     assert kwargs["config"].signature_version == "s3v4"
+    assert kwargs["config"].request_checksum_calculation == "when_required"
+    assert kwargs["config"].response_checksum_validation == "when_required"
 
 
 @pytest.mark.parametrize("region", ["us-east-1", "eu-west-1", ""])

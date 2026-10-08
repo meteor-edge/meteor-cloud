@@ -12,7 +12,6 @@ from edge_installer.config.loader import load_configuration
 from edge_installer.process.runner import ProcessResult, redact
 from edge_installer.providers.aws.outputs import TerraformOutputs
 from edge_installer.providers.aws.terraform import TerraformRunner
-from edge_installer.providers.gcp.terraform import GcpTerraformRunner
 
 EXAMPLE = (
     Path(__file__).resolve().parent.parent
@@ -76,24 +75,4 @@ def test_terraform_plan_invocation(mock_run: pytest.MonkeyPatch, tmp_path: Path)
 def test_missing_output_raises_validation_error() -> None:
     with pytest.raises(ValidationError):
         TerraformOutputs.model_validate({"instance_id": "i-1"})
-
-
-def test_gcp_terraform_variables(tmp_path: Path) -> None:
-    path = (
-        Path(__file__).resolve().parent.parent
-        / "edge_installer"
-        / "config"
-        / "examples"
-        / "installation.gcp.yaml"
-    )
-    config = load_configuration(path)
-    runner = GcpTerraformRunner(config, tmp_path)
-    variables = runner.variables()
-
-    assert variables["project_id"] == "your-gcp-project"
-    assert variables["region"] == "europe-west1"
-    assert variables["backend_image"] == config.deployment.backend_image
-    assert "postgres_password" not in variables
-    assert "jwt_secret" not in variables
-    assert variables["labels"]["managed-by"] == "edge-installer"
 

@@ -6,7 +6,7 @@ Devices connect to EMQX over **one-way TLS** with a per-device username and pass
 Registered device → authenticates to MQTT → publishes status/metrics → ping → pong
 ```
 
-Certificate-based device authentication (mTLS) is not implemented. Production AWS Ansible does not deploy EMQX; use local Compose or run the data-plane stack yourself. Cloud Run does not expose MQTT TCP 8883.
+Certificate-based device authentication (mTLS) is not implemented. MQTT is optional and off by default in every deployment path. Enable it with `mqtt_enabled: true` (Ansible), the `mqtt` and `emqx` Compose profiles, or `mqtt.enabled=true` (Helm), using the bundled EMQX or an external one. Devices need TCP 8883 reachable.
 
 ## Security model
 

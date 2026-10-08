@@ -1,0 +1,8 @@
+---
+profile: production
+exclude_paths:
+  - inventory/
+skip_list:
+  # Settings are shared by all roles (roles/meteorcloud/defaults) and are part of
+  # the edge-installer extra-vars contract, so they are not prefixed per role.
+  - var-naming[no-role-prefix]

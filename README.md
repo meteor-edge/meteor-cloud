@@ -1,25 +1,49 @@
 # MeteorCloud
 
-Self-hosted Linux fleet platform: operator console, control plane, MQTT data plane, and a device agent. Deploy the application stack on AWS EC2 or GCP Cloud Run. The public website is a separate Next.js app.
+Self-hosted Linux fleet platform: operator console, control plane, MQTT data plane, and a device agent. The public website is a separate Next.js app in [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui).
 
 ## Modules
 
-Each of these is its own process and has its own Compose file under `compose/`.
-
 | Module | Path | Role |
 | --- | --- | --- |
-| Control plane | `src/control-plane/` | Identity, organizations, device registry, enrollment, MQTT policy and ingest, operator API |
+| Control plane | `src/control-plane/` | Identity, organizations, device registry, enrollment, artifacts, MQTT policy and ingest, operator API |
 | Data plane | `src/data-plane/` | EMQX platform client: publish, subscribe, forward inbound MQTT to the control plane |
 | Console | `console/` | Operator UI. Browser talks only to the control-plane API |
-| Device plane | `src/device-plane/agent/` | On-device agent (`meteorcli`) |
-| Infrastructure | `infrastructure/` | Terraform, Ansible, installer, Docker, observability |
+| Device plane | `src/device-plane/agent/` | On-device agent (`meteorcli`); runs on devices, not deployed by MeteorCloud |
 
-Same machine: join Compose projects on the Docker network named `meteorcloud`. Across servers: set `DATA_PLANE_URL`, `CONTROL_PLANE_URL`, and `VITE_API_BASE_URL` to reachable origins. The public website is a separate app in [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui); it is not a directory in this repo.
+## Deployment
+
+There are two independent ways to run MeteorCloud. Both use the same container images and the same settings.
+
+| | Docker Compose + Ansible | Kubernetes + Helm |
+| --- | --- | --- |
+| For | One VM, EC2 instance, or on-prem server | An existing cluster: k3s, k3d, GKE, EKS, AKS, OpenShift, customer clusters |
+| Files | [`deploy/compose/`](deploy/compose/), [`deploy/ansible/`](deploy/ansible/) | [`deploy/kubernetes/helm/meteorcloud/`](deploy/kubernetes/helm/meteorcloud/) |
+| Install | `ansible-playbook playbooks/site.yml` (or `edge-installer apply` on AWS) | `helm upgrade --install` |
+| Guide | [docs/deployment.md](docs/deployment.md) | [docs/kubernetes.md](docs/kubernetes.md) |
+
+**MeteorCloud does not provision or manage Kubernetes clusters.** The Helm chart installs into a cluster you already have. Creating clusters, node pools, load balancers, DNS, and managed databases is your platform's job (Terraform, eksctl, gcloud, the cloud console, ...). k3d is used only as a local development and CI tool.
+
+Ansible only prepares servers and runs Docker Compose; it never deploys to Kubernetes. Terraform ([`infrastructure/terraform/aws`](infrastructure/terraform/aws/)) only creates the AWS EC2 host for the Compose path.
+
+### Dependencies
+
+| Dependency | Status | Options |
+| --- | --- | --- |
+| PostgreSQL | Required | Bundled container, or external (managed or customer database) |
+| Artifact storage | Required | Filesystem volume, AWS S3, any S3-compatible API (MinIO, Ceph, R2, GCS interoperability, customer storage). Bundled MinIO is optional and off by default |
+| MQTT broker | Optional (device connectivity) | Bundled EMQX, or an external EMQX; off by default |
+| Redis | Optional | Only for shared rate limits across several API replicas; in-memory otherwise |
+| Kafka, ClickHouse | Not used | Not deployed |
+
+The smallest install runs PostgreSQL, the API, the console, and a reverse proxy (Traefik with Compose, your ingress controller with Kubernetes).
 
 ## Local development
 
+Docker Compose (hot reload):
+
 ```bash
-cp .env.example .env
+cp deploy/compose/.env.example deploy/compose/.env   # make dev does this if missing
 make dev
 make seed      # optional: owner@example.com / dev-password-123
 ```
@@ -33,53 +57,39 @@ make seed      # optional: owner@example.com / dev-password-123
 | MQTT TLS | mqtts://localhost:8883 |
 | EMQX dashboard (dev) | http://localhost:18083 |
 
-Start one module:
+Choose bundled services with `COMPOSE_PROFILES` in `deploy/compose/.env` (`postgres`, `redis`, `minio`, `mqtt`, `emqx`). Start one module: `make dev-control-plane`, `make dev-data-plane`, `make dev-console`. Stop: `make stop`.
+
+Kubernetes (k3d + Helm, needs [k3d](https://k3d.io), kubectl, and helm):
 
 ```bash
-make dev-control-plane
-make dev-data-plane
-make dev-console
+make k8s-up       # local k3d cluster: ingress on localhost:8088, MQTT on localhost:18883
+make k8s-deploy   # build images, import into k3d, helm upgrade --install (values-local.yaml)
+make k8s-status   # pods, services, ingress, volumes
+make k8s-test     # helm test + HTTP smoke test
+make k8s-down     # delete the cluster
 ```
 
-Public website (clone `meteor-ui`, not this tree): `make dev-website` inside that repo.
+Checks that CI runs: `make test lint typecheck compose-config compose-smoke helm-lint terraform-check ansible-check ansible-lint`, and `./scripts/k8s-smoke.sh` for a throwaway-cluster install. See [docs/development.md](docs/development.md).
 
-Stop: `make stop`
-
-Product documentation for operators and integrators lives on the website under **Docs**. The operator console links there (`VITE_DOCS_BASE_URL`). Console source is `console/` in this repo. The public website stays in the private repo [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui). Details: [docs/frontends.md](docs/frontends.md).
-
-## Cloud deployment
-
-**AWS (EC2 + Ansible)** — [AWS deployment](docs/aws-deployment.md):
-
-```bash
-export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
-export EDGE_PLATFORM_JWT_SECRET='...'
-# Edit installation.yaml — provider: aws
-make up
-```
-
-**GCP (Cloud Run)** — [GCP Cloud Run](docs/gcp-deployment.md):
-
-```bash
-cp installer/edge_installer/config/examples/installation.gcp.yaml ./installation.yaml
-export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
-export EDGE_PLATFORM_JWT_SECRET='...'
-make up
-```
-
-AWS production Compose currently runs the control plane and console on one host. MQTT/EMQX is local Compose (or a host you run yourself). Cloud Run does not expose MQTT TCP 8883. The website is not part of `cloud_app`; deploy it separately.
+Product documentation for operators lives on the website under **Docs**; the console links there (`VITE_DOCS_BASE_URL`). Details: [docs/frontends.md](docs/frontends.md).
 
 ## Layout
 
 ```text
 ├── src/
-│   ├── control-plane/          # FastAPI (app.*)
-│   ├── data-plane/             # MQTT gateway (data_plane.*)
+│   ├── control-plane/          # FastAPI (app.*), Dockerfile
+│   ├── data-plane/             # MQTT gateway (data_plane.*), Dockerfile
 │   └── device-plane/agent/     # meteorcli
-├── console/                    # operator UI
-├── compose/                    # one Compose file per module
-├── contracts/                  # HTTP JSON between planes
+├── console/                    # operator UI, Dockerfile (nginx)
+├── deploy/
+│   ├── compose/                # Docker Compose files, .env.example, service config
+│   ├── ansible/                # server preparation + Compose deployment
+│   └── kubernetes/helm/        # Helm chart
 ├── infrastructure/
-├── docs/                       # Markdown source (mirrored on the website)
+│   ├── terraform/aws/          # EC2 host for the Compose path
+│   └── installer/              # edge-installer (Terraform + Ansible on AWS)
+├── contracts/                  # HTTP JSON between planes
+├── scripts/                    # smoke tests, certificates, CI helpers
+├── docs/
 └── Makefile
 ```

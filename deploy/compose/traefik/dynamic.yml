@@ -1,0 +1,55 @@
+# Traefik dynamic configuration (Go template, rendered by Traefik's file provider).
+# PLATFORM_DOMAIN set: HTTPS with a Let's Encrypt certificate and HTTP->HTTPS redirect.
+# PLATFORM_DOMAIN empty: plain HTTP on port 80.
+# Only /api and /health reach the API; /internal and /metrics stay private.
+{{ $domain := env "PLATFORM_DOMAIN" }}
+http:
+  routers:
+    backend:
+      rule: "PathPrefix(`/health`) || PathPrefix(`/api`)"
+      service: backend
+      priority: 10
+{{- if $domain }}
+      entryPoints: [websecure]
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "{{ $domain }}"
+{{- else }}
+      entryPoints: [web]
+{{- end }}
+    console:
+      rule: "PathPrefix(`/`)"
+      service: console
+      priority: 1
+{{- if $domain }}
+      entryPoints: [websecure]
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "{{ $domain }}"
+    http-redirect:
+      rule: "PathPrefix(`/`)"
+      entryPoints: [web]
+      middlewares: [redirect-to-https]
+      service: console
+      priority: 100
+
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+{{- else }}
+      entryPoints: [web]
+{{- end }}
+
+  services:
+    backend:
+      loadBalancer:
+        servers:
+          - url: http://backend:8000
+    console:
+      loadBalancer:
+        servers:
+          - url: http://console:80

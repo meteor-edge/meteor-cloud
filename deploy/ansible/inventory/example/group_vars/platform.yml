@@ -1,0 +1,38 @@
+---
+# Settings for the hosts in the `platform` group. Every setting and its default
+# is listed in roles/meteorcloud/defaults/main.yml. Secrets are read from
+# EDGE_PLATFORM_* environment variables on the controller (or use ansible-vault).
+
+platform_public_url: https://fleet.example.com
+platform_domain: fleet.example.com   # empty: plain HTTP on port 80
+
+# Images: build from git on the host, or pull prebuilt images from a registry.
+image_source: git
+git_ref: master
+# image_source: registry
+# backend_image: ghcr.io/your-org/meteorcloud-backend:0.2.0
+# data_plane_image: ghcr.io/your-org/meteorcloud-data-plane:0.2.0
+# frontend_image: ghcr.io/your-org/meteorcloud-console:0.2.0
+
+# PostgreSQL: bundled container, or external (EDGE_PLATFORM_DATABASE_URL).
+postgres_provider: bundled
+
+# Rate limiting: memory needs no Redis (single API process).
+cache_provider: memory
+
+# Artifacts: filesystem on this host, or any S3-compatible service.
+object_storage_provider: filesystem
+# object_storage_provider: s3
+# object_storage_endpoint_url: https://s3.example.com   # empty for AWS S3
+# object_storage_bucket: meteorcloud-artifacts
+# minio_enabled: true                                   # bundled MinIO instead
+
+# Device MQTT (TLS 8883): bundled EMQX with a self-signed CA by default.
+mqtt_enabled: false
+# mqtt_broker: external
+# mqtt_broker_host: mqtt.example.com
+# mqtt_certs_src_dir: /path/on/controller/with/ca.crt,server.crt,server.key
+
+# Host firewall (UFW) for on-prem servers without a cloud security group.
+firewall_enabled: true
+firewall_allowed_ssh_cidrs: ["198.51.100.0/24"]

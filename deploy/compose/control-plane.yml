@@ -1,0 +1,124 @@
+# Control plane: API plus the infrastructure it can use.
+# Bundled infrastructure is opt-in through COMPOSE_PROFILES (see .env.example):
+#   postgres  PostgreSQL (or set DATABASE_URL to an external server)
+#   redis     Redis for rate limiting (or CACHE_PROVIDER=memory, or an external REDIS_URL)
+#   minio     S3-compatible storage (or OBJECT_STORAGE_PROVIDER=filesystem, or external S3)
+networks:
+  meteorcloud:
+    # Shared name so separately started module projects can join each other.
+    name: ${COMPOSE_NETWORK_NAME:-meteorcloud}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: [postgres]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-edge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-edge}
+      POSTGRES_DB: ${POSTGRES_DB:-edge_platform}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ${POSTGRES_DATA:-postgres_data}:/var/lib/postgresql/data
+      - ./config/postgres/init-test-db.sh:/docker-entrypoint-initdb.d/02-init-test-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - meteorcloud
+
+  redis:
+    image: redis:7-alpine
+    profiles: [redis]
+    volumes:
+      - ${REDIS_DATA:-redis_data}:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - meteorcloud
+
+  # Official minio/minio is no longer pullable without login. This Bitnami build
+  # still embeds the console UI (2025.5+ starts the API only).
+  minio:
+    image: ${MINIO_IMAGE:-bitnamilegacy/minio:2024.12.18-debian-12-r1}
+    profiles: [minio]
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY_ID:-meteorcloud}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-meteorcloud-dev-secret}
+      MINIO_DEFAULT_BUCKETS: ${OBJECT_STORAGE_BUCKET:-meteorcloud-artifacts}
+      # Plain HTTP for local Compose; without these the console never binds.
+      MINIO_SCHEME: http
+      MINIO_SERVER_URL: http://localhost:${MINIO_API_PORT:-9000}
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:${MINIO_CONSOLE_PORT:-9001}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - ${MINIO_DATA:-minio_data}:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - meteorcloud
+
+  backend:
+    image: ${BACKEND_IMAGE:-meteorcloud/backend:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/control-plane
+    env_file:
+      - ${METEORCLOUD_ENV_FILE:-.env}
+    # Wiring defaults for the bundled services; each can be overridden in .env.
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-edge}:${POSTGRES_PASSWORD:-edge}@postgres:5432/${POSTGRES_DB:-edge_platform}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATA_PLANE_URL: ${DATA_PLANE_URL:-http://data-plane:8081}
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
+      # Interpolated like EMQX's copy so the broker and API always agree.
+      MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
+      MQTT_CA_CERT_PATH: /certs/ca.crt
+      OBJECT_STORAGE_PATH: /data/artifacts
+      # Interpolated so test runs can raise them from the shell (see scripts/test-mqtt.sh).
+      REGISTRATION_RATE_LIMIT_REQUESTS: ${REGISTRATION_RATE_LIMIT_REQUESTS:-10}
+      ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS: ${ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS:-5}
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: "8000"
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
+      - ${ARTIFACTS_DATA:-artifacts_data}:/data/artifacts
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+      minio:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - meteorcloud
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  artifacts_data:

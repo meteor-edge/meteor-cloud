@@ -13,6 +13,10 @@ def infrastructure_root() -> Path:
     return repo_root() / "infrastructure"
 
 
+def ansible_root() -> Path:
+    return repo_root() / "deploy" / "ansible"
+
+
 def state_root() -> Path:
     return repo_root() / ".installer-state"
 

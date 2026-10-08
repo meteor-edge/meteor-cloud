@@ -1,0 +1,69 @@
+# Example production values. Copy and adjust; nothing here is cloud-specific.
+# Prerequisites you provide (see docs/kubernetes.md):
+#   - images pushed to your registry
+#   - PostgreSQL 14+ (managed or self-hosted)
+#   - an S3-compatible bucket (or a ReadWriteMany volume)
+#   - an ingress controller and a TLS certificate (e.g. cert-manager)
+#   - Secret "meteorcloud-secrets" with the keys listed in values.yaml
+#   - Secret "meteorcloud-mqtt-tls" (ca.crt, server.crt, server.key) when MQTT is on
+config:
+  appEnv: production
+  publicUrl: https://fleet.example.com
+  logFormat: json
+  registrationRequireHttps: true
+
+secrets:
+  # Keys: JWT_SECRET_KEY, APP_SECRET_KEY, DATABASE_URL, REDIS_URL,
+  # MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN, EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE,
+  # and optionally OBJECT_STORAGE_ACCESS_KEY_ID / OBJECT_STORAGE_SECRET_ACCESS_KEY.
+  existingSecret: meteorcloud-secrets
+
+imagePullSecrets: []
+backend:
+  image: { repository: registry.example.com/meteorcloud/backend, tag: "0.2.0" }
+  replicaCount: 2
+console:
+  image: { repository: registry.example.com/meteorcloud/console, tag: "0.2.0" }
+  replicaCount: 2
+dataPlane:
+  image: { repository: registry.example.com/meteorcloud/data-plane, tag: "0.2.0" }
+
+postgresql:
+  mode: external              # DATABASE_URL comes from the existing Secret
+
+cache:
+  provider: redis             # shared rate limits across API replicas
+  redis:
+    mode: external            # REDIS_URL comes from the existing Secret
+
+objectStorage:
+  provider: s3
+  s3:
+    endpointUrl: ""           # AWS S3; set for MinIO/Ceph/R2/GCS interoperability
+    region: eu-west-1
+    bucket: meteorcloud-artifacts
+
+serviceAccount:
+  # Use a workload identity instead of static keys where your platform has one.
+  annotations: {}
+
+mqtt:
+  enabled: true
+  broker: bundled
+  publicHost: mqtt.example.com
+  tls:
+    existingSecret: meteorcloud-mqtt-tls
+  emqx:
+    service:
+      type: LoadBalancer
+      loadBalancerSourceRanges: []
+
+ingress:
+  enabled: true
+  className: nginx
+  host: fleet.example.com
+  annotations: {}
+  #  cert-manager.io/cluster-issuer: letsencrypt
+  tls:
+    - secretName: meteorcloud-tls
+      hosts: [fleet.example.com]

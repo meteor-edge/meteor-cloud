@@ -12,10 +12,13 @@ alwaysApply: true
 * Validate realistic inputs and edge cases without over-engineering.
 * Run relevant tests, checks, and linters after making changes.
 * Verify the requested behavior and avoid regressions.
-* Deployment today is AWS EC2 (Ansible) or GCP Cloud Run (Terraform only). `installation.provider` is `Literal["aws", "gcp"]`. AWS apply/plan/destroy go through `AwsEc2Provider`; GCP goes through `GcpCloudRunProvider`.
-* Keep using the existing AWS config contract (`aws:`, SSH, region, instance type, and related env secrets) for the EC2 path. GCP uses `gcp:` (project, region, Cloud Run sizing) and the same `EDGE_PLATFORM_*` secrets.
-* When adding infra behavior, put provider-specific code behind `InfrastructureProvider` / `AwsEc2Provider` / `GcpCloudRunProvider`. Do not scatter GCP APIs into Ansible or AWS Terraform, and do not scatter AWS APIs into the Cloud Run stack.
-* VPN, Traefik, and MQTT/EMQX are AWS (or local Compose) only. Cloud Run does not expose MQTT TCP 8883.
+* There are two independent deployment paths with the same images and settings:
+  * **Docker Compose + Ansible** (`deploy/compose/`, `deploy/ansible/`) for VMs, EC2, and on-prem servers. Ansible prepares the host and runs the repo's Compose files. It never deploys to Kubernetes.
+  * **Kubernetes + Helm** (`deploy/kubernetes/helm/meteorcloud/`) for existing clusters. MeteorCloud does not provision or manage Kubernetes clusters. Keep the chart portable: no cloud-specific resources, operators, or CRDs.
+* `edge-installer` covers only the AWS EC2 Compose path: `installation.provider` is `Literal["aws"]`, and apply/plan/destroy go through `InfrastructureProvider` / `AwsEc2Provider`. Keep the existing AWS config contract (`aws:`, SSH, region, instance type, `EDGE_PLATFORM_*` env secrets). Terraform (`infrastructure/terraform/aws`) provisions infrastructure only.
+* Treat each dependency as bundled, external, or off, and select it through config. PostgreSQL is required. Artifacts use `filesystem` or `s3` (any S3-compatible API). Redis and MQTT/EMQX are optional. Do not deploy MinIO, Redis, Kafka, or ClickHouse unless they are needed.
+* Keep application config, secrets, and infrastructure config separate: env files for Compose, ConfigMap/Secret for Kubernetes, `EDGE_PLATFORM_*`/vault for Ansible.
+* VPN (WireGuard) is part of the EC2 path only.
 * Prefer containers and config/env for deploy-specific values. Avoid new hard-coded AWS account IDs, regions, or endpoints in application code.
 * Never commit secrets. Use the target platform’s secret-management mechanism.
 * Prefer portable, open standards unless an AWS-specific feature is explicitly required for the current path.

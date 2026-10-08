@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-- Docker and Docker Compose
+- Docker and Docker Compose v2.24+
+- Optional, for Kubernetes: k3d, kubectl, helm
 - Python 3.13+
 - Node.js 22+
 - Make
@@ -10,7 +11,7 @@
 ## First-time setup
 
 ```bash
-cp .env.example .env
+cp deploy/compose/.env.example deploy/compose/.env
 
 python -m venv .venv
 source .venv/bin/activate
@@ -24,7 +25,7 @@ make install
 
 ```bash
 make dev                 # all Compose files (shared network meteorcloud)
-make dev-control-plane   # postgres, redis, control-plane API
+make dev-control-plane   # bundled infra (postgres/redis/minio profiles) + control-plane API
 make dev-data-plane      # EMQX + data-plane MQTT gateway
 make dev-console         # operator console
 ```
@@ -48,10 +49,16 @@ Compose files:
 
 | File | Services |
 | --- | --- |
-| `compose/control-plane.yml` | `postgres`, `redis`, `backend` |
-| `compose/data-plane.yml` | `emqx`, `data-plane` |
-| `compose/console.yml` | `console` |
-| `docker-compose.yml` | `include:` of those three |
+| `deploy/compose/control-plane.yml` | `backend`; profiles `postgres`, `redis`, `minio` |
+| `deploy/compose/data-plane.yml` | profiles `mqtt` (`data-plane`), `emqx` |
+| `deploy/compose/console.yml` | `console` (Vite dev server) |
+| `deploy/compose/docker-compose.yml` | `include:` of those three |
+| `deploy/compose/docker-compose.dev.yml` | Source mounts and hot reload (`make dev`) |
+| `deploy/compose/docker-compose.prod.yml` | Production overlay: Traefik, restart policies, no internal ports |
+
+`COMPOSE_PROFILES` in `deploy/compose/.env` selects the bundled services. Remove a
+profile and point the matching setting (`DATABASE_URL`, `REDIS_URL`,
+`OBJECT_STORAGE_ENDPOINT_URL`, `MQTT_BROKER_HOST`) at an external service instead.
 
 Same machine stacks **must** use network name `meteorcloud`.
 
@@ -131,7 +138,18 @@ make data-plane-test
 make console-test
 ```
 
-Runs:
+Deployment checks (the same ones CI runs):
+
+```bash
+make compose-config    # docker compose config for base, dev, prod, observability
+make compose-smoke     # minimal production stack + scripts/smoke_test.py (make images first)
+make helm-lint         # helm lint + template for every values file
+make terraform-check   # fmt, init -backend=false, validate (no credentials)
+make ansible-check ansible-lint
+./scripts/k8s-smoke.sh # throwaway k3d cluster: helm install, test, uninstall, delete
+```
+
+`make test` runs:
 
 1. Installer Pytest suite
 2. Control-plane Pytest suite (requires PostgreSQL; use `make dev` first)
@@ -159,7 +177,7 @@ make format
 
 ## Environment variables
 
-Copy `.env.example` to `.env` and adjust as needed. Important values:
+Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed. Values are written from the containers' point of view (service names, not `localhost`). Important values:
 
 | Variable | Purpose |
 | --- | --- |
@@ -174,7 +192,8 @@ Copy `.env.example` to `.env` and adjust as needed. Important values:
 | `CONTROL_PLANE_URL` | Data plane → control-plane ingest/auth origin |
 | `TELEMETRY_PROVIDER` | Last-value store (`postgresql` only; timescale/clickhouse reserved) |
 | `DATABASE_PROVIDER` | Persistence adapter (`postgresql` only) |
-| `CACHE_PROVIDER` | Rate-limit adapter (`redis` only) |
+| `CACHE_PROVIDER` | Rate-limit adapter: `redis` (shared) or `memory` (per process) |
+| `OBJECT_STORAGE_PROVIDER` | Artifacts: `s3` (any S3-compatible API) or `filesystem` (`OBJECT_STORAGE_PATH`) |
 | `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
 | `OTA_PROVIDER` | OTA adapter (`none` until a provider exists) |
 | `IDENTITY_PROVIDER` | Member sign-in account directory (`local` only: PostgreSQL users) |
@@ -196,12 +215,18 @@ HTTP JSON between planes is documented in [`contracts/mqtt-http.md`](../contract
 2. Register it in the installer service registry
 3. Wire enablement through configuration models
 
-## Kubernetes later
+## Local Kubernetes
 
-Do not add manifests in this repo yet. A later split would be Deployments:
-`control-plane`, `data-plane`, and `console`. Scale the API and console independently. The public website is a separate deploy from private `meteor-ui`.
-Keep the data-plane MQTT consumer at 1 until shared subscriptions / a consumer group exist.
-`infrastructure/kubernetes` stays empty.
+```bash
+make k8s-up        # k3d cluster (development tool only)
+make k8s-deploy    # build images, import, helm upgrade --install with values-local.yaml
+make k8s-status
+make k8s-test
+make k8s-down
+```
+
+The console and API are at http://localhost:8088, MQTT TLS at localhost:18883 (CA in
+`.k8s/certs/ca.crt`). See [Kubernetes](kubernetes.md).
 
 ## Coding standards
 

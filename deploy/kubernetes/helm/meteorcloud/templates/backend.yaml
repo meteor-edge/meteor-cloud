@@ -1,0 +1,182 @@
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $secretName := include "meteorcloud.secretName" . }}
+{{- $filesystem := eq .Values.objectStorage.provider "filesystem" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-backend
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  strategy:
+    {{- if include "meteorcloud.filesystemRWO" . }}
+    # A ReadWriteOnce volume cannot be attached to the old and new pod at once.
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "backend") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "meteorcloud.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.backend.podSecurityContext | nindent 8 }}
+      initContainers:
+        # Schema migrations, then the optional first administrator. Retries
+        # until the database accepts connections.
+        - name: migrate
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" .Values.backend.image) }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              attempt=0
+              until alembic upgrade head; do
+                attempt=$((attempt + 1))
+                if [ "$attempt" -ge 60 ]; then echo "database not reachable" >&2; exit 1; fi
+                echo "waiting for database (attempt $attempt)"
+                sleep 5
+              done
+              python -m app.cli create-admin
+          envFrom:
+            - configMapRef:
+                name: {{ $fullname }}
+            - secretRef:
+                name: {{ $secretName }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+      containers:
+        - name: backend
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" .Values.backend.image) }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: {{ $fullname }}
+            - secretRef:
+                name: {{ $secretName }}
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts:
+            {{- if $filesystem }}
+            - name: artifacts
+              mountPath: /data/artifacts
+            {{- end }}
+            {{- if .Values.mqtt.enabled }}
+            - name: mqtt-ca
+              mountPath: /certs
+              readOnly: true
+            {{- end }}
+      volumes:
+        {{- if $filesystem }}
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: {{ include "meteorcloud.artifactsClaimName" . }}
+        {{- end }}
+        {{- if .Values.mqtt.enabled }}
+        - name: mqtt-ca
+          secret:
+            secretName: {{ .Values.mqtt.tls.existingSecret }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-backend
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+{{- if and $filesystem (not .Values.objectStorage.filesystem.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "meteorcloud.artifactsClaimName" . }}
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+  {{- if .Values.objectStorage.filesystem.keep }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.objectStorage.filesystem.accessModes | nindent 4 }}
+  {{- with .Values.objectStorage.filesystem.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.objectStorage.filesystem.size }}
+{{- end }}
+{{- if .Values.serviceAccount.create }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "meteorcloud.serviceAccountName" . }}
+  labels:
+    {{- include "meteorcloud.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: false
+{{- end }}

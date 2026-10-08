@@ -78,7 +78,7 @@ make down                              # or edge-installer destroy --yes
 4. Ansible `site.yml`:
    - **provision** — Docker, directories (shared)
    - **deploy** — each enabled service playbook
-5. For `cloud_app`: clone repo, build images, start Compose, migrations, optional admin
+5. For `cloud_app`: copy `deploy/compose/` to `/opt/edge-platform/compose`, render `.env`, clone the repo and build images (or pull from a registry), `docker compose up --wait` (the API runs migrations on start), optional first admin
 6. For `vpn`: install WireGuard (active when `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` is set)
 7. Health check (cloud_app only)
 
@@ -100,14 +100,16 @@ Platform URL: http://18.198.10.20
 
 ```text
 Internet -> Traefik -> /api, /health -> Backend
-                     -> /           -> Frontend
-PostgreSQL and Redis: internal Docker network only
+                     -> /           -> Console
+PostgreSQL (and Redis, if enabled): internal Docker network only
+Artifacts: /opt/edge-platform/data/artifacts (filesystem storage)
 VPN (optional): UDP 51820 -> WireGuard on host
 ```
 
 ## Limitations
 
-- Single EC2 instance
+- Single EC2 instance (for clusters use the [Helm chart](kubernetes.md))
+- MQTT is off with the installer defaults; enable it by running the playbooks with your own inventory ([Deployment](deployment.md))
 - Local Terraform state
 - VPN shares the cloud_app host
 - No automatic DNS management

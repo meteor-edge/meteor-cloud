@@ -59,11 +59,13 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
       - name: Install Ansible
-        run: python -m pip install ansible
+        run: python -m pip install ansible ansible-lint
       - name: Terraform check
         run: make terraform-check
       - name: Ansible check
-        run: make ansible-check
+        run: |
+          make ansible-check
+          make ansible-lint
 
   aws-e2e:
     name: EC2 apply, smoke, destroy
@@ -127,7 +129,6 @@ jobs:
           edge-installer apply "${CONFIG_PATH}"
       - name: Extra smoke checks
         run: |
-          chmod +x scripts/aws-ci-smoke.sh
           edge-installer status "${CONFIG_PATH}"
           URL="$(python -c "
           import json
@@ -139,7 +140,7 @@ jobs:
               raise SystemExit(f'missing platform_url in {path}')
           print(url)
           ")"
-          scripts/aws-ci-smoke.sh "${URL}"
+          python scripts/smoke_test.py "${URL}"
           echo "PLATFORM_URL=${URL}" >> "$GITHUB_ENV"
           python -c "
           import json

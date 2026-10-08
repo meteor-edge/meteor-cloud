@@ -1,7 +1,0 @@
-include:
-  - path: compose/control-plane.yml
-    project_directory: .
-  - path: compose/data-plane.yml
-    project_directory: .
-  - path: compose/console.yml
-    project_directory: .

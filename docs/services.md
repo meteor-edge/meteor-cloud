@@ -1,13 +1,13 @@
 # Modular services
 
-Deploy one or more independent stacks from a single `installation.yaml` and one command.
+`edge-installer` deploys one or more independent stacks to an AWS EC2 host from a single `installation.yaml`. It runs Terraform for the host and the Ansible playbooks in `deploy/ansible/` for the services. For Kubernetes use the Helm chart instead ([Kubernetes](kubernetes.md)).
 
 ## Available services
 
 | Service | Description | Requires |
 |---------|-------------|----------|
-| `cloud_app` | Application stack (control-plane API, console, Postgres, Redis) | AWS: Docker/Traefik. GCP: Cloud Run |
-| `vpn` | WireGuard VPN tunnel on the EC2 host | AWS only; disable on GCP |
+| `cloud_app` | Application stack via Docker Compose (API, console, PostgreSQL, Traefik; optional Redis, MQTT) | Docker on the host |
+| `vpn` | WireGuard VPN tunnel on the EC2 host | `cloud_app` (same host) |
 
 More services can be added following the extension guide below.
 
@@ -57,8 +57,8 @@ The installer:
 
 | Layer | Location |
 |-------|----------|
-| Terraform | `infrastructure/terraform/modules/cloud_app/` |
-| Ansible | `playbooks/services/cloud_app.yml` |
+| Terraform | `infrastructure/terraform/aws/modules/cloud_app/` |
+| Ansible | `deploy/ansible/playbooks/services/cloud_app.yml` (runs `deploy/compose/`) |
 | Config | `components:`, `deployment:`, `platform:` |
 
 Secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD`, `EDGE_PLATFORM_JWT_SECRET`
@@ -67,8 +67,8 @@ Secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD`, `EDGE_PLATFORM_JWT_SECRET`
 
 | Layer | Location |
 |-------|----------|
-| Terraform | `infrastructure/terraform/modules/vpn/` (UDP SG rule) |
-| Ansible | `playbooks/services/vpn.yml`, `roles/vpn/` |
+| Terraform | `infrastructure/terraform/aws/modules/vpn/` (UDP SG rule) |
+| Ansible | `deploy/ansible/playbooks/services/vpn.yml`, `roles/vpn/` |
 | Config | `services.vpn.*` |
 
 Secret: `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` (optional — installs packages without it)
@@ -76,34 +76,33 @@ Secret: `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` (optional — installs packages w
 ## Directory layout
 
 ```text
-infrastructure/
-├── terraform/
-│   ├── aws/                    # root stack
-│   └── modules/
-│       ├── cloud_app/
-│       └── vpn/
-└── ansible/
-    ├── playbooks/
-    │   ├── site.yml
-    │   ├── provision.yml
-    │   ├── deploy.yml
-    │   └── services/
-    │       ├── cloud_app.yml
-    │       └── vpn.yml
-    └── roles/
-        ├── platform_*/
-        └── vpn/
-
+infrastructure/terraform/aws/
+├── main.tf                     # root stack, gated by enabled_services
+└── modules/
+    ├── cloud_app/
+    └── vpn/
+deploy/ansible/
+├── playbooks/
+│   ├── site.yml
+│   ├── provision.yml
+│   ├── deploy.yml
+│   └── services/
+│       ├── cloud_app.yml
+│       └── vpn.yml
+└── roles/
+    ├── meteorcloud/            # all settings and defaults
+    ├── platform_*/
+    └── vpn/
 infrastructure/installer/edge_installer/services/
 └── registry.py                 # service definitions
 ```
 
 ## Adding a new service
 
-1. **Terraform** — create `infrastructure/terraform/modules/<name>/`
+1. **Terraform** — create `infrastructure/terraform/aws/modules/<name>/`
 2. **Wire root stack** — add module block in `terraform/aws/main.tf` gated by `enabled_services`
-3. **Ansible** — create `playbooks/services/<name>.yml` and role(s)
-4. **Import** — add to `playbooks/deploy.yml`:
+3. **Ansible** — create `deploy/ansible/playbooks/services/<name>.yml` and role(s)
+4. **Import** — add to `deploy/ansible/playbooks/deploy.yml`:
    ```yaml
    - import_playbook: services/<name>.yml
      when: "'<name>' in enabled_services"

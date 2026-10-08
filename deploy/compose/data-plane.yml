@@ -1,0 +1,67 @@
+# Data plane: MQTT gateway plus an optional bundled broker.
+#   mqtt   data-plane service (needed whenever MQTT_ENABLED=true)
+#   emqx   bundled EMQX broker (or point MQTT_BROKER_HOST at an external EMQX)
+networks:
+  meteorcloud:
+    # Shared name so separately started module projects can join each other.
+    name: ${COMPOSE_NETWORK_NAME:-meteorcloud}
+
+services:
+  emqx:
+    image: emqx/emqx:5.8.6
+    profiles: [emqx]
+    environment:
+      EMQX_DASHBOARD__DEFAULT_USERNAME: admin
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:-public}
+      # EMQX 5.8 HOCON does not accept getenv() in emqx.conf; override HTTP headers from env.
+      # An empty MQTT_INTERNAL_TOKEN makes the control plane reject every device login.
+      EMQX_AUTHENTICATION__1__HEADERS: '{"content-type" = "application/json", "x-mqtt-internal-token" = "${MQTT_INTERNAL_TOKEN:-}"}'
+      EMQX_AUTHORIZATION__SOURCES__1__HEADERS: '{"content-type" = "application/json", "x-mqtt-internal-token" = "${MQTT_INTERNAL_TOKEN:-}"}'
+    ports:
+      - "${MQTT_PORT:-8883}:8883"
+      - "18083:18083"
+    volumes:
+      - ./config/emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/ca.crt:/opt/emqx/etc/certs/ca.crt:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/server.crt:/opt/emqx/etc/certs/server.crt:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/server.key:/opt/emqx/etc/certs/server.key:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "emqx ctl listeners | awk '$$0==\"ssl:default\"{p=1;next} p&&$$0~/^[^[:space:]]/{p=0} p&&/listen_on[[:space:]]*:[[:space:]]*0.0.0.0:8883/{l=1} p&&/running[[:space:]]*:[[:space:]]*true/{r=1} END{exit (l&&r)?0:1}'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    networks:
+      - meteorcloud
+
+  data-plane:
+    image: ${DATA_PLANE_IMAGE:-meteorcloud/data-plane:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane
+    profiles: [mqtt]
+    env_file:
+      - ${METEORCLOUD_ENV_FILE:-.env}
+    environment:
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
+      HTTP_ADDR: ":8081"
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
+      MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
+      MQTT_CA_CERT_PATH: /certs/ca.crt
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
+    ports:
+      - "8081:8081"
+    depends_on:
+      emqx:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - meteorcloud
