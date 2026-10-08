@@ -111,13 +111,7 @@ class FleetService:
         organization_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> OrganizationMembership:
-        result = self.organizations.get_for_user(
-            organization_id=organization_id,
-            user_id=user_id,
-        )
-        if result is None:
-            raise NotFoundError("organization_not_found", "Organization was not found.")
-        return result[1]
+        return self.authz.require_membership(user_id=user_id, organization_id=organization_id)
 
     def _require(
         self,
@@ -860,9 +854,11 @@ class FleetService:
             self._require_device_type(organization_id, payload.device_type_id)
             device.device_type_id = payload.device_type_id
         if payload.clear_device_group:
+            self._require(membership, "device.update", device_group_id=None)
             device.device_group_id = None
         elif payload.device_group_id is not None:
             self._require_device_group(organization_id, payload.device_group_id)
+            self._require(membership, "device.update", device_group_id=payload.device_group_id)
             device.device_group_id = payload.device_group_id
         if payload.labels is not None:
             device.labels = payload.labels

@@ -102,11 +102,8 @@ class ArtifactService:
 
     # ---------------------------------------------------------------- helpers
     def _require_membership(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMembership:
-        """Return membership or raise NotFoundError for a missing organization or membership."""
-        result = self.organizations.get_for_user(organization_id=organization_id, user_id=user_id)
-        if result is None:
-            raise NotFoundError("organization_not_found", "Organization was not found.")
-        return result[1]
+        """Return the active membership or raise NotFoundError (missing org, membership, or inactive)."""
+        return self.authz.require_membership(user_id=user_id, organization_id=organization_id)
 
     def _require_artifact(self, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> Artifact:
         """Return an artifact in the organization or raise NotFoundError."""

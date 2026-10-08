@@ -117,6 +117,28 @@ def test_scoped_operator_cannot_access_other_device_group(
     assert client.get(f"/api/v1/organizations/{org.id}/devices/{device_munich.id}", headers=headers).status_code == 403
     assert client.get(f"/api/v1/organizations/{org.id}/devices/{ungrouped.id}", headers=headers).status_code == 403
 
+    device_url = f"/api/v1/organizations/{org.id}/devices/{device_berlin.id}"
+    assert client.patch(device_url, headers=headers, json={"device_group_id": str(munich.id)}).status_code == 403
+    assert client.patch(device_url, headers=headers, json={"clear_device_group": True}).status_code == 403
+    db_session.refresh(device_berlin)
+    assert device_berlin.device_group_id == berlin.id
+
+
+def test_disabled_member_cannot_use_fleet_or_artifacts(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    operator = create_user(db_session, email="ops@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    membership = add_member(db_session, org, operator, OrganizationRole.OPERATOR)
+    membership.status = "disabled"
+    db_session.commit()
+
+    owner_headers = auth_header(client, "owner@example.com")
+    headers = auth_header(client, "ops@example.com")
+    for path in ("devices", "artifacts"):
+        url = f"/api/v1/organizations/{org.id}/{path}"
+        assert client.get(url, headers=owner_headers).status_code == 200
+        assert client.get(url, headers=headers).status_code == 404
+
 
 def test_scoped_list_filters_before_pagination(client: TestClient, db_session: Session) -> None:
     owner = create_user(db_session, email="owner@example.com")
