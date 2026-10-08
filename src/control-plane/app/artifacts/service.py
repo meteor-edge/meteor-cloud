@@ -22,9 +22,9 @@ from app.artifacts.models import Artifact, ArtifactType
 from app.artifacts.repository import ArtifactRepository
 from app.artifacts.schemas import ArtifactCreate, ArtifactDownloadLinkResponse, ArtifactResponse
 from app.audit.service import AuditRecorder
+from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
-from app.core.exceptions import AppError, ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
-from app.devices.permissions import can_manage_fleet
+from app.core.exceptions import AppError, ConflictError, NotFoundError, UnauthorizedError
 from app.devices.repository import DeviceTypeRepository
 from app.devices.schemas import Page
 from app.identity.models import User
@@ -98,22 +98,12 @@ class ArtifactService:
         self.artifacts = ArtifactRepository(session)
         self.device_types = DeviceTypeRepository(session)
         self.audit = AuditRecorder(session)
+        self.authz = AuthzService(session)
 
     # ---------------------------------------------------------------- helpers
     def _require_membership(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMembership:
-        """Return membership or raise NotFoundError for a missing organization or membership."""
-        result = self.organizations.get_for_user(organization_id=organization_id, user_id=user_id)
-        if result is None:
-            raise NotFoundError("organization_not_found", "Organization was not found.")
-        return result[1]
-
-    def _require_manage(self, membership: OrganizationMembership) -> None:
-        """Raise ForbiddenError unless the membership belongs to an owner or admin."""
-        if not can_manage_fleet(membership.role):
-            raise ForbiddenError(
-                "insufficient_permission",
-                "You do not have permission to manage artifacts.",
-            )
+        """Return the active membership or raise NotFoundError (missing org, membership, or inactive)."""
+        return self.authz.require_membership(user_id=user_id, organization_id=organization_id)
 
     def _require_artifact(self, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> Artifact:
         """Return an artifact in the organization or raise NotFoundError."""
@@ -141,7 +131,8 @@ class ArtifactService:
         case-insensitive SQL LIKE matching. Raise NotFoundError if the actor
         cannot access the organization; database errors propagate.
         """
-        self._require_membership(organization_id, actor.id)
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "artifact.read")
         items, total = self.artifacts.list_paginated(
             organization_id=organization_id,
             type=type,
@@ -164,7 +155,8 @@ class ArtifactService:
         Raise NotFoundError if membership or the artifact is absent;
         database and response validation errors propagate.
         """
-        self._require_membership(organization_id, actor.id)
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "artifact.read")
         return ArtifactResponse.model_validate(self._require_artifact(organization_id, artifact_id))
 
     # ----------------------------------------------------------------- upload
@@ -195,7 +187,7 @@ class ArtifactService:
         remain.
         """
         membership = self._require_membership(organization_id, actor.id)
-        self._require_manage(membership)
+        self.authz.require(membership, "artifact.create")
 
         max_bytes = self.settings.artifact_max_upload_bytes
         if declared_size is not None and declared_size > max_bytes:
@@ -290,7 +282,7 @@ class ArtifactService:
         are suppressed and may leave orphaned content.
         """
         membership = self._require_membership(organization_id, actor.id)
-        self._require_manage(membership)
+        self.authz.require(membership, "artifact.delete")
         artifact = self._require_artifact(organization_id, artifact_id)
         key = artifact.storage_key
         self.audit.record(
@@ -323,7 +315,8 @@ class ArtifactService:
         and AppError (503) for other errors opening storage. Database errors and
         later stream-read errors propagate.
         """
-        self._require_membership(organization_id, actor.id)
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "artifact.read")
         artifact = self._require_artifact(organization_id, artifact_id)
         return artifact, self._open(artifact)
 
@@ -337,7 +330,8 @@ class ArtifactService:
         NotFoundError for absent membership or artifact; database and signing
         errors propagate.
         """
-        self._require_membership(organization_id, actor.id)
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "artifact.read")
         artifact = self._require_artifact(organization_id, artifact_id)
         expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.artifact_download_link_ttl_seconds)
         # No "sub" claim: the ticket must never be accepted as a user access token.

@@ -15,6 +15,9 @@ import {
   Router,
   Settings,
   UserPlus,
+  UserRound,
+  Users,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -24,6 +27,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { BrandMark } from "@/components/BrandMark";
 import { useOrganizationContext } from "@/context/OrganizationContext";
 import { resolveDocsBaseUrl } from "@/lib/docsUrl";
+import { canManageMembers, canReadTeams } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -38,11 +42,9 @@ const subLinkClass = (isActive: boolean) =>
     isActive && "bg-accent text-accent-foreground",
   );
 
-// Members and enrollment API keys are reached from the Settings page.
+// Enrollment API keys are reached from the Settings page.
 function isSettingsSection(pathname: string, orgId: string): boolean {
-  return ["members", "api-keys"].some((page) =>
-    pathname.startsWith(`/organizations/${orgId}/${page}`),
-  );
+  return pathname.startsWith(`/organizations/${orgId}/api-keys`);
 }
 
 /** A collapsible menu group. The heading names the area; the pages live underneath. */
@@ -115,6 +117,9 @@ export function Sidebar() {
   const orgPath = `/organizations/${orgId}`;
   const isPage = (page: string) => pathname.startsWith(`${orgPath}/${page}`);
   const artifactType = new URLSearchParams(search).get("type");
+  const role = selectedOrganization?.current_user_role;
+  const showMembers = canManageMembers(role);
+  const showTeams = canReadTeams(role);
 
   return (
     <aside className="hidden w-64 shrink-0 border-r border-border bg-section backdrop-blur md:flex md:flex-col">
@@ -196,6 +201,24 @@ export function Sidebar() {
                   <Activity className="h-4 w-4" />
                   Monitoring
                 </NavLink>
+                {(showMembers || showTeams) && (
+                  <NavSection
+                    icon={Users}
+                    label="People"
+                    active={["members", "teams"].some(isPage)}
+                  >
+                    {showMembers && (
+                      <SubLink to={`${orgPath}/members`} icon={UserRound} active={isPage("members")}>
+                        Members
+                      </SubLink>
+                    )}
+                    {showTeams && (
+                      <SubLink to={`${orgPath}/teams`} icon={UsersRound} active={isPage("teams")}>
+                        Teams
+                      </SubLink>
+                    )}
+                  </NavSection>
+                )}
                 <NavLink
                   to={`/organizations/${orgId}/settings`}
                   className={({ isActive }) =>

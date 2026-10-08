@@ -192,7 +192,7 @@ def test_member_cannot_delete_device(client: TestClient, db_session: Session) ->
     owner = create_user(db_session, email="owner@example.com")
     member = create_user(db_session, email="member@example.com")
     org, _ = create_org_with_owner(db_session, owner)
-    add_member(db_session, org, member, OrganizationRole.MEMBER)
+    add_member(db_session, org, member, OrganizationRole.OPERATOR)
     owner_headers = auth_header(client, "owner@example.com")
     member_headers = auth_header(client, "member@example.com")
     reg = _register(client, org.id, owner_headers, name="edge-01", mac_addresses=["aa:bb:cc:dd:ee:01"])

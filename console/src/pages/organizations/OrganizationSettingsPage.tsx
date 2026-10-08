@@ -133,9 +133,6 @@ export function OrganizationSettingsPage() {
 
       <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-card p-4 shadow-glow">
         <Button variant="secondary" asChild>
-          <Link to={`/organizations/${organizationId}/members`}>Members</Link>
-        </Button>
-        <Button variant="secondary" asChild>
           <Link to={`/organizations/${organizationId}/api-keys`}>Enrollment API keys</Link>
         </Button>
       </div>

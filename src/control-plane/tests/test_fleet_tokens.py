@@ -75,12 +75,12 @@ def test_create_token_rejects_past_expiry(client: TestClient, db_session: Sessio
     assert response.json()["error"]["code"] == "invalid_expiry"
 
 
-def test_member_cannot_create_token(client: TestClient, db_session: Session) -> None:
+def test_viewer_cannot_create_token(client: TestClient, db_session: Session) -> None:
     owner = create_user(db_session, email="owner@example.com")
-    member = create_user(db_session, email="member@example.com")
+    member = create_user(db_session, email="viewer@example.com")
     org, _ = create_org_with_owner(db_session, owner)
-    add_member(db_session, org, member, OrganizationRole.MEMBER)
-    headers = auth_header(client, "member@example.com")
+    add_member(db_session, org, member, OrganizationRole.VIEWER)
+    headers = auth_header(client, "viewer@example.com")
 
     response = client.post(
         f"/api/v1/organizations/{org.id}/registration-tokens",

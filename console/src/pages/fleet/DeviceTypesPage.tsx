@@ -10,7 +10,7 @@ import { DevicesNav } from "@/components/fleet/DevicesNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { canManageFleet } from "@/lib/permissions";
+import { canManageDeviceTypes } from "@/lib/permissions";
 
 export function DeviceTypesPage() {
   const { organizationId = "" } = useParams();
@@ -36,7 +36,7 @@ export function DeviceTypesPage() {
     enabled: Boolean(token && organizationId),
   });
 
-  const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const canManage = canManageDeviceTypes(orgQuery.data?.current_user_role);
 
   const createMutation = useMutation({
     mutationFn: () =>

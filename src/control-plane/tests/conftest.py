@@ -17,6 +17,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.artifacts import models as _artifact_models  # noqa: F401
 from app.artifacts.dependencies import get_object_storage
 from app.audit import models as _audit_models  # noqa: F401
+from app.authorization import models as _authorization_models  # noqa: F401
+from app.authorization.roles import get_system_role_id
+from app.authorization.seed import seed_authorization_catalog
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Base
@@ -45,6 +48,9 @@ def engine():
     eng = create_engine(settings.database_url, pool_pre_ping=True)
     Base.metadata.drop_all(bind=eng)
     Base.metadata.create_all(bind=eng)
+    with Session(eng) as session:
+        seed_authorization_catalog(session)
+        session.commit()
     yield eng
     eng.dispose()
 
@@ -62,6 +68,8 @@ def db_session(engine) -> Generator[Session]:
 
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     session = TestingSessionLocal()
+    seed_authorization_catalog(session)
+    session.commit()
     try:
         yield session
     finally:
@@ -152,7 +160,7 @@ def create_org_with_owner(
     membership = OrganizationMembership(
         organization_id=organization.id,
         user_id=owner.id,
-        role=OrganizationRole.OWNER,
+        role_id=get_system_role_id(session, OrganizationRole.OWNER.value),
     )
     session.add(membership)
     session.commit()
@@ -170,7 +178,7 @@ def add_member(
     membership = OrganizationMembership(
         organization_id=organization.id,
         user_id=user.id,
-        role=role,
+        role_id=get_system_role_id(session, role.value),
     )
     session.add(membership)
     session.commit()

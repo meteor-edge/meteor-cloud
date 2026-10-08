@@ -7,12 +7,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as authApi from "@/api/auth";
 import { ApiError } from "@/api/http";
 import * as orgApi from "@/api/organizations";
+import * as teamsApi from "@/api/teams";
 import { App } from "@/App";
 import { AuthProvider } from "@/auth/AuthContext";
 import { OrganizationProvider } from "@/context/OrganizationContext";
 
 vi.mock("@/api/auth");
 vi.mock("@/api/organizations");
+vi.mock("@/api/teams");
 
 function renderApp(initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({
@@ -213,6 +215,10 @@ describe("Organization UI", () => {
         email: "viewer@example.com",
         full_name: "Viewer",
         role: "viewer",
+        role_name: "Viewer",
+        status: "active",
+        scope: { mode: "organization", device_group_ids: [], device_group_names: [] },
+        teams: [],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
@@ -220,6 +226,152 @@ describe("Organization UI", () => {
 
     renderApp(["/organizations/org-1/members"]);
     expect(await screen.findByText("viewer@example.com")).toBeInTheDocument();
-    expect(screen.queryByLabelText(/add existing user by email/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add member/i })).not.toBeInTheDocument();
+  });
+
+  it("adds a member with a new account", async () => {
+    const user = userEvent.setup();
+    vi.mocked(orgApi.getOrganization).mockResolvedValue(acmeOrg);
+    vi.mocked(orgApi.listMembers).mockResolvedValue([]);
+    vi.mocked(orgApi.addMember).mockResolvedValue({
+      id: "m-2",
+      organization_id: "org-1",
+      user_id: "user-2",
+      email: "new@example.com",
+      full_name: "New Person",
+      role: "operator",
+      role_name: "Operator",
+      status: "active",
+      scope: { mode: "organization", device_group_ids: [], device_group_names: [] },
+      teams: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    renderApp(["/organizations/org-1/members"]);
+    await user.click(await screen.findByRole("button", { name: /add member/i }));
+    await user.type(screen.getByLabelText(/^email$/i), "new@example.com");
+    await user.type(screen.getByLabelText(/full name/i), "New Person");
+    await user.type(screen.getByLabelText(/temporary password/i), "temporary-pass");
+    await user.click(screen.getByRole("button", { name: /^add member$/i }));
+
+    await waitFor(() => {
+      expect(orgApi.addMember).toHaveBeenCalledWith("token-123", "org-1", {
+        email: "new@example.com",
+        full_name: "New Person",
+        password: "temporary-pass",
+        role: "operator",
+        scope: { device_group_ids: [] },
+      });
+    });
+  });
+
+  it("shows team badges on members", async () => {
+    vi.mocked(orgApi.getOrganization).mockResolvedValue(acmeOrg);
+    vi.mocked(orgApi.listMembers).mockResolvedValue([
+      {
+        id: "m-1",
+        organization_id: "org-1",
+        user_id: "user-1",
+        email: "ops@example.com",
+        full_name: "Ops",
+        role: "operator",
+        role_name: "Operator",
+        status: "active",
+        scope: { mode: "organization", device_group_ids: [], device_group_names: [] },
+        teams: [{ id: "team-1", name: "Berlin on-call" }],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    renderApp(["/organizations/org-1/members"]);
+    expect(await screen.findByRole("link", { name: "Berlin on-call" })).toHaveAttribute(
+      "href",
+      "/organizations/org-1/teams/team-1",
+    );
+  });
+
+  it("lists and creates teams", async () => {
+    const user = userEvent.setup();
+    vi.mocked(orgApi.getOrganization).mockResolvedValue(acmeOrg);
+    vi.mocked(teamsApi.listTeams).mockResolvedValue([
+      {
+        id: "team-1",
+        organization_id: "org-1",
+        name: "Firmware",
+        description: "Builds images",
+        member_count: 3,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(teamsApi.createTeam).mockResolvedValue({
+      id: "team-2",
+      organization_id: "org-1",
+      name: "Field ops",
+      description: null,
+      member_count: 0,
+      members: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    renderApp(["/organizations/org-1/teams"]);
+    expect(await screen.findByText("Firmware")).toBeInTheDocument();
+    expect(screen.getByText("members")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/^name$/i), "Field ops");
+    await user.click(screen.getByRole("button", { name: /add team/i }));
+    await waitFor(() => {
+      expect(teamsApi.createTeam).toHaveBeenCalledWith("token-123", "org-1", {
+        name: "Field ops",
+        description: undefined,
+      });
+    });
+  });
+
+  it("adds a member to a team", async () => {
+    const user = userEvent.setup();
+    vi.mocked(orgApi.getOrganization).mockResolvedValue(acmeOrg);
+    vi.mocked(orgApi.listMembers).mockResolvedValue([
+      {
+        id: "m-2",
+        organization_id: "org-1",
+        user_id: "user-2",
+        email: "dev@example.com",
+        full_name: "Dev",
+        role: "developer",
+        role_name: "Developer",
+        status: "active",
+        scope: { mode: "organization", device_group_ids: [], device_group_names: [] },
+        teams: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    const team = {
+      id: "team-1",
+      organization_id: "org-1",
+      name: "Firmware",
+      description: null,
+      member_count: 0,
+      members: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    vi.mocked(teamsApi.getTeam).mockResolvedValue(team);
+    vi.mocked(teamsApi.addTeamMember).mockResolvedValue(team);
+
+    renderApp(["/organizations/org-1/teams/team-1"]);
+    expect(await screen.findByRole("heading", { name: "Firmware" })).toBeInTheDocument();
+    await user.selectOptions(
+      await screen.findByLabelText(/add a member/i),
+      await screen.findByRole("option", { name: "Dev (dev@example.com)" }),
+    );
+    await user.click(screen.getByRole("button", { name: /add to team/i }));
+    await waitFor(() => {
+      expect(teamsApi.addTeamMember).toHaveBeenCalledWith("token-123", "org-1", "team-1", "m-2");
+    });
   });
 });

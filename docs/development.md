@@ -177,6 +177,7 @@ Copy `.env.example` to `.env` and adjust as needed. Important values:
 | `CACHE_PROVIDER` | Rate-limit adapter (`redis` only) |
 | `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
 | `OTA_PROVIDER` | OTA adapter (`none` until a provider exists) |
+| `IDENTITY_PROVIDER` | Member sign-in account directory (`local` only: PostgreSQL users) |
 
 HTTP JSON between planes is documented in [`contracts/mqtt-http.md`](../contracts/mqtt-http.md).
 

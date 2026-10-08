@@ -20,7 +20,7 @@ from app.core.config import Settings
 from app.core.exceptions import AppError, ConflictError, UnauthorizedError
 from app.devices.repository import DeviceTypeRepository
 from app.identity.models import User
-from app.tenancy.models import OrganizationMembership, OrganizationRole
+from app.tenancy.models import OrganizationRole
 from app.tenancy.repository import OrganizationRepository
 from tests.storage import InMemoryObjectStorage
 
@@ -32,11 +32,13 @@ def service():
     )
     service = ArtifactService(Mock(spec=Session), InMemoryObjectStorage(), settings)
     service.organizations = Mock(spec=OrganizationRepository)
-    service.organizations.get_for_user.return_value = (Mock(), OrganizationMembership(role=OrganizationRole.OWNER))
+    service.organizations.get_for_user.return_value = (Mock(), Mock(role=OrganizationRole.OWNER, status="active"))
     service.artifacts = Mock(spec=ArtifactRepository)
     service.artifacts.find_duplicate.return_value = None
     service.device_types = Mock(spec=DeviceTypeRepository)
     service.audit = Mock(spec=AuditRecorder)
+    service.authz = Mock()
+    service.authz.require = Mock()
 
     def refresh(artifact):
         artifact.created_at = artifact.updated_at = datetime.now(UTC)
@@ -158,9 +160,15 @@ def test_storage_failure_and_cleanup_failure_preserve_original_api_error(service
     service.session.commit.assert_not_called()
 
 
-@pytest.mark.parametrize("role", [OrganizationRole.VIEWER, OrganizationRole.MEMBER])
+@pytest.mark.parametrize("role", [OrganizationRole.VIEWER, OrganizationRole.OPERATOR])
 def test_non_managers_cannot_start_upload(service, upload_args, role):
-    service.organizations.get_for_user.return_value = (Mock(), OrganizationMembership(role=role))
+    from app.core.exceptions import ForbiddenError
+
+    service.organizations.get_for_user.return_value = (Mock(), Mock(role=role, status="active"))
+    service.authz.require.side_effect = ForbiddenError(
+        "insufficient_permission",
+        "You do not have permission to perform this action.",
+    )
     with pytest.raises(AppError) as exc:
         service.upload_artifact(**upload_args)
     assert exc.value.status_code == 403

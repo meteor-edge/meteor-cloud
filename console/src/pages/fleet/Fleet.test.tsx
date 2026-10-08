@@ -364,6 +364,8 @@ describe("Navigation", () => {
       "All Artifacts",
       "OS Images",
       "Monitoring",
+      "Members",
+      "Teams",
       "Settings",
     ]) {
       expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
@@ -384,6 +386,20 @@ describe("Navigation", () => {
       "href",
       "/organizations/org-1/artifacts?type=os_image",
     );
+    expect(within(nav).getByRole("button", { name: "People" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Teams" })).toHaveAttribute(
+      "href",
+      "/organizations/org-1/teams",
+    );
+  });
+
+  it("hides the People menu from viewers", async () => {
+    vi.mocked(orgApi.listOrganizations).mockResolvedValue([org("viewer")]);
+    renderApp(["/organizations/org-1/devices"]);
+    const nav = await screen.findByRole("navigation", { name: /main/i });
+    await within(nav).findByText("Acme Energy");
+    expect(within(nav).queryByRole("button", { name: "People" })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "Members" })).not.toBeInTheDocument();
   });
 });
 

@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs } from "@/components/ui/tabs";
-import { canManageFleet } from "@/lib/permissions";
+import { canManageDeviceGroups } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 type Tab = "overview" | "devices";
@@ -47,7 +47,7 @@ export function DeviceGroupDetailPage() {
     enabled: Boolean(token && organizationId),
   });
 
-  const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const canManage = canManageDeviceGroups(orgQuery.data?.current_user_role);
   const typeNames = useMemo(
     () => new Map((typesQuery.data ?? []).map((type) => [type.id, type.name])),
     [typesQuery.data],

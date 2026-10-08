@@ -40,7 +40,7 @@ def test_member_cannot_create_enrollment_key(client: TestClient, db_session: Ses
     owner = create_user(db_session, email="owner@example.com")
     member = create_user(db_session, email="member@example.com")
     org, _ = create_org_with_owner(db_session, owner)
-    add_member(db_session, org, member, OrganizationRole.MEMBER)
+    add_member(db_session, org, member, OrganizationRole.OPERATOR)
     headers = auth_header(client, "member@example.com")
 
     response = client.post(

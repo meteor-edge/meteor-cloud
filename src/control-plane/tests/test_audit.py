@@ -32,7 +32,7 @@ def test_login_is_listed_in_organization_audit(client: TestClient, db_session: S
     member = create_user(db_session, email="member@example.com")
     org, _ = create_org_with_owner(db_session, owner)
     add_member(db_session, org, admin, OrganizationRole.ADMIN)
-    add_member(db_session, org, member, OrganizationRole.MEMBER)
+    add_member(db_session, org, member, OrganizationRole.OPERATOR)
 
     auth_header(client, "member@example.com")
     events = client.get(
@@ -47,7 +47,7 @@ def test_member_cannot_list_audit_events(client: TestClient, db_session: Session
     owner = create_user(db_session, email="owner@example.com")
     member = create_user(db_session, email="member@example.com")
     org, _ = create_org_with_owner(db_session, owner)
-    add_member(db_session, org, member, OrganizationRole.MEMBER)
+    add_member(db_session, org, member, OrganizationRole.OPERATOR)
 
     response = client.get(
         f"/api/v1/organizations/{org.id}/audit-events",

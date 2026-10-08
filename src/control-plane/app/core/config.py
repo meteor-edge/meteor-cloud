@@ -113,6 +113,8 @@ class Settings(BaseSettings):
     cache_provider: Literal["redis"] = Field(default="redis", alias="CACHE_PROVIDER")
     mqtt_provider: Literal["emqx"] = Field(default="emqx", alias="MQTT_PROVIDER")
     ota_provider: Literal["none"] = Field(default="none", alias="OTA_PROVIDER")
+    # "local" = accounts in the PostgreSQL users table.
+    identity_provider: Literal["local"] = Field(default="local", alias="IDENTITY_PROVIDER")
 
     # Object storage for artifacts. "s3" covers MinIO, AWS S3, and other S3 APIs.
     object_storage_provider: Literal["s3"] = Field(default="s3", alias="OBJECT_STORAGE_PROVIDER")
