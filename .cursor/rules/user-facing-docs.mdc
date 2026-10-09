@@ -1,0 +1,28 @@
+---
+description: Keep docs/ updated for important user-facing feature changes
+alwaysApply: true
+---
+
+# User-facing documentation
+
+When a commit or feature changes how people **learn or work** with MeteorCloud, update the relevant file under `docs/` in the same change.
+
+## Update docs when
+
+* New or changed **CLI commands**, flags, or workflows (`meteorcli`, `make`, installer)
+* New or changed **HTTP/MQTT APIs**, request/response shapes, auth, or contracts
+* Enrollment, device lifecycle, MQTT, artifacts, or operator console flows operators must follow
+* Deployment, config, or env knobs that change how someone installs or runs the system
+
+## Do not
+
+* Dump implementation details, refactors, or internal renames into docs
+* Add long essays, speculative roadmaps, or duplicate OpenAPI verbatim
+* Create new doc files unless no existing topic fits; prefer editing the right page under `docs/` (see `docs/README.md`)
+
+## How to write
+
+* Short, actionable: commands, endpoints, config keys, and the minimum context to use them
+* Match the tone and structure of nearby docs
+* Link related pages instead of repeating them
+* If unsure whether something is user-facing, ask before writing a large doc

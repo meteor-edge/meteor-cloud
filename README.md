@@ -4,7 +4,7 @@
 
 MeteorCloud is the control plane, operator console, MQTT data plane, and device agent for managing edge fleets you own. Enroll devices, organize them by type and group, ship artifacts, run commands over MQTT, and keep operator access multi-tenant and auditable — without sending device data to a third-party SaaS.
 
-The public marketing site and product docs UI live in a separate Next.js app: [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui).
+Website: [meteor-edge.com](https://meteor-edge.com)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -19,81 +19,43 @@ The public marketing site and product docs UI live in a separate Next.js app: [`
 | **Artifacts** | OS images, firmware, compose bundles — metadata in Postgres, blobs in filesystem or S3 |
 | **Replaceable infra** | PostgreSQL required; Redis, MQTT, and object storage selected by config |
 
-## Product overview
+## Architecture
 
-Operators use the **console** against the **control plane** API. Devices run **meteorcli** (device-plane agent) and talk over HTTPS and optionally MQTT. The **data plane** owns the platform MQTT session and forwards inbound messages into the control plane.
+MeteorCloud is split into three planes. The **console** is the operator UI; it talks only to the control plane.
+
+| Plane | Path | Role |
+| --- | --- | --- |
+| **Device plane** | `src/device-plane/agent/` | `meteorcli` on the device: enroll, heartbeat, inventory, MQTT client |
+| **Data plane** | `src/data-plane/` | Platform MQTT gateway: subscribe/publish via EMQX, forward ingest to the control plane |
+| **Control plane** | `src/control-plane/` | Identity, tenancy, device registry, artifacts, MQTT policy, operator API, persistence |
+
+### Schema
 
 ```text
-Browser ──► Console ──► Control plane (FastAPI) ──► PostgreSQL
-                              │                         Redis (optional)
-                              │                         Object storage (filesystem or S3)
-meteor-agent HTTPS ───────────┤
-                              │
-meteor-agent MQTT ──► EMQX ───┼── HTTP auth/authorize
-                              │
-Control plane ── HTTP publish/watch ──► Data plane ── MQTT ──► EMQX
-Data plane ── HTTP ingest ────────────► Control plane
+┌─────────────────┐     ┌─────────────────┐     ┌──────────────────────┐
+│  Device plane   │     │   Data plane    │     │   Control plane      │
+│  (meteorcli)    │     │  (MQTT gateway) │     │  (API + Postgres)    │
+└────────┬────────┘     └────────┬────────┘     └──────────┬───────────┘
+         │                       │                         │
+         │  HTTPS enroll /       │                         │
+         │  heartbeat / auth     ├────────────────────────►│
+         │────────────────────────────────────────────────►│
+         │                       │                         │
+         │  MQTT telemetry /     │  HTTP ingest            │
+         │  status ──► EMQX ────►│────────────────────────►│
+         │                       │                         │
+         │◄── MQTT commands ◄────│◄── HTTP publish ────────│
+         │         EMQX          │                         │
 ```
 
-### Modules
+**Device → cloud (typical path)**
 
-| Module | Path | Role |
-| --- | --- | --- |
-| Control plane | `src/control-plane/` | Identity, organizations, device registry, enrollment, artifacts, MQTT policy and ingest, operator API |
-| Data plane | `src/data-plane/` | EMQX platform client: publish, subscribe, forward inbound MQTT to the control plane |
-| Console | `console/` | Operator UI (browser talks only to the control-plane API) |
-| Device plane | `src/device-plane/agent/` | On-device agent (`meteorcli`); runs on devices, not deployed by MeteorCloud |
+1. Agent enrolls and authenticates over **HTTPS** to the control plane.
+2. Agent publishes telemetry and status over **MQTT** to EMQX.
+3. Data plane receives those messages and **HTTP-forwards** them to the control plane for ingest and storage.
+4. Operators issue commands from the console → control plane → data plane → MQTT → agent.
 
-## Data schema
-
-PostgreSQL is the system of record for the control plane. Artifact **binaries** live in object storage; the database stores metadata and a `storage_key` only.
-
-```mermaid
-erDiagram
-    users ||--o{ organizations : creates
-    users ||--o{ organization_memberships : has
-    organizations ||--o{ organization_memberships : contains
-    organizations ||--o{ teams : has
-    organizations ||--o{ roles : has
-    organizations ||--o{ device_types : owns
-    organizations ||--o{ device_groups : owns
-    organizations ||--o{ devices : owns
-    organizations ||--o{ artifacts : owns
-    organizations ||--o{ registration_tokens : owns
-    organizations ||--o{ enrollment_api_keys : owns
-    organizations ||--o{ audit_events : records
-
-    roles ||--o{ role_permissions : grants
-    permissions ||--o{ role_permissions : included_in
-    organization_memberships }o--|| roles : uses
-    organization_memberships ||--o{ access_bindings : scoped_by
-    organization_memberships ||--o{ team_members : joins
-    teams ||--o{ team_members : has
-
-    device_types ||--o{ devices : classifies
-    device_groups ||--o{ devices : groups
-    device_types ||--o{ artifacts : targets
-    registration_tokens ||--o{ devices : enrolls
-
-    devices ||--o| device_mqtt_credentials : mqtt
-    devices ||--o{ device_commands : receives
-    devices ||--o{ device_enrollment_requests : from
-```
-
-### Core tables
-
-| Area | Tables |
-| --- | --- |
-| Identity & tenancy | `users`, `organizations`, `organization_memberships`, `teams`, `team_members` |
-| Authorization | `permissions`, `roles`, `role_permissions`, `access_bindings` |
-| Fleet | `device_types`, `device_groups`, `devices`, `registration_tokens`, `enrollment_api_keys`, `device_enrollment_requests` |
-| Connectivity | `device_mqtt_credentials`, `device_commands` |
-| Artifacts | `artifacts` (blob in filesystem/S3) |
-| Audit | `audit_events` |
-
-Tenant isolation is organization-scoped: fleet and artifact queries are filtered by membership. Device connectivity status is derived from `last_seen_at` rather than a separate status enum.
-
-More detail: [docs/architecture.md](docs/architecture.md), [docs/identity-and-organizations.md](docs/identity-and-organizations.md).
+More detail: [docs/architecture.md](docs/architecture.md).
 
 ## Quick start (local)
 
@@ -172,17 +134,18 @@ The smallest install runs PostgreSQL, the API, the console, and a reverse proxy 
 
 ## Documentation
 
+Start with [Getting started](docs/getting-started.md), then the full index: [docs/README.md](docs/README.md).
+
 | Doc | Topic |
 | --- | --- |
-| [Architecture](docs/architecture.md) | Modules, providers, HTTP/MQTT split |
-| [Development](docs/development.md) | Local Compose, env, coding standards |
-| [Identity & organizations](docs/identity-and-organizations.md) | Users, tenants, RBAC |
-| [Deployment](docs/deployment.md) | Compose + Ansible |
-| [Kubernetes](docs/kubernetes.md) | Helm on existing clusters |
-| [Fleet docs](docs/fleet/) | Enrollment, heartbeat, MQTT, artifacts |
-| [Docs index](docs/README.md) | Full list |
+| [Getting started](docs/getting-started.md) | Local stack + first device |
+| [Concepts](docs/concepts.md) | Three planes, orgs, devices |
+| [API overview](docs/api.md) | Control-plane HTTP map |
+| [meteorcli](docs/meteorcli.md) | Device CLI |
+| [Architecture](docs/architecture.md) | Providers, deploy paths |
+| [Deployment](docs/deployment.md) · [Kubernetes](docs/kubernetes.md) | Production install |
 
-Operator-facing product docs are also served by the website (`VITE_DOCS_BASE_URL`). See [docs/frontends.md](docs/frontends.md).
+Website: [meteor-edge.com](https://meteor-edge.com).
 
 ## License
 

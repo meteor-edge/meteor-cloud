@@ -19,7 +19,9 @@ source .venv/bin/activate
 make install
 ```
 
-`make install` installs control-plane, data-plane, installer, agent, and console dependencies. The public website is not in this tree; clone `meteor-ui` for that app.
+`make install` installs control-plane, data-plane, installer, agent, and console dependencies.
+
+For a product walkthrough (console + first device), start with [Getting started](getting-started.md).
 
 ## Running the stack
 
@@ -29,8 +31,6 @@ make dev-control-plane   # bundled infra (postgres/redis/minio profiles) + contr
 make dev-data-plane      # EMQX + data-plane MQTT gateway
 make dev-console         # operator console
 ```
-
-Public website: clone `meteor-ui` and run `make dev-website` there.
 
 Together this starts:
 
@@ -70,8 +70,6 @@ Same machine stacks **must** use network name `meteorcloud`.
 - Host-only (no Compose between them): `DATA_PLANE_URL=http://127.0.0.1:8081` and `CONTROL_PLANE_URL=http://127.0.0.1:8000`.
 
 Telemetry is **PostgreSQL last-value** on `Device` (`TELEMETRY_PROVIDER=postgresql`). Timescale and ClickHouse are reserved names and fail fast.
-
-Website content lives in `meteor-ui` under `website/content`. Marketing copy is JSON (`content/site.json`); docs are Markdown. Production uses `WEBSITE_CONTENT_SOURCE=s3` (JSON + `.md` + images on object storage), not control-plane Postgres. `/admin` edits that file set.
 
 Stop with:
 
@@ -116,11 +114,7 @@ cd console
 npm run dev
 ```
 
-The browser talks only to the control-plane API (`VITE_API_BASE_URL`).
-
-### Website
-
-Clone [`meteor-edge/meteor-ui`](https://github.com/meteor-edge/meteor-ui) and run `make dev-website` there. That app is not a directory in this repo.
+The browser talks only to the control-plane API (`VITE_API_BASE_URL`). See [Console](console.md).
 
 ### Installer
 
@@ -185,9 +179,8 @@ Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed
 | `TEST_DATABASE_URL` | Optional pytest database (must end in `_test`) |
 | `JWT_SECRET_KEY` | Signing key for JWT utilities |
 | `BACKEND_CORS_ORIGINS` | Allowed browser origins |
-| `VITE_DOCS_BASE_URL` | Console → public docs site (`/docs`) |
-| `SITE_URL` | Public website origin (canonical URLs, sitemap) |
-| `WEBSITE_CONTENT_SOURCE` | Website content: `filesystem` (local JSON + Markdown) or `s3` (JSON file + docs + images on object storage) |
+| `VITE_API_BASE_URL` | Console → control-plane origin |
+| `VITE_DOCS_BASE_URL` | Console → product docs URL |
 | `DATA_PLANE_URL` | Control plane → data-plane HTTP API |
 | `CONTROL_PLANE_URL` | Data plane → control-plane ingest/auth origin |
 | `TELEMETRY_PROVIDER` | Last-value store (`postgresql` only; timescale/clickhouse reserved) |
