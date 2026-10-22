@@ -26,10 +26,6 @@ How to use the product day to day.
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) |
-| Agent artifact download | [Agent artifacts](fleet/agent-artifacts.md) |
-| systemd deploys | [systemd](fleet/systemd.md) |
-| Docker / Compose deploys | [Docker](fleet/docker.md) |
-| Raspberry Pi OS agent | [Raspberry Pi](fleet/raspberry-pi.md) |
 | Operator console | [Console](console.md) |
 
 ## Reference
@@ -41,7 +37,6 @@ Commands and APIs you look up while working.
 | Control-plane HTTP API | [API overview](api.md) · interactive OpenAPI at `/docs` on a running API |
 | Device CLI | [meteorcli](meteorcli.md) |
 | MQTT ↔ control-plane contract | [`contracts/mqtt-http.md`](../contracts/mqtt-http.md) |
-| Releases / desired software contract | [`contracts/releases.md`](../contracts/releases.md) |
 | Architecture & providers | [Architecture](architecture.md) |
 
 ## Deploy and operate

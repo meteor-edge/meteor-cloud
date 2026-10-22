@@ -6,8 +6,8 @@ the release catalog. Who **executes** the Deploy is selected with
 `DEPLOYMENT_PROVIDER`.
 
 With the default **native** provider, MeteorCloud writes **desired** software on
-each target and agents apply it ([systemd](systemd.md), [docker /
-Compose](docker.md)). Optional MQTT `sync_desired` wakes them to poll sooner.
+each target and agents apply it (`systemd`, `docker`, `docker_compose` — see
+[Releases](releases.md)). Optional MQTT `sync_desired` wakes them to poll sooner.
 Devices that reported they lack the release runtime (e.g.
 `capabilities.systemd: false`) are marked **skipped**. Rollout may be
 `immediate` or `batched` (`batch_size`, optional `delay_seconds`). Use
@@ -15,6 +15,10 @@ Devices that reported they lack the release runtime (e.g.
 future **mender** provider would create the equivalent deployment in Mender and
 store Mender’s id as `provider_ref`, while operators still use the same Releases
 and Deployments UI/API.
+
+Agents download release artifacts with their device token
+(`GET /api/v1/agent/artifacts/{id}/download`) only when that artifact is on the
+device’s current desired software. The agent verifies `X-Checksum-SHA256`.
 
 ## API
 
@@ -81,8 +85,6 @@ release row or from an empty device Software panel.
 ## Related
 
 - [Releases](releases.md)
-- [systemd](systemd.md) · [Docker](docker.md) · [Raspberry Pi](raspberry-pi.md)
 - [Heartbeat](heartbeat.md)
-- [Agent artifact download](agent-artifacts.md)
-- [Architecture](../architecture.md)
+- [Agent README](../../src/device-plane/agent/README.md) (Raspberry Pi OS install)
 - [RBAC](../authorization/rbac.md)

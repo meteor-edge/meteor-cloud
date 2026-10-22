@@ -13,8 +13,8 @@ There are **two ways** to enroll a device:
 
 ## Install
 
-**Supported device OS for fleets today:** [Raspberry Pi OS](../../../docs/fleet/raspberry-pi.md)
-(Bookworm). Other Debian-like systems work the same way.
+**Supported device OS for fleets today:** Raspberry Pi OS (Bookworm). Other
+Debian-like systems work the same way.
 
 From this directory:
 

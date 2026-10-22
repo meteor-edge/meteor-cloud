@@ -11,7 +11,7 @@ Domain and application code must not import vendor clients directly. ClickHouse,
 
 When adding a real vendor boundary:
 
-* Depend on a port (repository, `TelemetryStore`, `MessageBus`, `MQTTGateway`, `ObjectStorage`, `DeploymentProvider`, cache/rate-limit, etc.).
+* Depend on a port (repository, `TelemetryStore`, `MessageBus`, `MQTTGateway`, `ObjectStorage`, `OTAProvider`, cache/rate-limit, etc.).
 * Put the current vendor in an adapter. Select it from configuration. Leave unimplemented providers unimplemented.
 * Do not hard-code ClickHouse, Kafka, EMQX, Redis, S3, or Mender into domain services.
 

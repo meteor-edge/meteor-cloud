@@ -42,20 +42,18 @@ On AWS, `edge-installer` creates the EC2 host with Terraform and runs the Ansibl
 ```text
 src/control-plane/app/
 ├── api/rest/         # health
-├── ports/            # MQTTGateway, RateLimiter, DeploymentProvider, ObjectStorage
-├── adapters/         # data-plane HTTP, redis/memory, s3/filesystem, native deployment
+├── ports/            # MQTTGateway, RateLimiter, OTAProvider
+├── adapters/         # data-plane HTTP, redis/memory, s3/filesystem, ota=none
 ├── identity/
 ├── tenancy/
 ├── devices/
-├── artifacts/
-├── releases/         # software release catalog
 ├── audit/
 ├── mqtt/             # ACL, credentials, ingest, SSE hub
 ├── core/
 └── main.py
 ```
 
-PostgreSQL is the control-plane database. Vendor systems (EMQX, Redis, future Mender) sit behind ports — no generic `DatabaseProvider`.
+PostgreSQL is the control-plane database. Vendor systems (EMQX, Redis, future OTA) sit behind ports — no generic `DatabaseProvider`.
 
 ## Data plane
 
@@ -71,10 +69,10 @@ Keep **one** data-plane MQTT subscriber until shared subscriptions exist.
 | `RateLimiter` | `redis`, `memory` | — |
 | `MQTTGateway` | Data-plane HTTP → EMQX | other broker names |
 | Telemetry last-value | PostgreSQL columns on `Device` | `timescale`, `clickhouse` |
-| `DeploymentProvider` | `native` (execute desired software), `none`, `mender` (stub) | Releases + Deploy history stay in MeteorCloud; provider only executes |
+| `OTAProvider` | `none` | `mender` and others later |
 | `ObjectStorage` | `s3`, `filesystem` | — |
 
-Artifact binaries live in object storage; PostgreSQL keeps metadata and `storage_key`. See [Artifacts](fleet/artifacts.md). Software versions operators select are [Releases](fleet/releases.md).
+Artifact binaries live in object storage; PostgreSQL keeps metadata and `storage_key`. See [Artifacts](fleet/artifacts.md).
 
 ## Kubernetes
 

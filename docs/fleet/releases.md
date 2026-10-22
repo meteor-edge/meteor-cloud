@@ -47,8 +47,17 @@ choosing a **deployment type**:
 Then fill the matching artifact and install fields. The same flow can grow new
 kinds later (for example AI models) without a separate wizard.
 
+## Apply notes
+
+- **systemd** — agent installs the unit under `/etc/systemd/system` (needs root /
+  `meteorcli.service`), then `daemon-reload` / `enable` / `restart` when
+  `start` is true.
+- **docker** — pull `spec.image` and/or `docker load` a tarball, then
+  `docker run`.
+- **docker_compose** — materialize YAML/zip and `docker compose up -d`.
+
 ## Deployment provider
 
 Releases always live in MeteorCloud. Who **executes** a Deploy is selected with
 `DEPLOYMENT_PROVIDER` (`native`, `none`, or `mender` stub). See
-[Deployments](deployments.md) and [Architecture](../architecture.md).
+[Deployments](deployments.md).

@@ -58,8 +58,9 @@ inventory fields. `software_report` updates installed software for known
 workloads (unknown keys are ignored). The response includes current
 `desired_software`. Agents can also poll `GET /api/v1/agent/software`.
 When a desired item has an `artifact_id`, the agent downloads it from
-[`GET /api/v1/agent/artifacts/{id}/download`](agent-artifacts.md) and reports
-`updating` / `failed` as needed. Disabled or credential-revoked devices are
+`GET /api/v1/agent/artifacts/{id}/download` (only if that artifact is on current
+desired software) and reports `updating` / `failed` as needed. See
+[Deployments](deployments.md). Disabled or credential-revoked devices are
 rejected.
 
 ## Connectivity status
