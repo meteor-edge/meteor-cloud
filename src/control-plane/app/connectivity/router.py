@@ -92,3 +92,20 @@ def revoke_device_connectivity(
         organization_id=organization_id,
         device_id=device_id,
     )
+
+
+@router.post(
+    "/api/v1/organizations/{organization_id}/devices/{device_id}/connectivity/restore",
+    response_model=DeviceConnectivityResponse,
+)
+def restore_device_connectivity(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: ConnectivitySvc,
+) -> DeviceConnectivityResponse:
+    return service.restore(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+    )

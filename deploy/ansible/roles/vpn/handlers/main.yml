@@ -9,4 +9,3 @@
     name: meteorcloud-gateway
     state: restarted
     daemon_reload: true
-

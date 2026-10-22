@@ -108,7 +108,10 @@
   loop:
     - { regexp: '^CONNECTIVITY_PROVIDER=', line: 'CONNECTIVITY_PROVIDER=wireguard' }
     - { regexp: '^WIREGUARD_SERVER_PUBLIC_KEY=', line: 'WIREGUARD_SERVER_PUBLIC_KEY="{{ wireguard_server_public_key }}"' }
-    - { regexp: '^WIREGUARD_SERVER_ENDPOINT=', line: 'WIREGUARD_SERVER_ENDPOINT={{ wireguard_server_endpoint | default(ansible_host ~ ":" ~ (listen_port | default(51820))) }}' }
+    - regexp: '^WIREGUARD_SERVER_ENDPOINT='
+      line: >-
+        WIREGUARD_SERVER_ENDPOINT={{ wireguard_server_endpoint
+        | default(ansible_host ~ ":" ~ (listen_port | default(51820)), true) }}
   no_log: true
   when:
     - vpn_server_private_key | default('') | length > 0

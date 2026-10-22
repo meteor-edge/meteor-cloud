@@ -44,10 +44,7 @@ class ConnectivityRepository:
 
     def allocated_addresses(self) -> set[str]:
         rows = self.session.scalars(
-            select(DeviceConnectivity.wg_address).where(
-                DeviceConnectivity.wg_address.is_not(None),
-                DeviceConnectivity.status != ConnectivityStatus.REVOKED.value,
-            )
+            select(DeviceConnectivity.wg_address).where(DeviceConnectivity.wg_address.is_not(None))
         )
         return {str(value) for value in rows.all() if value is not None}
 

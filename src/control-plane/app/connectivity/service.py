@@ -6,6 +6,7 @@ import ipaddress
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.audit.service import AuditRecorder
@@ -21,7 +22,7 @@ from app.connectivity.schemas import (
     InternalPeer,
 )
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.devices.models import Device
 from app.devices.repository import DeviceRepository
 from app.identity.models import User
@@ -80,6 +81,9 @@ class ConnectivityService:
             seen = seen.replace(tzinfo=UTC)
         return datetime.now(UTC) - seen <= stale_after
 
+    def _server_allowed_ips(self) -> str:
+        return f"{self.settings.wireguard_server_host}/32"
+
     def _client_config(self, *, address: str, public_key: str) -> str:
         keepalive = self.settings.wireguard_persistent_keepalive
         server_key = self.settings.wireguard_server_public_key
@@ -95,7 +99,7 @@ class ConnectivityService:
             "\n[Peer]\n"
             f"PublicKey = {server_key}\n"
             f"Endpoint = {endpoint}\n"
-            "AllowedIPs = 10.8.0.1/32\n"
+            f"AllowedIPs = {self._server_allowed_ips()}\n"
             f"PersistentKeepalive = {keepalive}\n"
             f"# Device public key (already registered): {public_key}\n"
         )
@@ -120,35 +124,31 @@ class ConnectivityService:
             )
 
         row = self.rows.get(device.id)
-        if row is None:
-            address = allocate_address(
-                cidr=self.settings.wireguard_client_cidr,
-                server_address=self.settings.wireguard_server_address,
-                allocated=self.rows.allocated_addresses(),
+        if row is not None and row.status == ConnectivityStatus.REVOKED.value:
+            # Revocation sticks until an operator restores connectivity.
+            raise ForbiddenError(
+                "connectivity_revoked",
+                "WireGuard connectivity for this device was revoked by an operator.",
             )
-            row = DeviceConnectivity(
-                device_id=device.id,
-                organization_id=device.organization_id,
-                provider=provider.name,
-                wg_public_key=public_key,
-                wg_address=address,
-                status=ConnectivityStatus.ACTIVE.value,
-            )
-            self.rows.add(row)
-        else:
-            if row.status == ConnectivityStatus.REVOKED.value or row.wg_address is None:
-                address = allocate_address(
-                    cidr=self.settings.wireguard_client_cidr,
-                    server_address=self.settings.wireguard_server_address,
-                    allocated=self.rows.allocated_addresses(),
-                )
-                row.wg_address = address
-            row.wg_public_key = public_key
-            row.provider = provider.name
-            row.status = ConnectivityStatus.ACTIVE.value
-            row.revoked_at = None
-        self.session.commit()
-        self.session.refresh(row)
+        for attempt in range(3):
+            try:
+                row = self._activate(device=device, row=row, public_key=public_key, provider=provider)
+                break
+            except IntegrityError:
+                # Two devices raced for the same free address; retry with a fresh view.
+                self.session.rollback()
+                if attempt == 2:
+                    raise ConflictError(
+                        "connectivity_allocation_conflict",
+                        "Could not allocate a WireGuard address. Please retry.",
+                    ) from None
+                existing_key = self.rows.get_by_public_key(public_key)
+                if existing_key is not None and existing_key.device_id != device.id:
+                    raise ConflictError(
+                        "wireguard_key_in_use",
+                        "This WireGuard public key is already registered to another device.",
+                    ) from None
+                row = self.rows.get(device.id)
         address = str(row.wg_address)
         return AgentWireGuardRegisterResponse(
             status=row.status,
@@ -156,11 +156,49 @@ class ConnectivityService:
             wg_address=f"{address}/32",
             server_public_key=self.settings.wireguard_server_public_key,
             server_endpoint=self.settings.wireguard_server_endpoint,
+            server_allowed_ips=self._server_allowed_ips(),
             allowed_ips=provider.client_allowed_ips(address),
             persistent_keepalive=self.settings.wireguard_persistent_keepalive,
             ssh_user=self.settings.shell_ssh_user,
             ssh_gateway_public_key=self.settings.shell_gateway_public_key or None,
+            ssh_gateway_source=self._server_allowed_ips() if self.settings.shell_gateway_public_key else None,
             client_config=self._client_config(address=address, public_key=public_key),
+        )
+
+    def _activate(
+        self,
+        *,
+        device: Device,
+        row: DeviceConnectivity | None,
+        public_key: str,
+        provider: DeviceConnectivityProvider,
+    ) -> DeviceConnectivity:
+        if row is None:
+            row = DeviceConnectivity(
+                device_id=device.id,
+                organization_id=device.organization_id,
+                provider=provider.name,
+                wg_public_key=public_key,
+                wg_address=self._allocate(),
+                status=ConnectivityStatus.ACTIVE.value,
+            )
+            self.rows.add(row)
+        else:
+            if row.wg_address is None:
+                row.wg_address = self._allocate()
+            row.wg_public_key = public_key
+            row.provider = provider.name
+            row.status = ConnectivityStatus.ACTIVE.value
+            row.revoked_at = None
+        self.session.commit()
+        self.session.refresh(row)
+        return row
+
+    def _allocate(self) -> str:
+        return allocate_address(
+            cidr=self.settings.wireguard_client_cidr,
+            server_address=self.settings.wireguard_server_address,
+            allocated=self.rows.allocated_addresses(),
         )
 
     def get_for_operator(
@@ -208,16 +246,48 @@ class ConnectivityService:
         row.status = ConnectivityStatus.REVOKED.value
         row.revoked_at = datetime.now(UTC)
         row.wg_public_key = None
-        row.wg_address = None
+        # Keep wg_address: it stays reserved for this device so it is never handed to
+        # another device while old host keys or routes may still point at it.
         from app.endpoints.service import EndpointService
+        from app.shell.service import close_open_sessions_for_device
 
         EndpointService(self.session, settings=self.settings).disable_for_device(
             organization_id=organization_id, device_id=device_id
         )
+        closed_shells = close_open_sessions_for_device(self.session, device_id=device_id)
         self.audit.record(
             actor=actor,
             organization_id=organization_id,
             action="connectivity.revoke",
+            resource_type="device",
+            resource_id=device_id,
+            metadata={"provider": row.provider, "closed_shell_sessions": closed_shells},
+        )
+        self.session.commit()
+        self.session.refresh(row)
+        return self._to_response(row)
+
+    def restore(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID
+    ) -> DeviceConnectivityResponse:
+        """Allow a revoked device to register again. It becomes active on its next registration."""
+        membership = self._require_membership(organization_id, actor.id)
+        device = self.devices.get(organization_id=organization_id, device_id=device_id)
+        if device is None:
+            raise NotFoundError("device_not_found", "Device was not found.")
+        self.authz.require(membership, "device.update", device_group_id=device.device_group_id)
+        self._require_provider()
+        row = self.rows.get(device_id)
+        if row is None:
+            raise NotFoundError("connectivity_not_found", "This device has not registered connectivity yet.")
+        if row.status != ConnectivityStatus.REVOKED.value:
+            raise ConflictError("connectivity_not_revoked", "Connectivity for this device is not revoked.")
+        row.status = ConnectivityStatus.PENDING.value
+        row.revoked_at = None
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="connectivity.restore",
             resource_type="device",
             resource_id=device_id,
             metadata={"provider": row.provider},

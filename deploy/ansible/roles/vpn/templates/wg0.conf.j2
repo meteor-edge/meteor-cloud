@@ -5,5 +5,18 @@ PrivateKey = {{ vpn_server_private_key }}
 # Peers are applied at runtime by the MeteorCloud gateway agent (`wg set`).
 # Do not add [Peer] blocks here; a full rewrite would drop live peers until the agent resyncs.
 
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1; iptables -I DOCKER-USER -i %i -j ACCEPT || true; iptables -I DOCKER-USER -o %i -j ACCEPT || true
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE; iptables -D DOCKER-USER -i %i -j ACCEPT || true; iptables -D DOCKER-USER -o %i -j ACCEPT || true
+# Devices only accept tunnel traffic from the server address (their peer AllowedIPs is
+# 10.8.0.1/32), so traffic from Docker containers (Traefik, the SSH gateway) is
+# masqueraded to wg0's address on the way in. Tunnel-sourced traffic is left alone,
+# and device-to-device forwarding is dropped so one device cannot reach another.
+PostUp = sysctl -w net.ipv4.ip_forward=1
+PostUp = iptables -I FORWARD -i %i -o %i -j DROP
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostUp = iptables -t nat -A POSTROUTING -o %i ! -s {{ network_cidr }} -j MASQUERADE
+PostUp = iptables -I DOCKER-USER -i %i -j ACCEPT || true; iptables -I DOCKER-USER -o %i -j ACCEPT || true
+PostDown = iptables -D FORWARD -i %i -o %i -j DROP
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -t nat -D POSTROUTING -o %i ! -s {{ network_cidr }} -j MASQUERADE
+PostDown = iptables -D DOCKER-USER -i %i -j ACCEPT || true; iptables -D DOCKER-USER -o %i -j ACCEPT || true

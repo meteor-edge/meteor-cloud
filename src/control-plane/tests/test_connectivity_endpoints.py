@@ -265,3 +265,112 @@ def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: 
     assert listed.status_code == 200
     assert listed.json()[0]["hostname"] == "camera.appx.meteor-edge.com"
     assert listed.json()[0]["availability"] == "unknown"
+
+
+def test_revoke_sticks_until_restore_and_keeps_address(client: TestClient, db_session: Session) -> None:
+    org, headers, token, _release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pi-revoke", mac="aa:bb:cc:dd:00:08")
+    register = {
+        "headers": _device_headers(reg["device_token"]),
+        "json": {"public_key": WG_KEY_A},
+    }
+    first = client.post("/api/v1/agent/connectivity/wireguard", **register)
+    assert first.status_code == 200, first.text
+    address = first.json()["wg_address"]
+    assert first.json()["server_allowed_ips"] == "10.8.0.1/32"
+    base = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/connectivity"
+
+    assert client.post(f"{base}/revoke", headers=headers).status_code == 200
+    again = client.post("/api/v1/agent/connectivity/wireguard", **register)
+    assert again.status_code == 403
+    assert again.json()["error"]["code"] == "connectivity_revoked"
+    peers = client.get(
+        "/internal/connectivity/peers",
+        headers={"X-Connectivity-Internal-Token": "test-connectivity-internal"},
+    )
+    assert peers.json()["peers"] == []
+
+    # The revoked device's address stays reserved: a new device gets a different one.
+    other = _register_device(client, token, name="pi-new", mac="aa:bb:cc:dd:00:09")
+    fresh = client.post(
+        "/api/v1/agent/connectivity/wireguard",
+        headers=_device_headers(other["device_token"]),
+        json={"public_key": WG_KEY_B},
+    )
+    assert fresh.status_code == 200
+    assert fresh.json()["wg_address"] != address
+
+    restored = client.post(f"{base}/restore", headers=headers)
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "pending"
+    back = client.post("/api/v1/agent/connectivity/wireguard", **register)
+    assert back.status_code == 200, back.text
+    assert back.json()["status"] == "active"
+    assert back.json()["wg_address"] == address
+
+
+def test_shell_tickets_expired_do_not_count_and_revoke_closes_sessions(
+    client: TestClient, db_session: Session
+) -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import UUID
+
+    from sqlalchemy import select
+
+    from app.audit.models import AuditEvent
+    from app.core.config import get_settings
+    from app.shell.models import DeviceShellSession, ShellSessionStatus
+
+    org, headers, token, _release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pi-tickets", mac="aa:bb:cc:dd:00:0a")
+    client.post(
+        "/api/v1/agent/connectivity/wireguard",
+        headers=_device_headers(reg["device_token"]),
+        json={"public_key": WG_KEY_A},
+    )
+    url = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/shell-sessions"
+    limit = get_settings().shell_max_sessions_per_user
+    created = [client.post(url, headers=headers) for _ in range(limit)]
+    assert all(item.status_code == 201 for item in created)
+    assert client.post(url, headers=headers).status_code == 409
+
+    for item in created:
+        row = db_session.get(DeviceShellSession, UUID(item.json()["session_id"]))
+        assert row is not None
+        row.ticket_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.commit()
+    live = client.post(url, headers=headers)
+    assert live.status_code == 201, live.text
+
+    audit = db_session.scalars(
+        select(AuditEvent).where(AuditEvent.action == "device.shell.start")
+    ).all()
+    assert audit and all(event.metadata_["session_id"] != "None" for event in audit)
+
+    revoke = client.post(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/connectivity/revoke",
+        headers=headers,
+    )
+    assert revoke.status_code == 200
+    db_session.expire_all()
+    row = db_session.get(DeviceShellSession, UUID(live.json()["session_id"]))
+    assert row is not None and row.status == ShellSessionStatus.CLOSED.value
+
+
+def test_shell_ticket_cannot_be_used_twice(client: TestClient, db_session: Session) -> None:
+    org, headers, token, _release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pi-once", mac="aa:bb:cc:dd:00:0b")
+    client.post(
+        "/api/v1/agent/connectivity/wireguard",
+        headers=_device_headers(reg["device_token"]),
+        json={"public_key": WG_KEY_B},
+    )
+    session = client.post(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/shell-sessions",
+        headers=headers,
+    ).json()
+    ws_path = session["websocket_path"] + f"?ticket={session['ticket']}"
+    with client.websocket_connect(ws_path) as websocket:
+        assert "MeteorCloud" in websocket.receive_bytes().decode("utf-8")
+    with client.websocket_connect(ws_path) as websocket:
+        assert websocket.receive_text().startswith("error:")

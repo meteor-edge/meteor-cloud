@@ -103,8 +103,31 @@ Manual gateway check:
    within ~15s of the gateway agent poll.
 2. From the server: `ping 10.8.0.x` then `ssh root@10.8.0.x`.
 3. Console → device → Connect in Terminal.
-4. Revoke connectivity in the API; `wg show` should drop the peer and new
-   shells should fail.
+4. Revoke connectivity in the API; `wg show` should drop the peer, open
+   shells should end within `SHELL_RECHECK_SECONDS`, and new shells should fail.
+
+## Revoke and restore
+
+`POST …/devices/{id}/connectivity/revoke` removes the peer, disables the
+device's endpoints, and closes its shells. The device keeps its address
+reserved, and its agent gets `403 connectivity_revoked` and takes its tunnel
+down. It stays down until an operator calls
+`POST …/devices/{id}/connectivity/restore`. After that, the next registration
+(the agent retries about every 10 minutes, or right away on restart) brings it
+back on the same address.
+
+The agent registers once at start and then every 10 minutes. It runs
+`wg-quick` only when the rendered `wg0.conf` changes or the interface is down,
+so heartbeats never restart the tunnel.
+
+## Container traffic and isolation
+
+Traefik and the SSH gateway run in Docker, so their packets leave on `wg0` with
+a Docker source address. Devices only accept tunnel traffic from the server
+address, so `wg0.conf` masquerades non-tunnel sources to `10.8.0.1`. It also
+drops `wg0 → wg0` forwarding, so devices cannot reach each other. The gateway
+SSH key is installed with `from="10.8.0.1/32"`. Host keys are kept in one
+`known_hosts` file per device under `SHELL_KNOWN_HOSTS_DIR`.
 
 ## DNS for apps (not SSH)
 

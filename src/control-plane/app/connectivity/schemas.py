@@ -23,10 +23,14 @@ class AgentWireGuardRegisterResponse(BaseModel):
     wg_address: str
     server_public_key: str
     server_endpoint: str
+    # AllowedIPs the device should set on the server peer (the gateway's tunnel address).
+    server_allowed_ips: str
     allowed_ips: str
     persistent_keepalive: int
     ssh_user: str
     ssh_gateway_public_key: str | None = None
+    # Source address to pin the gateway key to in authorized_keys (from="...").
+    ssh_gateway_source: str | None = None
     client_config: str
 
 

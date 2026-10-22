@@ -7,6 +7,7 @@ taken from the client.
 
 from __future__ import annotations
 
+import uuid
 from typing import Protocol
 
 
@@ -16,6 +17,10 @@ class DeviceShellConnection(Protocol):
     def write(self, data: bytes) -> None: ...
 
     def close(self) -> None: ...
+
+    def is_closed(self) -> bool:
+        """True once the remote side has gone away and no more output will arrive."""
+        ...
 
     def fileno(self) -> int | None: ...
 
@@ -29,6 +34,7 @@ class DeviceShellProvider(Protocol):
         host: str,
         port: int,
         username: str,
+        device_id: uuid.UUID | None = None,
     ) -> DeviceShellConnection:
         """Connect to ``host:port``. Implementations must refuse non-private hosts."""
         ...

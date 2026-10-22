@@ -5,6 +5,7 @@ These are not user APIs. EMQX must send ``X-MQTT-Internal-Token``.
 
 from __future__ import annotations
 
+import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
@@ -32,7 +33,7 @@ def _require_internal_token(
     x_mqtt_internal_token: Annotated[str | None, Header()] = None,
 ) -> None:
     expected = settings.mqtt_internal_token
-    if not expected or x_mqtt_internal_token != expected:
+    if not expected or not hmac.compare_digest((x_mqtt_internal_token or "").encode(), expected.encode()):
         raise UnauthorizedError("mqtt_internal_forbidden", "Invalid MQTT internal token.")
 
 

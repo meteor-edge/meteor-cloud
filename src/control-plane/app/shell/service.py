@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import hmac
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.audit.service import AuditRecorder
@@ -25,6 +26,23 @@ from app.tenancy.models import OrganizationMembership
 def _new_ticket() -> tuple[str, str]:
     token = generate_shell_ticket()
     return token.plaintext, token.token_hash
+
+
+def close_open_sessions_for_device(session: Session, *, device_id: uuid.UUID) -> int:
+    """Mark pending/open shells for a device closed. Live bridges notice on their next recheck.
+
+    Does not commit; the caller owns the transaction.
+    """
+    result = session.execute(
+        update(DeviceShellSession)
+        .where(
+            DeviceShellSession.device_id == device_id,
+            DeviceShellSession.status.in_((ShellSessionStatus.PENDING.value, ShellSessionStatus.OPEN.value)),
+        )
+        .values(status=ShellSessionStatus.CLOSED.value, closed_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    )
+    return int(result.rowcount or 0)
 
 
 class ShellService:
@@ -75,14 +93,18 @@ class ShellService:
             raise
         self._require_provider()
         peer = self.connectivity.require_reachable(device=device)
+        now = datetime.now(UTC)
         open_count = int(
             self.session.scalar(
                 select(func.count())
                 .select_from(DeviceShellSession)
                 .where(
                     DeviceShellSession.actor_user_id == actor.id,
-                    DeviceShellSession.status.in_(
-                        (ShellSessionStatus.PENDING.value, ShellSessionStatus.OPEN.value)
+                    # A pending ticket past its TTL can never be used, so it does not count.
+                    (DeviceShellSession.status == ShellSessionStatus.OPEN.value)
+                    | (
+                        (DeviceShellSession.status == ShellSessionStatus.PENDING.value)
+                        & (DeviceShellSession.ticket_expires_at > now)
                     ),
                 )
             )
@@ -97,10 +119,11 @@ class ShellService:
             actor_user_id=actor.id,
             ticket_hash=ticket_hash,
             status=ShellSessionStatus.PENDING.value,
-            ticket_expires_at=datetime.now(UTC)
-            + timedelta(seconds=self.settings.shell_ticket_ttl_seconds),
+            ticket_expires_at=now + timedelta(seconds=self.settings.shell_ticket_ttl_seconds),
         )
         self.session.add(row)
+        # Assign the primary key before it goes into the audit record.
+        self.session.flush()
         self.audit.record(
             actor=actor,
             organization_id=organization_id,
@@ -119,7 +142,9 @@ class ShellService:
             device_id=device_id,
         )
 
-    def consume_ticket(self, *, session_id: uuid.UUID, ticket: str) -> tuple[DeviceShellSession, str, int, str]:
+    def consume_ticket(
+        self, *, session_id: uuid.UUID, ticket: str
+    ) -> tuple[DeviceShellSession, str, int, str]:
         """Validate a one-time ticket. Returns session, host, port, username."""
         self._require_provider()
         row = self.session.get(DeviceShellSession, session_id)
@@ -127,22 +152,53 @@ class ShellService:
             raise UnauthorizedError("invalid_shell_ticket", "Shell session was not found.")
         if row.status != ShellSessionStatus.PENDING.value:
             raise UnauthorizedError("invalid_shell_ticket", "This shell ticket was already used.")
-        if datetime.now(UTC) > row.ticket_expires_at:
+        now = datetime.now(UTC)
+        if now > row.ticket_expires_at:
             row.status = ShellSessionStatus.CLOSED.value
-            row.closed_at = datetime.now(UTC)
+            row.closed_at = now
             self.session.commit()
             raise UnauthorizedError("invalid_shell_ticket", "This shell ticket has expired.")
-        if hash_token(ticket) != row.ticket_hash:
+        if not hmac.compare_digest(hash_token(ticket), row.ticket_hash):
             raise UnauthorizedError("invalid_shell_ticket", "Invalid shell ticket.")
         device = self.devices.get(organization_id=row.organization_id, device_id=row.device_id)
         if device is None or not device.is_enabled:
             raise ConflictError("device_disabled", "This device is not available.")
         peer = self.connectivity.require_reachable(device=device)
         host = self.connectivity.wg_host(peer)
-        row.status = ShellSessionStatus.OPEN.value
-        row.opened_at = datetime.now(UTC)
+        # Claim the ticket atomically so two concurrent connects cannot both open it.
+        claimed = self.session.execute(
+            update(DeviceShellSession)
+            .where(
+                DeviceShellSession.id == session_id,
+                DeviceShellSession.status == ShellSessionStatus.PENDING.value,
+            )
+            .values(status=ShellSessionStatus.OPEN.value, opened_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if not claimed.rowcount:
+            self.session.rollback()
+            raise UnauthorizedError("invalid_shell_ticket", "This shell ticket was already used.")
         self.session.commit()
+        self.session.refresh(row)
         return row, host, self.settings.shell_ssh_port, self.settings.shell_ssh_user
+
+    def session_still_allowed(self, session_id: uuid.UUID) -> bool:
+        """True while the shell is open, its device is enabled, and connectivity is active."""
+        try:
+            row = self.session.get(DeviceShellSession, session_id, populate_existing=True)
+            if row is None or row.status != ShellSessionStatus.OPEN.value:
+                return False
+            device = self.devices.get(organization_id=row.organization_id, device_id=row.device_id)
+            if device is None or not device.is_enabled:
+                return False
+            try:
+                self.connectivity.require_reachable(device=device)
+            except ConflictError:
+                return False
+            return True
+        finally:
+            # End the read transaction so the pooled connection is not held between checks.
+            self.session.rollback()
 
     def close_session(self, session_id: uuid.UUID, *, actor: User | None = None) -> None:
         row = self.session.get(DeviceShellSession, session_id)

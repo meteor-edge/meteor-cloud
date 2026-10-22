@@ -57,7 +57,7 @@ services:
       - --providers.file.watch=true
       - --providers.http.endpoint=http://backend:8000/internal/routing/traefik
       - --providers.http.pollInterval=5s
-      - --providers.http.headers.X-Routing-Internal-Token=${ROUTING_INTERNAL_TOKEN:-dev-connectivity-internal}
+      - --providers.http.headers.X-Routing-Internal-Token=${ROUTING_INTERNAL_TOKEN:-${CONNECTIVITY_INTERNAL_TOKEN:-dev-connectivity-internal}}
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}

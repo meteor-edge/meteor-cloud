@@ -26,6 +26,8 @@ DATA_PLANE_IMAGE=meteorcloud/data-plane:$IMAGE_TAG
 IMAGE_PULL_POLICY=never
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=${SMOKE_HTTPS_PORT:-18443}
+# Loopback API port for the host gateway agent; keep it off 8000 so a local API does not clash.
+BACKEND_PORT=${SMOKE_BACKEND_PORT:-18000}
 POSTGRES_PASSWORD=$(secret 16)
 APP_SECRET_KEY=$JWT_SECRET
 JWT_SECRET_KEY=$JWT_SECRET

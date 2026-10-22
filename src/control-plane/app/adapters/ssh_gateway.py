@@ -10,7 +10,9 @@ import ipaddress
 import os
 import select
 import subprocess
+import uuid
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from app.core.exceptions import ValidationAppError
 
@@ -28,17 +30,24 @@ def _default_runner(args: Sequence[str]) -> subprocess.Popen[bytes]:
 class SshGatewayConnection:
     def __init__(self, process: subprocess.Popen[bytes]) -> None:
         self._process = process
+        self._eof = False
 
     def read(self, n: int = 4096) -> bytes:
         stdout = self._process.stdout
-        if stdout is None:
+        if stdout is None or self._eof:
+            self._eof = True
             return b""
-        if self._process.poll() is not None:
-            return stdout.read() or b""
         ready, _, _ = select.select([stdout], [], [], 0.2)
         if not ready:
             return b""
-        return os.read(stdout.fileno(), n)
+        chunk = os.read(stdout.fileno(), n)
+        if not chunk:
+            # EOF: ssh exited (remote shell closed, auth failed, or connection lost).
+            self._eof = True
+        return chunk
+
+    def is_closed(self) -> bool:
+        return self._eof
 
     def write(self, data: bytes) -> None:
         stdin = self._process.stdin
@@ -69,15 +78,31 @@ class SshGatewayProvider:
         *,
         identity_file: str = "",
         client_cidr: str = "10.8.0.0/16",
+        known_hosts_dir: str = "",
         extra_args: Sequence[str] | None = None,
         runner: Callable[[Sequence[str]], subprocess.Popen[bytes]] = _default_runner,
     ) -> None:
         self._identity_file = identity_file
         self._client_cidr = client_cidr
+        self._known_hosts_dir = known_hosts_dir
         self._extra_args = list(extra_args or [])
         self._runner = runner
 
-    def connect(self, *, host: str, port: int, username: str) -> SshGatewayConnection:
+    def _known_hosts_file(self, device_id: uuid.UUID | None) -> str | None:
+        if not self._known_hosts_dir or device_id is None:
+            return None
+        directory = Path(self._known_hosts_dir)
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return str(directory / f"{device_id}.known_hosts")
+
+    def connect(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        device_id: uuid.UUID | None = None,
+    ) -> SshGatewayConnection:
         if not host or host.startswith("-"):
             raise ValidationAppError("invalid_shell_host", "Refusing SSH to an invalid host.")
         try:
@@ -102,6 +127,11 @@ class SshGatewayProvider:
             "-p",
             str(port),
         ]
+        known_hosts = self._known_hosts_file(device_id)
+        if known_hosts is not None:
+            # One file per device: a reused WireGuard address starts with a clean slate
+            # instead of failing on (or trusting) another device's host key.
+            args.extend(["-o", f"UserKnownHostsFile={known_hosts}"])
         if self._identity_file:
             args.extend(["-i", self._identity_file])
         args.extend(self._extra_args)
@@ -131,11 +161,21 @@ class EchoShellConnection:
     def close(self) -> None:
         self._closed = True
 
+    def is_closed(self) -> bool:
+        return self._closed
+
     def fileno(self) -> int | None:
         return None
 
 
 class EchoShellProvider:
-    def connect(self, *, host: str, port: int, username: str) -> EchoShellConnection:
-        del host, port, username
+    def connect(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        device_id: uuid.UUID | None = None,
+    ) -> EchoShellConnection:
+        del host, port, username, device_id
         return EchoShellConnection()
