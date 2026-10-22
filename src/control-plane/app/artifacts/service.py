@@ -293,8 +293,15 @@ class ArtifactService:
             resource_id=artifact.id,
             metadata={"name": artifact.name, "version": artifact.version},
         )
-        self.artifacts.delete(artifact)
-        self.session.commit()
+        try:
+            self.artifacts.delete(artifact)
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise ConflictError(
+                "artifact_in_use",
+                "This artifact cannot be deleted while releases still reference it.",
+            ) from exc
         # Metadata is gone first so the artifact can never be listed without content.
         self._discard_object(key)
 
@@ -317,6 +324,13 @@ class ArtifactService:
         """
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.read")
+        artifact = self._require_artifact(organization_id, artifact_id)
+        return artifact, self._open(artifact)
+
+    def open_content(
+        self, *, organization_id: uuid.UUID, artifact_id: uuid.UUID
+    ) -> tuple[Artifact, StoredObject]:
+        """Open artifact bytes for an already-authorized caller (e.g. agent download)."""
         artifact = self._require_artifact(organization_id, artifact_id)
         return artifact, self._open(artifact)
 

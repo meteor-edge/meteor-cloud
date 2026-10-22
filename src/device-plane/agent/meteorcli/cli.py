@@ -7,7 +7,7 @@ Subcommands
   register   Register this device with a registration token (path 1).
   request-token  Ask the API for a device token; wait briefly for admin approval.
   claim          Collect the device token after a later approval.
-  run        Send periodic heartbeats.
+  run        Heartbeats, MQTT, and apply desired software (systemd/docker/compose).
   mqtt-test    Publish one TLS MQTT message (default: devices/{id}/status).
   mqtt-listen  Print inbound commands (default: devices/{id}/commands).
   status       Show persisted (non-secret) configuration.
@@ -26,12 +26,14 @@ import sys
 import time
 from pathlib import Path
 
+from edge_agent.capabilities import collect_capabilities
 from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.config import AgentConfig, load_config, save_config
 from edge_agent.credentials import read_device_token, read_registration_token_file
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
 from edge_agent.registration import register
+from edge_agent.software import reconcile_software
 from meteorcli import __version__
 from meteorcli.config import (
     CliPaths,
@@ -557,10 +559,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 1
     config, device_token = loaded
     client = EdgeClient(config.server_url)
+    artifacts_dir = paths.config_path.parent / "artifacts"
+
+    def _payload() -> dict:
+        payload: dict = {"capabilities": collect_capabilities()}
+        reports = reconcile_software(client, device_token, artifacts_dir)
+        if reports:
+            payload["software_report"] = reports
+        return payload
 
     if args.once:
         try:
-            response = send_heartbeat(client, device_token)
+            response = send_heartbeat(client, device_token, _payload())
         except AgentApiError as error:
             print(f"error: heartbeat failed: {error.message}", file=sys.stderr)
             return 1
@@ -589,6 +599,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             interval_seconds=interval,
             sleep=time.sleep,
             should_continue=lambda: True,
+            payload_factory=_payload,
         )
     except AgentApiError:
         return 1

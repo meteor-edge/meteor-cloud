@@ -16,6 +16,7 @@ USER_BIN="${HOME}/.local/bin"
 PREFIX="${PREFIX:-}"
 BIN_DIR="${BIN_DIR:-}"
 UNINSTALL=0
+WITH_SERVICE=0
 
 usage() {
   cat <<EOF
@@ -24,13 +25,15 @@ Install meteorcli from ${SCRIPT_DIR}
 Usage:
   $0                      Install for this user (${USER_PREFIX}, ${USER_BIN})
   sudo $0                 Install system-wide (${SYSTEM_PREFIX}, ${SYSTEM_BIN})
+  sudo $0 --with-service  System-wide + enable meteorcli.service (Raspberry Pi OS)
   $0 --uninstall          Remove the install (keeps credentials)
 
 Options:
-  --prefix DIR    Virtualenv location
-  --bin-dir DIR   Directory for the meteorcli symlink
-  --uninstall     Remove the venv and symlink
-  -h, --help      Show this help
+  --prefix DIR     Virtualenv location
+  --bin-dir DIR    Directory for the meteorcli symlink
+  --with-service   Install and enable systemd unit (root / system install only)
+  --uninstall      Remove the venv and symlink (and unit if present)
+  -h, --help       Show this help
 EOF
 }
 
@@ -43,6 +46,10 @@ while [[ $# -gt 0 ]]; do
     --bin-dir)
       BIN_DIR="${2:?--bin-dir requires a directory}"
       shift 2
+      ;;
+    --with-service)
+      WITH_SERVICE=1
+      shift
       ;;
     --uninstall)
       UNINSTALL=1
@@ -101,6 +108,11 @@ find_python() {
 
 uninstall() {
   local link="${BIN_DIR}/meteorcli"
+  if [[ "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now meteorcli.service 2>/dev/null || true
+    rm -f /etc/systemd/system/meteorcli.service
+    systemctl daemon-reload 2>/dev/null || true
+  fi
   if [[ -L "${link}" || -f "${link}" ]]; then
     rm -f "${link}"
     echo "Removed ${link}"
@@ -116,7 +128,87 @@ uninstall() {
   fi
 }
 
-install() {
+# meteorcli.service always uses /etc/meteorcli. If the operator enrolled as a
+# normal user (e.g. pi) before enabling the service, copy that config in.
+migrate_user_config_to_system() {
+  local system_dir="/etc/meteorcli"
+  local user_home user_dir
+  local copied=0
+
+  mkdir -p "${system_dir}"
+  chmod 0755 "${system_dir}"
+
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    user_home="$(getent passwd "${SUDO_USER}" | cut -d: -f6 || true)"
+  fi
+  if [[ -z "${user_home:-}" && -n "${HOME:-}" && "${HOME}" != "/root" ]]; then
+    user_home="${HOME}"
+  fi
+  [[ -n "${user_home:-}" ]] || return 0
+
+  user_dir="${user_home}/.config/meteorcli"
+  if [[ ! -d "${user_dir}" ]]; then
+    return 0
+  fi
+
+  # Prefer migrating when the system dir has no device credential yet.
+  if [[ -f "${system_dir}/device-token" ]]; then
+    echo "Keeping existing ${system_dir} (device-token already present)."
+    return 0
+  fi
+  if [[ ! -f "${user_dir}/device-token" && ! -f "${user_dir}/config.json" ]]; then
+    return 0
+  fi
+
+  local name
+  for name in config.json device-token api-key mqtt.json mqtt-ca.crt claim-secret; do
+    if [[ -f "${user_dir}/${name}" ]]; then
+      cp -a "${user_dir}/${name}" "${system_dir}/${name}"
+      chmod 0600 "${system_dir}/${name}" 2>/dev/null || true
+      copied=1
+    fi
+  done
+  # Artifacts cache is optional; skip large trees unless empty on system side.
+  if [[ -d "${user_dir}/artifacts" && ! -e "${system_dir}/artifacts" ]]; then
+    cp -a "${user_dir}/artifacts" "${system_dir}/artifacts"
+    copied=1
+  fi
+
+  if [[ "${copied}" -eq 1 ]]; then
+    echo "Migrated meteorcli config from ${user_dir} → ${system_dir}"
+    echo "(meteorcli.service reads /etc/meteorcli as root.)"
+  fi
+}
+
+install_service() {
+  local unit_src="${SCRIPT_DIR}/packaging/meteorcli.service"
+  local unit_dst="/etc/systemd/system/meteorcli.service"
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "error: --with-service requires a root (system-wide) install." >&2
+    exit 1
+  fi
+  if [[ ! -f "${unit_src}" ]]; then
+    echo "error: missing ${unit_src}" >&2
+    exit 1
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "error: systemctl not found; cannot install the service." >&2
+    exit 1
+  fi
+  migrate_user_config_to_system
+  # Do not call ``install`` here — a function of that name used to recurse forever.
+  cp "${unit_src}" "${unit_dst}"
+  chmod 0644 "${unit_dst}"
+  # Point ExecStart at the installed binary when BIN_DIR differs.
+  if [[ "${BIN_DIR}/meteorcli" != "/usr/local/bin/meteorcli" ]]; then
+    sed -i "s|^ExecStart=.*|ExecStart=${BIN_DIR}/meteorcli run|" "${unit_dst}"
+  fi
+  systemctl daemon-reload
+  systemctl enable meteorcli.service
+  echo "Installed ${unit_dst} (enabled). Start after config: systemctl start meteorcli"
+}
+
+install_meteorcli() {
   local python
   python="$(find_python)" || {
     echo "error: Python 3.11+ is required (python3, python3.11, python3.12, or python3.13)." >&2
@@ -150,8 +242,20 @@ install() {
   if [[ "${EUID}" -ne 0 && ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
     echo "Add ${BIN_DIR} to PATH if meteorcli is not found."
   fi
-  echo "Next: meteorcli config --domain <host> --api-key key_..."
-  echo "      meteorcli test"
+  if [[ "${WITH_SERVICE}" -eq 1 ]]; then
+    install_service
+  fi
+  if [[ "${EUID}" -eq 0 ]]; then
+    echo "Next: sudo meteorcli config --domain <host> --api-key key_..."
+    echo "      sudo meteorcli test"
+    echo "      sudo meteorcli register|request-token  (writes /etc/meteorcli for the service)"
+    echo "      sudo systemctl start meteorcli"
+  else
+    echo "Next: meteorcli config --domain <host> --api-key key_..."
+    echo "      meteorcli test"
+    echo "      meteorcli register|request-token, then meteorcli run"
+    echo "Tip: for meteorcli.service use sudo ./installcli.sh --with-service (migrates ~/.config/meteorcli)."
+  fi
 }
 
 if [[ "${UNINSTALL}" -eq 1 ]]; then
@@ -168,4 +272,4 @@ if ! need_writable "${PREFIX}" || ! need_writable "${BIN_DIR}"; then
   exit 1
 fi
 
-install
+install_meteorcli

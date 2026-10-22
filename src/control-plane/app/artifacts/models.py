@@ -22,6 +22,7 @@ from app.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
 class ArtifactType(enum.StrEnum):
     OS_IMAGE = "os_image"
     FIRMWARE = "firmware"
+    DOCKER = "docker"
     DOCKER_COMPOSE = "docker_compose"
     SYSTEMD = "systemd"
     CONFIGURATION = "configuration"

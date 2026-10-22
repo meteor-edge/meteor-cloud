@@ -16,13 +16,14 @@ import {
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
+import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { StatusBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { canManageFleet } from "@/lib/permissions";
+import { canManageDeployments, canManageFleet } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 function Detail({ label, value }: { label: string; value: string | null | undefined }) {
@@ -75,6 +76,7 @@ export function DeviceDetailPage() {
   });
 
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const canDeploy = canManageDeployments(orgQuery.data?.current_user_role);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
@@ -215,6 +217,21 @@ export function DeviceDetailPage() {
       {error && (
         <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
       )}
+
+      <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+        <h2 className="text-lg font-semibold">Software</h2>
+        <p className="text-sm text-muted-foreground">
+          Desired vs installed releases on this device. Empty until a release is deployed.
+        </p>
+        {token && (
+          <DeviceSoftwarePanel
+            token={token}
+            organizationId={organizationId}
+            deviceId={deviceId}
+            canDeploy={canDeploy}
+          />
+        )}
+      </div>
 
       <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
         <h2 className="text-lg font-semibold">MQTT Connection</h2>

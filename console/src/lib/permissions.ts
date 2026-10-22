@@ -42,6 +42,16 @@ export function canManageArtifacts(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "developer";
 }
 
+/** Start or cancel Deploy actions. Prefer /me/access when available. */
+export function canManageDeployments(role: string | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "operator" || role === "developer";
+}
+
+/** Rollback a finished Deploy (owner/admin only). */
+export function canRollbackDeployments(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 export function canManageDeviceTypes(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "developer";
 }

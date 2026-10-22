@@ -208,6 +208,9 @@ class RegistrationService:
         device: Device,
         payload: AgentHeartbeatRequest,
     ) -> AgentHeartbeatResponse:
+        from app.deployments.software_schemas import SoftwareReportItem
+        from app.deployments.software_service import DeviceSoftwareService
+
         now = datetime.now(UTC)
         device.last_seen_at = now
         if payload.hostname is not None:
@@ -217,8 +220,28 @@ class RegistrationService:
         if payload.kernel_version is not None:
             device.kernel_version = payload.kernel_version
         self.devices.update(device)
+
+        software = DeviceSoftwareService(self.session)
+        if payload.capabilities:
+            software.apply_capabilities(device_id=device.id, capabilities=payload.capabilities)
+        if payload.software_report:
+            reports: list[SoftwareReportItem] = []
+            for raw in payload.software_report:
+                try:
+                    reports.append(SoftwareReportItem.model_validate(raw))
+                except Exception:
+                    continue
+            if reports:
+                software.apply_software_reports(
+                    organization_id=device.organization_id,
+                    device_id=device.id,
+                    reports=reports,
+                    commit=False,
+                )
+
         self.session.commit()
         self.session.refresh(device)
+        desired = [item.model_dump(mode="json") for item in software.list_desired_for_agent(device_id=device.id)]
         return AgentHeartbeatResponse(
             device_id=device.id,
             status=connectivity_status(
@@ -228,4 +251,5 @@ class RegistrationService:
             ),
             heartbeat_interval_seconds=self.settings.device_heartbeat_interval_seconds,
             server_time=now,
+            desired_software=desired,
         )

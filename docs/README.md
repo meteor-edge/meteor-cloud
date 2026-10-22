@@ -24,6 +24,8 @@ How to use the product day to day.
 | Device HTTP auth & heartbeat | [Device authentication](fleet/device-authentication.md) · [Heartbeat](fleet/heartbeat.md) |
 | MQTT connectivity | [MQTT](fleet/mqtt.md) |
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
+| Releases (software versions) | [Releases](fleet/releases.md) |
+| Deployments (send a release) | [Deployments](fleet/deployments.md) |
 | Operator console | [Console](console.md) |
 
 ## Reference

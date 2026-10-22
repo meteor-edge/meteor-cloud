@@ -17,7 +17,16 @@ Optional body:
   "hostname": "edge-01",
   "os_version": "22.04",
   "kernel_version": "6.2.0",
-  "metrics": {}
+  "metrics": {},
+  "capabilities": { "systemd": true, "docker": true, "docker_compose": true },
+  "software_report": [
+    {
+      "workload_key": "camera-agent.service",
+      "installed_release_id": "…",
+      "installed_version": "1.2.0",
+      "health": "healthy"
+    }
+  ]
 }
 ```
 
@@ -28,12 +37,31 @@ Response:
   "device_id": "…",
   "status": "online",
   "heartbeat_interval_seconds": 60,
-  "server_time": "2026-08-18T10:00:00Z"
+  "server_time": "2026-08-18T10:00:00Z",
+  "desired_software": [
+    {
+      "workload_key": "camera-agent.service",
+      "kind": "systemd",
+      "release_id": "…",
+      "release_name": "camera-agent",
+      "release_version": "1.2.0",
+      "artifact_id": "…",
+      "revision": 1,
+      "spec": { "unit_name": "camera-agent.service", "start": true }
+    }
+  ]
 }
 ```
 
 Each heartbeat updates the device's `last_seen_at` and may refresh a few
-inventory fields. Disabled or credential-revoked devices are rejected.
+inventory fields. `software_report` updates installed software for known
+workloads (unknown keys are ignored). The response includes current
+`desired_software`. Agents can also poll `GET /api/v1/agent/software`.
+When a desired item has an `artifact_id`, the agent downloads it from
+`GET /api/v1/agent/artifacts/{id}/download` (only if that artifact is on current
+desired software) and reports `updating` / `failed` as needed. See
+[Deployments](deployments.md). Disabled or credential-revoked devices are
+rejected.
 
 ## Connectivity status
 

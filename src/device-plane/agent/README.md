@@ -13,22 +13,33 @@ There are **two ways** to enroll a device:
 
 ## Install
 
-On a Linux device, from this directory:
+**Supported device OS for fleets today:** Raspberry Pi OS (Bookworm). Other
+Debian-like systems work the same way.
+
+From this directory:
 
 ```bash
-./installcli.sh          # current user (~/.local)
-sudo ./installcli.sh     # system-wide
+./installcli.sh                    # current user (~/.local)
+sudo ./installcli.sh               # system-wide
+sudo ./installcli.sh --with-service  # + enable meteorcli.service
 meteorcli --help
 ```
 
 A user install puts the venv in `~/.local/share/meteorcli` and the command in
 `~/.local/bin`. A system install uses `/opt/meteorcli` and `/usr/local/bin`.
 Re-run the script to upgrade. Uninstall with `./installcli.sh --uninstall`
-(credentials are kept).
+(credentials are kept; the systemd unit is removed when present).
+
+`meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
+and **docker_compose** releases. Root (or equivalent) is required for system
+unit installs.
 
 Config and credentials go in `~/.config/meteorcli` for a normal user, or
-`/etc/meteorcli` when running as root. You do not need root to run
-`meteorcli config`, `test`, or `request-token` as your own user.
+`/etc/meteorcli` when running as root / under `meteorcli.service`. Prefer
+`sudo meteorcli register` or `sudo meteorcli request-token` after a system
+install so the service finds the device token. Re-running
+`sudo ./installcli.sh --with-service` copies an existing user config into
+`/etc/meteorcli` when that dir has no `device-token` yet.
 
 For local development:
 
@@ -53,7 +64,7 @@ meteorcli --version
 | `register`       | Enroll with a one-time registration token (admin-initiated).         |
 | `request-token`  | Request a device token to connect this machine to the API.           |
 | `claim`          | Collect the device token after a later approval.                     |
-| `run`            | Send heartbeats and keep an MQTT session (loop, or `--once`).     |
+| `run`            | Heartbeats, MQTT, download desired artifacts, apply systemd units. |
 | `status`         | Show persisted, non-secret configuration.                            |
 
 Environment variables: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`,

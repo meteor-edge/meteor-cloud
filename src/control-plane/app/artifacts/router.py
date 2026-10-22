@@ -130,7 +130,7 @@ def download_artifact(
     artifact, stored = service.open_download(
         actor=current_user, organization_id=organization_id, artifact_id=artifact_id
     )
-    return _stream(artifact, stored)
+    return stream_artifact(artifact, stored)
 
 
 @router.post("/{artifact_id}/download-link", response_model=ArtifactDownloadLinkResponse)
@@ -155,10 +155,10 @@ def download_artifact_with_ticket(
     artifact, stored = service.open_download_with_ticket(
         organization_id=organization_id, artifact_id=artifact_id, ticket=ticket
     )
-    return _stream(artifact, stored)
+    return stream_artifact(artifact, stored)
 
 
-def _stream(artifact: Artifact, stored: StoredObject) -> StreamingResponse:
+def stream_artifact(artifact: Artifact, stored: StoredObject) -> StreamingResponse:
     """Return an attachment stream with byte length and SHA-256 headers.
 
     Use the artifact's content type before the stored type, disable caching,

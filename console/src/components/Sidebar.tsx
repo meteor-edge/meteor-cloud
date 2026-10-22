@@ -12,8 +12,11 @@ import {
   List,
   LogIn,
   Package,
+  Rocket,
   Router,
+  Send,
   Settings,
+  Tag,
   UserPlus,
   UserRound,
   Users,
@@ -197,10 +200,28 @@ export function Sidebar() {
                   </SubLink>
                 </NavSection>
 
-                <NavLink to={`/organizations/${orgId}/mqtt`} className={linkClass}>
-                  <Activity className="h-4 w-4" />
-                  Monitoring
-                </NavLink>
+                <NavSection
+                  icon={Rocket}
+                  label="Software"
+                  active={["releases", "deployments"].some(isPage)}
+                >
+                  <SubLink to={`${orgPath}/releases`} icon={Tag} active={isPage("releases")}>
+                    Releases
+                  </SubLink>
+                  <SubLink
+                    to={`${orgPath}/deployments`}
+                    icon={Send}
+                    active={isPage("deployments")}
+                  >
+                    Deployments
+                  </SubLink>
+                </NavSection>
+
+                <NavSection icon={Activity} label="Observability" active={isPage("mqtt")}>
+                  <SubLink to={`${orgPath}/mqtt`} icon={Activity} active={isPage("mqtt")}>
+                    Monitoring
+                  </SubLink>
+                </NavSection>
                 {(showMembers || showTeams) && (
                   <NavSection
                     icon={Users}

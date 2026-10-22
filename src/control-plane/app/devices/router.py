@@ -9,6 +9,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
+from app.deployments.software_dependencies import DeviceSoftwareSvc
+from app.deployments.software_schemas import DeviceSoftwareResponse
 from app.devices.dependencies import FleetSvc
 from app.devices.schemas import (
     DeviceCredentialResponse,
@@ -322,6 +324,21 @@ def get_device(
     service: FleetSvc,
 ) -> DeviceResponse:
     return service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.get("/devices/{device_id}/software", response_model=list[DeviceSoftwareResponse])
+def list_device_software(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    software: DeviceSoftwareSvc,
+) -> list[DeviceSoftwareResponse]:
+    """Desired vs installed software for one device."""
+    return software.list_for_device_operator(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+    )
 
 
 @router.patch("/devices/{device_id}", response_model=DeviceResponse)
