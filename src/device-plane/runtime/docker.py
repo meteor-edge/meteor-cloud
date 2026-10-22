@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -82,7 +83,7 @@ class DockerAdapter:
             args.extend(["-e", f"{key}={value}"])
         args.append(resolved_image)
         if command:
-            args.extend(command.split())
+            args.extend(shlex.split(command))
 
         self._run(args)
         logger.info("Started container %s from %s", name, resolved_image)

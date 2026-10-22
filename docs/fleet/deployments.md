@@ -42,7 +42,7 @@ devices in their groups.
   "release_id": "<uuid>",
   "name": "optional label",
   "target": {
-    "device_ids": [],
+    "device_ids": ["<device-uuid>"],
     "group_ids": [],
     "device_type_ids": []
   },

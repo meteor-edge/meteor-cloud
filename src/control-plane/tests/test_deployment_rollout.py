@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.deployments.models import Deployment
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_user
 from tests.test_deployments import UNIT, _register_device, _setup_release
@@ -158,3 +162,56 @@ def test_batched_rollout_then_retry_and_rollback(
         headers=auth_header(client, "dev-roll@example.com"),
     )
     assert denied.status_code == 403
+
+
+def test_batched_delay_advances_on_later_heartbeat_without_open_rows(
+    client: TestClient, db_session: Session
+) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [
+        _register_device(client, token, name=f"pi-d{index}", mac=f"aa:bb:cc:20:00:0{index}")
+        for index in range(3)
+    ]
+    device_ids = [reg["device_id"] for reg in regs]
+
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={
+            "release_id": release["id"],
+            "target": {"device_ids": device_ids},
+            "rollout": {"strategy": "batched", "batch_size": 2, "delay_seconds": 3600},
+        },
+    )
+    assert created.status_code == 201, created.text
+    deployment = created.json()
+    activated = set(deployment["rollout"]["activated_device_ids"])
+    assert len(activated) == 2
+
+    for reg in regs:
+        if reg["device_id"] in activated:
+            _report_in_sync(client, reg["device_token"], release["id"], "1.2.0")
+
+    detail = client.get(
+        f"/api/v1/organizations/{org.id}/deployments/{deployment['id']}",
+        headers=headers,
+    ).json()
+    assert detail["counts"]["succeeded"] == 2
+    assert detail["counts"]["queued"] == 1
+
+    row = db_session.get(Deployment, UUID(deployment["id"]))
+    assert row is not None
+    rollout = dict(row.rollout or {})
+    rollout["batch_released_at"] = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+    row.rollout = rollout
+    db_session.commit()
+
+    done_reg = next(reg for reg in regs if reg["device_id"] in activated)
+    _report_in_sync(client, done_reg["device_token"], release["id"], "1.2.0")
+
+    advanced = client.get(
+        f"/api/v1/organizations/{org.id}/deployments/{deployment['id']}",
+        headers=headers,
+    ).json()
+    assert advanced["counts"]["queued"] == 0
+    assert advanced["counts"]["pending"] + advanced["counts"]["succeeded"] == 3

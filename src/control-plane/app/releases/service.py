@@ -201,5 +201,12 @@ class ReleaseService:
             resource_id=release.id,
             metadata={"name": release.name, "version": release.version, "kind": release.kind.value},
         )
-        self.releases.delete(release)
-        self.session.commit()
+        try:
+            self.releases.delete(release)
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise ConflictError(
+                "release_in_use",
+                "This release cannot be deleted while deployments or software still reference it.",
+            ) from exc

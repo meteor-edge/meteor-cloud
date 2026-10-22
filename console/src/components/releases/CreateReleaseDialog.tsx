@@ -190,10 +190,18 @@ export function CreateReleaseDialog({
     let payload: ReleaseCreatePayload;
     try {
       const raw = parseYamlObject(yamlText);
+      if (raw.name != null && typeof raw.name !== "string") {
+        setError("YAML name must be a quoted string.");
+        return;
+      }
+      if (raw.version != null && typeof raw.version !== "string") {
+        setError("YAML version must be a quoted string.");
+        return;
+      }
       const kindValue = String(raw.kind ?? "") as ReleaseKind;
       payload = {
-        name: String(raw.name ?? "").trim(),
-        version: String(raw.version ?? "").trim(),
+        name: (typeof raw.name === "string" ? raw.name : "").trim(),
+        version: (typeof raw.version === "string" ? raw.version : "").trim(),
         kind: kindValue,
         artifact_id: raw.artifact_id == null || raw.artifact_id === "" ? null : String(raw.artifact_id),
         description:

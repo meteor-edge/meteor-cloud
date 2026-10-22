@@ -6,6 +6,7 @@ capabilities (Raspberry Pi OS / Debian with optional Docker Engine).
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,97 @@ def artifact_cache_path(artifacts_dir: Path, artifact_id: str) -> Path:
 
 def checksum_sidecar_path(artifact_path: Path) -> Path:
     return artifact_path.with_suffix(artifact_path.suffix + ".sha256")
+
+
+def applied_state_path(artifacts_dir: Path) -> Path:
+    """Persisted release_id/revision per workload (skip re-apply when unchanged)."""
+    return artifacts_dir.parent / "applied-software.json"
+
+
+def _load_applied_state(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_applied_workload(
+    path: Path,
+    *,
+    workload_key: str,
+    release_id: str,
+    revision: int,
+) -> None:
+    state = _load_applied_state(path)
+    state[workload_key] = {"release_id": release_id, "revision": revision}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _desired_identity(item: dict[str, Any]) -> tuple[str, int] | None:
+    release_id = item.get("release_id")
+    if release_id is None or release_id == "":
+        return None
+    try:
+        revision = int(item.get("revision") or 0)
+    except (TypeError, ValueError):
+        revision = 0
+    return str(release_id), revision
+
+
+def _already_applied(state: dict[str, Any], item: dict[str, Any]) -> bool:
+    identity = _desired_identity(item)
+    if identity is None:
+        return False
+    release_id, revision = identity
+    recorded = state.get(item["workload_key"])
+    if not isinstance(recorded, dict):
+        return False
+    try:
+        recorded_revision = int(recorded.get("revision") or -1)
+    except (TypeError, ValueError):
+        return False
+    return str(recorded.get("release_id") or "") == release_id and recorded_revision == revision
+
+
+def _health_only(item: dict[str, Any], *, compose_work: Path) -> dict[str, Any] | None:
+    """Return an in_sync/failed report when health can be checked without apply."""
+    kind = item.get("kind")
+    spec = item.get("spec") or {}
+    try:
+        if kind == "systemd":
+            from runtime.systemd import SystemdAdapter, systemd_available
+
+            if not systemd_available():
+                return None
+            unit_name = str(spec.get("unit_name") or item["workload_key"])
+            start = bool(spec.get("start", True))
+            if not start:
+                return _in_sync(item, healthy=True)
+            healthy = SystemdAdapter().health_check(unit_name=unit_name)
+            return _in_sync(item, healthy=healthy) if healthy else None
+        if kind == "docker":
+            from runtime.docker import DockerAdapter, docker_available
+
+            if not docker_available():
+                return None
+            container_name = str(spec.get("container_name") or item["workload_key"])
+            healthy = DockerAdapter().health_check(container_name=container_name)
+            return _in_sync(item, healthy=True) if healthy else None
+        if kind == "docker_compose":
+            from runtime.compose import ComposeAdapter, compose_available
+
+            if not compose_available():
+                return None
+            project_name = str(spec.get("project_name") or item["workload_key"])
+            healthy = ComposeAdapter(work_root=compose_work).health_check(project_name=project_name)
+            return _in_sync(item, healthy=True) if healthy else None
+    except Exception:  # noqa: BLE001 — fall through to full apply
+        logger.debug("Health-only check failed for %s; will re-apply", item.get("workload_key"))
+    return None
 
 
 def _already_downloaded(path: Path, expected_checksum: str | None) -> bool:
@@ -216,6 +308,8 @@ def reconcile_software(
         return []
 
     compose_work = artifacts_dir.parent / "compose"
+    state_path = applied_state_path(artifacts_dir)
+    applied = _load_applied_state(state_path)
     reports: list[dict[str, Any]] = []
     for item in desired:
         workload_key = item.get("workload_key")
@@ -226,6 +320,12 @@ def reconcile_software(
         if kind not in {"systemd", "docker", "docker_compose"}:
             reports.append(_failed(workload_key, f"Unsupported release kind: {kind!r}"))
             continue
+
+        if _already_applied(applied, item):
+            health_report = _health_only(item, compose_work=compose_work)
+            if health_report is not None:
+                reports.append(health_report)
+                continue
 
         artifact_id = item.get("artifact_id")
 
@@ -242,7 +342,7 @@ def reconcile_software(
                     artifacts_dir=artifacts_dir,
                 )
                 _report_updating(client, device_token, workload_key=workload_key, progress_percent=100)
-                reports.append(_apply_systemd(item, unit_file))
+                report = _apply_systemd(item, unit_file)
             elif kind == "docker":
                 tarball: Path | None = None
                 if artifact_id:
@@ -262,7 +362,7 @@ def reconcile_software(
                     )
                     continue
                 _report_updating(client, device_token, workload_key=workload_key, progress_percent=100)
-                reports.append(_apply_docker(item, tarball))
+                report = _apply_docker(item, tarball)
             else:  # docker_compose
                 if not artifact_id:
                     reports.append(
@@ -277,7 +377,19 @@ def reconcile_software(
                     artifacts_dir=artifacts_dir,
                 )
                 _report_updating(client, device_token, workload_key=workload_key, progress_percent=100)
-                reports.append(_apply_compose(item, compose_file, compose_work))
+                report = _apply_compose(item, compose_file, compose_work)
+
+            reports.append(report)
+            identity = _desired_identity(item)
+            if report.get("sync_status") == "in_sync" and identity is not None:
+                release_id, revision = identity
+                _save_applied_workload(
+                    state_path,
+                    workload_key=workload_key,
+                    release_id=release_id,
+                    revision=revision,
+                )
+                applied[workload_key] = {"release_id": release_id, "revision": revision}
         except AgentApiError as error:
             reports.append(_failed(workload_key, error.message))
             logger.warning("Software reconcile failed for %s: %s", workload_key, error.code)

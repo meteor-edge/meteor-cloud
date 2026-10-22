@@ -293,8 +293,15 @@ class ArtifactService:
             resource_id=artifact.id,
             metadata={"name": artifact.name, "version": artifact.version},
         )
-        self.artifacts.delete(artifact)
-        self.session.commit()
+        try:
+            self.artifacts.delete(artifact)
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise ConflictError(
+                "artifact_in_use",
+                "This artifact cannot be deleted while releases still reference it.",
+            ) from exc
         # Metadata is gone first so the artifact can never be listed without content.
         self._discard_object(key)
 

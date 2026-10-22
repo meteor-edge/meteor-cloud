@@ -710,8 +710,17 @@ class DeploymentService:
             if deployment is not None:
                 touched_deployments[deployment.id] = deployment
 
+        # Also refresh in-progress deployments that include this device so batched
+        # rollouts can advance after delay_seconds even when this device has no
+        # open rows left.
+        for deployment in self.deployments.list_in_progress_for_device(
+            organization_id=organization_id,
+            device_id=device_id,
+        ):
+            touched_deployments.setdefault(deployment.id, deployment)
+
         # Flush so status aggregates see the updated deployment_devices rows.
-        if touched_deployments:
+        if open_rows:
             self.session.flush()
         for deployment in touched_deployments.values():
             self.refresh_deployment_status(deployment)

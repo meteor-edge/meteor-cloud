@@ -7,7 +7,12 @@ import uuid
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from app.deployments.models import Deployment, DeploymentDevice, DeploymentDeviceStatus
+from app.deployments.models import (
+    Deployment,
+    DeploymentDevice,
+    DeploymentDeviceStatus,
+    DeploymentStatus,
+)
 
 
 class DeploymentRepository:
@@ -98,5 +103,25 @@ class DeploymentRepository:
                     DeploymentDevice.device_id == device_id,
                     DeploymentDevice.status.in_(open_statuses),
                 )
+            ).all()
+        )
+
+    def list_in_progress_for_device(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+    ) -> list[Deployment]:
+        """In-progress deployments that include this device (any row status)."""
+        return list(
+            self.session.scalars(
+                select(Deployment)
+                .join(DeploymentDevice, DeploymentDevice.deployment_id == Deployment.id)
+                .where(
+                    Deployment.organization_id == organization_id,
+                    Deployment.status == DeploymentStatus.IN_PROGRESS.value,
+                    DeploymentDevice.device_id == device_id,
+                )
+                .distinct()
             ).all()
         )

@@ -1,6 +1,6 @@
 [Unit]
 Description=MeteorCloud device agent (meteorcli)
-Documentation=https://github.com/meteor-edge/metero-cloud
+Documentation=https://github.com/meteor-edge/meteor-cloud
 After=network-online.target
 Wants=network-online.target
 

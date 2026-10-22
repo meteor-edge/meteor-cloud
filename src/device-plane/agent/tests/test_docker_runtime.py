@@ -24,7 +24,13 @@ def test_docker_apply_pull_runs_container(tmp_path: Path) -> None:
         return result
 
     adapter = DockerAdapter(runner=runner)
-    adapter.apply(container_name="cam", image="busybox:latest", ports=["8080:80"], env={"A": "1"})
+    adapter.apply(
+        container_name="cam",
+        image="busybox:latest",
+        ports=["8080:80"],
+        env={"A": "1"},
+        command='sh -c "echo hello"',
+    )
 
     assert calls[0][:3] == ["docker", "rm", "-f"]
     run = calls[1]
@@ -32,6 +38,7 @@ def test_docker_apply_pull_runs_container(tmp_path: Path) -> None:
     assert "busybox:latest" in run
     assert "-p" in run and "8080:80" in run
     assert "-e" in run and "A=1" in run
+    assert run[-3:] == ["sh", "-c", "echo hello"]
 
 
 def test_docker_load_parses_image(tmp_path: Path) -> None:

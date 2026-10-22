@@ -90,6 +90,40 @@ def test_wrong_artifact_type_rejected(client: TestClient, db_session: Session) -
     assert response.json()["error"]["code"] == "artifact_type_mismatch"
 
 
+def test_delete_release_in_use_by_deployment_returns_409(
+    client: TestClient, db_session: Session
+) -> None:
+    from tests.test_deployments import _register_device, _setup_release
+
+    org, headers, token, release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pi-keep", mac="aa:bb:cc:30:00:01")
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={
+            "release_id": release["id"],
+            "target": {"device_ids": [reg["device_id"]]},
+            "rollout": {"strategy": "immediate"},
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    blocked = client.delete(
+        f"/api/v1/organizations/{org.id}/releases/{release['id']}",
+        headers=headers,
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "release_in_use"
+
+    artifact_id = release["artifact_id"]
+    blocked_art = client.delete(
+        f"/api/v1/organizations/{org.id}/artifacts/{artifact_id}",
+        headers=headers,
+    )
+    assert blocked_art.status_code == 409
+    assert blocked_art.json()["error"]["code"] == "artifact_in_use"
+
+
 def test_duplicate_release_rejected(client: TestClient, db_session: Session) -> None:
     org, headers = _owner_setup(client, db_session)
     artifact = _upload_systemd(client, org.id, headers).json()

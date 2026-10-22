@@ -17,6 +17,7 @@ def test_systemd_reconcile_sets_installed_when_healthy(tmp_path: Path) -> None:
             "release_id": "rel-1",
             "release_version": "1.2.0",
             "artifact_id": "art-1",
+            "revision": 1,
             "spec": {"unit_name": "cam.service", "start": True},
         }
     ]
@@ -40,6 +41,41 @@ def test_systemd_reconcile_sets_installed_when_healthy(tmp_path: Path) -> None:
     assert reports[0]["health"] == "healthy"
     assert reports[0]["installed_release_id"] == "rel-1"
     adapter.apply.assert_called_once()
+
+
+def test_systemd_reconcile_skips_apply_when_release_unchanged(tmp_path: Path) -> None:
+    client = MagicMock()
+    client.get_software.return_value = [
+        {
+            "workload_key": "cam.service",
+            "kind": "systemd",
+            "release_id": "rel-1",
+            "release_version": "1.2.0",
+            "artifact_id": "art-1",
+            "revision": 2,
+            "spec": {"unit_name": "cam.service", "start": True},
+        }
+    ]
+    unit_path = tmp_path / "art-1"
+    unit_path.write_text("[Unit]\n", encoding="utf-8")
+    (tmp_path / "art-1.sha256").write_text("abc\n", encoding="utf-8")
+
+    adapter = MagicMock()
+    adapter.health_check.return_value = True
+
+    with (
+        patch("edge_agent.software._ensure_artifact", return_value=unit_path),
+        patch("edge_agent.software._report_updating"),
+        patch("runtime.systemd.systemd_available", return_value=True),
+        patch("runtime.systemd.SystemdAdapter", return_value=adapter),
+    ):
+        first = reconcile_software(client, "dev_token", tmp_path)
+        second = reconcile_software(client, "dev_token", tmp_path)
+
+    assert first[0]["sync_status"] == "in_sync"
+    assert second[0]["sync_status"] == "in_sync"
+    adapter.apply.assert_called_once()
+    assert adapter.health_check.call_count >= 2
 
 
 def test_systemd_health_fail_does_not_set_installed(tmp_path: Path) -> None:

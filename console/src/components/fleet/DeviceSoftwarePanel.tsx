@@ -64,7 +64,10 @@ export function DeviceSoftwarePanel({
         {canDeploy && (
           <Button type="button" className="mt-4" asChild>
             <Link
-              to={`/organizations/${organizationId}/deployments?deploy=1&device_id=${deviceId}`}
+              to={`/organizations/${organizationId}/deployments?${new URLSearchParams({
+                deploy: "1",
+                device_id: deviceId,
+              }).toString()}`}
             >
               Deploy a release
             </Link>
