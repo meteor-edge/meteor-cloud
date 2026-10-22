@@ -1,15 +1,11 @@
-"""OTA (firmware distribution) port.
+"""Deprecated OTA port.
 
-No OTA provider is implemented. Configuration uses ``ota_provider=none``.
-A future Mender (or other) adapter would implement this protocol.
+Prefer ``app.ports.deployment.DeploymentProvider``. This module re-exports the
+new port so older imports keep working until callers are updated.
 """
 
 from __future__ import annotations
 
-from typing import Protocol
+from app.ports.deployment import DeploymentProvider as OTAProvider
 
-
-class OTAProvider(Protocol):
-    def create_deployment(self, device_id: str, artifact_ref: str) -> str:
-        """Start a firmware deployment and return a provider-specific id."""
-        ...
+__all__ = ["OTAProvider"]

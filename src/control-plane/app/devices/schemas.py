@@ -331,6 +331,10 @@ class AgentHeartbeatRequest(BaseModel):
     os_version: str | None = Field(default=None, max_length=255)
     kernel_version: str | None = Field(default=None, max_length=255)
     metrics: dict[str, Any] = Field(default_factory=dict)
+    # Agent-reported install capabilities (systemd, docker, docker_compose, …).
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    # Installed / sync status for known workloads; unknown keys are ignored.
+    software_report: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AgentHeartbeatResponse(BaseModel):
@@ -338,6 +342,7 @@ class AgentHeartbeatResponse(BaseModel):
     status: ConnectivityStatus
     heartbeat_interval_seconds: int
     server_time: datetime
+    desired_software: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

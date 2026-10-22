@@ -16,6 +16,7 @@ USER_BIN="${HOME}/.local/bin"
 PREFIX="${PREFIX:-}"
 BIN_DIR="${BIN_DIR:-}"
 UNINSTALL=0
+WITH_SERVICE=0
 
 usage() {
   cat <<EOF
@@ -24,13 +25,15 @@ Install meteorcli from ${SCRIPT_DIR}
 Usage:
   $0                      Install for this user (${USER_PREFIX}, ${USER_BIN})
   sudo $0                 Install system-wide (${SYSTEM_PREFIX}, ${SYSTEM_BIN})
+  sudo $0 --with-service  System-wide + enable meteorcli.service (Raspberry Pi OS)
   $0 --uninstall          Remove the install (keeps credentials)
 
 Options:
-  --prefix DIR    Virtualenv location
-  --bin-dir DIR   Directory for the meteorcli symlink
-  --uninstall     Remove the venv and symlink
-  -h, --help      Show this help
+  --prefix DIR     Virtualenv location
+  --bin-dir DIR    Directory for the meteorcli symlink
+  --with-service   Install and enable systemd unit (root / system install only)
+  --uninstall      Remove the venv and symlink (and unit if present)
+  -h, --help       Show this help
 EOF
 }
 
@@ -43,6 +46,10 @@ while [[ $# -gt 0 ]]; do
     --bin-dir)
       BIN_DIR="${2:?--bin-dir requires a directory}"
       shift 2
+      ;;
+    --with-service)
+      WITH_SERVICE=1
+      shift
       ;;
     --uninstall)
       UNINSTALL=1
@@ -101,6 +108,11 @@ find_python() {
 
 uninstall() {
   local link="${BIN_DIR}/meteorcli"
+  if [[ "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now meteorcli.service 2>/dev/null || true
+    rm -f /etc/systemd/system/meteorcli.service
+    systemctl daemon-reload 2>/dev/null || true
+  fi
   if [[ -L "${link}" || -f "${link}" ]]; then
     rm -f "${link}"
     echo "Removed ${link}"
@@ -114,6 +126,31 @@ uninstall() {
   else
     echo "Left ${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli in place (device credentials)."
   fi
+}
+
+install_service() {
+  local unit_src="${SCRIPT_DIR}/packaging/meteorcli.service"
+  local unit_dst="/etc/systemd/system/meteorcli.service"
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "error: --with-service requires a root (system-wide) install." >&2
+    exit 1
+  fi
+  if [[ ! -f "${unit_src}" ]]; then
+    echo "error: missing ${unit_src}" >&2
+    exit 1
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "error: systemctl not found; cannot install the service." >&2
+    exit 1
+  fi
+  install -m 0644 "${unit_src}" "${unit_dst}"
+  # Point ExecStart at the installed binary when BIN_DIR differs.
+  if [[ "${BIN_DIR}/meteorcli" != "/usr/local/bin/meteorcli" ]]; then
+    sed -i "s|^ExecStart=.*|ExecStart=${BIN_DIR}/meteorcli run|" "${unit_dst}"
+  fi
+  systemctl daemon-reload
+  systemctl enable meteorcli.service
+  echo "Installed ${unit_dst} (enabled). Start after config: systemctl start meteorcli"
 }
 
 install() {
@@ -150,8 +187,12 @@ install() {
   if [[ "${EUID}" -ne 0 && ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
     echo "Add ${BIN_DIR} to PATH if meteorcli is not found."
   fi
+  if [[ "${WITH_SERVICE}" -eq 1 ]]; then
+    install_service
+  fi
   echo "Next: meteorcli config --domain <host> --api-key key_..."
   echo "      meteorcli test"
+  echo "      meteorcli register|request-token, then meteorcli run (or systemctl start meteorcli)"
 }
 
 if [[ "${UNINSTALL}" -eq 1 ]]; then

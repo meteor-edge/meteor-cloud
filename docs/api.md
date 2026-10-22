@@ -59,10 +59,12 @@ Prefix: `/api/v1/organizations/{organization_id}`
 | Registration tokens | `/registration-tokens` (+ revoke) |
 | Enrollment keys | `/enrollment-keys` (+ revoke) |
 | Enrollment requests | list / approve / reject under enrollment request routes |
-| Devices | `/devices`, `/devices/{device_id}`, enable/disable, MQTT revoke |
+| Devices | `/devices`, `/devices/{device_id}`, `/devices/{device_id}/software`, enable/disable, MQTT revoke |
 | MQTT test | `/mqtt/events` (SSE), `/mqtt/publish` |
 | Audit | `/audit-events` |
 | Artifacts | `/artifacts` (separate router; upload, download, download-link) |
+| Releases | `/releases` (software versions: create, list, update, delete) |
+| Deployments | `/deployments` (Deploy a release; list, detail, cancel) |
 
 Fleet guides: [docs/fleet/](fleet/).
 
@@ -73,7 +75,9 @@ Prefix: `/api/v1/agent`
 | Method | Path | Auth |
 | --- | --- | --- |
 | `POST` | `/register` | Registration token in body |
-| `POST` | `/heartbeat` | Device token |
+| `POST` | `/heartbeat` | Device token (optional `software_report`; returns `desired_software`) |
+| `GET` | `/software` | Device token (desired workloads) |
+| `GET` | `/artifacts/{id}/download` | Device token (only if artifact is on desired software) |
 | `GET`/`POST` | `/enroll/check` | Enrollment API key |
 | `POST` | `/enroll/request` | Enrollment API key |
 | `POST` | `/enroll/poll` | Claim secret |

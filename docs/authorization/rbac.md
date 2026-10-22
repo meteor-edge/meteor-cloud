@@ -136,7 +136,7 @@ Stored as `resource` + `action` columns; id is derived.
 
 - Catalog lives in code (`catalog.py`), seeded into `permissions` on migrate/boot.
 - No `"*"` / `"everything"` permission. Owner is a role that *includes* all permissions.
-- Deployments permissions exist in the catalog before the Deployments product ships; endpoints return 404 until built, but Access UI can show them as “reserved”.
+- Deployments permissions gate the [Deployments](../fleet/deployments.md) APIs. With `DEPLOYMENT_PROVIDER=none`, those routes return 404.
 
 ---
 

@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 
+from app.artifacts.dependencies import ArtifactSvc
+from app.artifacts.router import stream_artifact
 from app.core.config import Settings, get_settings
+from app.deployments.software_dependencies import DeviceSoftwareSvc
+from app.deployments.software_schemas import DesiredSoftwareItem
 from app.devices.dependencies import (
     CurrentApiKey,
     CurrentDevice,
@@ -71,6 +77,35 @@ def device_heartbeat(
     service: RegistrationSvc,
 ) -> AgentHeartbeatResponse:
     return service.heartbeat(device=device, payload=payload)
+
+
+@router.get("/software", response_model=list[DesiredSoftwareItem])
+def agent_list_software(
+    device: CurrentDevice,
+    software: DeviceSoftwareSvc,
+) -> list[DesiredSoftwareItem]:
+    """Return current desired software for this device (MQTT wake-up / poll)."""
+    return software.list_desired_for_agent(device_id=device.id)
+
+
+@router.get("/artifacts/{artifact_id}/download")
+def agent_download_artifact(
+    artifact_id: uuid.UUID,
+    device: CurrentDevice,
+    software: DeviceSoftwareSvc,
+    artifacts: ArtifactSvc,
+) -> StreamingResponse:
+    """Stream an artifact only if it is on this device's current desired software."""
+    software.require_desired_artifact(
+        organization_id=device.organization_id,
+        device_id=device.id,
+        artifact_id=artifact_id,
+    )
+    artifact, stored = artifacts.open_content(
+        organization_id=device.organization_id,
+        artifact_id=artifact_id,
+    )
+    return stream_artifact(artifact, stored)
 
 
 def _warn_insecure_transport(request: Request, settings: Settings) -> None:

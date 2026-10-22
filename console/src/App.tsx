@@ -8,6 +8,9 @@ import { RegisterPage } from "@/pages/auth/RegisterPage";
 import { HealthPage } from "@/pages/HealthPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { ArtifactsPage } from "@/pages/artifacts/ArtifactsPage";
+import { DeploymentDetailPage } from "@/pages/deployments/DeploymentDetailPage";
+import { DeploymentsPage } from "@/pages/deployments/DeploymentsPage";
+import { ReleasesPage } from "@/pages/releases/ReleasesPage";
 import { DeviceDetailPage } from "@/pages/fleet/DeviceDetailPage";
 import { DeviceGroupDetailPage } from "@/pages/fleet/DeviceGroupDetailPage";
 import { DeviceGroupsPage } from "@/pages/fleet/DeviceGroupsPage";
@@ -153,6 +156,30 @@ export function App() {
           element={
             <ProtectedRoute>
               <ArtifactsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/releases"
+          element={
+            <ProtectedRoute>
+              <ReleasesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/deployments"
+          element={
+            <ProtectedRoute>
+              <DeploymentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/deployments/:deploymentId"
+          element={
+            <ProtectedRoute>
+              <DeploymentDetailPage />
             </ProtectedRoute>
           }
         />

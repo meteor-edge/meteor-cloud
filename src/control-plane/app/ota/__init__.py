@@ -1,10 +1,11 @@
-"""OTA application facade.
+"""OTA / deployment provider facade.
 
-Depends on ``app.ports.ota.OTAProvider``. No provider is wired
-(``ota_provider=none``).
+Prefer ``DEPLOYMENT_PROVIDER`` and ``app.ports.deployment.DeploymentProvider``.
+``OTA_PROVIDER=none`` remains accepted for older env files.
 """
 
-from app.adapters import ota_provider
+from app.adapters import deployment_provider, ota_provider
+from app.ports.deployment import DeploymentProvider
 from app.ports.ota import OTAProvider
 
-__all__ = ["OTAProvider", "ota_provider"]
+__all__ = ["DeploymentProvider", "OTAProvider", "deployment_provider", "ota_provider"]

@@ -21,3 +21,9 @@ docker build -f infrastructure/docker/Dockerfile.console \
 ```
 
 Compose and Helm deploy the console next to the control plane. Point `VITE_API_BASE_URL` at the public API origin operators will use.
+
+## Features
+
+Fleet screens include devices, groups, types, artifacts, and **releases** (systemd
+services, single containers, Compose applications, and future kinds). Creating a
+release does not deploy it yet; see [Releases](fleet/releases.md).

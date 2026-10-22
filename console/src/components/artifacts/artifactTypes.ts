@@ -4,6 +4,7 @@ import type { ArtifactType } from "@/api/fleet";
 export const ARTIFACT_TYPES: ArtifactType[] = [
   "os_image",
   "firmware",
+  "docker",
   "docker_compose",
   "systemd",
   "configuration",
@@ -13,6 +14,7 @@ export const ARTIFACT_TYPES: ArtifactType[] = [
 export const ARTIFACT_TYPE_LABELS: Record<ArtifactType, string> = {
   os_image: "OS Image",
   firmware: "Firmware",
+  docker: "Docker image tarball",
   docker_compose: "Docker Compose",
   systemd: "systemd",
   configuration: "Configuration",
@@ -22,6 +24,7 @@ export const ARTIFACT_TYPE_LABELS: Record<ArtifactType, string> = {
 export const ARTIFACT_TYPE_SECTION_LABELS: Record<ArtifactType, string> = {
   os_image: "OS Images",
   firmware: "Firmware",
+  docker: "Docker tarballs",
   docker_compose: "Docker Compose",
   systemd: "systemd Units",
   configuration: "Configuration",

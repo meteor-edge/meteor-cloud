@@ -67,3 +67,12 @@ def test_observability_backend_accepts_cloudwatch() -> None:
 def test_observability_backend_rejects_unknown_value() -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, OBSERVABILITY_BACKEND="datadog")
+
+
+def test_deployment_provider_defaults_to_native() -> None:
+    assert Settings(_env_file=None).deployment_provider == "native"
+
+
+def test_deployment_provider_accepts_none_and_mender() -> None:
+    assert Settings(_env_file=None, DEPLOYMENT_PROVIDER="none").deployment_provider == "none"
+    assert Settings(_env_file=None, DEPLOYMENT_PROVIDER="mender").deployment_provider == "mender"

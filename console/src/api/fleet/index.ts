@@ -7,3 +7,6 @@ export * from "@/api/fleet/enrollmentKeys";
 export * from "@/api/fleet/enrollmentRequests";
 export * from "@/api/fleet/mqtt";
 export * from "@/api/fleet/artifacts";
+export * from "@/api/fleet/releases";
+export * from "@/api/fleet/software";
+export * from "@/api/fleet/deployments";

@@ -35,10 +35,139 @@ export type DeviceGroup = {
 export type ArtifactType =
   | "os_image"
   | "firmware"
+  | "docker"
   | "docker_compose"
   | "systemd"
   | "configuration"
   | "other";
+
+export type ReleaseKind = "systemd" | "docker" | "docker_compose";
+
+export type Release = {
+  id: string;
+  organization_id: string;
+  name: string;
+  version: string;
+  kind: ReleaseKind;
+  artifact_id: string | null;
+  description: string | null;
+  spec: Record<string, unknown>;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReleaseListParams = {
+  kind?: ReleaseKind;
+  version?: string;
+  search?: string;
+  page?: number;
+  page_size?: number;
+};
+
+export type ReleaseCreatePayload = {
+  name: string;
+  version: string;
+  kind: ReleaseKind;
+  artifact_id?: string | null;
+  description?: string | null;
+  spec: Record<string, unknown>;
+};
+
+export type DeploymentCounts = {
+  pending: number;
+  queued: number;
+  updating: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  skipped: number;
+  total: number;
+};
+
+export type DeploymentDevice = {
+  id: string;
+  deployment_id: string;
+  device_id: string;
+  device_name: string | null;
+  status: string;
+  progress_percent: number | null;
+  previous_desired_release_id: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Deployment = {
+  id: string;
+  organization_id: string;
+  release_id: string;
+  release: ReleaseSummary | null;
+  name: string | null;
+  target: Record<string, unknown>;
+  rollout: Record<string, unknown>;
+  status: string;
+  provider: string;
+  provider_ref: string | null;
+  counts: DeploymentCounts;
+  created_by_user_id: string | null;
+  rollback_of_deployment_id: string | null;
+  created_at: string;
+  updated_at: string;
+  devices?: DeploymentDevice[] | null;
+};
+
+export type DeploymentListParams = {
+  status?: string;
+  release_id?: string;
+  page?: number;
+  page_size?: number;
+};
+
+export type DeploymentCreatePayload = {
+  release_id: string;
+  name?: string | null;
+  target: {
+    device_ids?: string[];
+    group_ids?: string[];
+    device_type_ids?: string[];
+  };
+  rollout?: {
+    strategy?: string;
+    batch_size?: number | null;
+    delay_seconds?: number | null;
+  };
+};
+
+export type ReleaseSummary = {
+  id: string;
+  name: string;
+  version: string;
+  kind: ReleaseKind;
+};
+
+export type DeviceSoftware = {
+  id: string;
+  organization_id: string;
+  device_id: string;
+  workload_key: string;
+  kind: ReleaseKind;
+  desired_release_id: string | null;
+  desired_revision: number;
+  desired_spec: Record<string, unknown>;
+  desired_release: ReleaseSummary | null;
+  installed_release_id: string | null;
+  installed_version: string | null;
+  installed_release: ReleaseSummary | null;
+  health: string;
+  sync_status: string;
+  progress_percent: number;
+  attempt_count: number;
+  last_error: string | null;
+  reported_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export type Artifact = {
   id: string;

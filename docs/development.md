@@ -188,7 +188,8 @@ Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed
 | `CACHE_PROVIDER` | Rate-limit adapter: `redis` (shared) or `memory` (per process) |
 | `OBJECT_STORAGE_PROVIDER` | Artifacts: `s3` (any S3-compatible API) or `filesystem` (`OBJECT_STORAGE_PATH`) |
 | `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
-| `OTA_PROVIDER` | OTA adapter (`none` until a provider exists) |
+| `DEPLOYMENT_PROVIDER` | Who *executes* Deploys: `native` (default), `none`, or `mender` (stub until adapter exists). Releases/UI stay in MeteorCloud |
+| `OTA_PROVIDER` | Deprecated; prefer `DEPLOYMENT_PROVIDER` |
 | `IDENTITY_PROVIDER` | Member sign-in account directory (`local` only: PostgreSQL users) |
 
 HTTP JSON between planes is documented in [`contracts/mqtt-http.md`](../contracts/mqtt-http.md).

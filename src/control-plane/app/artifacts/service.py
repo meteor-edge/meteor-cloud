@@ -320,6 +320,13 @@ class ArtifactService:
         artifact = self._require_artifact(organization_id, artifact_id)
         return artifact, self._open(artifact)
 
+    def open_content(
+        self, *, organization_id: uuid.UUID, artifact_id: uuid.UUID
+    ) -> tuple[Artifact, StoredObject]:
+        """Open artifact bytes for an already-authorized caller (e.g. agent download)."""
+        artifact = self._require_artifact(organization_id, artifact_id)
+        return artifact, self._open(artifact)
+
     def create_download_link(
         self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID
     ) -> ArtifactDownloadLinkResponse:

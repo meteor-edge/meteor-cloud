@@ -19,6 +19,7 @@ data:
   REGISTRATION_REQUIRE_HTTPS: {{ .Values.config.registrationRequireHttps | toString | quote }}
   DATABASE_PROVIDER: postgresql
   TELEMETRY_PROVIDER: postgresql
+  DEPLOYMENT_PROVIDER: native
   OTA_PROVIDER: none
   IDENTITY_PROVIDER: local
   CACHE_PROVIDER: {{ .Values.cache.provider | quote }}

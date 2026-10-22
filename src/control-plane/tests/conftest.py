@@ -34,6 +34,9 @@ from app.devices.rate_limit import InMemoryRateLimiter
 from app.identity import models as _identity_models  # noqa: F401
 from app.identity.models import User
 from app.main import create_app
+from app.deployments import models as _deployment_models  # noqa: F401
+from app.deployments import software_models as _software_models  # noqa: F401
+from app.releases import models as _release_models  # noqa: F401
 from app.tenancy import models as _organization_models  # noqa: F401
 from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole
 from tests.db_guard import assert_safe_test_database_url, ensure_database_exists

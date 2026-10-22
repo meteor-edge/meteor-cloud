@@ -7,9 +7,12 @@ Credentials passed here are never logged.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 
@@ -24,9 +27,16 @@ class AgentApiError(Exception):
 
 
 class EdgeClient:
-    def __init__(self, server_url: str, *, timeout: float = 15.0) -> None:
+    def __init__(
+        self,
+        server_url: str,
+        *,
+        timeout: float = 15.0,
+        download_timeout: float = 300.0,
+    ) -> None:
         self.server_url = server_url.rstrip("/")
         self.timeout = timeout
+        self.download_timeout = download_timeout
 
     def _request(
         self,
@@ -117,3 +127,67 @@ class EdgeClient:
 
     def heartbeat(self, *, device_token: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._post("/api/v1/agent/heartbeat", payload, bearer=device_token)
+
+    def get_software(self, *, device_token: str) -> list[dict[str, Any]]:
+        """Fetch desired software for this device."""
+        result = self._get("/api/v1/agent/software", bearer=device_token)
+        if isinstance(result, list):
+            return result
+        return []
+
+    def download_artifact(
+        self,
+        *,
+        device_token: str,
+        artifact_id: str,
+        destination: Path,
+        on_progress: Callable[[int, int | None], None] | None = None,
+    ) -> str:
+        """Download an artifact, verify ``X-Checksum-SHA256``, and return the hex digest.
+
+        Raises ``AgentApiError`` with code ``checksum_mismatch`` when the digest
+        does not match. Partial files are removed on failure.
+        """
+        url = f"{self.server_url}/api/v1/agent/artifacts/{artifact_id}/download"
+        headers = {"Authorization": f"Bearer {device_token}", "Accept": "*/*"}
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = destination.with_suffix(destination.suffix + ".partial")
+        try:
+            with urllib.request.urlopen(request, timeout=self.download_timeout) as response:
+                expected = (response.headers.get("X-Checksum-SHA256") or "").strip().lower()
+                total_header = response.headers.get("Content-Length")
+                total = int(total_header) if total_header and total_header.isdigit() else None
+                digest = hashlib.sha256()
+                received = 0
+                with tmp_path.open("wb") as handle:
+                    while True:
+                        chunk = response.read(64 * 1024)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+                        digest.update(chunk)
+                        received += len(chunk)
+                        if on_progress is not None:
+                            on_progress(received, total)
+            actual = digest.hexdigest()
+            if expected and actual != expected:
+                tmp_path.unlink(missing_ok=True)
+                raise AgentApiError(
+                    0,
+                    "checksum_mismatch",
+                    "Downloaded artifact failed SHA-256 verification.",
+                )
+            tmp_path.replace(destination)
+            return expected or actual
+        except AgentApiError:
+            raise
+        except urllib.error.HTTPError as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise self._to_api_error(exc) from exc
+        except urllib.error.URLError as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise AgentApiError(0, "network_error", str(exc.reason)) from exc
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise

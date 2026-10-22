@@ -66,7 +66,7 @@ Reading requires organization membership. Uploading and deleting require the
 | `POST` | `/api/v1/organizations/{org}/artifacts/{id}/download-link` | Returns `url` and a short-lived `ticket` for browser downloads |
 | `POST` | `/api/v1/organizations/{org}/artifacts/{id}/download` | Form field `ticket`, no auth header. The ticket is bound to user, organization, and artifact, and membership is re-checked. It travels in the body so it never appears in URLs or request logs |
 
-Types: `os_image`, `firmware`, `docker_compose`, `systemd`, `configuration`, `other`.
+Types: `os_image`, `firmware`, `docker`, `docker_compose`, `systemd`, `configuration`, `other`.
 
 Downloads include `Content-Length`, `Content-Disposition`, and
 `X-Checksum-SHA256` headers.
@@ -77,8 +77,10 @@ Downloads include `Content-Length`, `Content-Disposition`, and
   before streaming them to storage. Very large images may later move to
   presigned direct-to-storage uploads.
 - Deleting an organization removes artifact rows, but not their stored objects.
-- Deployments and the container registry are not implemented yet. They will
-  reference artifacts by ID.
+- [Releases](releases.md) reference artifacts by ID. [Deploy](deployments.md) a
+  release to set desired software on devices. MeteorCloud does not host a
+  container registry; docker releases pull images on the device or use a
+  `docker` tarball artifact.
 
 ## UI
 

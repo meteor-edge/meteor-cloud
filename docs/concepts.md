@@ -44,6 +44,12 @@ Connectivity for operators is mainly `last_seen_at` from heartbeats; MQTT online
 
 Deployable files (OS image, firmware, compose bundle, …). **Metadata** lives in PostgreSQL; **bytes** live in filesystem or S3-compatible storage. See [Artifacts](fleet/artifacts.md).
 
+## Releases
+
+A **release** is a version of software (name + version + kind + install spec) that
+references an artifact when needed. Operators create releases first; deploying
+them to devices comes later. See [Releases](fleet/releases.md).
+
 ## MQTT (optional)
 
 Off by default. When enabled, devices get per-device MQTT credentials at enroll/claim time, connect over TLS, and publish only to ACL-allowed topics. The data plane ingests those payloads into the control plane. See [MQTT](fleet/mqtt.md).
