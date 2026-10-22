@@ -1,0 +1,16 @@
+---
+# No cloud security group: UFW allows only SSH (from these networks) and WireGuard.
+firewall_enabled: true
+firewall_allowed_ssh_cidrs: [192.168.10.0/24]
+
+# Control plane hosted elsewhere (e.g. AWS). Join it with a site link: on the control-plane
+# host run `wg genkey | tee /etc/wireguard/link.key | wg pubkey`, put the public key here, then
+# install artifacts/wireguard-wg-gateway-onprem/wg-link-cp-1.conf there as /etc/wireguard/wg-link.conf
+# and publish the API on 10.9.0.10:8000 (Compose: BACKEND_BIND_ADDRESS=10.9.0.10).
+vpn_site_links:
+  - name: cp-1
+    public_key: "REPLACE_WITH_CP_LINK_PUBLIC_KEY"
+    address: 10.9.0.10
+vpn_control_plane_url: http://10.9.0.10:8000
+# The control plane dials this; set the LAN address when it is on the same network.
+# vpn_link_endpoint: 192.168.10.20:51820

@@ -30,6 +30,8 @@ def test_terraform_variables_include_tags(tmp_path: Path) -> None:
     assert variables["installation_name"] == "production"
     assert variables["aws_region"] == "eu-central-1"
     assert variables["tags"]["ManagedBy"] == "edge-installer"
+    assert variables["vpn_placement"] == "same_host"
+    assert variables["vpn_instance_type"] == "t3.micro"
 
 
 def test_terraform_output_parsing() -> None:

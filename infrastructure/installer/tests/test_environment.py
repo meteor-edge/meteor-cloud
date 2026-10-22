@@ -114,5 +114,16 @@ def test_build_ansible_extra_vars_includes_vpn_key_when_set(
     extra = build_ansible_extra_vars(config, _outputs())
 
     assert extra["vpn_server_private_key"] == "super-secret-key"
-    assert extra["connectivity_provider"] == "wireguard"
-    assert extra["wireguard_server_endpoint"].endswith(":51820")
+    # Ansible derives these from the gateway host; extra-vars would override it.
+    assert "connectivity_provider" not in extra
+    assert "wireguard_server_endpoint" not in extra
+
+
+def test_build_ansible_extra_vars_dedicated_gateway_link_endpoint() -> None:
+    config = load_configuration(EXAMPLE)
+    outputs = _outputs(vpn_gateway_public_ip="5.6.7.8", vpn_gateway_private_ip="10.0.0.9")
+
+    extra = build_ansible_extra_vars(config, outputs)
+
+    assert extra["vpn_link_endpoint"] == "10.0.0.9:51820"
+    assert "vpn_link_endpoint" not in build_ansible_extra_vars(config, _outputs())

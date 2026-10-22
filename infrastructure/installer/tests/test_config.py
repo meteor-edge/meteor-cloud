@@ -132,6 +132,27 @@ def test_validate_reports_missing_secrets(tmp_path: Path, monkeypatch: pytest.Mo
     assert any("EDGE_PLATFORM_JWT_SECRET" in item for item in errors)
 
 
+def test_validate_requires_connectivity_token_for_vpn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "key.pem"
+    key_path.write_text("key", encoding="utf-8")
+    monkeypatch.delenv("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN", raising=False)
+    monkeypatch.delenv("EDGE_PLATFORM_MQTT_INTERNAL_TOKEN", raising=False)
+
+    config = load_configuration(EXAMPLE)
+    config.aws.ssh_private_key_path = str(key_path)
+    assert any("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN" in item for item in validate_configuration(config))
+
+    monkeypatch.setenv("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN", "token")
+    assert not any("CONNECTIVITY" in item for item in validate_configuration(config))
+
+
+def test_vpn_placement_defaults_to_same_host() -> None:
+    config = load_configuration(EXAMPLE)
+    assert config.services.vpn.placement == "same_host"
+
+
 def test_validate_reports_missing_ssh_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "secret")
     monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")

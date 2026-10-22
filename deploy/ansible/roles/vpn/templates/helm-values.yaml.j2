@@ -1,0 +1,13 @@
+# Helm values for the WireGuard gateway {{ vpn_gateway_host }}:
+#   helm upgrade --install meteorcloud deploy/kubernetes/helm/meteorcloud \
+#     -f values-production.yaml -f {{ vpn_handoff_dir }}/helm-values.yaml \
+#     --set-string secrets.connectivityInternalToken="$EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN"
+# The gateway polls {{ vpn_agent_control_plane_url | trim }}: expose the backend there
+# with an internal load balancer or a private ingress, never the public one.
+connectivity:
+  provider: wireguard
+  wireguard:
+    serverPublicKey: "{{ vpn_server_public_key }}"
+    serverEndpoint: "{{ vpn_gateway_endpoint | trim }}"
+    serverAddress: "{{ vpn_server_address }}"
+    clientCidr: "{{ vpn_network_cidr }}"

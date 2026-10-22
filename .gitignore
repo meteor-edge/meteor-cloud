@@ -84,7 +84,10 @@ certs/*
 
 # Ansible inventories with real hosts (keep the example)
 deploy/ansible/inventory/*
-!deploy/ansible/inventory/example/
+!deploy/ansible/inventory/example*/
 
 # Local k3d MQTT certificates
 .k8s/
+
+# Ansible WireGuard gateway hand-off files (contain public keys and endpoints)
+deploy/ansible/artifacts/

@@ -79,6 +79,9 @@ def run_apply(*, config_path: Path, console: Console) -> None:
     console.print(f"Region: {config.aws.region if config.aws else result.outputs.region}")
     console.print(f"Instance ID: {result.outputs.instance_id}")
     console.print(f"Public IP: {result.outputs.public_ip}")
+    if result.outputs.vpn_gateway_public_ip:
+        port = config.services.vpn.listen_port
+        console.print(f"WireGuard gateway: {result.outputs.vpn_gateway_public_ip}:{port} (UDP)")
     console.print(f"Platform URL: {result.state.platform_url}")
     for key, value in result.health.items():
         console.print(f"{key.replace('_', ' ').title()}: {value}")

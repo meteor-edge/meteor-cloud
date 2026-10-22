@@ -1,36 +1,70 @@
 ---
-- name: Install WireGuard
-  ansible.builtin.apt:
-    name:
-      - wireguard
-      - wireguard-tools
-      - python3
-    state: present
-    update_cache: true
+# WireGuard gateway: wg0, the peer agent, and static site-link peers on a
+# dedicated gateway. Runs on vpn_gateway_hosts; see playbooks/services/vpn.yml.
+- name: Check WireGuard gateway settings
+  ansible.builtin.assert:
+    that:
+      - not (vpn_standalone | bool) or vpn_gateway_hosts | length == 1
+      - vpn_server_private_key | length > 0 or vpn_generate_server_key | bool
+      - connectivity_internal_token | length > 0
+      - vpn_managed_api_hosts | length > 0 or vpn_control_plane_url | length > 0
+      - >-
+        vpn_managed_api_hosts | map('extract', hostvars, 'vpn_link_public_key') | select('defined') | list | length
+        == vpn_managed_api_hosts | length
+      - vpn_site_links | rejectattr('public_key', 'defined') | list | length == 0
+      - vpn_site_links | map(attribute='public_key') | reject('match', '^[A-Za-z0-9+/]{43}=$') | list | length == 0
+      - >-
+        vpn_site_links | map(attribute='address') | map('regex_replace', '\.\d+$', '') | reject('equalto', vpn_link_prefix)
+        | list | length == 0
+    fail_msg: >-
+      WireGuard gateway: use exactly one host in the vpn_gateway group; set EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY
+      or keep vpn_generate_server_key; set EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN (or
+      EDGE_PLATFORM_MQTT_INTERNAL_TOKEN); with no `platform` hosts set vpn_control_plane_url; give every
+      vpn_site_links entry a WireGuard public_key (wg pubkey output) and an address inside vpn_link_subnet ({{ vpn_link_subnet }}).
+      Run without --limit so the API hosts' site-link keys are known.
+    quiet: true
 
-- name: Ensure WireGuard config directory exists
-  ansible.builtin.file:
-    path: /etc/wireguard
-    state: directory
+- name: Install WireGuard requirements
+  ansible.builtin.include_tasks: packages.yml
+  vars:
+    vpn_sysctl:
+      net.ipv4.ip_forward: 1
+
+- name: Install the provided server private key
+  ansible.builtin.copy:
+    dest: /etc/wireguard/server.key
+    content: "{{ vpn_server_private_key | trim }}\n"
     owner: root
     group: root
-    mode: "0700"
-
-- name: Derive WireGuard server public key
-  ansible.builtin.command:
-    cmd: wg pubkey
-    stdin: "{{ vpn_server_private_key }}"
-  register: wg_derived_pub
-  changed_when: false
+    mode: "0600"
+  notify: Restart wireguard
   no_log: true
-  when:
-    - vpn_server_private_key | default('') | length > 0
-    - wireguard_server_public_key | default('') | length == 0
+  when: vpn_server_private_key | length > 0
 
-- name: Remember WireGuard server public key
+- name: Generate a server private key once
+  ansible.builtin.shell:
+    cmd: umask 077 && wg genkey > /etc/wireguard/server.key
+    creates: /etc/wireguard/server.key
+  when: vpn_server_private_key | length == 0
+
+- name: Derive the server public key
+  ansible.builtin.shell:
+    cmd: wg pubkey < /etc/wireguard/server.key
+  register: vpn_server_pubkey
+  changed_when: false
+
+- name: Remember the server public key
   ansible.builtin.set_fact:
-    wireguard_server_public_key: "{{ wg_derived_pub.stdout | trim }}"
-  when: wg_derived_pub.stdout | default('') | length > 0
+    vpn_server_public_key: "{{ vpn_server_pubkey.stdout | trim }}"
+
+# Managed API hosts read this file (platform_config) to enable CONNECTIVITY_PROVIDER.
+- name: Publish the server public key
+  ansible.builtin.copy:
+    dest: /etc/wireguard/server.pub
+    content: "{{ vpn_server_public_key }}\n"
+    owner: root
+    group: root
+    mode: "0644"
 
 - name: Render WireGuard server configuration
   ansible.builtin.template:
@@ -40,14 +74,12 @@
     group: root
     mode: "0600"
   notify: Restart wireguard
-  when: vpn_server_private_key | default('') | length > 0
 
 - name: Enable and start WireGuard interface
   ansible.builtin.systemd:
     name: wg-quick@wg0
     enabled: true
     state: started
-  when: vpn_server_private_key | default('') | length > 0
 
 - name: Ensure gateway directories exist
   ansible.builtin.file:
@@ -59,7 +91,6 @@
   loop:
     - { path: /opt/meteorcloud/gateway, mode: "0755" }
     - { path: /etc/meteorcloud, mode: "0700" }
-  when: vpn_server_private_key | default('') | length > 0
 
 - name: Install gateway peer agent
   ansible.builtin.copy:
@@ -69,7 +100,6 @@
     group: root
     mode: "0755"
   notify: Restart meteorcloud gateway
-  when: vpn_server_private_key | default('') | length > 0
 
 - name: Render gateway environment
   ansible.builtin.template:
@@ -80,7 +110,6 @@
     mode: "0600"
   notify: Restart meteorcloud gateway
   no_log: true
-  when: vpn_server_private_key | default('') | length > 0
 
 - name: Install gateway systemd unit
   ansible.builtin.template:
@@ -90,51 +119,11 @@
     group: root
     mode: "0644"
   notify: Restart meteorcloud gateway
-  when: vpn_server_private_key | default('') | length > 0
 
+# Retries every 15s until the API answers (on a fresh host it starts after this play).
 - name: Enable and start gateway agent
   ansible.builtin.systemd:
     name: meteorcloud-gateway
     enabled: true
     state: started
     daemon_reload: true
-  when: vpn_server_private_key | default('') | length > 0
-
-- name: Write WireGuard settings into Compose env
-  ansible.builtin.lineinfile:
-    path: "{{ platform_compose_dir }}/.env"
-    regexp: "{{ item.regexp }}"
-    line: "{{ item.line }}"
-  vars:
-    wg_server_endpoint: "{{ wireguard_server_endpoint | default(ansible_host ~ ':' ~ (listen_port | default(51820))) }}"
-  loop:
-    - regexp: "^CONNECTIVITY_PROVIDER="
-      line: CONNECTIVITY_PROVIDER=wireguard
-    - regexp: "^WIREGUARD_SERVER_PUBLIC_KEY="
-      line: "WIREGUARD_SERVER_PUBLIC_KEY=\"{{ wireguard_server_public_key }}\""
-    - regexp: "^WIREGUARD_SERVER_ENDPOINT="
-      line: "WIREGUARD_SERVER_ENDPOINT={{ wg_server_endpoint }}"
-  no_log: true
-  when:
-    - vpn_server_private_key | default('') | length > 0
-    - wireguard_server_public_key | default('') | length > 0
-    - platform_compose_dir is defined
-
-- name: Recreate API with WireGuard settings
-  ansible.builtin.command:
-    cmd: >-
-      docker compose -f docker-compose.yml -f docker-compose.prod.yml
-      -f docker-compose.vpn.yml up -d --no-deps backend
-    chdir: "{{ platform_compose_dir }}"
-  changed_when: true
-  when:
-    - vpn_server_private_key | default('') | length > 0
-    - wireguard_server_public_key | default('') | length > 0
-    - platform_compose_dir is defined
-
-- name: Note when VPN keys are not configured
-  ansible.builtin.debug:
-    msg: >-
-      WireGuard packages installed. Set EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY and re-run deploy
-      to activate the tunnel.
-  when: vpn_server_private_key | default('') | length == 0

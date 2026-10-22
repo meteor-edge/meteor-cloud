@@ -93,10 +93,60 @@ firewall_enabled: false
 firewall_ssh_port: 22
 firewall_allowed_ssh_cidrs: ["0.0.0.0/0"]
 
-# Device WireGuard (EC2 Compose path). Stay "none" until a server key is set.
+# Device WireGuard gateway (the `vpn` service, or playbooks/wireguard.yml).
+# Where wg0 runs is chosen by the inventory:
+#   - `platform` only: on the API host (co-located).
+#   - `vpn_gateway` + `platform`: on a dedicated server (AWS, on-prem); each API
+#     host is joined to it by an automatic WireGuard site link (vpn_link_subnet).
+#   - `vpn_gateway` only: the control plane runs elsewhere (another cloud,
+#     Kubernetes). Set vpn_control_plane_url and vpn_site_links / vpn_routed_cidrs.
+# connectivity_provider and wireguard_server_public_key are filled in from the
+# gateway on managed API hosts; they stay "none"/empty until it is set up.
 connectivity_provider: none
 wireguard_server_public_key: "{{ lookup('env', 'EDGE_PLATFORM_VPN_SERVER_PUBLIC_KEY') | default('', true) }}"
+# host:port devices dial. Empty: vpn_public_host of the gateway host (else ansible_host) and vpn_listen_port.
 wireguard_server_endpoint: ""
+# Server private key. Empty: generate one on the gateway once (/etc/wireguard/server.key, never leaves the host).
+vpn_server_private_key: "{{ lookup('env', 'EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY') | default('', true) }}"
+vpn_generate_server_key: true
+vpn_listen_port: 51820
+vpn_server_address: 10.8.0.1/16
+vpn_network_cidr: 10.8.0.0/16
+# Automatic site links to managed API hosts; must not overlap vpn_network_cidr.
+# API host N (order in the `platform` group) gets .N+2 and serves the API to the gateway there.
+vpn_link_subnet: 10.9.0.0/24
+# Address the API hosts dial for the site link. Empty: the device endpoint.
+# Set the gateway's private ip:port when both are in one VPC or LAN.
+vpn_link_endpoint: ""
+# Control plane hosted elsewhere (`vpn_gateway` only): private URL the gateway agent polls for
+# /internal/connectivity/* (e.g. an internal load balancer or http://10.0.1.5:8000). Traefik never
+# serves /internal publicly. Overrides the derived URL in the other modes.
+vpn_control_plane_url: ""
+# Site links for unmanaged control-plane hosts: [{name, public_key, address}] with an address
+# inside vpn_link_subnet. Generate the key on that host; playbooks/wireguard.yml writes its config.
+vpn_site_links: []
+# Private source networks routed to the gateway without a tunnel (e.g. the VPC or EKS pod CIDR).
+# They may open connections to devices and are NATed to the server address. AWS: disable the
+# gateway's source/dest check and route vpn_network_cidr to its ENI.
+vpn_routed_cidrs: []
+# Derived; do not set.
+vpn_standalone: "{{ groups['vpn_gateway'] | default([]) | length > 0 }}"
+vpn_managed_api_hosts: "{{ groups['platform'] | default([]) if vpn_standalone | bool else [] }}"
+vpn_gateway_hosts: "{{ groups['vpn_gateway'] if vpn_standalone | bool else groups['platform'] | default([]) }}"
+vpn_gateway_host: "{{ vpn_gateway_hosts | first if vpn_standalone | bool else inventory_hostname }}"
+vpn_gateway_endpoint: >-
+  {{ wireguard_server_endpoint
+     or (hostvars[vpn_gateway_host].vpn_public_host | default(hostvars[vpn_gateway_host].ansible_host | default(vpn_gateway_host)))
+        ~ ':' ~ vpn_listen_port }}
+vpn_link_prefix: "{{ vpn_link_subnet.split('/')[0].split('.')[:3] | join('.') }}"
+vpn_agent_control_plane_url: >-
+  {{ vpn_control_plane_url
+     or ('http://' ~ vpn_link_prefix ~ '.2:8000' if vpn_managed_api_hosts | length > 0 else 'http://127.0.0.1:8000') }}
+# Controller directory for playbooks/wireguard.yml's control-plane settings (gitignored).
+vpn_handoff_dir: "{{ playbook_dir }}/../artifacts/wireguard-{{ vpn_gateway_host }}"
+vpn_api_bind_address: >-
+  {{ (vpn_link_prefix ~ '.' ~ (vpn_managed_api_hosts.index(inventory_hostname) + 2))
+     if inventory_hostname in vpn_managed_api_hosts else '127.0.0.1' }}
 connectivity_internal_token: "{{ lookup('env', 'EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN') | default(mqtt_internal_token, true) }}"
 routing_internal_token: "{{ lookup('env', 'EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN') | default(connectivity_internal_token, true) }}"
 apps_base_domain: "{{ platform_domain | default('meteor-edge.com', true) }}"

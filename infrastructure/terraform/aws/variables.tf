@@ -101,6 +101,29 @@ variable "vpn_allowed_client_cidrs" {
   description = "CIDR blocks allowed to connect to WireGuard"
 }
 
+variable "vpn_placement" {
+  type        = string
+  default     = "same_host"
+  description = "Where WireGuard runs: same_host (cloud_app instance) or dedicated (own instance)"
+
+  validation {
+    condition     = contains(["same_host", "dedicated"], var.vpn_placement)
+    error_message = "vpn_placement must be same_host or dedicated."
+  }
+}
+
+variable "vpn_instance_type" {
+  type        = string
+  default     = "t3.micro"
+  description = "EC2 instance type for a dedicated WireGuard gateway"
+}
+
+variable "vpn_root_volume_size_gb" {
+  type        = number
+  default     = 16
+  description = "Root EBS volume size in GB for a dedicated WireGuard gateway"
+}
+
 variable "tags" {
   type        = map(string)
   default     = {}

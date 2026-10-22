@@ -168,12 +168,16 @@ class PlatformDeploymentService:
         if self.config.aws is None:
             raise InstallerError("aws settings are required for SSH wait", stage="ssh")
         key_path = Path(self.config.aws.ssh_private_key_path).expanduser()
-        wait_for_server(
-            outputs.connect_ip,
-            outputs.ssh_username,
-            key_path,
-            timeout_seconds=self.config.deployment.health_check_timeout_seconds,
-        )
+        hosts = [outputs.connect_ip]
+        if outputs.vpn_gateway_public_ip:
+            hosts.append(outputs.vpn_gateway_public_ip)
+        for host in hosts:
+            wait_for_server(
+                host,
+                outputs.ssh_username,
+                key_path,
+                timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+            )
 
     def _run_site(self, outputs: TerraformOutputs) -> None:
         inventory = installation_dir(self.config.installation.name) / "inventory.ini"
@@ -199,6 +203,8 @@ class PlatformDeploymentService:
         state.instance_id = outputs.instance_id
         state.public_ip = outputs.public_ip
         state.elastic_ip = outputs.elastic_ip or None
+        state.vpn_gateway_instance_id = outputs.vpn_gateway_instance_id or None
+        state.vpn_gateway_ip = outputs.vpn_gateway_public_ip or None
         state.platform_url = url
         state.platform_version = self.config.platform.version
         state.installed_components = self.config.enabled_component_names()

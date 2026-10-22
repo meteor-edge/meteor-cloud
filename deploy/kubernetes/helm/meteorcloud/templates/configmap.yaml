@@ -22,7 +22,15 @@ data:
   DEPLOYMENT_PROVIDER: native
   OTA_PROVIDER: none
   IDENTITY_PROVIDER: local
-  CONNECTIVITY_PROVIDER: none
+  CONNECTIVITY_PROVIDER: {{ .Values.connectivity.provider | quote }}
+  {{- if eq .Values.connectivity.provider "wireguard" }}
+  {{- with .Values.connectivity.wireguard }}
+  WIREGUARD_SERVER_PUBLIC_KEY: {{ .serverPublicKey | quote }}
+  WIREGUARD_SERVER_ENDPOINT: {{ .serverEndpoint | quote }}
+  WIREGUARD_SERVER_ADDRESS: {{ .serverAddress | quote }}
+  WIREGUARD_CLIENT_CIDR: {{ .clientCidr | quote }}
+  {{- end }}
+  {{- end }}
   SHELL_PROVIDER: none
   CACHE_PROVIDER: {{ .Values.cache.provider | quote }}
   OBJECT_STORAGE_PROVIDER: {{ .Values.objectStorage.provider | quote }}

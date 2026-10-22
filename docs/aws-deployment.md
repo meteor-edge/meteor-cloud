@@ -75,13 +75,13 @@ make down                              # or edge-installer destroy --yes
 ## What `apply` / `make up` does
 
 1. Validates configuration and secrets
-2. Runs Terraform for **enabled services** (EC2, SG, EIP, VPN rules)
-3. Waits for SSH
+2. Runs Terraform for **enabled services** (EC2, SG, EIP, VPN rules; a second EC2 + SG + EIP for the WireGuard gateway with `services.vpn.placement: dedicated`)
+3. Waits for SSH (on the gateway too)
 4. Ansible `site.yml`:
    - **provision** — Docker, directories (shared)
    - **deploy** — each enabled service playbook
 5. For `cloud_app`: copy `deploy/compose/` to `/opt/edge-platform/compose`, render `.env`, clone the repo and build images (or pull from a registry), `docker compose up --wait` (the API runs migrations on start), optional first admin
-6. For `vpn`: install WireGuard (active when `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` is set)
+6. For `vpn` (runs before `cloud_app`): install WireGuard on the gateway (the app host, or the dedicated instance), generate its key, start `wg-quick@wg0` and the peer agent, and set `CONNECTIVITY_PROVIDER=wireguard` in the API's `.env`. A dedicated gateway also gets a site link (`wg-link`) from the API host. See [Device connectivity](fleet/connectivity.md).
 7. Health check (cloud_app only)
 
 ## Expected success output
@@ -105,7 +105,7 @@ Internet -> Traefik -> /api, /health -> Backend
                      -> /           -> Console
 PostgreSQL (and Redis, if enabled): internal Docker network only
 Artifacts: /opt/edge-platform/data/artifacts (filesystem storage)
-VPN (optional): UDP 51820 -> WireGuard on host
+VPN (optional): UDP 51820 -> WireGuard on the host, or on the dedicated gateway instance (placement: dedicated)
 ```
 
 ## Limitations

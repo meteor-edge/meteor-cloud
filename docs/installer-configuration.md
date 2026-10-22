@@ -30,10 +30,21 @@ services:
     allowed_client_cidrs:
       - 0.0.0.0/0
     server_address: 10.8.0.1/24
+    placement: same_host        # or dedicated
+    # instance_type: t3.micro   # dedicated gateway only
+    # root_volume_size_gb: 16
 ```
 
 - Default: both enabled
-- `vpn` requires `cloud_app` (same EC2 host)
+- `vpn` requires `cloud_app` and `EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN`
+  (shared by the API and the WireGuard gateway agent). The gateway's server key
+  is generated on the host unless `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` is set.
+- `vpn.placement`:
+  - `same_host` (default): WireGuard runs on the cloud_app EC2 instance.
+  - `dedicated`: Terraform creates a second EC2 instance with its own security
+    group (SSH, UDP `listen_port`) and Elastic IP. Ansible installs WireGuard
+    there and joins the API host to it with a WireGuard site link over the VPC.
+    Devices dial the gateway's Elastic IP.
 - At least one service must be enabled
 
 When `cloud_app` is disabled, Postgres/JWT secrets are not required.

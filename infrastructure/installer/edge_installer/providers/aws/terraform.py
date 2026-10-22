@@ -59,6 +59,9 @@ class TerraformRunner:
             "allow_https": cfg.network.allow_https,
             "vpn_listen_port": cfg.services.vpn.listen_port,
             "vpn_allowed_client_cidrs": cfg.services.vpn.allowed_client_cidrs,
+            "vpn_placement": cfg.services.vpn.placement,
+            "vpn_instance_type": cfg.services.vpn.instance_type,
+            "vpn_root_volume_size_gb": cfg.services.vpn.root_volume_size_gb,
             "tags": {
                 "Installation": cfg.installation.name,
                 "Environment": cfg.installation.environment,

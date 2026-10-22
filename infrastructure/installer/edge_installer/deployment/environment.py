@@ -47,11 +47,14 @@ def build_ansible_extra_vars(
         "vpn_network_cidr": config.services.vpn.network_cidr,
         "vpn_server_address": config.services.vpn.server_address,
     }
+    # Ansible derives CONNECTIVITY_PROVIDER and the device endpoint from the gateway
+    # host (generating its key when none is given); extra-vars would override that.
     vpn_key = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY", "")
     if vpn_key:
         extra["vpn_server_private_key"] = vpn_key
-        extra["connectivity_provider"] = "wireguard"
-        extra["wireguard_server_endpoint"] = f"{outputs.connect_ip}:{config.services.vpn.listen_port}"
+    if outputs.vpn_gateway_private_ip:
+        # The API host reaches a dedicated gateway inside the VPC.
+        extra["vpn_link_endpoint"] = f"{outputs.vpn_gateway_private_ip}:{config.services.vpn.listen_port}"
     vpn_pub = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PUBLIC_KEY", "").strip()
     if vpn_pub:
         extra["wireguard_server_public_key"] = vpn_pub

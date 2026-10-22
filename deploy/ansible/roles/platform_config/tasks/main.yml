@@ -100,6 +100,12 @@
     directory_mode: "0755"
   register: platform_service_config
 
+- name: Read WireGuard gateway settings
+  ansible.builtin.include_role:
+    name: vpn
+    tasks_from: discover
+  when: "'vpn' in enabled_services"
+
 - name: Render Compose environment file
   ansible.builtin.template:
     src: meteorcloud.env.j2

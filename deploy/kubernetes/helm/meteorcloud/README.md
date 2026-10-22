@@ -18,6 +18,14 @@ helm -n meteorcloud test meteorcloud
 | `mqtt.enabled`, `mqtt.broker` | off, or `bundled` EMQX / `external` | off |
 | `ingress.enabled`, `ingress.className` | any ingress controller | disabled; set `ingress.enabled: true` in an overlay |
 | `secrets.existingSecret` | your own Secret instead of the generated one | empty |
+| `connectivity.provider` | `none`, `wireguard` (gateway on its own VM, see below) | `none` |
+
+Device WireGuard (browser SSH, app endpoints): the WireGuard server runs outside
+the cluster on an AWS or on-prem VM set up by
+[`deploy/ansible/playbooks/wireguard.yml`](../../../ansible/README.md#wireguard-gateway),
+which writes the `connectivity.*` values to `artifacts/wireguard-<gateway>/helm-values.yaml`.
+`connectivity.gatewayService` adds an internal load balancer the gateway agent polls;
+give the gateway the same `secrets.connectivityInternalToken`.
 
 Every value is documented in [`values.yaml`](values.yaml). Environment overlays,
 all on this one chart:

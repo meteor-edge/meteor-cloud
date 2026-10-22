@@ -4,8 +4,10 @@ MeteorCloud reaches devices on a **private WireGuard network**. Devices dial out
 to the gateway (NAT-friendly). SSH is never published on the public internet.
 Public app URLs (`*.appx…`) are separate; see [Endpoints](endpoints.md).
 
-This is implemented on the **Compose + Ansible (EC2) path**. Kubernetes stays
-`CONNECTIVITY_PROVIDER=none` until a dedicated gateway exists.
+Ansible sets up the WireGuard server (the **gateway**) on the API host, or on
+its own server on AWS or on-prem. The control plane can run anywhere: Compose,
+another cloud, or Kubernetes (Helm), which uses a dedicated gateway outside the
+cluster.
 
 ## What is stored where
 
@@ -13,7 +15,7 @@ This is implemented on the **Compose + Ansible (EC2) path**. Kubernetes stays
 | --- | --- |
 | Device WireGuard **private** key | Device only (`/etc/meteorcli/wireguard/private.key`) |
 | Device WireGuard **public** key | Device + control plane |
-| Server WireGuard **private** key | Cloud host env `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` |
+| Server WireGuard **private** key | Gateway only (`/etc/wireguard/server.key`, generated there, or `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY`) |
 | SSH gateway private key | Cloud host (`SHELL_SSH_IDENTITY_FILE`) |
 | Browser | Short-lived `sh_…` ticket only |
 
@@ -21,61 +23,72 @@ If an SD card dies, revoke the old peer and **re-enroll** (new device id). A
 revoked device cannot register WireGuard again. The control plane cannot restore
 the lost private key.
 
-## Set up the WireGuard server (EC2 / Compose host)
+## Set up the WireGuard server (Ansible)
 
-1. Enable the installer `vpn` service (default on AWS). Open **UDP 51820** on
-   the security group.
-2. Generate a server key **on the host** (never commit it):
+Ansible installs everything on an Ubuntu 22.04/24.04 or Debian 12 host:
+`wireguard`, `wireguard-tools`, `iptables`, the kernel module, and persistent
+IPv4 forwarding. It generates the server key **on the gateway** once
+(`/etc/wireguard/server.key`; `wg0.conf` loads it in `PostUp` and never contains
+it) and starts `wg-quick@wg0` plus the **peer gateway agent**
+(`meteorcloud-gateway.service`). The agent applies `wg set` from the control
+plane every 15s and never rewrites `wg0.conf`; after a `wg-quick` restart it
+re-adds peers on the next poll. Open **UDP 51820** to the gateway (security
+group, or a router port forward on-prem).
 
-   ```bash
-   wg genkey | tee /etc/wireguard/server.key | wg pubkey > /etc/wireguard/server.pub
-   chmod 600 /etc/wireguard/server.key
-   ```
+The API and the agent share `CONNECTIVITY_INTERNAL_TOKEN`
+(`EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN` on the controller). The agent
+reaches `/internal/connectivity/*` privately; Traefik never serves `/internal`.
 
-3. Set on the Ansible controller / host env:
+| Where the gateway runs | Inventory | Agent polls | API → devices (SSH, apps) |
+| --- | --- | --- | --- |
+| API host (default, edge-installer) | `platform` | `127.0.0.1:8000` (`docker-compose.vpn.yml`) | host `wg0` |
+| Own server, API managed by Ansible | `vpn_gateway` + `platform` | API over an automatic site link | site link `wg-link` |
+| Own server, control plane elsewhere | `vpn_gateway` only | `vpn_control_plane_url` | `vpn_site_links` or `vpn_routed_cidrs` |
 
-   ```bash
-   export EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY="$(cat /etc/wireguard/server.key)"
-   ```
+**On the API host.** Add `vpn` to `enabled_services`; `site.yml` sets up the
+gateway first, then writes `CONNECTIVITY_PROVIDER=wireguard`, the server public
+key, and the endpoint into the API's `.env`. Docker/Traefik on the host route
+**to** `10.8.0.0/16` via `wg0`. New connections **from** VPN devices are dropped
+(established replies are allowed), including Docker networks. There is no
+MASQUERADE: devices cannot use the host as an internet gateway.
 
-   Re-deploy so Ansible renders `/etc/wireguard/wg0.conf` (Interface only) and
-   starts `wg-quick@wg0`.
+**On a dedicated server.** A dedicated gateway lets only the control plane open
+connections to devices, and NATs that traffic to `10.8.0.1` (the only address
+devices accept). Devices cannot open connections anywhere: not to the gateway,
+not to other devices, not to the internet.
 
-4. Point the API at that gateway (Ansible does this when the VPN key is set):
+- *API managed by the same inventory:* each API host gets a WireGuard site link
+  (`vpn_link_subnet`, default `10.9.0.0/24`; API host N is `.N+2`) and publishes
+  the API on that address only. No VPC peering, routes, or EC2 source/dest-check
+  changes; the gateway can be in a different network from the API.
+- *Control plane elsewhere (other cloud, Kubernetes):* run
+  `playbooks/wireguard.yml` with an inventory like
+  `inventory/example-wireguard-aws/` or `inventory/example-wireguard-onprem/`.
+  Set `vpn_control_plane_url` to a private address of the API. Then give the
+  control plane a path to the devices, either:
+  - `vpn_site_links`: generate a key on the control-plane host
+    (`wg genkey | tee /etc/wireguard/link.key | wg pubkey`), list it with an
+    address in `vpn_link_subnet`, and install the generated
+    `wg-link-<name>.conf` there; or
+  - `vpn_routed_cidrs`: the VPC or pod CIDR when the control plane routes to
+    the gateway's private IP. On AWS, disable the instance's source/dest check
+    and route `10.8.0.0/16` to its ENI. EKS pods have VPC IPs, so this covers
+    Helm installs.
 
-   ```bash
-   export EDGE_PLATFORM_VPN_SERVER_PUBLIC_KEY="$(cat /etc/wireguard/server.pub)"
-   export EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN="<random>"
+  The playbook writes `deploy/ansible/artifacts/wireguard-<gateway>/`:
+  `control-plane.env` (Compose) and `helm-values.yaml` (`connectivity.*` for the
+  Helm chart; `connectivity.gatewayService` adds an internal load balancer for
+  the agent).
 
-   CONNECTIVITY_PROVIDER=wireguard
-   WIREGUARD_SERVER_PUBLIC_KEY="$(cat /etc/wireguard/server.pub)"
-   WIREGUARD_SERVER_ENDPOINT="<public-ip-or-dns>:51820"
-   WIREGUARD_CLIENT_CIDR=10.8.0.0/16
-   WIREGUARD_SERVER_ADDRESS=10.8.0.1/16
-   CONNECTIVITY_INTERNAL_TOKEN="<random>"
-   ROUTING_INTERNAL_TOKEN="$CONNECTIVITY_INTERNAL_TOKEN"
-   ```
+Manual agent run (static site-link peers are never removed):
 
-5. Run the **peer gateway agent** on the same host (applies `wg set` from the
-   control plane; does not rewrite `wg0.conf` peer lists). Ansible installs
-   `meteorcloud-gateway.service`. Manual run:
+```bash
+CONNECTIVITY_INTERNAL_TOKEN=… \
+  python3 src/device-plane/gateway/connectivity_agent.py \
+    --api-url http://127.0.0.1:8000 --interface wg0 [--keep-peer <site-link-pubkey>]
+```
 
-   ```bash
-   CONNECTIVITY_INTERNAL_TOKEN=… \
-     python3 src/device-plane/gateway/connectivity_agent.py \
-       --api-url http://127.0.0.1:8000 --interface wg0
-   ```
-
-   After a `wg-quick` restart the agent re-adds peers on the next poll. Add
-   `docker-compose.vpn.yml` so the API is on `127.0.0.1:8000` for this agent
-   (Traefik still owns 80/443). Ansible includes that overlay when the VPN key
-   is set.
-
-6. Enable IPv4 forwarding (the `wg0` PostUp does this). Docker/Traefik on the
-   host can then route **to** `10.8.0.0/16` via `wg0`. New connections **from**
-   VPN devices are dropped (established replies are allowed), including Docker
-   networks. There is no MASQUERADE: devices cannot use the host as an internet
-   gateway.
+See [`deploy/ansible/README.md`](../../deploy/ansible/README.md#wireguard-gateway).
 
 ## Device side
 

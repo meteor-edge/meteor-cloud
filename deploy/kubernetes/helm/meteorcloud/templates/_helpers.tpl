@@ -77,6 +77,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq $v.postgresql.mode "external") (not $v.secrets.existingSecret) (not $v.postgresql.external.url) (not $v.postgresql.external.host) }}
 {{- fail "postgresql.mode=external needs postgresql.external.url, postgresql.external.host, or secrets.existingSecret with DATABASE_URL" }}
 {{- end }}
+{{- if not (has $v.connectivity.provider (list "none" "wireguard")) }}
+{{- fail "connectivity.provider must be none or wireguard" }}
+{{- end }}
+{{- if and (eq $v.connectivity.provider "wireguard") (or (not $v.connectivity.wireguard.serverPublicKey) (not $v.connectivity.wireguard.serverEndpoint)) }}
+{{- fail "connectivity.provider=wireguard needs connectivity.wireguard.serverPublicKey and serverEndpoint (from deploy/ansible/playbooks/wireguard.yml)" }}
+{{- end }}
 {{- if not (has $v.cache.provider (list "memory" "redis")) }}
 {{- fail "cache.provider must be memory or redis" }}
 {{- end }}

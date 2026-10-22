@@ -14,7 +14,7 @@ INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := src/device-plane/agent
 INFRA_DIR := infrastructure
 ANSIBLE_DIR := deploy/ansible
-ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml
+ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml wireguard.yml
 CHART := deploy/kubernetes/helm/meteorcloud
 CONFIG ?= installation.yaml
 

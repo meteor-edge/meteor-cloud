@@ -31,12 +31,40 @@ config:
 #   MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN      mqtt.enabled
 #   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled broker
 #   EDGE_PLATFORM_ADMIN_EMAIL/PASSWORD               optional first administrator
+#   CONNECTIVITY_INTERNAL_TOKEN                      connectivity.provider=wireguard
 secrets:
   existingSecret: ""
   jwtSecret: ""
+  # Shared with the WireGuard gateway agent (EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN).
+  # Empty: generated once; read it back from the Secret for the gateway.
+  connectivityInternalToken: ""
   admin:
     email: ""
     password: ""
+
+# --- Device connectivity (WireGuard, optional) -----------------------------
+# The WireGuard server runs outside the cluster on its own VM (AWS EC2 or
+# on-prem), set up by deploy/ansible/playbooks/wireguard.yml. That playbook
+# writes the values below to artifacts/wireguard-<gateway>/helm-values.yaml.
+connectivity:
+  provider: none             # none | wireguard
+  wireguard:
+    serverPublicKey: ""
+    serverEndpoint: ""       # host:port devices dial, e.g. wg.example.com:51820
+    serverAddress: 10.8.0.1/16
+    clientCidr: 10.8.0.0/16
+  # Private Service the gateway agent polls (/internal/connectivity/*). Keep it
+  # internal: an internal load balancer restricted to the gateway's address.
+  # Set vpn_control_plane_url on the gateway to http://<this address>:8000.
+  gatewayService:
+    enabled: false
+    type: LoadBalancer
+    annotations: {}
+      # AWS (load balancer controller):
+      # service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      # service.beta.kubernetes.io/aws-load-balancer-type: external
+      # service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    loadBalancerSourceRanges: []   # e.g. ["10.0.1.20/32"], the gateway's private IP
 
 # --- PostgreSQL (required) -------------------------------------------------
 postgresql:

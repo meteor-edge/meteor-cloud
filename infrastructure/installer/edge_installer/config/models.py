@@ -132,6 +132,11 @@ class VpnServiceSettings(BaseModel):
     network_cidr: str = "10.8.0.0/24"
     allowed_client_cidrs: list[str] = Field(default_factory=lambda: ["0.0.0.0/0"])
     server_address: str = "10.8.0.1/24"
+    # same_host: WireGuard on the cloud_app instance. dedicated: its own EC2 instance
+    # (Terraform module vpn_gateway), joined to the API host by a WireGuard site link.
+    placement: Literal["same_host", "dedicated"] = "same_host"
+    instance_type: str = "t3.micro"
+    root_volume_size_gb: int = Field(default=16, ge=8, le=1024)
 
 
 class ServicesSettings(BaseModel):

@@ -1,8 +1,10 @@
-# Optional overlay for the EC2 WireGuard path. Publishes the API on localhost
-# so the host gateway agent can poll /internal/connectivity/peers.
+# Optional overlay for the WireGuard path. Publishes the API on localhost so the
+# host gateway agent can poll /internal/connectivity/peers. With a dedicated
+# gateway, Ansible sets BACKEND_BIND_ADDRESS to this host's site-link address
+# (reachable only through the tunnel).
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
 #     -f docker-compose.vpn.yml up -d
 services:
   backend:
     ports: !override
-      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"

@@ -1,2 +1,0 @@
-listen_port: "{{ vpn_listen_port | default(51820) }}"
-network_cidr: "{{ vpn_network_cidr | default('10.8.0.0/16') }}"

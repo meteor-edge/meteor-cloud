@@ -1,0 +1,43 @@
+---
+# Gateway: write the settings an unmanaged control plane needs (Compose .env,
+# Helm values, site-link configs) to the controller.
+- name: Create hand-off directory on the controller
+  ansible.builtin.file:
+    path: "{{ vpn_handoff_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Write hand-off files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ vpn_handoff_dir }}/{{ item.dest }}"
+    mode: "0600"
+  loop:
+    - { src: control-plane.env.j2, dest: control-plane.env }
+    - { src: helm-values.yaml.j2, dest: helm-values.yaml }
+  delegate_to: localhost
+  become: false
+
+- name: Write site-link configs for unmanaged control-plane hosts
+  ansible.builtin.template:
+    src: wg-link.conf.j2
+    dest: "{{ vpn_handoff_dir }}/wg-link-{{ item.name }}.conf"
+    mode: "0600"
+  loop: "{{ vpn_site_links }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    link_address: "{{ item.address }}"
+    link_private_key_line: "PrivateKey = <contents of /etc/wireguard/link.key on {{ item.name }}>"
+  delegate_to: localhost
+  become: false
+
+- name: Show the WireGuard gateway summary
+  ansible.builtin.debug:
+    msg:
+      - "Devices dial: {{ vpn_gateway_endpoint | trim }} (open UDP {{ vpn_listen_port }})"
+      - "Server public key: {{ vpn_server_public_key }}"
+      - "Agent polls: {{ vpn_agent_control_plane_url }}"
+      - "Control-plane settings: {{ vpn_handoff_dir }}/control-plane.env and helm-values.yaml"

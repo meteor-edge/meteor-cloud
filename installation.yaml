@@ -35,6 +35,9 @@ services:
     allowed_client_cidrs:
       - 0.0.0.0/0
     server_address: 10.8.0.1/24
+    # same_host: WireGuard on the cloud_app instance. dedicated: its own EC2
+    # instance (instance_type, root_volume_size_gb), linked to the API host.
+    placement: same_host
 
 components:
   postgres:
