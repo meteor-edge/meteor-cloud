@@ -24,6 +24,8 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Base
 from app.core.security import hash_password
+from app.deployments import models as _deployment_models  # noqa: F401
+from app.deployments import software_models as _software_models  # noqa: F401
 from app.devices import models as _fleet_models  # noqa: F401
 from app.devices.dependencies import (
     get_enroll_poll_rate_limiter,
@@ -34,8 +36,6 @@ from app.devices.rate_limit import InMemoryRateLimiter
 from app.identity import models as _identity_models  # noqa: F401
 from app.identity.models import User
 from app.main import create_app
-from app.deployments import models as _deployment_models  # noqa: F401
-from app.deployments import software_models as _software_models  # noqa: F401
 from app.releases import models as _release_models  # noqa: F401
 from app.tenancy import models as _organization_models  # noqa: F401
 from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole

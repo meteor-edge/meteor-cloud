@@ -18,12 +18,12 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.metrics import MetricsMiddleware, metrics_response
 from app.core.request_id import RequestIdMiddleware
+from app.deployments.router import router as deployments_router
 from app.devices.agent_router import router as agent_router
 from app.devices.router import router as fleet_router
 from app.identity.router import router as identity_router
 from app.mqtt.internal_router import router as mqtt_internal_router
 from app.mqtt.runtime import start_mqtt_runtime, stop_mqtt_runtime
-from app.deployments.router import router as deployments_router
 from app.releases.router import router as releases_router
 from app.tenancy.router import router as organizations_router
 
