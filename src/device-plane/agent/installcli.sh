@@ -143,8 +143,9 @@ install_service() {
     echo "error: systemctl not found; cannot install the service." >&2
     exit 1
   fi
-  # Use coreutils ``install`` explicitly — a function named install() would recurse.
-  command install -m 0644 "${unit_src}" "${unit_dst}"
+  # Do not call ``install`` here — a function of that name used to recurse forever.
+  cp "${unit_src}" "${unit_dst}"
+  chmod 0644 "${unit_dst}"
   # Point ExecStart at the installed binary when BIN_DIR differs.
   if [[ "${BIN_DIR}/meteorcli" != "/usr/local/bin/meteorcli" ]]; then
     sed -i "s|^ExecStart=.*|ExecStart=${BIN_DIR}/meteorcli run|" "${unit_dst}"
