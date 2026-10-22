@@ -6,7 +6,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from runtime.systemd import SystemdAdapter, SystemdError, systemd_available
 
 

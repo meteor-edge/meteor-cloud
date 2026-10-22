@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
 from runtime.compose import ComposeAdapter, ComposeError, compose_available
 from runtime.docker import DockerAdapter, DockerError, docker_available
 

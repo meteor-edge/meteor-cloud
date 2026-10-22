@@ -16,12 +16,12 @@ import sys
 import time
 from pathlib import Path
 
+from edge_agent.capabilities import collect_capabilities
 from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.config import AgentConfig, AgentPaths, load_config
 from edge_agent.credentials import read_device_token, read_registration_token_file
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.registration import register
-from edge_agent.capabilities import collect_capabilities
 from edge_agent.software import reconcile_software
 
 logger = logging.getLogger("edge_agent")
