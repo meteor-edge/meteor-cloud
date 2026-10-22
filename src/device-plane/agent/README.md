@@ -35,8 +35,11 @@ and **docker_compose** releases. Root (or equivalent) is required for system
 unit installs.
 
 Config and credentials go in `~/.config/meteorcli` for a normal user, or
-`/etc/meteorcli` when running as root. You do not need root to run
-`meteorcli config`, `test`, or `request-token` as your own user.
+`/etc/meteorcli` when running as root / under `meteorcli.service`. Prefer
+`sudo meteorcli register|request-token` after a system install so the service
+finds the device token. Re-running `sudo ./installcli.sh --with-service`
+copies an existing user config into `/etc/meteorcli` when that dir has no
+`device-token` yet.
 
 For local development:
 

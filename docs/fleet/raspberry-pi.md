@@ -17,7 +17,10 @@ cd src/device-plane/agent
 sudo ./installcli.sh --with-service
 ```
 
-Configure against your control plane (LAN IP or hostname):
+Configure and enroll **as root** when using `meteorcli.service` (it reads
+`/etc/meteorcli`). A plain-user enroll goes to `~/.config/meteorcli`;
+`sudo ./installcli.sh --with-service` migrates that into `/etc/meteorcli` if
+the system dir has no device token yet.
 
 ```bash
 sudo meteorcli config --domain 192.168.0.10:8000 --api-key key_...

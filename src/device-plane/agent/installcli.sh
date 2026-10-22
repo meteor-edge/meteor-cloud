@@ -128,6 +128,58 @@ uninstall() {
   fi
 }
 
+# meteorcli.service always uses /etc/meteorcli. If the operator enrolled as a
+# normal user (e.g. pi) before enabling the service, copy that config in.
+migrate_user_config_to_system() {
+  local system_dir="/etc/meteorcli"
+  local user_home user_dir
+  local copied=0
+
+  mkdir -p "${system_dir}"
+  chmod 0755 "${system_dir}"
+
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    user_home="$(getent passwd "${SUDO_USER}" | cut -d: -f6 || true)"
+  fi
+  if [[ -z "${user_home:-}" && -n "${HOME:-}" && "${HOME}" != "/root" ]]; then
+    user_home="${HOME}"
+  fi
+  [[ -n "${user_home:-}" ]] || return 0
+
+  user_dir="${user_home}/.config/meteorcli"
+  if [[ ! -d "${user_dir}" ]]; then
+    return 0
+  fi
+
+  # Prefer migrating when the system dir has no device credential yet.
+  if [[ -f "${system_dir}/device-token" ]]; then
+    echo "Keeping existing ${system_dir} (device-token already present)."
+    return 0
+  fi
+  if [[ ! -f "${user_dir}/device-token" && ! -f "${user_dir}/config.json" ]]; then
+    return 0
+  fi
+
+  local name
+  for name in config.json device-token api-key mqtt.json mqtt-ca.crt claim-secret; do
+    if [[ -f "${user_dir}/${name}" ]]; then
+      cp -a "${user_dir}/${name}" "${system_dir}/${name}"
+      chmod 0600 "${system_dir}/${name}" 2>/dev/null || true
+      copied=1
+    fi
+  done
+  # Artifacts cache is optional; skip large trees unless empty on system side.
+  if [[ -d "${user_dir}/artifacts" && ! -e "${system_dir}/artifacts" ]]; then
+    cp -a "${user_dir}/artifacts" "${system_dir}/artifacts"
+    copied=1
+  fi
+
+  if [[ "${copied}" -eq 1 ]]; then
+    echo "Migrated meteorcli config from ${user_dir} → ${system_dir}"
+    echo "(meteorcli.service reads /etc/meteorcli as root.)"
+  fi
+}
+
 install_service() {
   local unit_src="${SCRIPT_DIR}/packaging/meteorcli.service"
   local unit_dst="/etc/systemd/system/meteorcli.service"
@@ -143,6 +195,7 @@ install_service() {
     echo "error: systemctl not found; cannot install the service." >&2
     exit 1
   fi
+  migrate_user_config_to_system
   # Do not call ``install`` here — a function of that name used to recurse forever.
   cp "${unit_src}" "${unit_dst}"
   chmod 0644 "${unit_dst}"
@@ -192,9 +245,17 @@ install_meteorcli() {
   if [[ "${WITH_SERVICE}" -eq 1 ]]; then
     install_service
   fi
-  echo "Next: meteorcli config --domain <host> --api-key key_..."
-  echo "      meteorcli test"
-  echo "      meteorcli register|request-token, then meteorcli run (or systemctl start meteorcli)"
+  if [[ "${EUID}" -eq 0 ]]; then
+    echo "Next: sudo meteorcli config --domain <host> --api-key key_..."
+    echo "      sudo meteorcli test"
+    echo "      sudo meteorcli register|request-token  (writes /etc/meteorcli for the service)"
+    echo "      sudo systemctl start meteorcli"
+  else
+    echo "Next: meteorcli config --domain <host> --api-key key_..."
+    echo "      meteorcli test"
+    echo "      meteorcli register|request-token, then meteorcli run"
+    echo "Tip: for meteorcli.service use sudo ./installcli.sh --with-service (migrates ~/.config/meteorcli)."
+  fi
 }
 
 if [[ "${UNINSTALL}" -eq 1 ]]; then
