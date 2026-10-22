@@ -105,10 +105,15 @@
     path: "{{ platform_compose_dir }}/.env"
     regexp: "{{ item.regexp }}"
     line: "{{ item.line }}"
+  vars:
+    wg_server_endpoint: "{{ wireguard_server_endpoint | default(ansible_host ~ ':' ~ (listen_port | default(51820))) }}"
   loop:
-    - { regexp: '^CONNECTIVITY_PROVIDER=', line: 'CONNECTIVITY_PROVIDER=wireguard' }
-    - { regexp: '^WIREGUARD_SERVER_PUBLIC_KEY=', line: 'WIREGUARD_SERVER_PUBLIC_KEY="{{ wireguard_server_public_key }}"' }
-    - { regexp: '^WIREGUARD_SERVER_ENDPOINT=', line: 'WIREGUARD_SERVER_ENDPOINT={{ wireguard_server_endpoint | default(ansible_host ~ ":" ~ (listen_port | default(51820))) }}' }
+    - regexp: "^CONNECTIVITY_PROVIDER="
+      line: CONNECTIVITY_PROVIDER=wireguard
+    - regexp: "^WIREGUARD_SERVER_PUBLIC_KEY="
+      line: "WIREGUARD_SERVER_PUBLIC_KEY=\"{{ wireguard_server_public_key }}\""
+    - regexp: "^WIREGUARD_SERVER_ENDPOINT="
+      line: "WIREGUARD_SERVER_ENDPOINT={{ wg_server_endpoint }}"
   no_log: true
   when:
     - vpn_server_private_key | default('') | length > 0
