@@ -31,3 +31,25 @@ def test_apply_peers_adds_and_removes() -> None:
     joined = [" ".join(item) for item in calls]
     assert any("peer OLDKEY remove" in line for line in joined)
     assert any("peer NEWKEY allowed-ips 10.8.0.5/32" in line for line in joined)
+
+
+def test_apply_peers_keeps_static_peers() -> None:
+    calls: list[list[str]] = []
+
+    def runner(args):
+        calls.append(list(args))
+        result = MagicMock()
+        result.stdout = ""
+        if args[:3] == ["wg", "show", "wg0"] and "dump" in args:
+            result.stdout = "private\t\nLINKKEY\t\t\t0\nOLDKEY\t\t\t0\n"
+        return result
+
+    apply_peers(
+        interface="wg0",
+        desired=[{"public_key": "LINKKEY", "allowed_ips": "10.8.0.9/32"}],
+        keep=frozenset({"LINKKEY"}),
+        runner=runner,
+    )
+    joined = [" ".join(item) for item in calls if "show" not in item]
+    assert "wg set wg0 peer OLDKEY remove" in joined
+    assert not any("LINKKEY" in line for line in joined)

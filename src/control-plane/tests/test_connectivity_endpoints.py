@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import base64
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.adapters import connectivity_provider, shell_provider
+from app.connectivity.service import ConnectivityService
+from app.core.config import get_settings
+from app.core.exceptions import UnauthorizedError
+from app.shell.service import ShellService
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
 from tests.test_deployments import _register_device, _setup_release
@@ -51,6 +59,14 @@ def test_wireguard_register_allocates_address_and_revokes(
     assert revoked.status_code == 200
     assert revoked.json()["status"] == "revoked"
     assert revoked.json()["wg_public_key"] is None
+
+    again = client.post(
+        "/api/v1/agent/connectivity/wireguard",
+        headers=_device_headers(reg["device_token"]),
+        json={"public_key": WG_KEY_A},
+    )
+    assert again.status_code == 403
+    assert again.json()["error"]["code"] == "connectivity_revoked"
 
 
 def test_duplicate_wireguard_key_rejected(client: TestClient, db_session: Session) -> None:
@@ -171,35 +187,40 @@ def test_routing_document_omits_unready_and_requires_token(
         },
     )
     assert created.status_code == 201, created.text
+    assert created.json()["availability"] == "ready"
     denied = client.get("/internal/routing/traefik")
     assert denied.status_code == 401
-    empty = client.get(
-        "/internal/routing/traefik",
-        headers={"X-Routing-Internal-Token": "test-connectivity-internal"},
-    )
-    assert empty.status_code == 200
-    assert empty.json()["http"]["routers"] == {}
-
-    from uuid import UUID
-
-    from app.endpoints.models import ApplicationEndpoint, EndpointAvailability
-
-    row = db_session.get(ApplicationEndpoint, UUID(created.json()["id"]))
-    assert row is not None
-    row.availability = EndpointAvailability.READY.value
-    db_session.commit()
 
     ready = client.get(
         "/internal/routing/traefik",
         headers={"X-Routing-Internal-Token": "test-connectivity-internal"},
-    ).json()
-    routers = ready["http"]["routers"]
+    )
+    assert ready.status_code == 200
+    routers = ready.json()["http"]["routers"]
     assert len(routers) == 1
-    service = next(iter(ready["http"]["services"].values()))
+    service = next(iter(ready.json()["http"]["services"].values()))
     url = service["loadBalancer"]["servers"][0]["url"]
     assert url.startswith("http://10.8.0.")
     assert url.endswith(":80")
     assert "169.254" not in url
+
+    offline_reg = _register_device(client, token, name="pi-offline", mac="aa:bb:cc:dd:00:15")
+    offline = client.post(
+        f"/api/v1/organizations/{org.id}/endpoints",
+        headers=headers,
+        json={
+            "device_id": offline_reg["device_id"],
+            "hostname": "offline.appx.meteor-edge.com",
+            "port": 80,
+        },
+    )
+    assert offline.status_code == 201, offline.text
+    assert offline.json()["availability"] == "offline"
+    still = client.get(
+        "/internal/routing/traefik",
+        headers={"X-Routing-Internal-Token": "test-connectivity-internal"},
+    ).json()
+    assert len(still["http"]["routers"]) == 1
 
 
 def test_internal_peers_and_shell_ticket(client: TestClient, db_session: Session) -> None:
@@ -265,3 +286,115 @@ def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: 
     assert listed.status_code == 200
     assert listed.json()[0]["hostname"] == "camera.appx.meteor-edge.com"
     assert listed.json()[0]["availability"] == "unknown"
+
+
+def test_sync_from_software_marks_manual_endpoints_ready(
+    client: TestClient, db_session: Session
+) -> None:
+    org, headers, token, _release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pi-manual", mac="aa:bb:cc:dd:00:10")
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/endpoints",
+        headers=headers,
+        json={
+            "device_id": reg["device_id"],
+            "hostname": "manual.appx.meteor-edge.com",
+            "port": 80,
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["availability"] == "offline"
+
+    client.post(
+        "/api/v1/agent/connectivity/wireguard",
+        headers=_device_headers(reg["device_token"]),
+        json={"public_key": WG_KEY_B},
+    )
+    from app.endpoints.service import EndpointService
+
+    EndpointService(db_session).sync_from_software(
+        organization_id=org.id,
+        device_id=uuid.UUID(reg["device_id"]),
+        workload_key="unrelated",
+    )
+    db_session.commit()
+
+    listed = client.get(
+        f"/api/v1/organizations/{org.id}/endpoints?device_id={reg['device_id']}",
+        headers=headers,
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["availability"] == "ready"
+    routing = client.get(
+        "/internal/routing/traefik",
+        headers={"X-Routing-Internal-Token": "test-connectivity-internal"},
+    ).json()
+    assert len(routing["http"]["routers"]) == 1
+
+
+def test_create_endpoint_unknown_deployment_id_rejected(
+    client: TestClient, db_session: Session
+) -> None:
+    org, headers, token, _release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pi-dep", mac="aa:bb:cc:dd:00:08")
+    missing = client.post(
+        f"/api/v1/organizations/{org.id}/endpoints",
+        headers=headers,
+        json={
+            "device_id": reg["device_id"],
+            "hostname": "missing.appx.meteor-edge.com",
+            "port": 80,
+            "deployment_id": str(uuid.uuid4()),
+        },
+    )
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "deployment_not_found"
+
+
+def test_shell_ticket_concurrent_redemption(
+    client: TestClient, db_session: Session, engine
+) -> None:
+    org, headers, token, _release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pi-race", mac="aa:bb:cc:dd:00:09")
+    client.post(
+        "/api/v1/agent/connectivity/wireguard",
+        headers=_device_headers(reg["device_token"]),
+        json={"public_key": WG_KEY_A},
+    )
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/shell-sessions",
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    session_id = uuid.UUID(created.json()["session_id"])
+    ticket = created.json()["ticket"]
+    db_session.commit()
+    db_session.expire_all()
+    start = threading.Barrier(2)
+
+    def redeem() -> str:
+        start.wait(timeout=5)
+        settings = get_settings()
+        session = Session(engine)
+        try:
+            connectivity = ConnectivityService(
+                session, provider=connectivity_provider(settings), settings=settings
+            )
+            service = ShellService(
+                session,
+                connectivity=connectivity,
+                provider=shell_provider(settings),
+                settings=settings,
+            )
+            try:
+                service.consume_ticket(session_id=session_id, ticket=ticket)
+                return "ok"
+            except UnauthorizedError:
+                return "denied"
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: redeem(), range(2)))
+    assert results.count("ok") == 1
+    assert results.count("denied") == 1

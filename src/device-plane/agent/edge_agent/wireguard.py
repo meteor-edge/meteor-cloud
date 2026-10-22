@@ -71,10 +71,10 @@ def write_client_config(
     server_public_key: str,
     server_endpoint: str,
     keepalive: int = 25,
-) -> Path:
+) -> tuple[Path, bool]:
     conf = directory / "wg0.conf"
     address_line = address if "/" in address else f"{address}/32"
-    conf.write_text(
+    content = (
         "[Interface]\n"
         f"Address = {address_line}\n"
         f"PrivateKey = {private_key}\n"
@@ -82,14 +82,28 @@ def write_client_config(
         f"PublicKey = {server_public_key}\n"
         f"Endpoint = {server_endpoint}\n"
         "AllowedIPs = 10.8.0.1/32\n"
-        f"PersistentKeepalive = {keepalive}\n",
-        encoding="utf-8",
+        f"PersistentKeepalive = {keepalive}\n"
     )
-    os.chmod(conf, stat.S_IRUSR | stat.S_IWUSR)
-    return conf
+    previous = conf.read_text(encoding="utf-8") if conf.is_file() else None
+    changed = previous != content
+    if changed:
+        conf.write_text(content, encoding="utf-8")
+        os.chmod(conf, stat.S_IRUSR | stat.S_IWUSR)
+    return conf, changed
 
 
-def apply_interface(conf: Path, *, runner: Runner = _default_runner) -> None:
+def apply_interface(
+    conf: Path,
+    *,
+    runner: Runner = _default_runner,
+    config_changed: bool = True,
+) -> None:
+    if not config_changed:
+        try:
+            runner(["wg", "show", conf.stem])
+            return
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
     try:
         runner(["wg-quick", "down", str(conf)])
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -125,7 +139,7 @@ def sync_connectivity(
     try:
         private_key, public_key = ensure_keypair(wireguard_dir(config_dir), runner=runner)
         response = client.register_wireguard(device_token=device_token, public_key=public_key)
-        write_client_config(
+        conf, changed = write_client_config(
             wireguard_dir(config_dir),
             private_key=private_key,
             address=str(response.get("wg_address") or ""),
@@ -134,11 +148,14 @@ def sync_connectivity(
             keepalive=int(response.get("persistent_keepalive") or 25),
         )
         try:
-            apply_interface(wireguard_dir(config_dir) / "wg0.conf", runner=runner)
+            apply_interface(conf, runner=runner, config_changed=changed)
         except (subprocess.CalledProcessError, FileNotFoundError) as exc:
             logger.warning("Could not apply WireGuard interface: %s", exc)
         install_gateway_ssh_key(str(response.get("ssh_gateway_public_key") or ""))
         return response
-    except Exception:
+    except Exception as exc:
+        if getattr(exc, "code", None) == "connectivity_disabled":
+            logger.info("Device connectivity is disabled; skipping WireGuard")
+            return None
         logger.exception("WireGuard registration failed")
         return None

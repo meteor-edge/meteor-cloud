@@ -17,8 +17,9 @@ This is implemented on the **Compose + Ansible (EC2) path**. Kubernetes stays
 | SSH gateway private key | Cloud host (`SHELL_SSH_IDENTITY_FILE`) |
 | Browser | Short-lived `sh_…` ticket only |
 
-If an SD card dies, re-enroll the device, revoke the old peer, and register a
-new WireGuard public key. The control plane cannot restore the lost private key.
+If an SD card dies, revoke the old peer and **re-enroll** (new device id). A
+revoked device cannot register WireGuard again. The control plane cannot restore
+the lost private key.
 
 ## Set up the WireGuard server (EC2 / Compose host)
 
@@ -71,7 +72,10 @@ new WireGuard public key. The control plane cannot restore the lost private key.
    is set.
 
 6. Enable IPv4 forwarding (the `wg0` PostUp does this). Docker/Traefik on the
-   host can then route to `10.8.0.0/16` via the host’s `wg0`.
+   host can then route **to** `10.8.0.0/16` via `wg0`. New connections **from**
+   VPN devices are dropped (established replies are allowed), including Docker
+   networks. There is no MASQUERADE: devices cannot use the host as an internet
+   gateway.
 
 ## Device side
 

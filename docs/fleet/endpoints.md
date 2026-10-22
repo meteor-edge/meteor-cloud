@@ -25,7 +25,9 @@ Create body: `{ "device_id", "hostname", "port", "protocol": "http" }`.
 Hostname must be `{label}.appx.{APPS_BASE_DOMAIN}`.
 
 Availability (`unknown` / `ready` / `unhealthy` / `offline`) is separate from
-Deploy status. Traefik only routes **enabled** + **ready** endpoints.
+Deploy status. Traefik only routes **enabled** + **ready** endpoints. Manual
+endpoints (no workload or Deploy) are `ready` when the device’s WireGuard
+session is active, otherwise `offline`.
 
 Optional on Deploy create (exactly one target device):
 

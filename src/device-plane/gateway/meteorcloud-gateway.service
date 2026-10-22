@@ -6,7 +6,7 @@ Requires=wg-quick@wg0.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/meteorcloud/gateway/connectivity_agent.py --api-url http://127.0.0.1:8000 --interface wg0
+ExecStart=/usr/bin/python3 /opt/meteorcloud/gateway/connectivity_agent.py --interface wg0
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=-/etc/meteorcloud/gateway.env

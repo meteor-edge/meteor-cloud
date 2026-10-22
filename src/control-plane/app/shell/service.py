@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.audit.service import AuditRecorder
@@ -75,14 +75,33 @@ class ShellService:
             raise
         self._require_provider()
         peer = self.connectivity.require_reachable(device=device)
+        now = datetime.now(UTC)
+        expired = list(
+            self.session.scalars(
+                select(DeviceShellSession).where(
+                    DeviceShellSession.actor_user_id == actor.id,
+                    DeviceShellSession.status == ShellSessionStatus.PENDING.value,
+                    DeviceShellSession.ticket_expires_at <= now,
+                )
+            )
+        )
+        for pending in expired:
+            pending.status = ShellSessionStatus.CLOSED.value
+            pending.closed_at = now
+        if expired:
+            self.session.flush()
         open_count = int(
             self.session.scalar(
                 select(func.count())
                 .select_from(DeviceShellSession)
                 .where(
                     DeviceShellSession.actor_user_id == actor.id,
-                    DeviceShellSession.status.in_(
-                        (ShellSessionStatus.PENDING.value, ShellSessionStatus.OPEN.value)
+                    or_(
+                        DeviceShellSession.status == ShellSessionStatus.OPEN.value,
+                        and_(
+                            DeviceShellSession.status == ShellSessionStatus.PENDING.value,
+                            DeviceShellSession.ticket_expires_at > now,
+                        ),
                     ),
                 )
             )
@@ -122,7 +141,7 @@ class ShellService:
     def consume_ticket(self, *, session_id: uuid.UUID, ticket: str) -> tuple[DeviceShellSession, str, int, str]:
         """Validate a one-time ticket. Returns session, host, port, username."""
         self._require_provider()
-        row = self.session.get(DeviceShellSession, session_id)
+        row = self.session.get(DeviceShellSession, session_id, with_for_update=True)
         if row is None:
             raise UnauthorizedError("invalid_shell_ticket", "Shell session was not found.")
         if row.status != ShellSessionStatus.PENDING.value:

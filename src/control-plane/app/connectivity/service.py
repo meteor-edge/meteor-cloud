@@ -21,7 +21,7 @@ from app.connectivity.schemas import (
     InternalPeer,
 )
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.devices.models import Device
 from app.devices.repository import DeviceRepository
 from app.identity.models import User
@@ -136,7 +136,12 @@ class ConnectivityService:
             )
             self.rows.add(row)
         else:
-            if row.status == ConnectivityStatus.REVOKED.value or row.wg_address is None:
+            if row.status == ConnectivityStatus.REVOKED.value:
+                raise ForbiddenError(
+                    "connectivity_revoked",
+                    "Connectivity for this device was revoked. Re-enroll the device to reconnect.",
+                )
+            if row.wg_address is None:
                 address = allocate_address(
                     cidr=self.settings.wireguard_client_cidr,
                     server_address=self.settings.wireguard_server_address,

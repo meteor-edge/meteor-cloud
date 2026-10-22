@@ -13,6 +13,7 @@ from app.connectivity.models import ConnectivityStatus
 from app.connectivity.repository import ConnectivityRepository
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.deployments.repository import DeploymentRepository
 from app.deployments.software_models import SoftwareHealth, SoftwareSyncStatus
 from app.deployments.software_repository import DeviceSoftwareRepository
 from app.devices.repository import DeviceRepository
@@ -37,6 +38,12 @@ class EndpointService:
 
     def _require_membership(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMembership:
         return self.authz.require_membership(user_id=user_id, organization_id=organization_id)
+
+    def _manual_availability(self, device_id: uuid.UUID) -> str:
+        peer = self.connectivity.get(device_id)
+        if peer is None or peer.status != ConnectivityStatus.ACTIVE.value:
+            return EndpointAvailability.OFFLINE.value
+        return EndpointAvailability.READY.value
 
     def _device(self, organization_id: uuid.UUID, device_id: uuid.UUID):
         device = self.devices.get(organization_id=organization_id, device_id=device_id)
@@ -124,10 +131,21 @@ class EndpointService:
                 "device_port_in_use",
                 "An enabled endpoint already uses this port on the device.",
             )
+        if payload.deployment_id is not None:
+            deployment = DeploymentRepository(self.session).get(
+                organization_id=organization_id,
+                deployment_id=payload.deployment_id,
+            )
+            if deployment is None:
+                raise NotFoundError("deployment_not_found", "Deployment was not found.")
         software_id = None
         if payload.workload_key:
             software = self.software.get_by_workload(device_id=device.id, workload_key=payload.workload_key)
             software_id = software.id if software is not None else None
+        if payload.workload_key is None and payload.deployment_id is None:
+            availability = self._manual_availability(device.id)
+        else:
+            availability = EndpointAvailability.UNKNOWN.value
         row = ApplicationEndpoint(
             organization_id=organization_id,
             device_id=device.id,
@@ -138,7 +156,7 @@ class EndpointService:
             protocol=payload.protocol,
             port=payload.port,
             enabled=payload.enabled,
-            availability=EndpointAvailability.UNKNOWN.value,
+            availability=availability,
         )
         self.endpoints.add(row)
         self.audit.record(
@@ -259,6 +277,7 @@ class EndpointService:
             if row.workload_key and row.workload_key != workload_key:
                 continue
             if row.workload_key is None and row.deployment_id is None:
+                row.availability = self._manual_availability(device_id)
                 continue
             peer = self.connectivity.get(device_id)
             if peer is None or peer.status != ConnectivityStatus.ACTIVE.value:

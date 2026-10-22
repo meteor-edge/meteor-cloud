@@ -48,16 +48,26 @@ async def shell_websocket(
     if not ticket:
         await websocket.close(code=4401, reason="Missing shell ticket")
         return
+    consumed = False
+    connection = None
     try:
-        row, host, port, username = service.consume_ticket(session_id=session_id, ticket=ticket)
+        _row, host, port, username = service.consume_ticket(session_id=session_id, ticket=ticket)
+        consumed = True
         connection = service._require_provider().connect(host=host, port=port, username=username)
     except AppError as exc:
+        if consumed:
+            service.close_session(session_id)
         await websocket.send_text(f"error: {exc.message}")
         await websocket.close(code=4400, reason=exc.code[:120])
         return
     except Exception:
+        if consumed:
+            service.close_session(session_id)
         logger.exception("Failed to open device shell")
         await websocket.send_text("error: could not open a shell to this device")
+        await websocket.close(code=1011)
+        return
+    if connection is None:
         await websocket.close(code=1011)
         return
 
@@ -95,19 +105,33 @@ async def shell_websocket(
                 await asyncio.to_thread(connection.write, data)
 
     try:
-        await asyncio.wait_for(
-            asyncio.gather(from_device(), from_browser()),
+        device_task = asyncio.create_task(from_device())
+        browser_task = asyncio.create_task(from_browser())
+        done, pending = await asyncio.wait(
+            {device_task, browser_task},
             timeout=float(max_duration),
+            return_when=asyncio.FIRST_COMPLETED,
         )
-    except TimeoutError:
-        await websocket.send_text("\r\n[session time limit reached]\r\n")
+        if not done:
+            await websocket.send_text("\r\n[session time limit reached]\r\n")
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            if task.cancelled():
+                continue
+            exc = task.exception()
+            if exc is not None:
+                raise exc
     except WebSocketDisconnect:
         pass
     except Exception:
         logger.exception("Shell session %s ended with an error", session_id)
     finally:
         stop.set()
-        connection.close()
+        if connection is not None:
+            connection.close()
         service.close_session(session_id)
         try:
             await websocket.close()

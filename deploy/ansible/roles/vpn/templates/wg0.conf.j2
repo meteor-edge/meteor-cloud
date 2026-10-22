@@ -5,5 +5,5 @@ PrivateKey = {{ vpn_server_private_key }}
 # Peers are applied at runtime by the MeteorCloud gateway agent (`wg set`).
 # Do not add [Peer] blocks here; a full rewrite would drop live peers until the agent resyncs.
 
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1; iptables -I DOCKER-USER -i %i -j ACCEPT || true; iptables -I DOCKER-USER -o %i -j ACCEPT || true
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE; iptables -D DOCKER-USER -i %i -j ACCEPT || true; iptables -D DOCKER-USER -o %i -j ACCEPT || true
+PostUp = iptables -A FORWARD -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -A FORWARD -i %i -j DROP; sysctl -w net.ipv4.ip_forward=1; iptables -I DOCKER-USER -o %i -j ACCEPT || true; iptables -I DOCKER-USER -i %i -j DROP || true; iptables -I DOCKER-USER -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
+PostDown = iptables -D FORWARD -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -D FORWARD -i %i -j DROP; iptables -D DOCKER-USER -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true; iptables -D DOCKER-USER -i %i -j DROP || true; iptables -D DOCKER-USER -o %i -j ACCEPT || true

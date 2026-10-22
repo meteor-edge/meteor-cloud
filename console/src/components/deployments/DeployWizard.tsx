@@ -122,6 +122,8 @@ export function DeployWizard({
         : { strategy: "immediate" };
     const hostname = endpointHostname.trim().toLowerCase();
     const port = endpointPort.trim() ? Number(endpointPort) : null;
+    const singleDevice =
+      deviceIds.length === 1 && groupIds.length === 0;
     return {
       release_id: releaseId,
       name: name.trim() || null,
@@ -131,7 +133,7 @@ export function DeployWizard({
       },
       rollout,
       endpoint:
-        hostname && port
+        singleDevice && hostname && port
           ? { hostname, port, protocol: "http" }
           : null,
     };
