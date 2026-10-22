@@ -1,0 +1,8 @@
+# Optional overlay for the EC2 WireGuard path. Publishes the API on localhost
+# so the host gateway agent can poll /internal/connectivity/peers.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.vpn.yml up -d
+services:
+  backend:
+    ports: !override
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"

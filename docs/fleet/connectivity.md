@@ -65,8 +65,10 @@ new WireGuard public key. The control plane cannot restore the lost private key.
        --api-url http://127.0.0.1:8000 --interface wg0
    ```
 
-   After a `wg-quick` restart the agent re-adds peers on the next poll. Production
-   Compose binds the API on `127.0.0.1:8000` for this agent (Traefik still owns 80/443).
+   After a `wg-quick` restart the agent re-adds peers on the next poll. Add
+   `docker-compose.vpn.yml` so the API is on `127.0.0.1:8000` for this agent
+   (Traefik still owns 80/443). Ansible includes that overlay when the VPN key
+   is set.
 
 6. Enable IPv4 forwarding (the `wg0` PostUp does this). Docker/Traefik on the
    host can then route to `10.8.0.0/16` via the host’s `wg0`.

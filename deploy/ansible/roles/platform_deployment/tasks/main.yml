@@ -3,6 +3,7 @@
   ansible.builtin.set_fact:
     platform_compose: >-
       docker compose -f docker-compose.yml -f docker-compose.prod.yml
+      {{ '-f docker-compose.vpn.yml' if vpn_server_private_key | default('') | length > 0 else '' }}
       {{ '-f docker-compose.observability.yml' if observability_enabled | bool else '' }}
 
 - name: Fetch application source for image builds

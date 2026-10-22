@@ -124,7 +124,7 @@
   ansible.builtin.command:
     cmd: >-
       docker compose -f docker-compose.yml -f docker-compose.prod.yml
-      up -d --no-deps backend
+      -f docker-compose.vpn.yml up -d --no-deps backend
     chdir: "{{ platform_compose_dir }}"
   changed_when: true
   when:

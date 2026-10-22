@@ -19,9 +19,7 @@ services:
   backend:
     restart: unless-stopped
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
-    # Localhost only: Traefik fronts 80/443; the host gateway agent polls the API here.
-    ports:
-      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    ports: !reset []
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_DEBUG: "false"

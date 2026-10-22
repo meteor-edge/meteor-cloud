@@ -247,6 +247,8 @@ compose-config: ## Validate the Compose files and overlays
 	docker compose -f $(COMPOSE_DIR)/docker-compose.yml config --quiet
 	$(COMPOSE) config --quiet
 	docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml config --quiet
+	docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml \
+		-f $(COMPOSE_DIR)/docker-compose.vpn.yml config --quiet
 	GRAFANA_ADMIN_PASSWORD=check docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml \
 		-f $(COMPOSE_DIR)/docker-compose.observability.yml config --quiet
 
