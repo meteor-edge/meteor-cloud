@@ -50,6 +50,16 @@ def build_ansible_extra_vars(
     vpn_key = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY", "")
     if vpn_key:
         extra["vpn_server_private_key"] = vpn_key
+        extra["connectivity_provider"] = "wireguard"
+        extra["wireguard_server_endpoint"] = f"{outputs.connect_ip}:{config.services.vpn.listen_port}"
+    vpn_pub = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PUBLIC_KEY", "").strip()
+    if vpn_pub:
+        extra["wireguard_server_public_key"] = vpn_pub
+    connectivity_token = os.environ.get("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN", "").strip()
+    if connectivity_token:
+        extra["connectivity_internal_token"] = connectivity_token
+    if config.platform.domain:
+        extra["apps_base_domain"] = config.platform.domain
     if db_url := os.environ.get("EDGE_PLATFORM_DATABASE_URL", "").strip():
         extra["external_database_url"] = db_url
     return extra

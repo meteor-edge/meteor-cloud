@@ -63,6 +63,20 @@ class FakeClient:
         self.software_response: list[dict[str, Any]] = []
         self.software_error: AgentApiError | None = None
         self.software_calls: list[dict[str, Any]] = []
+        self.wireguard_calls: list[dict[str, Any]] = []
+        self.wireguard_error: AgentApiError | None = None
+        self.wireguard_response: dict[str, Any] = {
+            "status": "active",
+            "provider": "wireguard",
+            "wg_address": "10.8.0.12/32",
+            "server_public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "server_endpoint": "gateway.example.com:51820",
+            "allowed_ips": "10.8.0.12/32",
+            "persistent_keepalive": 25,
+            "ssh_user": "root",
+            "ssh_gateway_public_key": None,
+            "client_config": "",
+        }
 
     def register(
         self,
@@ -116,6 +130,12 @@ class FakeClient:
         if self.software_error is not None:
             raise self.software_error
         return list(self.software_response)
+
+    def register_wireguard(self, *, device_token: str, public_key: str) -> dict[str, Any]:
+        self.wireguard_calls.append({"device_token": device_token, "public_key": public_key})
+        if self.wireguard_error is not None:
+            raise self.wireguard_error
+        return dict(self.wireguard_response)
 
 
 @pytest.fixture

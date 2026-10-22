@@ -97,7 +97,9 @@ helm -n meteorcloud test meteorcloud --logs
 |---------|-----|
 | WireGuard not running | Set `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` and re-deploy |
 | Cannot connect | Check UDP port in SG (`services.vpn.listen_port`, default 51820) |
-| No peer config | Add client peers to `/etc/wireguard/wg0.conf` manually (automation future work) |
+| No peer config | Run the gateway agent (`src/device-plane/gateway/connectivity_agent.py`) so it applies `wg set` from the control plane. Do not paste `[Peer]` blocks into `wg0.conf` |
+| Device has no WG IP | `CONNECTIVITY_PROVIDER=wireguard` and `meteorcli run` as root with `wireguard-tools` installed |
+| Browser terminal fails | Device `sshd` up, `SHELL_PROVIDER=ssh_gateway`, gateway host can route to `10.8.0.0/16`, connectivity status `active` |
 
 ## Security notes
 

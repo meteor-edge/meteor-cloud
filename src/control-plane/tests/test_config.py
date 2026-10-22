@@ -76,3 +76,10 @@ def test_deployment_provider_defaults_to_native() -> None:
 def test_deployment_provider_accepts_none_and_mender() -> None:
     assert Settings(_env_file=None, DEPLOYMENT_PROVIDER="none").deployment_provider == "none"
     assert Settings(_env_file=None, DEPLOYMENT_PROVIDER="mender").deployment_provider == "mender"
+
+
+def test_connectivity_and_shell_providers() -> None:
+    assert Settings(_env_file=None, CONNECTIVITY_PROVIDER="none").connectivity_provider == "none"
+    assert Settings(_env_file=None, CONNECTIVITY_PROVIDER="wireguard").connectivity_provider == "wireguard"
+    assert Settings(_env_file=None, SHELL_PROVIDER="echo").shell_provider == "echo"
+    assert Settings(_env_file=None, SHELL_PROVIDER="ssh_gateway").shell_provider == "ssh_gateway"

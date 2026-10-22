@@ -3,3 +3,10 @@
   ansible.builtin.systemd:
     name: wg-quick@wg0
     state: restarted
+
+- name: Restart meteorcloud gateway
+  ansible.builtin.systemd:
+    name: meteorcloud-gateway
+    state: restarted
+    daemon_reload: true
+

@@ -93,6 +93,17 @@ firewall_enabled: false
 firewall_ssh_port: 22
 firewall_allowed_ssh_cidrs: ["0.0.0.0/0"]
 
+# Device WireGuard (EC2 Compose path). Stay "none" until a server key is set.
+connectivity_provider: none
+wireguard_server_public_key: "{{ lookup('env', 'EDGE_PLATFORM_VPN_SERVER_PUBLIC_KEY') | default('', true) }}"
+wireguard_server_endpoint: ""
+connectivity_internal_token: "{{ lookup('env', 'EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN') | default(mqtt_internal_token, true) }}"
+routing_internal_token: "{{ lookup('env', 'EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN') | default(connectivity_internal_token, true) }}"
+apps_base_domain: "{{ platform_domain | default('meteor-edge.com', true) }}"
+shell_provider: none
+shell_ssh_identity_file: ""
+shell_gateway_public_key: ""
+
 # Services selected by edge-installer; standalone runs deploy the application only.
 enabled_services: [cloud_app]
 

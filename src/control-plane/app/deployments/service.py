@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,6 +30,7 @@ from app.deployments.schemas import (
     DeploymentResponse,
     DeployRollout,
     DeployTarget,
+    EndpointSpec,
     ReleaseBrief,
 )
 from app.deployments.software_models import SoftwareSyncStatus
@@ -354,6 +356,21 @@ class DeploymentService:
         flag_modified(deployment, "rollout")
         self.session.flush()
 
+        if payload.endpoint is not None:
+            if len(deploy_ids) != 1:
+                raise ValidationAppError(
+                    "endpoint_requires_one_device",
+                    "A public URL can only be attached when the Deploy targets exactly one device.",
+                )
+            self._attach_endpoint(
+                actor=actor,
+                organization_id=organization_id,
+                deployment_id=deployment.id,
+                device_id=deploy_ids[0],
+                release=release,
+                spec=payload.endpoint,
+            )
+
         if activate_ids:
             provider_ref = provider.deploy(
                 organization_id=organization_id,
@@ -390,6 +407,53 @@ class DeploymentService:
         )
         self.session.commit()
         return self._to_response(deployment, include_devices=True)
+
+    def _published_container_ports(self, spec: dict[str, Any]) -> list[int]:
+        ports: list[int] = []
+        for item in spec.get("ports") or []:
+            right = str(item).rsplit(":", 1)[-1]
+            number = right.split("/", 1)[0]
+            try:
+                ports.append(int(number))
+            except ValueError:
+                continue
+        return ports
+
+    def _attach_endpoint(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        deployment_id: uuid.UUID,
+        device_id: uuid.UUID,
+        release: Release,
+        spec: EndpointSpec,
+    ) -> None:
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "endpoint.create")
+        kind_value = release.kind.value if hasattr(release.kind, "value") else str(release.kind)
+        published = self._published_container_ports(dict(release.spec or {}))
+        if kind_value == ReleaseKind.DOCKER.value and published and spec.port not in published:
+            raise ValidationAppError(
+                "endpoint_port_mismatch",
+                "Endpoint port must match a published container port on this docker release.",
+            )
+        from app.endpoints.schemas import EndpointCreate
+        from app.endpoints.service import EndpointService
+
+        EndpointService(self.session).create_endpoint(
+            actor=actor,
+            organization_id=organization_id,
+            payload=EndpointCreate(
+                device_id=device_id,
+                hostname=spec.hostname,
+                port=spec.port,
+                protocol=spec.protocol,
+                deployment_id=deployment_id,
+                workload_key=workload_key_from_spec(release.kind, release.spec),
+            ),
+            commit=False,
+        )
 
     @staticmethod
     def _initial_batch(deploy_ids: list[uuid.UUID], rollout: dict) -> list[uuid.UUID]:

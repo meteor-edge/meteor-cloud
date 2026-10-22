@@ -47,6 +47,14 @@ export function canManageDeployments(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "operator" || role === "developer";
 }
 
+export function canManageEndpoints(role: string | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "operator" || role === "developer";
+}
+
+export function canOpenDeviceShell(role: string | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "operator";
+}
+
 /** Rollback a finished Deploy (owner/admin only). */
 export function canRollbackDeployments(role: string | undefined): boolean {
   return role === "owner" || role === "admin";

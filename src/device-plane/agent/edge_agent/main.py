@@ -88,6 +88,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
     artifacts_dir = paths.config_path.parent / "artifacts"
 
     def _payload() -> dict:
+        from edge_agent.wireguard import sync_connectivity
+
+        sync_connectivity(client, device_token, paths.config_path.parent)
         payload: dict = {"capabilities": collect_capabilities()}
         reports = reconcile_software(client, device_token, artifacts_dir)
         if reports:

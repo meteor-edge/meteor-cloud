@@ -26,6 +26,8 @@ How to use the product day to day.
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) |
+| Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
+| Public app URLs (`*.appx`) | [Endpoints](fleet/endpoints.md) |
 | Operator console | [Console](console.md) |
 
 ## Reference

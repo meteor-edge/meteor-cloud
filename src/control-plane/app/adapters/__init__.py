@@ -11,9 +11,11 @@ from app.core.config import Settings
 from app.devices.rate_limit import InMemoryRateLimiter, RedisRateLimiter
 from app.mqtt.service import NoopPublisher
 from app.ports.cache import RateLimiter
+from app.ports.connectivity import DeviceConnectivityProvider
 from app.ports.deployment import DeploymentProvider
 from app.ports.identity import IdentityDirectory
 from app.ports.mqtt import MQTTGateway
+from app.ports.shell import DeviceShellProvider
 from app.ports.storage import ObjectStorage
 
 
@@ -70,6 +72,39 @@ def deployment_provider(settings: Settings, session: Session) -> DeploymentProvi
     )
 
 
+def connectivity_provider(settings: Settings) -> DeviceConnectivityProvider | None:
+    if settings.connectivity_provider == "none":
+        return None
+    if settings.connectivity_provider == "wireguard":
+        from app.adapters.wireguard_connectivity import WireGuardConnectivityProvider
+
+        return WireGuardConnectivityProvider()
+    raise RuntimeError(
+        f"Unsupported connectivity.provider={settings.connectivity_provider!r}; "
+        "only 'wireguard' and 'none' are known"
+    )
+
+
+def shell_provider(settings: Settings) -> DeviceShellProvider | None:
+    if settings.shell_provider == "none":
+        return None
+    if settings.shell_provider == "echo":
+        from app.adapters.ssh_gateway import EchoShellProvider
+
+        return EchoShellProvider()
+    if settings.shell_provider == "ssh_gateway":
+        from app.adapters.ssh_gateway import SshGatewayProvider
+
+        return SshGatewayProvider(
+            identity_file=settings.shell_ssh_identity_file,
+            client_cidr=settings.wireguard_client_cidr,
+        )
+    raise RuntimeError(
+        f"Unsupported shell.provider={settings.shell_provider!r}; "
+        "only 'ssh_gateway', 'echo', and 'none' are known"
+    )
+
+
 def ota_provider(settings: Settings) -> DeploymentProvider | None:
     """Deprecated: returns None when deploys are off; otherwise requires deployment_provider(session)."""
     if settings.deployment_provider == "none":
@@ -112,10 +147,12 @@ def object_storage(settings: Settings) -> ObjectStorage:
 
 __all__ = [
     "InMemoryRateLimiter",
+    "connectivity_provider",
     "deployment_provider",
     "identity_directory",
     "mqtt_gateway",
     "object_storage",
     "ota_provider",
     "rate_limiter",
+    "shell_provider",
 ]

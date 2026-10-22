@@ -22,6 +22,8 @@ data:
   DEPLOYMENT_PROVIDER: native
   OTA_PROVIDER: none
   IDENTITY_PROVIDER: local
+  CONNECTIVITY_PROVIDER: none
+  SHELL_PROVIDER: none
   CACHE_PROVIDER: {{ .Values.cache.provider | quote }}
   OBJECT_STORAGE_PROVIDER: {{ .Values.objectStorage.provider | quote }}
   OBJECT_STORAGE_PATH: /data/artifacts

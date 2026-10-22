@@ -32,7 +32,9 @@ Re-run the script to upgrade. Uninstall with `./installcli.sh --uninstall`
 
 `meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
 and **docker_compose** releases. Root (or equivalent) is required for system
-unit installs.
+unit installs. When the control plane has WireGuard enabled, `run` also
+registers this device’s **public** key and brings up a tunnel (private key stays
+on the device). See [Device connectivity](../../../docs/fleet/connectivity.md).
 
 Config and credentials go in `~/.config/meteorcli` for a normal user, or
 `/etc/meteorcli` when running as root / under `meteorcli.service`. Prefer

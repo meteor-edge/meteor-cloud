@@ -1,7 +1,9 @@
 [Interface]
-Address = {{ vpn_server_address | default('10.8.0.1/24') }}
+Address = {{ vpn_server_address | default('10.8.0.1/16') }}
 ListenPort = {{ listen_port }}
 PrivateKey = {{ vpn_server_private_key }}
+# Peers are applied at runtime by the MeteorCloud gateway agent (`wg set`).
+# Do not add [Peer] blocks here; a full rewrite would drop live peers until the agent resyncs.
 
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1; iptables -I DOCKER-USER -i %i -j ACCEPT || true; iptables -I DOCKER-USER -o %i -j ACCEPT || true
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE; iptables -D DOCKER-USER -i %i -j ACCEPT || true; iptables -D DOCKER-USER -o %i -j ACCEPT || true

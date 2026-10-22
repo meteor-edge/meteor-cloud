@@ -19,6 +19,7 @@ API_KEY_PREFIX = "key_"
 # Per-request secret handed to the device so it can poll for approval and
 # claim its credential exactly once.
 CLAIM_SECRET_PREFIX = "clm_"
+SHELL_TICKET_PREFIX = "sh_"
 
 # Number of random bytes for the url-safe secret body.
 _SECRET_BYTES = 32
@@ -75,3 +76,8 @@ def generate_api_key() -> GeneratedToken:
 def generate_claim_secret() -> GeneratedToken:
     """Generate a new enrollment claim secret (``clm_`` prefix)."""
     return _generate(CLAIM_SECRET_PREFIX)
+
+
+def generate_shell_ticket() -> GeneratedToken:
+    """Generate a one-time browser SSH ticket (``sh_`` prefix)."""
+    return _generate(SHELL_TICKET_PREFIX)

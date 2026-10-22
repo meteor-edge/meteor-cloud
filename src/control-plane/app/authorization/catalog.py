@@ -66,6 +66,11 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("deployment", "create", "Create deployments", "Start deployments."),
     PermissionDef("deployment", "cancel", "Cancel deployments", "Cancel in-progress deployments."),
     PermissionDef("deployment", "rollback", "Rollback deployments", "Roll back a deployment."),
+    PermissionDef("endpoint", "read", "View endpoints", "List and open public application endpoints."),
+    PermissionDef("endpoint", "create", "Create endpoints", "Register public application hostnames."),
+    PermissionDef("endpoint", "update", "Update endpoints", "Change or disable public application endpoints."),
+    PermissionDef("endpoint", "delete", "Delete endpoints", "Remove public application endpoints."),
+    PermissionDef("device", "shell", "Open device terminal", "Open a browser SSH session to a device."),
     PermissionDef("enrollment_key", "read", "View enrollment API keys", "List enrollment API keys."),
     PermissionDef("enrollment_key", "manage", "Manage enrollment API keys", "Create and revoke enrollment API keys."),
     PermissionDef("mqtt", "test", "Use MQTT test tools", "Publish and listen in the organization MQTT test UI."),
@@ -74,7 +79,7 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
 PERMISSION_BY_ID: dict[str, PermissionDef] = {item.id: item for item in PERMISSIONS}
 
 # Resources whose instances are limited by device-group scope.
-DEVICE_SCOPED_RESOURCES = frozenset({"device", "device_group"})
+DEVICE_SCOPED_RESOURCES = frozenset({"device", "device_group", "endpoint"})
 
 _ALL = frozenset(PERMISSION_BY_ID)
 _VIEWER = frozenset(
@@ -85,6 +90,7 @@ _VIEWER = frozenset(
         "device_type.read",
         "artifact.read",
         "deployment.read",
+        "endpoint.read",
     }
 )
 _DEVELOPER = _VIEWER | frozenset(
@@ -98,6 +104,9 @@ _DEVELOPER = _VIEWER | frozenset(
         "artifact.delete",
         "deployment.create",
         "deployment.cancel",
+        "endpoint.create",
+        "endpoint.update",
+        "endpoint.delete",
         "mqtt.test",
     }
 )
@@ -107,8 +116,12 @@ _OPERATOR = _VIEWER | frozenset(
         "device.create",
         "device.update",
         "device.reboot",
+        "device.shell",
         "deployment.create",
         "deployment.cancel",
+        "endpoint.create",
+        "endpoint.update",
+        "endpoint.delete",
         "mqtt.test",
     }
 )

@@ -128,6 +128,13 @@ class EdgeClient:
     def heartbeat(self, *, device_token: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._post("/api/v1/agent/heartbeat", payload, bearer=device_token)
 
+    def register_wireguard(self, *, device_token: str, public_key: str) -> dict[str, Any]:
+        return self._post(
+            "/api/v1/agent/connectivity/wireguard",
+            {"public_key": public_key},
+            bearer=device_token,
+        )
+
     def get_software(self, *, device_token: str) -> list[dict[str, Any]]:
         """Fetch desired software for this device."""
         result = self._get("/api/v1/agent/software", bearer=device_token)

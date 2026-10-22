@@ -10,6 +10,7 @@ import { LandingPage } from "@/pages/LandingPage";
 import { ArtifactsPage } from "@/pages/artifacts/ArtifactsPage";
 import { DeploymentDetailPage } from "@/pages/deployments/DeploymentDetailPage";
 import { DeploymentsPage } from "@/pages/deployments/DeploymentsPage";
+import { EndpointsPage } from "@/pages/endpoints/EndpointsPage";
 import { ReleasesPage } from "@/pages/releases/ReleasesPage";
 import { DeviceDetailPage } from "@/pages/fleet/DeviceDetailPage";
 import { DeviceGroupDetailPage } from "@/pages/fleet/DeviceGroupDetailPage";
@@ -180,6 +181,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <DeploymentDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/endpoints"
+          element={
+            <ProtectedRoute>
+              <EndpointsPage />
             </ProtectedRoute>
           }
         />

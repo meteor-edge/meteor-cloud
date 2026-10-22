@@ -102,6 +102,7 @@ def test_build_ansible_extra_vars_omits_vpn_key_when_not_set(
     extra = build_ansible_extra_vars(config, _outputs())
 
     assert "vpn_server_private_key" not in extra
+    assert "connectivity_provider" not in extra
 
 
 def test_build_ansible_extra_vars_includes_vpn_key_when_set(
@@ -113,3 +114,5 @@ def test_build_ansible_extra_vars_includes_vpn_key_when_set(
     extra = build_ansible_extra_vars(config, _outputs())
 
     assert extra["vpn_server_private_key"] == "super-secret-key"
+    assert extra["connectivity_provider"] == "wireguard"
+    assert extra["wireguard_server_endpoint"].endswith(":51820")

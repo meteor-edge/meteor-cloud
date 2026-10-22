@@ -121,6 +121,40 @@ class Settings(BaseSettings):
     )
     # Deprecated alias; prefer DEPLOYMENT_PROVIDER. Kept so existing env files load.
     ota_provider: Literal["none"] = Field(default="none", alias="OTA_PROVIDER")
+    # Private device network. "none" disables peer APIs; "wireguard" is the v1 transport.
+    connectivity_provider: Literal["wireguard", "none"] = Field(
+        default="none",
+        alias="CONNECTIVITY_PROVIDER",
+    )
+    wireguard_server_public_key: str = Field(default="", alias="WIREGUARD_SERVER_PUBLIC_KEY")
+    wireguard_server_endpoint: str = Field(default="", alias="WIREGUARD_SERVER_ENDPOINT")
+    wireguard_server_address: str = Field(default="10.8.0.1/16", alias="WIREGUARD_SERVER_ADDRESS")
+    wireguard_client_cidr: str = Field(default="10.8.0.0/16", alias="WIREGUARD_CLIENT_CIDR")
+    wireguard_client_dns: str = Field(default="", alias="WIREGUARD_CLIENT_DNS")
+    wireguard_persistent_keepalive: int = Field(default=25, alias="WIREGUARD_PERSISTENT_KEEPALIVE")
+    connectivity_internal_token: str = Field(default="dev-connectivity-internal", alias="CONNECTIVITY_INTERNAL_TOKEN")
+    connectivity_handshake_stale_seconds: int = Field(
+        default=180,
+        alias="CONNECTIVITY_HANDSHAKE_STALE_SECONDS",
+    )
+    connectivity_rate_limit_requests: int = Field(default=20, alias="CONNECTIVITY_RATE_LIMIT_REQUESTS")
+    connectivity_rate_limit_window_seconds: int = Field(
+        default=60,
+        alias="CONNECTIVITY_RATE_LIMIT_WINDOW_SECONDS",
+    )
+    # Public app hostnames are {label}.appx.{APPS_BASE_DOMAIN}.
+    apps_base_domain: str = Field(default="meteor-edge.com", alias="APPS_BASE_DOMAIN")
+    routing_internal_token: str = Field(default="", alias="ROUTING_INTERNAL_TOKEN")
+    # Browser SSH. "echo" is for tests only.
+    shell_provider: Literal["ssh_gateway", "echo", "none"] = Field(default="none", alias="SHELL_PROVIDER")
+    shell_ssh_user: str = Field(default="root", alias="SHELL_SSH_USER")
+    shell_ssh_port: int = Field(default=22, alias="SHELL_SSH_PORT")
+    shell_ssh_identity_file: str = Field(default="", alias="SHELL_SSH_IDENTITY_FILE")
+    shell_gateway_public_key: str = Field(default="", alias="SHELL_GATEWAY_PUBLIC_KEY")
+    shell_ticket_ttl_seconds: int = Field(default=60, alias="SHELL_TICKET_TTL_SECONDS")
+    shell_idle_timeout_seconds: int = Field(default=600, alias="SHELL_IDLE_TIMEOUT_SECONDS")
+    shell_max_duration_seconds: int = Field(default=3600, alias="SHELL_MAX_DURATION_SECONDS")
+    shell_max_sessions_per_user: int = Field(default=4, alias="SHELL_MAX_SESSIONS_PER_USER")
     # "local" = accounts in the PostgreSQL users table.
     identity_provider: Literal["local"] = Field(default="local", alias="IDENTITY_PROVIDER")
 

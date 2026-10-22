@@ -16,14 +16,16 @@ import {
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
+import { DeviceEndpointsPanel } from "@/components/fleet/DeviceEndpointsPanel";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
+import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { StatusBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { canManageDeployments, canManageFleet } from "@/lib/permissions";
+import { canManageDeployments, canManageEndpoints, canManageFleet, canOpenDeviceShell } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 function Detail({ label, value }: { label: string; value: string | null | undefined }) {
@@ -77,6 +79,8 @@ export function DeviceDetailPage() {
 
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
   const canDeploy = canManageDeployments(orgQuery.data?.current_user_role);
+  const canEndpoints = canManageEndpoints(orgQuery.data?.current_user_role);
+  const canShell = canOpenDeviceShell(orgQuery.data?.current_user_role);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
@@ -232,6 +236,29 @@ export function DeviceDetailPage() {
           />
         )}
       </div>
+
+      <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+        <h2 className="text-lg font-semibold">Public URLs</h2>
+        <p className="text-sm text-muted-foreground">
+          Each application on this device can have its own hostname, including different
+          ports such as 80 and 8080.
+        </p>
+        {token && (
+          <DeviceEndpointsPanel
+            token={token}
+            organizationId={organizationId}
+            deviceId={deviceId}
+            canManage={canEndpoints}
+          />
+        )}
+      </div>
+
+      {canShell && token && (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+          <h2 className="text-lg font-semibold">Terminal</h2>
+          <DeviceTerminal token={token} organizationId={organizationId} deviceId={deviceId} />
+        </div>
+      )}
 
       <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
         <h2 className="text-lg font-semibold">MQTT Connection</h2>

@@ -42,11 +42,31 @@ class DeployRollout(BaseModel):
         return self
 
 
+class EndpointSpec(BaseModel):
+    hostname: str = Field(min_length=1, max_length=255)
+    port: int = Field(ge=1, le=65535)
+    protocol: str = "http"
+
+    @field_validator("hostname")
+    @classmethod
+    def _hostname(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("protocol")
+    @classmethod
+    def _protocol(cls, value: str) -> str:
+        protocol = value.strip().lower()
+        if protocol not in {"http", "https"}:
+            raise ValueError("protocol must be http or https")
+        return protocol
+
+
 class DeploymentCreate(BaseModel):
     release_id: uuid.UUID
     target: DeployTarget
     rollout: DeployRollout = Field(default_factory=DeployRollout)
     name: str | None = Field(default=None, max_length=255)
+    endpoint: EndpointSpec | None = None
 
     @field_validator("name")
     @classmethod

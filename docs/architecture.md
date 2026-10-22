@@ -42,7 +42,7 @@ On AWS, `edge-installer` creates the EC2 host with Terraform and runs the Ansibl
 ```text
 src/control-plane/app/
 ├── api/rest/         # health
-├── ports/            # MQTTGateway, RateLimiter, OTAProvider
+├── ports/            # MQTTGateway, RateLimiter, connectivity, shell, storage
 ├── adapters/         # data-plane HTTP, redis/memory, s3/filesystem, ota=none
 ├── identity/
 ├── tenancy/
@@ -70,6 +70,8 @@ Keep **one** data-plane MQTT subscriber until shared subscriptions exist.
 | `MQTTGateway` | Data-plane HTTP → EMQX | other broker names |
 | Telemetry last-value | PostgreSQL columns on `Device` | `timescale`, `clickhouse` |
 | `OTAProvider` | `none` | `mender` and others later |
+| `DeviceConnectivityProvider` | `wireguard`, `none` | other tunnels later |
+| `DeviceShellProvider` | `ssh_gateway`, `echo` (tests), `none` | MQTT PTY later |
 | `ObjectStorage` | `s3`, `filesystem` | — |
 
 Artifact binaries live in object storage; PostgreSQL keeps metadata and `storage_key`. See [Artifacts](fleet/artifacts.md).

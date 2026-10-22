@@ -46,9 +46,18 @@ devices in their groups.
     "group_ids": [],
     "device_type_ids": []
   },
-  "rollout": { "strategy": "immediate" }
+  "rollout": { "strategy": "immediate" },
+  "endpoint": {
+    "hostname": "nginx.appx.meteor-edge.com",
+    "port": 80
+  }
 }
 ```
+
+`endpoint` is optional and only valid when the Deploy targets **one** device.
+Each app/port needs its own hostname (80 and 8080 on the same device are two
+endpoints). The public URL stays `unknown` until that workload is healthy.
+See [Endpoints](endpoints.md).
 
 Batched example: `"rollout": { "strategy": "batched", "batch_size": 2 }`.
 Devices beyond the batch stay **queued** until the current batch is terminal.

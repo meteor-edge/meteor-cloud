@@ -52,6 +52,8 @@ export function DeployWizard({
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [batchSize, setBatchSize] = useState("");
+  const [endpointHostname, setEndpointHostname] = useState("");
+  const [endpointPort, setEndpointPort] = useState("");
   const [yamlText, setYamlText] = useState(
     [
       "release_id: ",
@@ -118,6 +120,8 @@ export function DeployWizard({
       size && size > 0
         ? { strategy: "batched", batch_size: size }
         : { strategy: "immediate" };
+    const hostname = endpointHostname.trim().toLowerCase();
+    const port = endpointPort.trim() ? Number(endpointPort) : null;
     return {
       release_id: releaseId,
       name: name.trim() || null,
@@ -126,6 +130,10 @@ export function DeployWizard({
         group_ids: groupIds,
       },
       rollout,
+      endpoint:
+        hostname && port
+          ? { hostname, port, protocol: "http" }
+          : null,
     };
   }
 
@@ -383,6 +391,28 @@ export function DeployWizard({
                     activate that many devices at a time.
                   </p>
                 </div>
+                {deviceIds.length === 1 && groupIds.length === 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Public URL (optional)</p>
+                    <Input
+                      placeholder="nginx.appx.meteor-edge.com"
+                      value={endpointHostname}
+                      onChange={(event) => setEndpointHostname(event.target.value)}
+                    />
+                    <Input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      placeholder="Host port on the device (80, 8080, …)"
+                      value={endpointPort}
+                      onChange={(event) => setEndpointPort(event.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      One hostname per app/port. The URL is published after the app is
+                      healthy on the device.
+                    </p>
+                  </div>
+                )}
                 {skippedDevices.length > 0 && (
                   <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
                     {skippedDevices.length} selected device
