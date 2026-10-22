@@ -60,6 +60,9 @@ class FakeClient:
             "expires_at": None,
         }
         self.check_error: AgentApiError | None = None
+        self.software_response: list[dict[str, Any]] = []
+        self.software_error: AgentApiError | None = None
+        self.software_calls: list[dict[str, Any]] = []
 
     def register(
         self,
@@ -107,6 +110,12 @@ class FakeClient:
         if self.check_error is not None:
             raise self.check_error
         return self.check_response
+
+    def get_software(self, *, device_token: str) -> list[dict[str, Any]]:
+        self.software_calls.append({"device_token": device_token})
+        if self.software_error is not None:
+            raise self.software_error
+        return list(self.software_response)
 
 
 @pytest.fixture
