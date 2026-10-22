@@ -143,7 +143,8 @@ install_service() {
     echo "error: systemctl not found; cannot install the service." >&2
     exit 1
   fi
-  install -m 0644 "${unit_src}" "${unit_dst}"
+  # Use coreutils ``install`` explicitly — a function named install() would recurse.
+  command install -m 0644 "${unit_src}" "${unit_dst}"
   # Point ExecStart at the installed binary when BIN_DIR differs.
   if [[ "${BIN_DIR}/meteorcli" != "/usr/local/bin/meteorcli" ]]; then
     sed -i "s|^ExecStart=.*|ExecStart=${BIN_DIR}/meteorcli run|" "${unit_dst}"
@@ -153,7 +154,7 @@ install_service() {
   echo "Installed ${unit_dst} (enabled). Start after config: systemctl start meteorcli"
 }
 
-install() {
+install_meteorcli() {
   local python
   python="$(find_python)" || {
     echo "error: Python 3.11+ is required (python3, python3.11, python3.12, or python3.13)." >&2
@@ -209,4 +210,4 @@ if ! need_writable "${PREFIX}" || ! need_writable "${BIN_DIR}"; then
   exit 1
 fi
 
-install
+install_meteorcli
