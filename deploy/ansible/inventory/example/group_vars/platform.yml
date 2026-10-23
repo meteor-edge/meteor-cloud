@@ -33,6 +33,10 @@ mqtt_enabled: false
 # mqtt_broker_host: mqtt.example.com
 # mqtt_certs_src_dir: /path/on/controller/with/ca.crt,server.crt,server.key
 
+# Browser SSH (device page Terminal). Default is ssh_gateway when `vpn` is
+# enabled; set none to keep the tunnel without the terminal.
+# shell_provider: none
+
 # Host firewall (UFW) for on-prem servers without a cloud security group.
 firewall_enabled: true
 firewall_allowed_ssh_cidrs: ["198.51.100.0/24"]

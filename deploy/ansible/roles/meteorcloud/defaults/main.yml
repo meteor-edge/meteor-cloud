@@ -159,9 +159,10 @@ routing_internal_token: >-
      | default(lookup('env', 'EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN'), true)
      | default(connectivity_internal_token, true) }}
 apps_base_domain: "{{ platform_domain | default('meteor-edge.com', true) }}"
-# Browser SSH. ssh_gateway (needs `vpn`): Ansible creates the gateway SSH key on the API
+# Browser SSH. On with WireGuard: Ansible creates the gateway SSH key on the API
 # host once (shell_ssh_dir), mounts it into the API, and devices install its public key.
-shell_provider: none
+# Override with shell_provider: none if you want the tunnel without the terminal.
+shell_provider: "{{ 'ssh_gateway' if 'vpn' in enabled_services else 'none' }}"
 shell_ssh_dir: "{{ platform_root }}/shell"
 shell_ssh_identity_file: "{{ '/run/meteorcloud/shell/id_ed25519' if shell_provider == 'ssh_gateway' else '' }}"
 shell_gateway_public_key: ""

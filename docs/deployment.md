@@ -69,10 +69,10 @@ make up PLATFORM_DOMAIN=fleet.example.com
 `PLATFORM_DOMAIN` is required (`export PLATFORM_DOMAIN=fleet.example.com` or
 `make up PLATFORM_DOMAIN=fleet.example.com`); the script exits if it is empty.
 Then a checkbox of optional services (WireGuard, MQTT, MinIO), **all on**:
-up/down to move, space to check, Enter to continue. It prints DNS records for
-that setup. `--storage=s3` or `--mqtt=external` still ask for bucket or broker
-settings. Open `https://fleet.example.com`, not the public IP. Full list:
-[DNS records](dns.md).
+up/down to move, space to check, Enter to continue. WireGuard also enables
+browser SSH. It prints DNS records for that setup. `--storage=s3` or
+`--mqtt=external` still ask for bucket or broker settings. Open
+`https://fleet.example.com`, not the public IP. Full list: [DNS records](dns.md).
 
 | Command | What it does |
 | --- | --- |

@@ -145,8 +145,11 @@ Operators with `device.shell` (owner/admin/operator) open **Terminal** on the
 device page. Flow: JWT → short-lived ticket → WebSocket → SSH gateway →
 `ssh user@{wg_address}` over WireGuard.
 
-Set `SHELL_PROVIDER=ssh_gateway` and `SHELL_SSH_IDENTITY_FILE` on the API host
-(the process must be able to reach `10.8.0.0/16`). Tests use `SHELL_PROVIDER=echo`.
+`make up` with WireGuard turns this on (`SHELL_PROVIDER=ssh_gateway` and a
+gateway key under `/opt/edge-platform/shell`). The API host must be able to
+reach `10.8.0.0/16`. Re-run `sudo meteorcli run` on each device so it installs
+the gateway public key. Tests use `SHELL_PROVIDER=echo`. Set
+`shell_provider: none` in inventory if you want the tunnel without the terminal.
 
 ## Test locally (no real tunnel)
 

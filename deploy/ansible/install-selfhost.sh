@@ -553,6 +553,11 @@ case "${MQTT}" in
     ;;
 esac
 
+SHELL_PROVIDER_VALUE=none
+if [[ "${VPN}" -eq 1 ]]; then
+  SHELL_PROVIDER_VALUE=ssh_gateway
+fi
+
 cat > "${INV}/group_vars/platform.yml" <<EOF
 # Written by make up. Inventory is gitignored.
 platform_public_url: ${PUBLIC_URL}
@@ -573,6 +578,7 @@ mqtt_broker_host: ${MQTT_BROKER_HOST}
 mqtt_broker_port: ${MQTT_BROKER_PORT}
 mqtt_public_host: ${MQTT_PUBLIC_HOST}
 firewall_enabled: false
+shell_provider: ${SHELL_PROVIDER_VALUE}
 EOF
 
 echo "Packing this repository into ${ARCHIVE}"
