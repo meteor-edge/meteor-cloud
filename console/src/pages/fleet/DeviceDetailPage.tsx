@@ -17,6 +17,7 @@ import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
 import { DeviceEndpointsPanel } from "@/components/fleet/DeviceEndpointsPanel";
+import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
@@ -257,6 +258,13 @@ export function DeviceDetailPage() {
           />
         )}
       </div>
+
+      {token && (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+          <h2 className="text-lg font-semibold">WireGuard network</h2>
+          <DeviceNetworkPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+        </div>
+      )}
 
       {canShell && token && (
         <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">

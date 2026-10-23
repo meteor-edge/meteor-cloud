@@ -71,11 +71,10 @@ class FakeClient:
             "wg_address": "10.8.0.12/32",
             "server_public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             "server_endpoint": "gateway.example.com:51820",
-            "allowed_ips": "10.8.0.12/32",
+            "allowed_ips": "10.8.0.1/32",
             "persistent_keepalive": 25,
             "ssh_user": "root",
             "ssh_gateway_public_key": None,
-            "client_config": "",
         }
 
     def register(

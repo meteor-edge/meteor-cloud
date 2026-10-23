@@ -83,6 +83,10 @@ async def shell_websocket(
             if chunk:
                 last_activity = time.monotonic()
                 await websocket.send_bytes(chunk)
+            elif connection.closed:
+                # The shell exited (e.g. `exit`): end the session instead of waiting for the idle timeout.
+                stop.set()
+                return
             elif time.monotonic() - last_activity > idle:
                 await websocket.send_text("\r\n[idle timeout]\r\n")
                 stop.set()

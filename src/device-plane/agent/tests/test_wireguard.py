@@ -11,6 +11,7 @@ from edge_agent.client import AgentApiError
 from edge_agent.wireguard import (
     apply_interface,
     install_gateway_ssh_key,
+    refresh_endpoint,
     sync_connectivity,
     write_client_config,
 )
@@ -105,7 +106,10 @@ def test_sync_connectivity_does_not_upload_private_key(tmp_path: Path) -> None:
             raise FileNotFoundError("down")
         return result
 
-    with patch("edge_agent.wireguard.wireguard_available", return_value=True):
+    with (
+        patch("edge_agent.wireguard.wireguard_available", return_value=True),
+        patch("edge_agent.wireguard.socket.getaddrinfo", side_effect=OSError("offline")),
+    ):
         response = sync_connectivity(client, "dev_token", directory, runner=runner)
 
     assert response is not None
@@ -138,3 +142,44 @@ def test_install_gateway_ssh_key_is_idempotent(tmp_path: Path) -> None:
     install_gateway_ssh_key("ssh-ed25519 AAAA gw", authorized_keys=path)
     install_gateway_ssh_key("ssh-ed25519 AAAA gw", authorized_keys=path)
     assert path.read_text(encoding="utf-8").count("AAAA gw") == 1
+
+
+def _wg(show: dict[str, str], calls: list[list[str]]):
+    """A fake runner: `wg show wg0 <field>` prints show[field]; every call is recorded."""
+
+    def runner(args, **kwargs):
+        del kwargs
+        calls.append(list(args))
+        result = MagicMock()
+        result.stdout = show.get(args[3], "") if args[:2] == ["wg", "show"] else ""
+        return result
+
+    return runner
+
+
+def test_refresh_endpoint_follows_a_new_server_ip() -> None:
+    calls: list[list[str]] = []
+    runner = _wg({"latest-handshakes": "SERVER\t1000\n", "endpoints": "SERVER\t203.0.113.1:51820\n"}, calls)
+    refresh_endpoint("wg0", server_public_key="SERVER", server_endpoint="wg.example.com:51820",
+                     runner=runner, resolve=lambda host: "203.0.113.9", now=lambda: 1000 + 600)
+    assert calls[-1] == ["wg", "set", "wg0", "peer", "SERVER", "endpoint", "203.0.113.9:51820"]
+
+
+def test_refresh_endpoint_leaves_a_healthy_tunnel_alone() -> None:
+    calls: list[list[str]] = []
+    runner = _wg({"latest-handshakes": "SERVER\t1000\n"}, calls)
+    refresh_endpoint("wg0", server_public_key="SERVER", server_endpoint="wg.example.com:51820",
+                     runner=runner, resolve=lambda host: "203.0.113.9", now=lambda: 1000 + 30)
+    assert calls == [["wg", "show", "wg0", "latest-handshakes"]]
+
+
+def test_refresh_endpoint_skips_ip_endpoints_and_unchanged_names() -> None:
+    calls: list[list[str]] = []
+    refresh_endpoint("wg0", server_public_key="SERVER", server_endpoint="203.0.113.1:51820",
+                     runner=_wg({}, calls))
+    assert calls == []
+
+    runner = _wg({"latest-handshakes": "SERVER\t0\n", "endpoints": "SERVER\t203.0.113.1:51820\n"}, calls)
+    refresh_endpoint("wg0", server_public_key="SERVER", server_endpoint="wg.example.com:51820",
+                     runner=runner, resolve=lambda host: "203.0.113.1", now=lambda: 5000)
+    assert not any(call[:2] == ["wg", "set"] for call in calls)

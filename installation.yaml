@@ -5,6 +5,8 @@ installation:
 
 platform:
   version: "0.2.0"
+  # Your domain, e.g. meteor-edge.com. Needs DNS records <domain>, *.<domain> and
+  # wg.<domain> (see docs/dns.md); `edge-installer apply` prints them with the IPs.
   domain: null
   public_url: null
 

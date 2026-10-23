@@ -7,6 +7,8 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -42,15 +44,20 @@ def test_wireguard_register_allocates_address_and_revokes(
     body = created.json()
     assert body["status"] == "active"
     assert body["wg_address"].startswith("10.8.0.")
-    assert "<device-private-key>" in body["client_config"]
-    assert WG_KEY_A not in body["client_config"] or True  # public key may appear; private never
+    assert body["allowed_ips"] == "10.8.0.1/32"
 
     listed = client.get(
         f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/connectivity",
         headers=headers,
     )
     assert listed.status_code == 200
-    assert listed.json()["wg_public_key"] == WG_KEY_A
+    shown = listed.json()
+    assert shown["wg_public_key"] == WG_KEY_A
+    assert shown["wg_address"] == body["wg_address"].removesuffix("/32")
+    assert shown["server_address"] == "10.8.0.1"
+    assert shown["ssh_user"] == "root"
+    assert shown["ssh_port"] == 22
+    assert shown["connected"] is False  # no handshake reported yet
 
     revoked = client.post(
         f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/connectivity/revoke",
@@ -109,7 +116,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "nginx.appx.meteor-edge.com",
+            "hostname": "nginx.meteor-edge.com",
             "port": 80,
         },
     )
@@ -119,7 +126,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "dashboard.appx.meteor-edge.com",
+            "hostname": "panel.meteor-edge.com",
             "port": 8080,
         },
     )
@@ -129,7 +136,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "other.appx.meteor-edge.com",
+            "hostname": "other.meteor-edge.com",
             "port": 80,
         },
     )
@@ -139,7 +146,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "nginx.appx.meteor-edge.com",
+            "hostname": "nginx.meteor-edge.com",
             "port": 9000,
         },
     )
@@ -182,7 +189,7 @@ def test_routing_document_omits_unready_and_requires_token(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "boiler.appx.meteor-edge.com",
+            "hostname": "boiler.meteor-edge.com",
             "port": 80,
         },
     )
@@ -210,7 +217,7 @@ def test_routing_document_omits_unready_and_requires_token(
         headers=headers,
         json={
             "device_id": offline_reg["device_id"],
-            "hostname": "offline.appx.meteor-edge.com",
+            "hostname": "offline.meteor-edge.com",
             "port": 80,
         },
     )
@@ -261,6 +268,11 @@ def test_internal_peers_and_shell_ticket(client: TestClient, db_session: Session
         websocket.send_text("pwd\n")
         echoed = websocket.receive_bytes().decode("utf-8")
         assert "pwd" in echoed
+        # Exiting the shell closes the browser session right away (not at the idle timeout).
+        websocket.send_text("exit\n")
+        assert "exit" in websocket.receive_bytes().decode("utf-8")
+        with pytest.raises(WebSocketDisconnect):
+            websocket.receive_bytes()
 
 
 def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: Session) -> None:
@@ -273,7 +285,7 @@ def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: 
             "release_id": release["id"],
             "target": {"device_ids": [reg["device_id"]]},
             "endpoint": {
-                "hostname": "camera.appx.meteor-edge.com",
+                "hostname": "camera.meteor-edge.com",
                 "port": 80,
             },
         },
@@ -284,7 +296,7 @@ def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: 
         headers=headers,
     )
     assert listed.status_code == 200
-    assert listed.json()[0]["hostname"] == "camera.appx.meteor-edge.com"
+    assert listed.json()[0]["hostname"] == "camera.meteor-edge.com"
     assert listed.json()[0]["availability"] == "unknown"
 
 
@@ -298,7 +310,7 @@ def test_sync_from_software_marks_manual_endpoints_ready(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "manual.appx.meteor-edge.com",
+            "hostname": "manual.meteor-edge.com",
             "port": 80,
         },
     )
@@ -342,7 +354,7 @@ def test_create_endpoint_unknown_deployment_id_rejected(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "missing.appx.meteor-edge.com",
+            "hostname": "missing.meteor-edge.com",
             "port": 80,
             "deployment_id": str(uuid.uuid4()),
         },

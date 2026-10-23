@@ -87,13 +87,14 @@ device and release answered.
 
 The suite never assumes you own a domain. With `E2E_DNS_PROVIDER=route53`,
 `validate` checks that the zone `E2E_DNS_ZONE_ID` is accessible and is
-`E2E_DOMAIN`. Terraform then creates only `<env>.<domain>` and
-`*.<env>.<domain>` (tracked in the environment's state; nothing else in
+`E2E_DOMAIN`. Terraform then creates only `<env>.<domain>`,
+`*.<env>.<domain>` and `wg.<env>.<domain>` ([DNS records](dns.md); tracked in the environment's state; nothing else in
 the zone is touched) and an instance role that may only write the two
 `_acme-challenge` TXT records. Traefik reads it through IMDSv2 (hop limit 2), so
 no static AWS keys reach the host.
 
-`E2E_DNS_PROVIDER=manual`: create both A records yourself. `none` (or no
+`E2E_DNS_PROVIDER=manual`: create the three A records yourself; `up` and
+`status` print them with the right IPs. `none` (or no
 domain): everything else still runs; DNS, TLS and public-app checks are
 `blocked` and the run fails. A running proxy is never taken as proof that a
 public endpoint works.

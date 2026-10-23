@@ -52,6 +52,10 @@ def render_inventory(cfg: Config, state: State, hosts: list[Host], *, platform_a
     def entry(host: Host, **extra: Any) -> dict[str, Any]:
         return {"ansible_host": host.address, "ansible_user": host.user, **extra}
 
+    # Devices dial wg.<fqdn> (a DNS name they can follow) when there is public DNS, else the IP.
+    wireguard_host = gateway or control_plane
+    wireguard_name = {"vpn_public_host": f"wg.{cfg.fqdn}" if cfg.has_public_dns else wireguard_host.address}
+
     inventory: dict[str, Any] = {
         "all": {
             "vars": {
@@ -64,7 +68,7 @@ def render_inventory(cfg: Config, state: State, hosts: list[Host], *, platform_a
             },
             "children": {
                 "platform": {
-                    "hosts": {"control-plane": entry(control_plane)},
+                    "hosts": {"control-plane": entry(control_plane, **({} if gateway else wireguard_name))},
                     "vars": platform_vars(cfg, platform_archive=platform_archive, gateway=gateway,
                                           control_plane=control_plane),
                 },
@@ -77,7 +81,7 @@ def render_inventory(cfg: Config, state: State, hosts: list[Host], *, platform_a
     }
     if gateway is not None:
         inventory["all"]["children"]["vpn_gateway"] = {
-            "hosts": {"vpn-gateway": entry(gateway, vpn_public_host=gateway.address)}
+            "hosts": {"vpn-gateway": entry(gateway, **wireguard_name)}
         }
     state.inventory.write_text(json.dumps(inventory, indent=2) + "\n", encoding="utf-8")
     os.chmod(state.inventory, 0o600)

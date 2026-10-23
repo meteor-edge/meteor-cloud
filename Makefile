@@ -243,7 +243,7 @@ e2e-check: ## Full-stack E2E tooling checks (unit tests, Terraform validate, she
 	for root in aws onprem; do \
 		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate terraform init -backend=false -input=false >/dev/null \
 		&& TF_DATA_DIR=.terraform-validate terraform validate) || exit 1; done
-	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/testapp/serve.sh; \
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/demo.sh $(E2E_DIR)/testapp/serve.sh; \
 	else echo "shellcheck not installed; skipped"; fi
 
 e2e-up: ## Create a full-stack E2E environment and run the suite (tests/e2e/.env)

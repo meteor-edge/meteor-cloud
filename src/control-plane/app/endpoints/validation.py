@@ -12,7 +12,7 @@ _LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 # APPS_RESERVED_NAMES (e.g. hosts that already exist under the apps domain).
 _RESERVED_HOSTS = frozenset(
     {
-        "admin", "api", "app", "apps", "appx", "auth", "backend", "console", "dashboard", "docs",
+        "admin", "api", "app", "apps", "auth", "backend", "console", "dashboard", "docs",
         "ftp", "grafana", "help", "localhost", "login", "mail", "metadata", "mqtt", "mx", "ns",
         "ns1", "ns2", "postgres", "redis", "smtp", "sso", "status", "support", "traefik", "vpn",
         "wg", "www",
@@ -57,7 +57,7 @@ def suggested_hostname(*, app: str, device_name: str, org_slug: str, apps_base_d
 
 
 def parse_hostname(hostname: str, *, apps_base_domain: str, reserved: frozenset[str] = frozenset()) -> list[str]:
-    """Labels in front of the apps domain: [name] (custom), [app, device, org] or legacy [name, "appx"]."""
+    """Labels in front of the apps domain: [name] (custom) or [app, device, org] (suggested)."""
     domain = normalize_domain(apps_base_domain)
     value = hostname.strip().lower().rstrip(".")
     if not value.endswith(f".{domain}"):
@@ -72,7 +72,7 @@ def parse_hostname(hostname: str, *, apps_base_domain: str, reserved: frozenset[
         if labels[0] in _RESERVED_HOSTS or labels[0] in reserved:
             raise HostnameRejected("reserved", f"'{labels[0]}' is reserved. Choose another name.")
         return labels
-    if len(labels) == 3 or (len(labels) == 2 and labels[1] == "appx"):
+    if len(labels) == 3:
         return labels
     raise HostnameRejected("invalid", f"Use name.{domain} or app.device.organization.{domain}.")
 

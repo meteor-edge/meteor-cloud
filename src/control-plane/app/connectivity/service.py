@@ -66,6 +66,10 @@ class ConnectivityService:
             wg_address=address,
             status=row.status,
             last_handshake_at=row.last_handshake_at,
+            connected=self.handshake_is_fresh(row),
+            server_address=self.settings.wireguard_server_address.split("/", 1)[0],
+            ssh_user=self.settings.shell_ssh_user,
+            ssh_port=self.settings.shell_ssh_port,
             revoked_at=row.revoked_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -79,26 +83,6 @@ class ConnectivityService:
         if seen.tzinfo is None:
             seen = seen.replace(tzinfo=UTC)
         return datetime.now(UTC) - seen <= stale_after
-
-    def _client_config(self, *, address: str, public_key: str) -> str:
-        keepalive = self.settings.wireguard_persistent_keepalive
-        server_key = self.settings.wireguard_server_public_key
-        endpoint = self.settings.wireguard_server_endpoint
-        dns_line = ""
-        if self.settings.wireguard_client_dns:
-            dns_line = f"DNS = {self.settings.wireguard_client_dns}\n"
-        return (
-            "[Interface]\n"
-            f"Address = {address}/32\n"
-            f"PrivateKey = <device-private-key>\n"
-            f"{dns_line}"
-            "\n[Peer]\n"
-            f"PublicKey = {server_key}\n"
-            f"Endpoint = {endpoint}\n"
-            "AllowedIPs = 10.8.0.1/32\n"
-            f"PersistentKeepalive = {keepalive}\n"
-            f"# Device public key (already registered): {public_key}\n"
-        )
 
     def register_agent(
         self,
@@ -161,11 +145,10 @@ class ConnectivityService:
             wg_address=f"{address}/32",
             server_public_key=self.settings.wireguard_server_public_key,
             server_endpoint=self.settings.wireguard_server_endpoint,
-            allowed_ips=provider.client_allowed_ips(address),
+            allowed_ips=provider.client_allowed_ips(self.settings.wireguard_server_address),
             persistent_keepalive=self.settings.wireguard_persistent_keepalive,
             ssh_user=self.settings.shell_ssh_user,
             ssh_gateway_public_key=self.settings.shell_gateway_public_key or None,
-            client_config=self._client_config(address=address, public_key=public_key),
         )
 
     def get_for_operator(

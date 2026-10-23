@@ -17,7 +17,10 @@ class DeviceShellConnection(Protocol):
 
     def close(self) -> None: ...
 
-    def fileno(self) -> int | None: ...
+    @property
+    def closed(self) -> bool:
+        """True once the remote shell has exited and all its output was read."""
+        ...
 
 
 class DeviceShellProvider(Protocol):

@@ -4,7 +4,7 @@ import tarfile
 from pathlib import Path
 
 from e2e.ansible import parse_recap, render_inventory
-from e2e.cli import hosts_from_outputs, parser
+from e2e.cli import dns_records, hosts_from_outputs, parser
 from e2e.config import load
 from e2e.source import build_archive
 from e2e.state import State
@@ -39,9 +39,21 @@ def test_inventory_pins_host_keys_and_keeps_secrets_out(tmp_path: Path) -> None:
     assert platform["minio_enabled"] is True
     assert platform["vpn_link_endpoint"] == "172.31.0.2:51820"
     assert platform["traefik_aws_region"] == "eu-central-1"
-    assert inventory["all"]["children"]["vpn_gateway"]["hosts"]["vpn-gateway"]["vpn_public_host"] == "198.51.100.2"
+    assert inventory["all"]["children"]["vpn_gateway"]["hosts"]["vpn-gateway"]["vpn_public_host"] == "wg.ci-1.example.com"
+    assert "vpn_public_host" not in inventory["all"]["children"]["platform"]["hosts"]["control-plane"]
     assert (state.secrets_file.stat().st_mode & 0o777) == 0o600
     assert state.secrets(cfg) == secrets  # stable across calls
+
+
+def test_inventory_uses_the_ip_for_wireguard_without_public_dns(tmp_path: Path) -> None:
+    cfg = load(tmp_path / "x", environ={"E2E_ENV_NAME": "ci-1", "E2E_AWS_REGION": "eu-central-1"})
+    state = State("ci-1", root=tmp_path)
+    state.ensure()
+    outputs = {**OUTPUTS, "gateway": None}
+    inventory = render_inventory(cfg, state, hosts_from_outputs(outputs), platform_archive=tmp_path / "p.tgz",
+                                 device_archive=tmp_path / "d.tgz", ssh_key=tmp_path / "key")
+    control_plane = inventory["all"]["children"]["platform"]["hosts"]["control-plane"]
+    assert control_plane["vpn_public_host"] == "198.51.100.1"
 
 
 def test_parse_recap() -> None:
@@ -86,3 +98,14 @@ def test_forget_replaced_hosts(tmp_path: Path) -> None:
     assert forget_replaced_hosts(state, before, after) == ["control-plane"]
     text = state.known_hosts.read_text()
     assert "198.51.100.1" not in text and "198.51.100.3" in text
+
+
+def test_dns_records_point_wireguard_at_the_gateway(tmp_path: Path) -> None:
+    cfg = load(tmp_path / "x", environ={"E2E_ENV_NAME": "demo", "E2E_DOMAIN": "example.com", "E2E_AWS_REGION": "eu-central-1",
+                                         "E2E_DNS_PROVIDER": "manual", "E2E_VPN_PLACEMENT": "dedicated"})
+    records = {name: ip for name, ip, _ in dns_records(cfg, hosts_from_outputs(OUTPUTS))}
+    assert records == {
+        "demo.example.com": "198.51.100.1",
+        "*.demo.example.com": "198.51.100.1",
+        "wg.demo.example.com": "198.51.100.2",
+    }

@@ -99,7 +99,8 @@ module "dns" {
   count  = local.route53 ? 1 : 0
   source = "./modules/dns"
 
-  zone_id    = var.dns_zone_id
-  fqdn       = local.fqdn
-  ingress_ip = module.cloud_app.public_ip
+  zone_id      = var.dns_zone_id
+  fqdn         = local.fqdn
+  ingress_ip   = module.cloud_app.public_ip
+  wireguard_ip = var.vpn_placement == "dedicated" ? module.vpn_gateway[0].public_ip : module.cloud_app.public_ip
 }

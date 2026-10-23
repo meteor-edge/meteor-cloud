@@ -118,7 +118,7 @@ configured directly.
 
 | Setting | Purpose |
 |---------|---------|
-| `vpn_public_host` (host var) | Address devices dial; default `ansible_host` |
+| `vpn_public_host` (host var) | Address devices dial, ideally a DNS name such as `wg.example.com`; default `ansible_host` |
 | `vpn_control_plane_url` | Private API URL for the agent when the control plane is not in the inventory |
 | `vpn_site_links` | `[{name, public_key, address}]` WireGuard links for unmanaged control-plane hosts |
 | `vpn_routed_cidrs` | Private networks (VPC, EKS pods) routed to the gateway; AWS: source/dest check off, route `10.8.0.0/16` to it |

@@ -2,24 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
 import { listEndpoints } from "@/api/fleet";
-import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
 import { AvailabilityBadge } from "@/components/fleet/StatusBadge";
 
 export function EndpointsPage() {
   const { organizationId = "" } = useParams();
   const { token } = useAuth();
-  const orgQuery = useQuery({
-    queryKey: ["organization", organizationId, token],
-    queryFn: () => getOrganization(token!, organizationId),
-    enabled: Boolean(token && organizationId),
-  });
   const endpointsQuery = useQuery({
     queryKey: ["endpoints", organizationId, token],
     queryFn: () => listEndpoints(token!, organizationId),
     enabled: Boolean(token && organizationId),
   });
-  void orgQuery.data;
 
   const items = endpointsQuery.data ?? [];
 
@@ -37,8 +30,8 @@ export function EndpointsPage() {
       )}
       {items.length === 0 && !endpointsQuery.isLoading ? (
         <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
-          No public URLs yet. Attach a hostname when deploying to a single device, or
-          create one from a device page.
+          No public URLs yet. Publish an app when deploying to a single device, or from a
+          device page.
         </p>
       ) : (
         <div className="overflow-x-auto rounded-md border border-border">

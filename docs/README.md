@@ -49,6 +49,7 @@ Commands and APIs you look up while working.
 | Compose + Ansible (VM, EC2, on-prem) | [Deployment](deployment.md) |
 | Kubernetes (existing cluster) | [Kubernetes](kubernetes.md) |
 | AWS EC2 quick install | [Install quickstart](install-quickstart.md) |
+| DNS records to create (domain, apps, WireGuard) | [DNS records](dns.md) |
 | `installation.yaml` | [Installer configuration](installer-configuration.md) |
 | Modular services (`cloud_app`, `vpn`) | [Services](services.md) |
 | AWS prerequisites & deploy | [Prerequisites](aws-prerequisites.md) · [AWS deployment](aws-deployment.md) |

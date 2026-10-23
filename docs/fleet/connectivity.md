@@ -35,6 +35,29 @@ plane every 15s and never rewrites `wg0.conf`; after a `wg-quick` restart it
 re-adds peers on the next poll. Open **UDP 51820** to the gateway (security
 group, or a router port forward on-prem).
 
+### The address devices dial: `wg.<domain>`
+
+One of the three [DNS records](../dns.md) MeteorCloud needs.
+
+Give the gateway a DNS name, e.g. `wg.meteor-edge.com`, as an **A record to its
+public IP** (DNS only: no HTTP proxy such as Cloudflare's orange cloud, since
+WireGuard is UDP). Set it on the gateway host in the inventory:
+
+```yaml
+vpn_public_host: wg.meteor-edge.com   # devices get Endpoint = wg.meteor-edge.com:51820
+```
+
+Without it, devices dial the host's IP (`ansible_host`). The demo/E2E Terraform
+creates `wg.<env>.<domain>` itself. `wg` is reserved, so no app can take it.
+
+Reconnecting: devices send a keepalive every 25s, so after a reboot, a network
+change on the device, or a short outage, WireGuard reconnects on its own.
+WireGuard looks a name up only when the tunnel starts, so the device agent
+checks on every heartbeat: when the last handshake is older than 3 minutes, it
+looks `wg.<domain>` up again and points the tunnel at the new IP
+(`wg set wg0 peer … endpoint …`). Moving the gateway to a new IP is then just a
+DNS change; use a short TTL (60s).
+
 The API and the agent share `CONNECTIVITY_INTERNAL_TOKEN`
 (`EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN` on the controller). The agent
 reaches `/internal/connectivity/*` privately; Traefik never serves `/internal`.
@@ -102,6 +125,20 @@ Install `wireguard` / `wireguard-tools` on the Pi. `meteorcli run` (as root):
 `sshd` must be running for browser SSH. Do not forward port 22 on the home
 router.
 
+## WireGuard network on the device page
+
+The device page's **WireGuard network** card shows the device's internal IP
+(e.g. `10.8.0.2`), whether its tunnel is connected (a recent handshake), and the
+SSH command to reach it, e.g. `ssh root@10.8.0.2` (`SHELL_SSH_USER`, plus `-p`
+when `SHELL_SSH_PORT` is not 22). Run it on the MeteorCloud server with the
+browser-terminal key, which every device trusts once it joins:
+
+```bash
+sudo ssh -i /opt/edge-platform/shell/id_ed25519 root@10.8.0.2   # Ansible installs
+```
+
+Devices cannot reach each other; only the server (`10.8.0.1`) can reach them.
+
 ## Browser terminal
 
 Operators with `device.shell` (owner/admin/operator) open **Terminal** on the
@@ -120,14 +157,15 @@ Manual gateway check:
 
 1. `wg show` on the server after a device registers — a peer should appear
    within ~15s of the gateway agent poll.
-2. From the server: `ping 10.8.0.x` then `ssh root@10.8.0.x`.
+2. From the server: `ping 10.8.0.x` then the SSH command from the device page.
 3. Console → device → Connect in Terminal.
 4. Revoke connectivity in the API; `wg show` should drop the peer and new
    shells should fail.
 
 ## DNS for apps (not SSH)
 
-SSH does not need public DNS. App URLs need one **wildcard**
+All DNS records are listed in [DNS records](../dns.md). SSH needs none of its
+own. App URLs need one **wildcard**
 `*.<APPS_BASE_DOMAIN>` A/AAAA (or CNAME) to the gateway. It covers custom names
 (`shop.meteor-edge.com`) and suggested ones (`shop.kiosk-12.acme.meteor-edge.com`).
 Records that already exist under the domain (for example `www`) take precedence;

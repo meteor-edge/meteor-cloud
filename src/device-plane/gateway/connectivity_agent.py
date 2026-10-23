@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger("meteorcloud.gateway")
@@ -48,48 +49,19 @@ def _request(url: str, token: str, *, method: str = "GET", body: dict[str, Any] 
         return json.loads(raw) if raw else {}
 
 
-def current_peer_keys(interface: str, *, runner: Runner = _run) -> set[str]:
+def current_peers(interface: str, *, runner: Runner = _run) -> dict[str, int]:
+    """Public key -> latest handshake (unix seconds, 0 = never) for each peer on the interface."""
     try:
         dump = runner(["wg", "show", interface, "dump"]).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return set()
-    keys: set[str] = set()
-    for index, line in enumerate(dump.splitlines()):
-        if index == 0:
-            continue
+        return {}
+    peers: dict[str, int] = {}
+    # The first line is the interface itself; peer lines are: key, psk, endpoint, allowed-ips, handshake, ...
+    for line in dump.splitlines()[1:]:
         parts = line.split("\t")
-        if parts:
-            keys.add(parts[0])
-    return keys
-
-
-def handshake_times(interface: str, *, runner: Runner = _run) -> list[dict[str, Any]]:
-    try:
-        dump = runner(["wg", "show", interface, "dump"]).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
-    items: list[dict[str, Any]] = []
-    for index, line in enumerate(dump.splitlines()):
-        if index == 0:
-            continue
-        parts = line.split("\t")
-        if len(parts) < 5:
-            continue
-        try:
-            unix = int(parts[4])
-        except ValueError:
-            continue
-        if unix <= 0:
-            continue
-        from datetime import UTC, datetime
-
-        items.append(
-            {
-                "public_key": parts[0],
-                "last_handshake_at": datetime.fromtimestamp(unix, tz=UTC).isoformat(),
-            }
-        )
-    return items
+        handshake = parts[4] if len(parts) > 4 else ""
+        peers[parts[0]] = int(handshake) if handshake.isdigit() else 0
+    return peers
 
 
 def apply_peers(
@@ -100,7 +72,7 @@ def apply_peers(
     runner: Runner = _run,
 ) -> None:
     wanted = {str(peer["public_key"]): str(peer["allowed_ips"]) for peer in desired if peer["public_key"] not in keep}
-    present = current_peer_keys(interface, runner=runner)
+    present = set(current_peers(interface, runner=runner))
     for key in present - set(wanted) - keep:
         runner(["wg", "set", interface, "peer", key, "remove"])
         logger.info("Removed WireGuard peer %s", key[:8])
@@ -120,7 +92,11 @@ def sync_once(
 ) -> None:
     payload = _request(f"{api_url.rstrip('/')}/internal/connectivity/peers", token)
     apply_peers(interface=interface, desired=list(payload.get("peers") or []), keep=keep, runner=runner)
-    items = [item for item in handshake_times(interface, runner=runner) if item["public_key"] not in keep]
+    items = [
+        {"public_key": key, "last_handshake_at": datetime.fromtimestamp(unix, tz=UTC).isoformat()}
+        for key, unix in current_peers(interface, runner=runner).items()
+        if unix > 0 and key not in keep
+    ]
     if items:
         _request(
             f"{api_url.rstrip('/')}/internal/connectivity/handshakes",

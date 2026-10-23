@@ -44,7 +44,8 @@ services:
   - `dedicated`: Terraform creates a second EC2 instance with its own security
     group (SSH, UDP `listen_port`) and Elastic IP. Ansible installs WireGuard
     there and joins the API host to it with a WireGuard site link over the VPC.
-    Devices dial the gateway's Elastic IP.
+    Devices dial the gateway's Elastic IP; give it a DNS name such as
+    `wg.<domain>` (see [connectivity](fleet/connectivity.md)).
 - At least one service must be enabled
 
 When `cloud_app` is disabled, Postgres/JWT secrets are not required.

@@ -170,6 +170,10 @@ export type DeviceConnectivity = {
   wg_address: string | null;
   status: string;
   last_handshake_at: string | null;
+  connected: boolean;
+  server_address: string;
+  ssh_user: string;
+  ssh_port: number;
   revoked_at: string | null;
   created_at: string;
   updated_at: string;

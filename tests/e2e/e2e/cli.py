@@ -127,7 +127,32 @@ def provision(cfg: Config, state: State) -> list[Host]:
             tf.init()
             tf.apply()
     state.update(hosts=[h.__dict__ for h in hosts], provider=cfg.provider, fqdn=cfg.fqdn)
+    if cfg.dns_provider == "manual":
+        say_dns_records(cfg, hosts)
     return hosts
+
+
+def dns_records(cfg: Config, hosts: list[Host]) -> list[tuple[str, str, str]]:
+    """(name, IP, purpose) for every DNS record the environment needs."""
+    by_role = {h.role: h for h in hosts}
+    ingress = (cfg.onprem_ingress_ip if cfg.provider == "onprem" else "") or by_role["control_plane"].address
+    wireguard = by_role["gateway"].address if cfg.provider == "aws" and "gateway" in by_role else ingress
+    return [
+        (cfg.fqdn, ingress, "console, API (/api), MQTT (TCP 8883)"),
+        (f"*.{cfg.fqdn}", ingress, "public app URLs"),
+        (f"wg.{cfg.fqdn}", wireguard, "WireGuard: devices connect here (UDP 51820)"),
+    ]
+
+
+def say_dns_records(cfg: Config, hosts: list[Host]) -> None:
+    if not cfg.has_public_dns:
+        return
+    if cfg.dns_provider == "route53":
+        say("  DNS records    created by Terraform in Route53:")
+    else:
+        say("  DNS records    create these A records yourself (DNS only, no proxy; TTL 60):")
+    for name, ip, purpose in dns_records(cfg, hosts):
+        say(f"                 {name:<32} -> {ip:<16} {purpose}")
 
 
 def configure(cfg: Config, state: State, hosts: list[Host], secrets: dict[str, str]) -> None:
@@ -261,7 +286,11 @@ def cmd_status(cfg: Config, state: State, args: argparse.Namespace) -> int:
             say(f"  console/API    {url}  (/health -> {response.status})")
         except OSError as exc:
             say(f"  console/API    {url}  (unreachable: {exc})")
+    say_dns_records(cfg, state.hosts())
     say(f"  admin login    {state.secrets_file} (EDGE_PLATFORM_ADMIN_EMAIL / _PASSWORD)")
+    demo_login = state.dir / "demo-login.env"
+    if demo_login.is_file():
+        say(f"  demo login     {demo_login} (DEMO_EMAIL / DEMO_PASSWORD)")
     latest = state.dir / "report.json"
     if latest.is_file():
         report = json.loads(latest.read_text(encoding="utf-8"))

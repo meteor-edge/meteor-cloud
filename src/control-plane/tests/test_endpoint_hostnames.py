@@ -48,7 +48,6 @@ def test_dns_label_and_suggestion() -> None:
     [
         ("shop.kiosk-12.acme.meteor-edge.com", "available"),
         ("shop.meteor-edge.com", "available"),
-        ("legacy.appx.meteor-edge.com", "available"),
         ("shop.kiosk-12.globex.meteor-edge.com", "not_yours"),
         ("shop.other-device.acme.meteor-edge.com", "not_yours"),
         ("www.meteor-edge.com", "reserved"),
@@ -74,7 +73,6 @@ def test_certificate_per_device_or_domain() -> None:
         tls_domain("shop.kiosk-12.acme.meteor-edge.com", apps_base_domain=DOMAIN) == "*.kiosk-12.acme.meteor-edge.com"
     )
     assert tls_domain("shop.meteor-edge.com", apps_base_domain=DOMAIN) == "*.meteor-edge.com"
-    assert tls_domain("old.appx.meteor-edge.com", apps_base_domain=DOMAIN) == "*.appx.meteor-edge.com"
 
 
 def test_suggestion_check_and_create(client: TestClient, db_session: Session) -> None:

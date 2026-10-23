@@ -27,6 +27,18 @@ services:
 
 Details: [Modular services](services.md)
 
+**Domain and DNS.** Set `platform.domain` (e.g. `meteor-edge.com`) for HTTPS,
+then create three A records once you know the server's IP (`make up` prints them
+at the end; plain DNS, no proxy):
+
+| Record | Points to | For |
+| --- | --- | --- |
+| `meteor-edge.com` | server IP | console, API, MQTT |
+| `*.meteor-edge.com` | server IP | public app URLs |
+| `wg.meteor-edge.com` | server IP, or the dedicated gateway's IP | WireGuard (UDP 51820) |
+
+Details: [DNS records](dns.md).
+
 ## 3. Secrets
 
 ```bash
@@ -71,6 +83,7 @@ make up
 ## Verify
 
 ```bash
+dig +short meteor-edge.com wg.meteor-edge.com app.meteor-edge.com   # all expected IPs
 curl http://<public-ip>/api/v1/health
 open http://<public-ip>/
 ```

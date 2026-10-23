@@ -55,10 +55,10 @@ class SshGatewayConnection:
             except subprocess.TimeoutExpired:
                 self._process.kill()
 
-    def fileno(self) -> int | None:
-        if self._process.stdout is None:
-            return None
-        return self._process.stdout.fileno()
+    @property
+    def closed(self) -> bool:
+        # read() drains the remaining output once ssh has exited.
+        return self._process.poll() is not None
 
 
 class SshGatewayProvider:
@@ -127,12 +127,15 @@ class EchoShellConnection:
         if self._closed:
             return
         self._buffer.extend(data)
+        # Like a real shell, `exit` ends the session once its echo is read.
+        self._closed = data.strip() == b"exit"
 
     def close(self) -> None:
         self._closed = True
 
-    def fileno(self) -> int | None:
-        return None
+    @property
+    def closed(self) -> bool:
+        return self._closed and not self._buffer
 
 
 class EchoShellProvider:

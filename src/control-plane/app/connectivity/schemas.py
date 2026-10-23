@@ -23,11 +23,11 @@ class AgentWireGuardRegisterResponse(BaseModel):
     wg_address: str
     server_public_key: str
     server_endpoint: str
+    # What the device routes through the tunnel: the server's tunnel address.
     allowed_ips: str
     persistent_keepalive: int
     ssh_user: str
     ssh_gateway_public_key: str | None = None
-    client_config: str
 
 
 class DeviceConnectivityResponse(BaseModel):
@@ -40,6 +40,12 @@ class DeviceConnectivityResponse(BaseModel):
     wg_address: str | None
     status: str
     last_handshake_at: datetime | None
+    # True while the device's last WireGuard handshake is recent.
+    connected: bool = False
+    # How to reach the device inside the tunnel: the server's tunnel IP and `ssh <user>@<wg_address>`.
+    server_address: str = ""
+    ssh_user: str = ""
+    ssh_port: int = 22
     revoked_at: datetime | None
     created_at: datetime
     updated_at: datetime

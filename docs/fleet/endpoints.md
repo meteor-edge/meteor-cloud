@@ -12,8 +12,7 @@ The organization is part of a suggested address, so suggestions never collide
 between organizations, and an organization can only use addresses that end in
 one of **its own** devices and its own organization name. Custom names are
 shared by everyone; reserved names (`www`, `api`, `admin`, `console`, …, plus
-`APPS_RESERVED_NAMES`) are refused. Earlier `<name>.appx.<domain>` addresses
-keep working.
+`APPS_RESERVED_NAMES`) are refused.
 
 One address per app port: two apps on the same device need different ports.
 Upstream addresses are **derived** from the device’s WireGuard IP; clients

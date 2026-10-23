@@ -13,6 +13,7 @@ from edge_installer.config.validation import (
     validate_configuration,
     validate_dependencies,
 )
+from edge_installer.deployment.dns import dns_records
 from edge_installer.deployment.service import PlatformDeploymentService
 from edge_installer.exceptions import ConfigurationError, InstallerError
 
@@ -85,6 +86,11 @@ def run_apply(*, config_path: Path, console: Console) -> None:
     console.print(f"Platform URL: {result.state.platform_url}")
     for key, value in result.health.items():
         console.print(f"{key.replace('_', ' ').title()}: {value}")
+    records = dns_records(config, result.outputs)
+    if records:
+        console.print("\n[bold]DNS records you need[/bold] (A records, DNS only, no proxy; see docs/dns.md):")
+        for name, ip, purpose in records:
+            console.print(f"  {name:<32} -> {ip:<16} {purpose}")
 
 
 def run_status(*, config_path: Path, console: Console) -> None:
