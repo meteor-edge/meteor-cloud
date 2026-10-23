@@ -43,7 +43,7 @@ When `cloud_app` is disabled, Postgres/JWT secrets are not required. VPN alone i
 ## Deploy
 
 ```bash
-make up
+make aws-up
 ```
 
 The installer:

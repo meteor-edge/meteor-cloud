@@ -9,12 +9,12 @@ export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
 export EDGE_PLATFORM_JWT_SECRET='...'
 
 # Edit installation.yaml — services, region, SSH key, etc.
-make up
+make aws-up
 ```
 
 Equivalent: `edge-installer apply installation.yaml`
 
-This is the EC2 path only (Terraform creates the host, Ansible deploys Compose). Kubernetes uses Helm ([kubernetes.md](kubernetes.md)). To smoke-test a throwaway instance from GitHub Actions, see [EC2 smoke test](aws-ci.md).
+This is the **create a new EC2** path only (`make aws-up`: Terraform creates the host, Ansible deploys Compose). If you already have the VM, clone the repo on it and run `make up` ([Install quickstart](install-quickstart.md)). Kubernetes uses Helm ([kubernetes.md](kubernetes.md)). To smoke-test a throwaway instance from GitHub Actions, see [EC2 smoke test](aws-ci.md).
 
 ## Configure services
 
@@ -66,13 +66,13 @@ Push app changes to GitHub before deploy when using `image_source: git`.
 ```bash
 edge-installer validate installation.yaml
 make plan                              # or edge-installer plan
-make up                                # or edge-installer apply
+make aws-up                            # or edge-installer apply
 make status-aws                        # or edge-installer status
 edge-installer upgrade installation.yaml
-make down                              # or edge-installer destroy --yes
+make aws-down                          # or edge-installer destroy --yes
 ```
 
-## What `apply` / `make up` does
+## What `apply` / `make aws-up` does
 
 1. Validates configuration and secrets
 2. Runs Terraform for **enabled services** (EC2, SG, EIP, VPN rules; a second EC2 + SG + EIP for the WireGuard gateway with `services.vpn.placement: dedicated`)

@@ -57,7 +57,21 @@ MeteorCloud is split into three planes. The **console** is the operator UI; it t
 
 More detail: [docs/architecture.md](docs/architecture.md).
 
-## Quick start (local)
+## Quick start (this VM)
+
+On the server that will host MeteorCloud (on-prem VM or an existing EC2):
+
+```bash
+# Ubuntu / Debian:     sudo apt-get update && sudo apt-get install -y git make
+# RHEL / Rocky / Alma: sudo dnf install -y git make
+git clone https://github.com/meteor-edge/meteor-cloud.git
+cd meteor-cloud
+make up
+```
+
+Login and generated secrets are printed at the end (also saved to `~/.meteorcloud/secrets.env`). Stop with `make down`. Guide: [docs/install-quickstart.md](docs/install-quickstart.md).
+
+## Quick start (local development)
 
 ```bash
 cp deploy/compose/.env.example deploy/compose/.env   # make dev does this if missing
@@ -92,12 +106,12 @@ Two independent paths; same images and settings.
 | --- | --- | --- |
 | For | One VM, EC2, or on-prem server | An existing cluster (k3s, GKE, EKS, AKS, …) |
 | Files | [`deploy/compose/`](deploy/compose/), [`deploy/ansible/`](deploy/ansible/) | [`deploy/kubernetes/helm/meteorcloud/`](deploy/kubernetes/helm/meteorcloud/) |
-| Install | `ansible-playbook playbooks/site.yml` (or `edge-installer apply` on AWS) | `helm upgrade --install` |
+| Install | `make up` on the VM, or `ansible-playbook playbooks/site.yml` / `make aws-up` (new EC2) | `helm upgrade --install` |
 | Guide | [docs/deployment.md](docs/deployment.md) | [docs/kubernetes.md](docs/kubernetes.md) |
 
 **MeteorCloud does not provision or manage Kubernetes clusters.** The Helm chart installs into a cluster you already have. Ansible only prepares servers and runs Compose; it never deploys to Kubernetes. Terraform ([`infrastructure/terraform/aws`](infrastructure/terraform/aws/)) creates the AWS EC2 host for the Compose path.
 
-On AWS, `make up` (or `edge-installer apply`) runs Terraform then Ansible. Fresh-instance proof: GitHub Actions → **EC2 smoke test** ([docs/aws-ci.md](docs/aws-ci.md)).
+On a VM you already have: clone, `make up`. To create a new AWS EC2 from a laptop, `make aws-up` (or `edge-installer apply`) runs Terraform then Ansible. Fresh-instance proof: GitHub Actions → **EC2 smoke test** ([docs/aws-ci.md](docs/aws-ci.md)).
 
 ### Dependencies
 
@@ -143,6 +157,7 @@ Start with [Getting started](docs/getting-started.md), then the full index: [doc
 | [API overview](docs/api.md) | Control-plane HTTP map |
 | [meteorcli](docs/meteorcli.md) | Device CLI |
 | [Architecture](docs/architecture.md) | Providers, deploy paths |
+| [Install quickstart](docs/install-quickstart.md) | `make up` on a VM; `make aws-up` for a new EC2 |
 | [Deployment](docs/deployment.md) · [Kubernetes](docs/kubernetes.md) | Production install |
 
 Website: [meteor-edge.com](https://meteor-edge.com).

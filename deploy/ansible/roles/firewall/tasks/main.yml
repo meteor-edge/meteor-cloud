@@ -1,45 +1,100 @@
 ---
-# Allows only what MeteorCloud serves (a dedicated WireGuard gateway: SSH and WireGuard). SSH is allowed before UFW is enabled so
-# the run cannot lock itself out.
-- name: Install UFW
-  ansible.builtin.apt:
-    name: ufw
-    state: present
+# Host firewall tool differs (UFW vs firewalld); ports and CIDRs are the same.
+- name: Configure UFW
+  when: ansible_pkg_mgr == 'apt'
+  block:
+    - name: Install UFW
+      ansible.builtin.package:
+        name: ufw
+        state: present
 
-- name: Allow SSH
-  community.general.ufw:
-    rule: allow
-    port: "{{ firewall_ssh_port | string }}"
-    proto: tcp
-    from_ip: "{{ item }}"
-  loop: "{{ firewall_allowed_ssh_cidrs }}"
+    - name: Allow SSH
+      community.general.ufw:
+        rule: allow
+        port: "{{ firewall_ssh_port | string }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+      loop: "{{ firewall_allowed_ssh_cidrs }}"
 
-- name: Allow HTTP and HTTPS
-  community.general.ufw:
-    rule: allow
-    port: "{{ item }}"
-    proto: tcp
-  loop: ["{{ http_port }}", "{{ https_port }}"]
-  when: inventory_hostname in groups['platform'] | default([])
+    - name: Allow HTTP and HTTPS
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop: ["{{ http_port }}", "{{ https_port }}"]
+      when: inventory_hostname in groups['platform'] | default([])
 
-- name: Allow MQTT over TLS
-  community.general.ufw:
-    rule: allow
-    port: "{{ mqtt_broker_port | string }}"
-    proto: tcp
-  when:
-    - inventory_hostname in groups['platform'] | default([])
-    - mqtt_enabled | bool and mqtt_broker == 'bundled'
+    - name: Allow MQTT over TLS
+      community.general.ufw:
+        rule: allow
+        port: "{{ mqtt_broker_port | string }}"
+        proto: tcp
+      when:
+        - inventory_hostname in groups['platform'] | default([])
+        - mqtt_enabled | bool and mqtt_broker == 'bundled'
 
-- name: Allow WireGuard
-  community.general.ufw:
-    rule: allow
-    port: "{{ vpn_listen_port | string }}"
-    proto: udp
-  when: inventory_hostname in groups['vpn_gateway'] | default([]) or ('vpn' in enabled_services and inventory_hostname in vpn_gateway_hosts)
+    - name: Allow WireGuard
+      community.general.ufw:
+        rule: allow
+        port: "{{ vpn_listen_port | string }}"
+        proto: udp
+      when: inventory_hostname in groups['vpn_gateway'] | default([]) or ('vpn' in enabled_services and inventory_hostname in vpn_gateway_hosts)
 
-- name: Enable UFW with default deny for incoming traffic
-  community.general.ufw:
-    state: enabled
-    policy: deny
-    direction: incoming
+    - name: Enable UFW with default deny for incoming traffic
+      community.general.ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+- name: Configure firewalld
+  when: ansible_pkg_mgr in ['dnf', 'yum']
+  block:
+    - name: Install firewalld
+      ansible.builtin.package:
+        name: firewalld
+        state: present
+
+    - name: Enable and start firewalld
+      ansible.builtin.service:
+        name: firewalld
+        state: started
+        enabled: true
+
+    - name: Allow SSH from permitted CIDRs
+      ansible.builtin.command:
+        cmd: >-
+          firewall-cmd --permanent --add-rich-rule='rule family="ipv4"
+          source address="{{ item }}" port port="{{ firewall_ssh_port }}"
+          protocol="tcp" accept'
+      register: firewalld_ssh
+      changed_when: "'ALREADY_ENABLED' not in firewalld_ssh.stderr"
+      loop: "{{ firewall_allowed_ssh_cidrs }}"
+
+    - name: Allow HTTP and HTTPS
+      ansible.builtin.command:
+        cmd: "firewall-cmd --permanent --add-service={{ item }}"
+      register: firewalld_web
+      changed_when: "'ALREADY_ENABLED' not in firewalld_web.stderr"
+      loop: [http, https]
+      when: inventory_hostname in groups['platform'] | default([])
+
+    - name: Allow MQTT over TLS
+      ansible.builtin.command:
+        cmd: "firewall-cmd --permanent --add-port={{ mqtt_broker_port }}/tcp"
+      register: firewalld_mqtt
+      changed_when: "'ALREADY_ENABLED' not in firewalld_mqtt.stderr"
+      when:
+        - inventory_hostname in groups['platform'] | default([])
+        - mqtt_enabled | bool and mqtt_broker == 'bundled'
+
+    - name: Allow WireGuard
+      ansible.builtin.command:
+        cmd: "firewall-cmd --permanent --add-port={{ vpn_listen_port }}/udp"
+      register: firewalld_vpn
+      changed_when: "'ALREADY_ENABLED' not in firewalld_vpn.stderr"
+      when: inventory_hostname in groups['vpn_gateway'] | default([]) or ('vpn' in enabled_services and inventory_hostname in vpn_gateway_hosts)
+
+    - name: Reload firewalld
+      ansible.builtin.command:
+        cmd: firewall-cmd --reload
+      changed_when: true

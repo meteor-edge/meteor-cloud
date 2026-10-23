@@ -46,7 +46,40 @@ Artifact downloads go through the API, so the storage endpoint never has to be p
 
 ## Option 1: Ansible (recommended for servers)
 
-Requirements: Ubuntu 22.04/24.04 or Debian 12 reachable over SSH with sudo; Ansible on your machine.
+Requirements: Ubuntu 22.04+, Debian 12+, or RHEL/CentOS/Rocky/AlmaLinux 9+, with
+sudo. The stack runs in Docker (same images on every distro). `make up` on the
+host installs Ansible if needed and uses it to install Docker and host packages
+for that OS. SSH-from-a-laptop and `make aws-up` need Ansible on the controller
+instead.
+
+### On this VM (on-prem or an existing server)
+
+Clone the repo **on the host** and run `make up`. It creates inventory and secrets,
+installs Ansible if needed, then Docker Compose production and WireGuard.
+
+```bash
+# Ubuntu / Debian:  sudo apt-get update && sudo apt-get install -y git make
+# RHEL / Rocky / Alma: sudo dnf install -y git make
+git clone https://github.com/meteor-edge/meteor-cloud.git
+cd meteor-cloud
+make up
+```
+
+| Command | What it does |
+| --- | --- |
+| `make up` | Install or upgrade on this host (WireGuard included) |
+| `make up ARGS=--no-vpn` | Same, without WireGuard |
+| `make down` | Stop; data stays in `/opt/edge-platform` |
+| `make down ARGS=--destroy-data` | Stop and delete `/opt/edge-platform` |
+
+Secrets are generated if missing, printed at the end so you can copy them, and
+saved mode `0600` at `~/.meteorcloud/secrets.env` and
+`deploy/ansible/inventory/selfhost/secrets.env` (gitignored). Optional:
+`PLATFORM_PUBLIC_URL=https://fleet.example.com make up`.
+
+To **create** a new AWS EC2 from a laptop, use `make aws-up` ([AWS deployment](aws-deployment.md)). Do not run `make aws-up` on the VM itself.
+
+### Another server (SSH from your laptop)
 
 ```bash
 cd deploy/ansible
@@ -66,7 +99,7 @@ Upgrade: change `git_ref` (git builds) or image tags (registry), then run
 `playbooks/upgrade.yml`. Destroy: `playbooks/destroy.yml` (add
 `-e platform_destroy_data=true` to delete data).
 
-On AWS, `edge-installer` creates the EC2 instance with Terraform and runs the same
+On AWS from a laptop, `make aws-up` (`edge-installer`) creates the EC2 instance with Terraform and runs the same
 playbooks: [aws-deployment.md](aws-deployment.md). To check that a fresh instance
 still installs cleanly, run the manual **EC2 smoke test** workflow
 ([aws-ci.md](aws-ci.md)).

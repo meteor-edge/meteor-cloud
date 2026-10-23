@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down
 
 COMPOSE_DIR := deploy/compose
 ENV_FILE := $(COMPOSE_DIR)/.env
@@ -120,11 +120,19 @@ stop-console: ## Stop the console Compose project
 stop-website: ## Website is not in this repo
 	@echo "The public website is not in this tree. From a meteor-ui clone: make stop-website"
 
-up: ## Deploy all enabled AWS services (Terraform + Ansible)
+up: ## Install MeteorCloud on this VM / existing server
+	$(ANSIBLE_DIR)/install-selfhost.sh $(ARGS)
+
+install-selfhost: up
+
+down: ## Stop MeteorCloud on this VM (keeps data; ARGS=--destroy-data to wipe)
+	$(ANSIBLE_DIR)/install-selfhost.sh --down $(ARGS)
+
+aws-up: ## Create a new AWS EC2 and deploy (Terraform + Ansible)
 	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
 	cd $(INSTALLER_DIR) && edge-installer apply $(abspath $(CONFIG))
 
-down: ## Destroy the installation
+aws-down: ## Destroy the AWS installation
 	cd $(INSTALLER_DIR) && edge-installer destroy $(abspath $(CONFIG)) --yes
 
 plan: ## Preview infrastructure changes for enabled services

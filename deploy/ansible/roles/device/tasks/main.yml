@@ -1,17 +1,19 @@
 ---
 - name: Install device packages
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name:
       - python3
-      - python3-venv
       - python3-pip
       - openssh-server
-      - wireguard
       - wireguard-tools
       - iptables
     state: present
-    update_cache: true
-    cache_valid_time: 3600
+
+- name: Install python3-venv
+  ansible.builtin.package:
+    name: python3-venv
+    state: present
+  when: ansible_pkg_mgr == 'apt'
 
 # meteorcli manages wg0 itself (wg-quick); devices never forward traffic.
 - name: Load the WireGuard kernel module at boot
@@ -27,15 +29,19 @@
     name: wireguard
     state: present
 
-# Ubuntu 24.04+ starts sshd on demand from ssh.socket; ssh.service is then stopped between connections.
-- name: Check for socket-activated sshd
+# Ubuntu 24.04+ uses ssh.socket; Debian uses ssh.service; RHEL uses sshd.service.
+- name: Find sshd unit
   ansible.builtin.stat:
-    path: /usr/lib/systemd/system/ssh.socket
-  register: device_ssh_socket
+    path: "{{ item }}"
+  loop:
+    - /usr/lib/systemd/system/ssh.socket
+    - /usr/lib/systemd/system/sshd.service
+    - /usr/lib/systemd/system/ssh.service
+  register: device_sshd_units
 
 - name: Enable sshd for browser SSH over WireGuard
   ansible.builtin.systemd_service:
-    name: "{{ 'ssh.socket' if device_ssh_socket.stat.exists else 'ssh.service' }}"
+    name: "{{ (device_sshd_units.results | selectattr('stat.exists') | map(attribute='item') | first | basename) }}"
     state: started
     enabled: true
 

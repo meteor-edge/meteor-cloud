@@ -85,6 +85,7 @@ certs/*
 # Ansible inventories with real hosts (keep the example)
 deploy/ansible/inventory/*
 !deploy/ansible/inventory/example*/
+deploy/ansible/.ansible/
 
 # Local k3d MQTT certificates
 .k8s/

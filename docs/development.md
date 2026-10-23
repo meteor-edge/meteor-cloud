@@ -22,6 +22,7 @@ make install
 `make install` installs control-plane, data-plane, installer, agent, and console dependencies.
 
 For a product walkthrough (console + first device), start with [Getting started](getting-started.md).
+Production on a VM is `make up`, not `make dev` ([Install quickstart](install-quickstart.md)).
 
 ## Running the stack
 

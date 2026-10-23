@@ -39,7 +39,9 @@ ssh -i ~/.ssh/edge-platform.pem ubuntu@<ip> 'echo ok'
 |---------|-----|
 | `Could not load 'yaml' callback plugin` | Fixed in `ansible.cfg` — use `stdout_callback = default` |
 | `repository_url is undefined` | Re-run apply so extra-vars include git settings; or use role defaults |
-| Playbook fails mid-deploy | Fix issue, then `edge-installer apply installation.yaml` (idempotent) |
+| Playbook fails mid-deploy | On this VM: re-run `make up`. AWS from a laptop: `make aws-up` / `edge-installer apply` (idempotent) |
+| `edge-installer: not found` after `make up` | You are on the VM. Use `make up` (this host). `make aws-up` is only from a laptop that creates a new EC2. |
+| `connectivity_internal_token` empty | Re-run `make up` on the host (it writes the token into extra-vars). |
 
 Manual run:
 

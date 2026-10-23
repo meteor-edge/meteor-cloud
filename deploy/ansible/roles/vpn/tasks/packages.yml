@@ -1,16 +1,14 @@
 ---
 # WireGuard userland, iptables for the PostUp rules, the kernel module, and
 # persistent kernel settings. Shared by the gateway and the API side of a site link.
+# ansible.builtin.package uses apt or dnf; these names exist on both families.
 - name: Install WireGuard requirements
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name:
-      - wireguard
       - wireguard-tools
       - iptables
       - python3
     state: present
-    update_cache: true
-    cache_valid_time: 3600
 
 - name: Load the WireGuard kernel module at boot
   ansible.builtin.copy:

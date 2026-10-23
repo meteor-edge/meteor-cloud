@@ -1,6 +1,16 @@
 # Upgrades
 
-Update enabled services on an existing installation without recreating EC2 (unless Terraform detects required infra changes).
+On a VM installed with `make up`:
+
+```bash
+cd meteor-cloud
+git pull
+make up
+```
+
+Inventory and secrets in `deploy/ansible/inventory/selfhost/` are reused.
+
+On AWS, update enabled services without recreating EC2 (unless Terraform detects required infra changes):
 
 ## Command
 

@@ -6,9 +6,10 @@ Learn and operate MeteorCloud — from first boot to production. Website: [meteo
 
 | Step | Doc |
 | --- | --- |
-| 1. Run the stack locally | [Getting started](getting-started.md) |
-| 2. Understand the three planes | [Concepts](concepts.md) |
-| 3. Enroll a device with `meteorcli` | [Getting started → First device](getting-started.md#enroll-a-device) |
+| 1. Run the stack locally | [Getting started](getting-started.md) (`make dev`) |
+| 2. Install on a VM | [Install quickstart](install-quickstart.md) (`make up`) |
+| 3. Understand the three planes | [Concepts](concepts.md) |
+| 4. Enroll a device with `meteorcli` | [Getting started → First device](getting-started.md#enroll-a-device) |
 
 ## Guides
 
@@ -48,7 +49,7 @@ Commands and APIs you look up while working.
 | Local / contributor setup | [Development](development.md) |
 | Compose + Ansible (VM, EC2, on-prem) | [Deployment](deployment.md) |
 | Kubernetes (existing cluster) | [Kubernetes](kubernetes.md) |
-| AWS EC2 quick install | [Install quickstart](install-quickstart.md) |
+| Install on a VM (`make up`) | [Install quickstart](install-quickstart.md) |
 | DNS records to create (domain, apps, WireGuard) | [DNS records](dns.md) |
 | `installation.yaml` | [Installer configuration](installer-configuration.md) |
 | Modular services (`cloud_app`, `vpn`) | [Services](services.md) |

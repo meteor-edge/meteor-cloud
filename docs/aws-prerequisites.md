@@ -100,7 +100,7 @@ Set `network.allowed_ssh_cidrs` to your public IP `/32` (or wider for testing).
 ## Deploy
 
 ```bash
-make up
+make aws-up
 ```
 
 See [Install quickstart](install-quickstart.md) and [AWS deployment](aws-deployment.md).

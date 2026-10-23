@@ -2,6 +2,9 @@
 
 Run MeteorCloud on your machine, open the console, and enroll a Linux device with `meteorcli`.
 
+This page is **local development** (`make dev`). To install production on a VM,
+clone the repo on that host and run `make up` ([Install quickstart](install-quickstart.md)).
+
 **Prerequisites:** Docker Compose v2.24+, Make, and (for the agent) Python 3.13+ on the device or the same host.
 
 ## 1. Start the local stack
@@ -74,4 +77,6 @@ Details: [Enrollment API keys](fleet/enrollment-api-keys.md), [Device-initiated 
 | --- | --- |
 | How the three planes fit together | [Concepts](concepts.md) |
 | Operator API | [API overview](api.md) |
-| Deploy beyond localhost | [Deployment](deployment.md) · [Kubernetes](kubernetes.md) · [Install quickstart](install-quickstart.md) |
+| Install on a VM (`make up`) | [Install quickstart](install-quickstart.md) · [Deployment](deployment.md) |
+| Create a new AWS EC2 (`make aws-up`) | [AWS deployment](aws-deployment.md) |
+| Kubernetes | [Kubernetes](kubernetes.md) |

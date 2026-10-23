@@ -15,7 +15,7 @@ export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
 export EDGE_PLATFORM_JWT_SECRET='...'
 
 edge-installer validate ../../installation.yaml
-make -C ../.. up          # or: edge-installer apply ../../installation.yaml
+make -C ../.. aws-up      # or: edge-installer apply ../../installation.yaml
 ```
 
 ## Commands
@@ -32,7 +32,7 @@ make -C ../.. up          # or: edge-installer apply ../../installation.yaml
 
 Config path can be positional (`installation.yaml`) or `--config installation.yaml`.
 
-Makefile equivalents from repo root: `make up`, `make down`, `make plan`, `make status-aws`.
+Makefile equivalents from repo root: `make aws-up`, `make aws-down`, `make plan`, `make status-aws`. `make up` / `make down` install or stop MeteorCloud on the current VM.
 
 ## Modular services
 

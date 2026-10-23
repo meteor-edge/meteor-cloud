@@ -110,7 +110,7 @@ E2E_SSH_KEY_FILE=~/.ssh/meteorcloud-lab
 E2E_ONPREM_INGRESS_IP=203.0.113.10                   # public address for DNS (port-forward 80/443)
 ```
 
-Hosts must be Ubuntu 22.04+/Debian 12 with sudo; devices need Python 3.11+.
+Hosts must be Ubuntu 22.04+/Debian 12+ or RHEL/Rocky/Alma 9+ with sudo; devices need Python 3.11+.
 Terraform manages only the DNS records. Ansible and the suite are the same as on
 AWS. For the wildcard certificate off AWS, export a scoped IAM key as
 `EDGE_PLATFORM_TRAEFIK_AWS_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY`. `down` removes

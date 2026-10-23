@@ -61,8 +61,6 @@ def build_ansible_extra_vars(
     connectivity_token = os.environ.get("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN", "").strip()
     if connectivity_token:
         extra["connectivity_internal_token"] = connectivity_token
-    if config.platform.domain:
-        extra["apps_base_domain"] = config.platform.domain
     if db_url := os.environ.get("EDGE_PLATFORM_DATABASE_URL", "").strip():
         extra["external_database_url"] = db_url
     return extra

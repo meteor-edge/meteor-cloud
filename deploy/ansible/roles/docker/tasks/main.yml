@@ -1,37 +1,60 @@
 ---
-- name: Ensure keyrings directory exists
-  ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    mode: "0755"
-
-- name: Download Docker GPG key
-  ansible.builtin.get_url:
-    url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
-    dest: /etc/apt/keyrings/docker.asc
-    mode: "0644"
-
+# ansible.builtin.package uses apt or dnf. Only the vendor repo layout differs.
 - name: Add Docker apt repository
-  ansible.builtin.deb822_repository:
-    name: docker
-    types: deb
-    uris: "https://download.docker.com/linux/{{ ansible_distribution | lower }}"
-    suites: "{{ ansible_distribution_release }}"
-    components:
-      - stable
-    architectures: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' if ansible_architecture == 'aarch64' else ansible_architecture }}"
-    signed_by: /etc/apt/keyrings/docker.asc
-    state: present
+  when: ansible_pkg_mgr == 'apt'
+  block:
+    - name: Ensure keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Docker GPG key
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Configure Docker apt repository
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: deb
+        uris: "https://download.docker.com/linux/{{ ansible_distribution | lower }}"
+        suites: "{{ ansible_distribution_release }}"
+        components:
+          - stable
+        architectures: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' if ansible_architecture == 'aarch64' else ansible_architecture }}"
+        signed_by: /etc/apt/keyrings/docker.asc
+        state: present
+
+    - name: Refresh apt cache after adding Docker
+      ansible.builtin.apt:
+        update_cache: true
+
+- name: Add Docker yum repository
+  when: ansible_pkg_mgr in ['dnf', 'yum']
+  block:
+    - name: Configure Docker yum repository
+      ansible.builtin.yum_repository:
+        name: docker-ce-stable
+        description: Docker CE Stable
+        baseurl: "https://download.docker.com/linux/centos/{{ ansible_distribution_major_version }}/$basearch/stable"
+        gpgcheck: true
+        gpgkey: https://download.docker.com/linux/centos/gpg
+        enabled: true
+
+    - name: Refresh dnf cache after adding Docker
+      ansible.builtin.dnf:
+        update_cache: true
 
 - name: Install Docker Engine and Compose plugin
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name:
       - docker-ce
       - docker-ce-cli
       - containerd.io
       - docker-compose-plugin
     state: present
-    update_cache: true
 
 - name: Configure Docker log rotation
   ansible.builtin.copy:

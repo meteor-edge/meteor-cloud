@@ -141,9 +141,9 @@ Gitignored. Do not commit.
 
 ```bash
 edge-installer validate installation.yaml
-make up      # apply
+make aws-up      # apply
 make plan
-make down    # destroy
+make aws-down    # destroy
 ```
 
 See [Install quickstart](install-quickstart.md).

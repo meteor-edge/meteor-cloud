@@ -39,9 +39,9 @@ passes `enabled_services` to Terraform and Ansible. See [Modular services](../do
 ## How it is run
 
 ```bash
-make up      # edge-installer apply: Terraform + Ansible for enabled services
-make plan    # preview
-make down    # destroy
+make aws-up    # edge-installer apply: Terraform + Ansible for enabled services
+make plan      # preview
+make aws-down  # destroy
 ```
 
 The installer copies `terraform/aws` (with its modules and lock file) into

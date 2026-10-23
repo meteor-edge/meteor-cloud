@@ -35,7 +35,7 @@ Same images and settings, two installers:
 | Docker Compose + Ansible | One VM, EC2, or on-prem server | `deploy/compose/`, `deploy/ansible/` |
 | Kubernetes + Helm | An existing cluster (MeteorCloud does not provision clusters) | `deploy/kubernetes/helm/meteorcloud/` |
 
-On AWS, `edge-installer` creates the EC2 host with Terraform and runs the Ansible path. See [Deployment](deployment.md), [Kubernetes](kubernetes.md), and [Services](services.md).
+On a VM you already have, `make up` runs the Ansible path on that host. To create a new AWS EC2, `edge-installer` / `make aws-up` runs Terraform then the same Ansible path. See [Deployment](deployment.md), [Kubernetes](kubernetes.md), and [Services](services.md).
 
 ## Control plane
 

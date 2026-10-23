@@ -25,7 +25,7 @@ the lost private key.
 
 ## Set up the WireGuard server (Ansible)
 
-Ansible installs everything on an Ubuntu 22.04/24.04 or Debian 12 host:
+Ansible installs everything on Ubuntu 22.04+, Debian 12+, or RHEL/CentOS/Rocky/AlmaLinux 9+:
 `wireguard`, `wireguard-tools`, `iptables`, the kernel module, and persistent
 IPv4 forwarding. It generates the server key **on the gateway** once
 (`/etc/wireguard/server.key`; `wg0.conf` loads it in `PostUp` and never contains
@@ -64,7 +64,7 @@ reaches `/internal/connectivity/*` privately; Traefik never serves `/internal`.
 
 | Where the gateway runs | Inventory | Agent polls | API → devices (SSH, apps) |
 | --- | --- | --- | --- |
-| API host (default, edge-installer) | `platform` | `127.0.0.1:8000` (`docker-compose.vpn.yml`) | host `wg0` |
+| API host (default, `make up` / edge-installer) | `platform` | `127.0.0.1:8000` (`docker-compose.vpn.yml`) | host `wg0` |
 | Own server, API managed by Ansible | `vpn_gateway` + `platform` | API over an automatic site link | site link `wg-link` |
 | Own server, control plane elsewhere | `vpn_gateway` only | `vpn_control_plane_url` | `vpn_site_links` or `vpn_routed_cidrs` |
 

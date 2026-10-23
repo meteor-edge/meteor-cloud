@@ -53,7 +53,7 @@ module "cloud_app" {
     from_port   = 51820
     to_port     = 51820
     protocol    = "udp"
-    cidr_blocks = [for ip in module.devices.public_ips : "${ip}/32"]
+    cidr_blocks = local.device_cidrs
   }] : []
   tags = local.tags
 }
@@ -66,15 +66,6 @@ module "devices" {
   instance_type     = var.device_instance_type
   ssh_key_name      = aws_key_pair.e2e.key_name
   allowed_ssh_cidrs = var.allowed_ssh_cidrs
-}
-
-# Formerly a separate WireGuard rule that the group's inline rules removed on the next apply.
-removed {
-  from = module.vpn
-
-  lifecycle {
-    destroy = false
-  }
 }
 
 # Devices dial the gateway; only their addresses may reach UDP 51820.
