@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import { Loader2, Power, TerminalSquare } from "lucide-react";
 
 import { createShellSession } from "@/api/fleet";
 import { ApiError } from "@/api/http";
@@ -9,7 +13,10 @@ type DeviceTerminalProps = {
   token: string;
   organizationId: string;
   deviceId: string;
+  deviceName?: string;
 };
+
+type Status = "idle" | "connecting" | "connected" | "closed";
 
 function websocketUrl(path: string, ticket: string): string {
   const api = resolveApiBaseUrl();
@@ -17,89 +24,168 @@ function websocketUrl(path: string, ticket: string): string {
   return `${wsBase}${path}?ticket=${encodeURIComponent(ticket)}`;
 }
 
-export function DeviceTerminal({ token, organizationId, deviceId }: DeviceTerminalProps) {
-  const preRef = useRef<HTMLPreElement | null>(null);
+export function DeviceTerminal({
+  token,
+  organizationId,
+  deviceId,
+  deviceName,
+}: DeviceTerminalProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const [output, setOutput] = useState("Click Connect to open a shell over WireGuard.\n");
-  const [command, setCommand] = useState("");
+  const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
 
+  // One xterm instance for the lifetime of the panel; every keystroke goes straight to the
+  // device's PTY (ssh -tt), so line editing, Tab completion and full-screen programs work.
   useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
+      fontSize: 13,
+      scrollback: 5000,
+      theme: {
+        background: "#000000",
+        foreground: "#e5e5e5",
+        cursor: "#22c55e",
+        selectionBackground: "#3f3f46",
+      },
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(containerRef.current);
+    fit.fit();
+    term.onData((data) => {
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(data);
+      }
+    });
+    const observer = new ResizeObserver(() => fit.fit());
+    observer.observe(containerRef.current);
+    termRef.current = term;
+    fitRef.current = fit;
     return () => {
+      observer.disconnect();
       socketRef.current?.close();
+      term.dispose();
     };
   }, []);
 
-  useEffect(() => {
-    if (preRef.current) {
-      preRef.current.scrollTop = preRef.current.scrollHeight;
-    }
-  }, [output]);
-
   async function connect() {
+    const term = termRef.current;
+    if (!term) {
+      return;
+    }
     setError(null);
+    setStatus("connecting");
+    term.reset();
     try {
       const session = await createShellSession(token, organizationId, deviceId);
       const socket = new WebSocket(websocketUrl(session.websocket_path, session.ticket));
       socket.binaryType = "arraybuffer";
-      socket.onmessage = (event) => {
-        const text =
-          typeof event.data === "string"
-            ? event.data
-            : new TextDecoder().decode(event.data as ArrayBuffer);
-        setOutput((current) => current + text);
+      socket.onopen = () => {
+        setStatus("connected");
+        fitRef.current?.fit();
+        term.focus();
       };
-      socket.onclose = () => setConnected(false);
-      socket.onopen = () => setConnected(true);
+      socket.onmessage = (event) => {
+        term.write(
+          typeof event.data === "string" ? event.data : new Uint8Array(event.data as ArrayBuffer),
+        );
+      };
+      socket.onerror = () => setError("The connection to the device failed.");
+      socket.onclose = () => {
+        socketRef.current = null;
+        setStatus("closed");
+      };
       socketRef.current = socket;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not open a shell session.");
+      setStatus("idle");
     }
   }
 
-  function send() {
-    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      return;
-    }
-    socketRef.current.send(command.endsWith("\n") ? command : `${command}\n`);
-    setCommand("");
+  function disconnect() {
+    socketRef.current?.close();
   }
+
+  const title = deviceName ?? "device";
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Browser SSH through MeteorCloud. The device is reached on its WireGuard address;
-        SSH is never exposed on the public internet.
-      </p>
-      <pre
-        ref={preRef}
-        className="h-64 overflow-auto rounded-md bg-background p-3 font-mono text-xs text-foreground"
-      >
-        {output}
-      </pre>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={() => void connect()} disabled={connected}>
-          {connected ? "Connected" : "Connect"}
-        </Button>
-        <input
-          className="h-10 min-w-[12rem] flex-1 rounded-md border border-input bg-field px-3 font-mono text-sm"
-          value={command}
-          disabled={!connected}
-          onChange={(event) => setCommand(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              send();
-            }
-          }}
-          placeholder={connected ? "Type a command" : "Connect first"}
-        />
-        <Button type="button" variant="outline" disabled={!connected} onClick={send}>
-          Send
-        </Button>
+    <div className="space-y-2">
+      <div className="overflow-hidden rounded-lg border border-zinc-800 bg-black shadow-lg">
+        <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3 py-2">
+          <div className="flex items-center gap-2 font-mono text-xs text-zinc-300">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                status === "connected"
+                  ? "bg-green-500"
+                  : status === "connecting"
+                    ? "bg-yellow-400"
+                    : "bg-zinc-600"
+              }`}
+              aria-hidden
+            />
+            <span>{title}</span>
+            <span className="text-zinc-500">
+              {status === "connected"
+                ? "connected over WireGuard"
+                : status === "connecting"
+                  ? "connecting…"
+                  : "not connected"}
+            </span>
+          </div>
+          {status === "connected" && (
+            <button
+              type="button"
+              onClick={disconnect}
+              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+            >
+              <Power className="h-3.5 w-3.5" /> Disconnect
+            </button>
+          )}
+        </div>
+
+        <div className="relative h-[28rem]">
+          <div ref={containerRef} className="absolute inset-0 p-2" />
+
+          {status !== "connected" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/85 text-center">
+              <TerminalSquare className="h-10 w-10 text-zinc-500" aria-hidden />
+              <div className="space-y-1">
+                <p className="font-mono text-sm text-zinc-200">
+                  {status === "closed" ? "Session ended" : `Open a shell on ${title}`}
+                </p>
+                <p className="max-w-sm text-xs text-zinc-500">
+                  Browser SSH over the device&apos;s WireGuard tunnel. SSH is never exposed on the
+                  public internet.
+                </p>
+              </div>
+              <Button
+                type="button"
+                onClick={() => void connect()}
+                disabled={status === "connecting"}
+              >
+                {status === "connecting" ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Connecting…
+                  </>
+                ) : status === "closed" ? (
+                  "Reconnect"
+                ) : (
+                  "Connect"
+                )}
+              </Button>
+              {error && <p className="text-xs text-red-400">{error}</p>}
+            </div>
+          )}
+        </div>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

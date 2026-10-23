@@ -31,7 +31,7 @@ output "enabled_services" {
 }
 
 output "vpn_listen_port" {
-  value = length(module.vpn) > 0 ? module.vpn[0].listen_port : var.vpn_listen_port
+  value = var.vpn_listen_port
 }
 
 output "vpn_placement" {

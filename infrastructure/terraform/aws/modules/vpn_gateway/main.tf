@@ -76,6 +76,13 @@ resource "aws_instance" "gateway" {
   tags = merge(var.tags, {
     Name = "${var.installation_name}-vpn-gateway"
   })
+
+  # AWS reports true once the Elastic IP is attached, and a newer Ubuntu image appears every few
+  # weeks; without this either one replaces the instance (and its data) on the next apply.
+  # Set ami_id to move a host to a new image on purpose.
+  lifecycle {
+    ignore_changes = [associate_public_ip_address, ami]
+  }
 }
 
 # Devices store the endpoint; a stable address keeps them connected across stop/start.

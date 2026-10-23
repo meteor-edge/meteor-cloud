@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down
 
 COMPOSE_DIR := deploy/compose
 ENV_FILE := $(COMPOSE_DIR)/.env
@@ -14,7 +14,7 @@ INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := src/device-plane/agent
 INFRA_DIR := infrastructure
 ANSIBLE_DIR := deploy/ansible
-ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml wireguard.yml
+ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml wireguard.yml device.yml
 CHART := deploy/kubernetes/helm/meteorcloud
 CONFIG ?= installation.yaml
 
@@ -234,6 +234,26 @@ terraform-check: ## Validate Terraform formatting and syntax (no cloud credentia
 	cd $(INFRA_DIR)/terraform && terraform fmt -check -recursive
 	cd $(INFRA_DIR)/terraform/aws && terraform init -backend=false -input=false
 	cd $(INFRA_DIR)/terraform/aws && terraform validate
+
+E2E_DIR := tests/e2e
+
+e2e-check: ## Full-stack E2E tooling checks (unit tests, Terraform validate, shellcheck; no credentials)
+	cd $(E2E_DIR) && python -m pytest -q tests
+	cd $(E2E_DIR)/terraform && terraform fmt -check -recursive
+	for root in aws onprem; do \
+		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate terraform init -backend=false -input=false >/dev/null \
+		&& TF_DATA_DIR=.terraform-validate terraform validate) || exit 1; done
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/testapp/serve.sh; \
+	else echo "shellcheck not installed; skipped"; fi
+
+e2e-up: ## Create a full-stack E2E environment and run the suite (tests/e2e/.env)
+	$(E2E_DIR)/meteorcloud-testenv up
+
+e2e-test: ## Re-run the E2E suite against the existing environment
+	$(E2E_DIR)/meteorcloud-testenv test
+
+e2e-down: ## Destroy the E2E environment (only its tracked resources)
+	$(E2E_DIR)/meteorcloud-testenv down
 
 ansible-check: ## Syntax-check every Ansible playbook
 	cd $(ANSIBLE_DIR) && for p in $(ANSIBLE_PLAYBOOKS); do \

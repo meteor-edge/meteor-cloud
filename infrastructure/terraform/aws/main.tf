@@ -21,17 +21,25 @@ module "cloud_app" {
   allowed_ssh_cidrs   = var.allowed_ssh_cidrs
   allow_http          = var.allow_http
   allow_https         = var.allow_https
-  tags                = var.tags
+  # vpn_placement = "same_host": WireGuard runs on this instance.
+  extra_ingress = contains(var.enabled_services, "vpn") && var.vpn_placement == "same_host" ? [{
+    description = "WireGuard VPN"
+    from_port   = var.vpn_listen_port
+    to_port     = var.vpn_listen_port
+    protocol    = "udp"
+    cidr_blocks = var.vpn_allowed_client_cidrs
+  }] : []
+  tags = var.tags
 }
 
-# vpn_placement = "same_host": WireGuard on the cloud_app instance (UDP rule on its SG).
-module "vpn" {
-  count  = contains(var.enabled_services, "vpn") && contains(var.enabled_services, "cloud_app") && var.vpn_placement == "same_host" ? 1 : 0
-  source = "./modules/vpn"
+# The WireGuard rule used to be a separate aws_security_group_rule, which the group's inline
+# rules removed on every second apply. Forget it without revoking: the inline rule above owns it now.
+removed {
+  from = module.vpn
 
-  security_group_id    = module.cloud_app[0].security_group_id
-  listen_port          = var.vpn_listen_port
-  allowed_client_cidrs = var.vpn_allowed_client_cidrs
+  lifecycle {
+    destroy = false
+  }
 }
 
 # vpn_placement = "dedicated": WireGuard on its own instance; the API host joins it

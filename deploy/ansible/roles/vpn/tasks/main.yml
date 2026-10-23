@@ -7,7 +7,7 @@
       - not (vpn_standalone | bool) or vpn_gateway_hosts | length == 1
       - vpn_server_private_key | length > 0 or vpn_generate_server_key | bool
       - connectivity_internal_token | length > 0
-      - vpn_managed_api_hosts | length > 0 or vpn_control_plane_url | length > 0
+      - not (vpn_standalone | bool) or vpn_managed_api_hosts | length > 0 or vpn_control_plane_url | length > 0
       - >-
         vpn_managed_api_hosts | map('extract', hostvars, 'vpn_link_public_key') | select('defined') | list | length
         == vpn_managed_api_hosts | length

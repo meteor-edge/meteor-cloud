@@ -43,14 +43,17 @@ class DeployRollout(BaseModel):
 
 
 class EndpointSpec(BaseModel):
-    hostname: str = Field(min_length=1, max_length=255)
+    # Empty: the suggested <release>.<device>.<org>.<apps domain>.
+    hostname: str | None = Field(default=None, max_length=255)
     port: int = Field(ge=1, le=65535)
     protocol: str = "http"
 
     @field_validator("hostname")
     @classmethod
-    def _hostname(cls, value: str) -> str:
-        return value.strip().lower()
+    def _hostname(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip().lower() or None
 
     @field_validator("protocol")
     @classmethod

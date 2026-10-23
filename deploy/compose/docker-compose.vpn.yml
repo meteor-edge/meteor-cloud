@@ -8,3 +8,6 @@ services:
   backend:
     ports: !override
       - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+    volumes:
+      # Browser SSH gateway key (SHELL_PROVIDER=ssh_gateway); empty directory otherwise.
+      - ${SHELL_SSH_DIR:-./shell}:/run/meteorcloud/shell:ro

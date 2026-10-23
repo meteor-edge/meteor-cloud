@@ -441,12 +441,16 @@ class DeploymentService:
         from app.endpoints.schemas import EndpointCreate
         from app.endpoints.service import EndpointService
 
-        EndpointService(self.session).create_endpoint(
+        endpoints = EndpointService(self.session)
+        hostname = spec.hostname or endpoints.suggest_hostname(
+            actor=actor, organization_id=organization_id, device_id=device_id, app=release.name
+        ).hostname
+        endpoints.create_endpoint(
             actor=actor,
             organization_id=organization_id,
             payload=EndpointCreate(
                 device_id=device_id,
-                hostname=spec.hostname,
+                hostname=hostname,
                 port=spec.port,
                 protocol=spec.protocol,
                 deployment_id=deployment_id,

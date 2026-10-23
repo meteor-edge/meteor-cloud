@@ -29,13 +29,14 @@
       - redis_provider in ['bundled', 'external']
       - object_storage_provider in ['filesystem', 's3']
       - mqtt_broker in ['bundled', 'external']
-      - image_source in ['git', 'registry']
+      - image_source in ['git', 'archive', 'registry']
+      - image_source != 'archive' or platform_source_archive | length > 0
       # Devices and the data plane share MQTT_BROKER_PORT; the bundled EMQX listens on 8883.
       - mqtt_broker == 'external' or (mqtt_broker_port | int) == 8883
     fail_msg: >-
       Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
       redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external,
-      image_source git|registry; the bundled MQTT broker always uses port 8883.
+      image_source git|archive|registry (archive needs platform_source_archive); the bundled MQTT broker always uses port 8883.
     quiet: true
 
 # Hosts deployed before the Compose files moved into the repository ran a stack
@@ -105,6 +106,32 @@
     name: vpn
     tasks_from: discover
   when: "'vpn' in enabled_services"
+
+- name: Create the browser SSH gateway key
+  when: shell_provider == 'ssh_gateway'
+  block:
+    - name: Create the SSH gateway key directory
+      ansible.builtin.file:
+        path: "{{ shell_ssh_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    # The API (root in its container) uses it to open `ssh root@<wg address>` for the browser terminal.
+    - name: Generate the SSH gateway key once
+      ansible.builtin.command:
+        cmd: ssh-keygen -q -t ed25519 -N "" -C meteorcloud-shell-gateway -f {{ shell_ssh_dir }}/id_ed25519
+        creates: "{{ shell_ssh_dir }}/id_ed25519"
+
+    - name: Read the SSH gateway public key
+      ansible.builtin.slurp:
+        src: "{{ shell_ssh_dir }}/id_ed25519.pub"
+      register: shell_gateway_pub
+
+    - name: Publish the SSH gateway public key to devices
+      ansible.builtin.set_fact:
+        shell_gateway_public_key: "{{ shell_gateway_pub.content | b64decode | trim }}"
 
 - name: Render Compose environment file
   ansible.builtin.template:

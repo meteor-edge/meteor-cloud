@@ -1,0 +1,6 @@
+---
+- name: Restart meteorcli
+  ansible.builtin.service:
+    name: meteorcli
+    state: restarted
+  when: device_registered | default(false) | bool

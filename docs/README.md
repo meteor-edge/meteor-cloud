@@ -27,7 +27,7 @@ How to use the product day to day.
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) |
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
-| Public app URLs (`*.appx`) | [Endpoints](fleet/endpoints.md) |
+| Public app URLs | [Endpoints](fleet/endpoints.md) |
 | Operator console | [Console](console.md) |
 
 ## Reference
@@ -55,6 +55,7 @@ Commands and APIs you look up while working.
 | Upgrades · destroy · logs | [Upgrades](upgrades.md) · [Destroy](destroy.md) · [Observability](observability.md) |
 | When something breaks | [Troubleshooting](troubleshooting.md) |
 | EC2 smoke test (CI) | [AWS CI](aws-ci.md) |
+| Full-stack E2E (one command, CI) | [E2E](e2e.md) |
 
 ## Related code docs
 

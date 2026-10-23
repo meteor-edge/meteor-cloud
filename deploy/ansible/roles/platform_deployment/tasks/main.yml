@@ -7,7 +7,7 @@
       {{ '-f docker-compose.observability.yml' if observability_enabled | bool else '' }}
 
 - name: Fetch application source for image builds
-  when: image_source == 'git'
+  when: image_source in ['git', 'archive']
   block:
     - name: Clone or update platform repository
       ansible.builtin.git:
@@ -15,7 +15,45 @@
         dest: "{{ platform_source_dir }}"
         version: "{{ git_ref }}"
         force: true
-      register: platform_source
+      register: platform_source_git
+      when: image_source == 'git'
+
+    - name: Copy the platform source archive
+      ansible.builtin.copy:
+        src: "{{ platform_source_archive }}"
+        dest: "{{ platform_root }}/source.tar.gz"
+        owner: root
+        group: root
+        mode: "0600"
+      register: platform_source_copy
+      when: image_source == 'archive'
+
+    # Replace the tree so files removed from the archive do not linger.
+    - name: Remove the previous source tree
+      ansible.builtin.file:
+        path: "{{ platform_source_dir }}"
+        state: absent
+      when: image_source == 'archive' and platform_source_copy is changed
+
+    - name: Create the source directory
+      ansible.builtin.file:
+        path: "{{ platform_source_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: image_source == 'archive'
+
+    - name: Unpack the platform source archive
+      ansible.builtin.unarchive:
+        src: "{{ platform_root }}/source.tar.gz"
+        dest: "{{ platform_source_dir }}"
+        remote_src: true
+      when: image_source == 'archive' and platform_source_copy is changed
+
+    - name: Record whether the source changed
+      ansible.builtin.set_fact:
+        platform_source: {changed: "{{ platform_source_git is changed or platform_source_copy is changed }}"}
 
     - name: Check for existing application images
       ansible.builtin.command:
@@ -28,7 +66,7 @@
       ansible.builtin.command:
         cmd: "{{ platform_compose }} build"
         chdir: "{{ platform_compose_dir }}"
-      when: platform_source.changed or platform_images.rc != 0
+      when: platform_source.changed | bool or platform_images.rc != 0
       changed_when: true
 
 - name: Pull container images

@@ -48,7 +48,7 @@ devices in their groups.
   },
   "rollout": { "strategy": "immediate" },
   "endpoint": {
-    "hostname": "nginx.appx.meteor-edge.com",
+    "hostname": "shop.meteor-edge.com",
     "port": 80
   }
 }

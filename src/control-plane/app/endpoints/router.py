@@ -8,7 +8,13 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.endpoints.dependencies import EndpointSvc
-from app.endpoints.schemas import EndpointCreate, EndpointResponse, EndpointUpdate
+from app.endpoints.schemas import (
+    EndpointCreate,
+    EndpointResponse,
+    EndpointUpdate,
+    HostnameCheckResponse,
+    HostnameSuggestionResponse,
+)
 from app.identity.dependencies import CurrentUser
 
 router = APIRouter(
@@ -28,6 +34,37 @@ def list_endpoints(
         actor=current_user,
         organization_id=organization_id,
         device_id=device_id,
+    )
+
+
+@router.get("/hostname-check", response_model=HostnameCheckResponse)
+def check_hostname(
+    organization_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: EndpointSvc,
+    device_id: Annotated[uuid.UUID, Query()],
+    hostname: Annotated[str, Query(min_length=1, max_length=255)],
+    endpoint_id: Annotated[uuid.UUID | None, Query()] = None,
+) -> HostnameCheckResponse:
+    return service.check_hostname(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+        hostname=hostname,
+        endpoint_id=endpoint_id,
+    )
+
+
+@router.get("/hostname-suggestion", response_model=HostnameSuggestionResponse)
+def suggest_hostname(
+    organization_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: EndpointSvc,
+    device_id: Annotated[uuid.UUID, Query()],
+    app: Annotated[str, Query(min_length=1, max_length=255)],
+) -> HostnameSuggestionResponse:
+    return service.suggest_hostname(
+        actor=current_user, organization_id=organization_id, device_id=device_id, app=app
     )
 
 

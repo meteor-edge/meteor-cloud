@@ -62,6 +62,20 @@ class EndpointUpdate(BaseModel):
         return protocol
 
 
+class HostnameCheckResponse(BaseModel):
+    hostname: str
+    available: bool
+    # available | taken | reserved | invalid | not_yours
+    reason: str
+    message: str
+
+
+class HostnameSuggestionResponse(BaseModel):
+    apps_domain: str
+    hostname: str
+    available: bool
+
+
 class EndpointResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -2,7 +2,7 @@
 
 MeteorCloud reaches devices on a **private WireGuard network**. Devices dial out
 to the gateway (NAT-friendly). SSH is never published on the public internet.
-Public app URLs (`*.appx…`) are separate; see [Endpoints](endpoints.md).
+Public app URLs are separate; see [Endpoints](endpoints.md).
 
 Ansible sets up the WireGuard server (the **gateway**) on the API host, or on
 its own server on AWS or on-prem. The control plane can run anywhere: Compose,
@@ -127,9 +127,11 @@ Manual gateway check:
 
 ## DNS for apps (not SSH)
 
-SSH does not need public DNS. App URLs need a **wildcard**
-`*.appx.<APPS_BASE_DOMAIN>` A/AAAA (or CNAME) to the gateway. A wildcard on
-`*.meteor-edge.com` does **not** cover `boiler.appx.meteor-edge.com`.
+SSH does not need public DNS. App URLs need one **wildcard**
+`*.<APPS_BASE_DOMAIN>` A/AAAA (or CNAME) to the gateway. It covers custom names
+(`shop.meteor-edge.com`) and suggested ones (`shop.kiosk-12.acme.meteor-edge.com`).
+Records that already exist under the domain (for example `www`) take precedence;
+list them in `APPS_RESERVED_NAMES`.
 
 Let’s Encrypt **HTTP-01** stays on `PLATFORM_DOMAIN`. App hostnames use Traefik
 **DNS-01** (`letsencrypt-dns`, default Route53). Put AWS keys in host env, never

@@ -91,3 +91,8 @@ deploy/ansible/inventory/*
 
 # Ansible WireGuard gateway hand-off files (contain public keys and endpoints)
 deploy/ansible/artifacts/
+
+# MeteorCloud E2E environments (state, keys, generated secrets, reports)
+tests/e2e/.env
+tests/e2e/.state/
+tests/e2e/terraform/*/.terraform-validate/

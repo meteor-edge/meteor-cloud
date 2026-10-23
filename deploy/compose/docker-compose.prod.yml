@@ -23,6 +23,10 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_DEBUG: "false"
+      # Trust Traefik's X-Forwarded-Proto/For so HTTPS requests are seen as https. Safe because the
+      # API is unpublished here: only Traefik (which overwrites client-sent forwarded headers),
+      # other containers and the host loopback reach it.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
 
   emqx:
     restart: unless-stopped

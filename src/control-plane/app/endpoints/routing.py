@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Header
 from app.core.config import Settings, get_settings
 from app.core.exceptions import UnauthorizedError
 from app.endpoints.dependencies import EndpointSvc
+from app.endpoints.validation import tls_domain
 
 router = APIRouter(prefix="/internal/routing", tags=["internal-routing"], include_in_schema=False)
 
@@ -30,8 +31,6 @@ def traefik_http_provider(
 ) -> dict[str, Any]:
     routers: dict[str, Any] = {}
     services: dict[str, Any] = {}
-    apps_domain = settings.apps_base_domain.strip().lower().strip(".")
-    tls_main = f"*.appx.{apps_domain}" if not apps_domain.startswith("appx.") else f"*.{apps_domain}"
     use_tls = bool(settings.apps_base_domain)
     for endpoint, upstream in service.routable_upstreams():
         name = f"app-{endpoint.id.hex}"
@@ -42,9 +41,10 @@ def traefik_http_provider(
             "entryPoints": ["websecure"] if use_tls else ["web"],
         }
         if use_tls:
+            # One wildcard per device (*.<device>.<org>.<domain>) or *.<domain> for custom names.
             router["tls"] = {
                 "certResolver": "letsencrypt-dns",
-                "domains": [{"main": tls_main}],
+                "domains": [{"main": tls_domain(endpoint.hostname, apps_base_domain=settings.apps_base_domain)}],
             }
         routers[name] = router
         services[name] = {"loadBalancer": {"servers": [{"url": upstream}]}}

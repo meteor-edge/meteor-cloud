@@ -17,6 +17,10 @@ Actions -> Run workflow
 Pull-request CI (`.github/workflows/ci.yml`) never touches AWS. This workflow
 (`.github/workflows/aws-ci.yml`) is manual.
 
+For the full product check (WireGuard, devices, browser SSH, DNS + HTTPS, app
+delivery, tenancy) use the separate **Full-stack E2E** workflow
+([e2e.md](e2e.md)).
+
 ## Run it
 
 GitHub -> Actions -> **EC2 smoke test** -> **Run workflow**, and pick the branch.

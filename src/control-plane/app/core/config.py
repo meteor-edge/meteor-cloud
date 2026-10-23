@@ -142,8 +142,10 @@ class Settings(BaseSettings):
         default=60,
         alias="CONNECTIVITY_RATE_LIMIT_WINDOW_SECONDS",
     )
-    # Public app hostnames are {label}.appx.{APPS_BASE_DOMAIN}.
+    # Public app hostnames: <app>.<device>.<org>.{APPS_BASE_DOMAIN} (suggested) or <name>.{APPS_BASE_DOMAIN}
+    # (custom). APPS_RESERVED_NAMES: comma-separated names that already exist under that domain.
     apps_base_domain: str = Field(default="meteor-edge.com", alias="APPS_BASE_DOMAIN")
+    apps_reserved_names: str = Field(default="", alias="APPS_RESERVED_NAMES")
     routing_internal_token: str = Field(default="", alias="ROUTING_INTERNAL_TOKEN")
     # Browser SSH. "echo" is for tests only.
     shell_provider: Literal["ssh_gateway", "echo", "none"] = Field(default="none", alias="SHELL_PROVIDER")
@@ -197,6 +199,10 @@ class Settings(BaseSettings):
         alias="OBSERVABILITY_BACKEND",
         description="prometheus (Loki/Grafana) or cloudwatch (reserved, not implemented).",
     )
+
+    @property
+    def reserved_app_names(self) -> frozenset[str]:
+        return frozenset(name.strip().lower() for name in self.apps_reserved_names.split(",") if name.strip())
 
     @property
     def cors_origins(self) -> list[str]:

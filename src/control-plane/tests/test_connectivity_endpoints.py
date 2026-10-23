@@ -149,7 +149,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "nginx.meteor-edge.com",
+            "hostname": "nginx.pi-apps.meteor-edge.com",
             "port": 9000,
         },
     )

@@ -19,10 +19,24 @@ from app.deployments.software_repository import DeviceSoftwareRepository
 from app.devices.repository import DeviceRepository
 from app.endpoints.models import ApplicationEndpoint, EndpointAvailability
 from app.endpoints.repository import EndpointRepository
-from app.endpoints.schemas import EndpointCreate, EndpointResponse, EndpointUpdate
-from app.endpoints.validation import assert_wireguard_upstream, validate_hostname
+from app.endpoints.schemas import (
+    EndpointCreate,
+    EndpointResponse,
+    EndpointUpdate,
+    HostnameCheckResponse,
+    HostnameSuggestionResponse,
+)
+from app.endpoints.validation import (
+    HostnameRejected,
+    assert_wireguard_upstream,
+    normalize_domain,
+    suggested_hostname,
+    validate_hostname,
+)
 from app.identity.models import User
-from app.tenancy.models import OrganizationMembership
+from app.tenancy.models import Organization, OrganizationMembership
+
+MAX_SUGGESTION_ATTEMPTS = 50
 
 
 class EndpointService:
@@ -50,6 +64,70 @@ class EndpointService:
         if device is None:
             raise NotFoundError("device_not_found", "Device was not found.")
         return device
+
+    def _validate_hostname(self, hostname: str, *, organization_id: uuid.UUID, device) -> str:
+        organization = self.session.get(Organization, organization_id)
+        if organization is None:
+            raise NotFoundError("organization_not_found", "Organization was not found.")
+        return validate_hostname(
+            hostname,
+            apps_base_domain=self.settings.apps_base_domain,
+            org_slug=organization.slug,
+            device_name=device.name,
+            reserved=self.settings.reserved_app_names,
+        )
+
+    def check_hostname(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+        hostname: str,
+        endpoint_id: uuid.UUID | None = None,
+    ) -> HostnameCheckResponse:
+        """Whether this organization can use ``hostname`` for an app on ``device_id`` (endpoint_id: renaming)."""
+        membership = self._require_membership(organization_id, actor.id)
+        device = self._device(organization_id, device_id)
+        self.authz.require(membership, "endpoint.read", device_group_id=device.device_group_id)
+        value = hostname.strip().lower().rstrip(".")
+        try:
+            value = self._validate_hostname(value, organization_id=organization_id, device=device)
+        except HostnameRejected as exc:
+            return HostnameCheckResponse(hostname=value, available=False, reason=exc.reason, message=exc.message)
+        existing = self.endpoints.get_by_hostname(value)
+        if existing is not None and existing.id != endpoint_id:
+            return HostnameCheckResponse(
+                hostname=value, available=False, reason="taken", message="This address is already in use."
+            )
+        return HostnameCheckResponse(hostname=value, available=True, reason="available", message="Available.")
+
+    def suggest_hostname(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID, app: str
+    ) -> HostnameSuggestionResponse:
+        """``<app>.<device>.<org>.<domain>``; a number is added to the app part while that is taken."""
+        membership = self._require_membership(organization_id, actor.id)
+        device = self._device(organization_id, device_id)
+        self.authz.require(membership, "endpoint.read", device_group_id=device.device_group_id)
+        organization = self.session.get(Organization, organization_id)
+        if organization is None:
+            raise NotFoundError("organization_not_found", "Organization was not found.")
+        base = suggested_hostname(
+            app=app,
+            device_name=device.name,
+            org_slug=organization.slug,
+            apps_base_domain=self.settings.apps_base_domain,
+        )
+        label, rest = base.split(".", 1)
+        for attempt in range(1, MAX_SUGGESTION_ATTEMPTS + 1):
+            candidate = base if attempt == 1 else f"{label[: 63 - len(str(attempt)) - 1]}-{attempt}.{rest}"
+            if self.endpoints.get_by_hostname(candidate) is None:
+                return HostnameSuggestionResponse(
+                    apps_domain=normalize_domain(self.settings.apps_base_domain), hostname=candidate, available=True
+                )
+        return HostnameSuggestionResponse(
+            apps_domain=normalize_domain(self.settings.apps_base_domain), hostname=base, available=False
+        )
 
     def _public_url(self, hostname: str) -> str:
         return f"https://{hostname}"
@@ -123,7 +201,7 @@ class EndpointService:
         membership = self._require_membership(organization_id, actor.id)
         device = self._device(organization_id, payload.device_id)
         self.authz.require(membership, "endpoint.create", device_group_id=device.device_group_id)
-        hostname = validate_hostname(payload.hostname, apps_base_domain=self.settings.apps_base_domain)
+        hostname = self._validate_hostname(payload.hostname, organization_id=organization_id, device=device)
         if self.endpoints.get_by_hostname(hostname) is not None:
             raise ConflictError("hostname_taken", "This hostname is already registered.")
         if payload.enabled and self.endpoints.enabled_on_port(device_id=device.id, port=payload.port):
@@ -193,7 +271,7 @@ class EndpointService:
         device = self._device(organization_id, row.device_id)
         self.authz.require(membership, "endpoint.update", device_group_id=device.device_group_id)
         if payload.hostname is not None:
-            hostname = validate_hostname(payload.hostname, apps_base_domain=self.settings.apps_base_domain)
+            hostname = self._validate_hostname(payload.hostname, organization_id=organization_id, device=device)
             existing = self.endpoints.get_by_hostname(hostname)
             if existing is not None and existing.id != row.id:
                 raise ConflictError("hostname_taken", "This hostname is already registered.")

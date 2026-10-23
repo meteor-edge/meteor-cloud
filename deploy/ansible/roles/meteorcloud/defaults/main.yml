@@ -30,8 +30,11 @@ registration_require_https: false
 docs_public_url: http://localhost:3000/docs
 
 # Images. image_source=git clones repository_url and builds on the host;
+# image_source=archive copies platform_source_archive (a controller .tar.gz of the
+# repository, e.g. `git archive`) and builds on the host (private repos, air-gapped);
 # image_source=registry pulls the image references below.
 image_source: git
+platform_source_archive: ""
 repository_url: https://github.com/shahabkamali/MeteorCloud.git
 git_ref: master
 backend_image: edge-platform-backend:0.2.0
@@ -150,9 +153,17 @@ vpn_api_bind_address: >-
 connectivity_internal_token: "{{ lookup('env', 'EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN') | default(mqtt_internal_token, true) }}"
 routing_internal_token: "{{ lookup('env', 'EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN') | default(connectivity_internal_token, true) }}"
 apps_base_domain: "{{ platform_domain | default('meteor-edge.com', true) }}"
+# Browser SSH. ssh_gateway (needs `vpn`): Ansible creates the gateway SSH key on the API
+# host once (shell_ssh_dir), mounts it into the API, and devices install its public key.
 shell_provider: none
-shell_ssh_identity_file: ""
+shell_ssh_dir: "{{ platform_root }}/shell"
+shell_ssh_identity_file: "{{ '/run/meteorcloud/shell/id_ed25519' if shell_provider == 'ssh_gateway' else '' }}"
 shell_gateway_public_key: ""
+# Region for Traefik's Route53 DNS-01 (wildcard app certificates). Credentials come from the
+# instance role (IMDSv2, hop limit 2) or, off AWS, a scoped IAM key from the controller env.
+traefik_aws_region: ""
+traefik_aws_access_key_id: "{{ lookup('env', 'EDGE_PLATFORM_TRAEFIK_AWS_ACCESS_KEY_ID') }}"
+traefik_aws_secret_access_key: "{{ lookup('env', 'EDGE_PLATFORM_TRAEFIK_AWS_SECRET_ACCESS_KEY') }}"
 
 # Services selected by edge-installer; standalone runs deploy the application only.
 enabled_services: [cloud_app]

@@ -4,7 +4,7 @@ Deploy MeteorCloud to an **AWS EC2** host with `edge-installer` (Terraform + Ans
 
 ## AWS (EC2)
 
-- Python 3.13+, Terraform 1.5+, ansible-core 2.15+, AWS credentials, SSH key pair
+- Python 3.13+, Terraform 1.7+, ansible-core 2.15+, AWS credentials, SSH key pair
 - Copy `infrastructure/installer/edge_installer/config/examples/installation.yaml`
 - See [AWS prerequisites](aws-prerequisites.md)
 
