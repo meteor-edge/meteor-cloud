@@ -150,8 +150,14 @@ vpn_handoff_dir: "{{ playbook_dir }}/../artifacts/wireguard-{{ vpn_gateway_host 
 vpn_api_bind_address: >-
   {{ (vpn_link_prefix ~ '.' ~ (vpn_managed_api_hosts.index(inventory_hostname) + 2))
      if inventory_hostname in vpn_managed_api_hosts else '127.0.0.1' }}
-connectivity_internal_token: "{{ EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN | default(lookup('env', 'EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN'), true) | default(mqtt_internal_token, true) }}"
-routing_internal_token: "{{ EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN | default(lookup('env', 'EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN'), true) | default(connectivity_internal_token, true) }}"
+connectivity_internal_token: >-
+  {{ EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN
+     | default(lookup('env', 'EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN'), true)
+     | default(mqtt_internal_token, true) }}
+routing_internal_token: >-
+  {{ EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN
+     | default(lookup('env', 'EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN'), true)
+     | default(connectivity_internal_token, true) }}
 apps_base_domain: "{{ platform_domain | default('meteor-edge.com', true) }}"
 # Browser SSH. ssh_gateway (needs `vpn`): Ansible creates the gateway SSH key on the API
 # host once (shell_ssh_dir), mounts it into the API, and devices install its public key.
