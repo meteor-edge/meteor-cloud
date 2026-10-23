@@ -9,9 +9,9 @@
 #   make down
 #   make down ARGS=--destroy-data
 #
-# On a terminal, make up shows a checkbox of optional services (all on by
-# default: WireGuard, MQTT, MinIO) and prints DNS records for that setup.
-# Non-interactive: METEORCLOUD_NONINTERACTIVE=1 plus PLATFORM_DOMAIN and flags.
+# PLATFORM_DOMAIN is required (export or make up PLATFORM_DOMAIN=...).
+# On a terminal, make up shows checkboxes (arrows + space). All services on
+# by default. Non-interactive: METEORCLOUD_NONINTERACTIVE=1 plus flags.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -286,61 +286,100 @@ PREFERRED_STORAGE="${STORAGE}"
 
 mark() { if [[ "$1" -eq 1 ]]; then printf 'x'; else printf ' '; fi; }
 
-select_services() {
-  local reply mqtt_on storage_on mqtt_where storage_where
-  echo
-  echo "Optional services — all on. Type a number to toggle, Enter to continue."
-  while true; do
-    mqtt_on=0
-    storage_on=0
-    [[ "${MQTT}" != off ]] && mqtt_on=1
-    [[ "${STORAGE}" != filesystem ]] && storage_on=1
-    mqtt_where="Bundled EMQX on this host."
-    [[ "${MQTT}" == external ]] && mqtt_where="Your existing broker."
-    storage_where="Bundled MinIO on this host. Off = files on this disk."
-    [[ "${STORAGE}" == s3 ]] && storage_where="Your S3 bucket. Off = files on this disk."
-    echo
-    printf '  [%s] 1  WireGuard (vpn)\n' "$(mark "${VPN}")"
-    echo "         What: a private tunnel devices dial."
-    echo "         For:  browser SSH and app endpoints, without public SSH."
-    echo
-    printf '  [%s] 2  MQTT (data plane)\n' "$(mark "${mqtt_on}")"
-    echo "         What: a TLS broker for device messages."
-    echo "         For:  live telemetry and commands. Enroll/HTTP work without it."
-    echo "         ${mqtt_where}"
-    echo
-    printf '  [%s] 3  Artifact storage\n' "$(mark "${storage_on}")"
-    echo "         What: where OS images, firmware, and compose bundles live."
-    echo "         For:  operators upload in the console; devices download via the API."
-    echo "         ${storage_where}"
-    echo
-    read -r -p "> " reply || true
-    case "${reply}" in
-      "") break ;;
-      1) if [[ "${VPN}" -eq 1 ]]; then VPN=0; else VPN=1; fi ;;
-      2) if [[ "${MQTT}" == off ]]; then MQTT="${PREFERRED_MQTT}"; else MQTT=off; fi ;;
-      3) if [[ "${STORAGE}" == filesystem ]]; then STORAGE="${PREFERRED_STORAGE}"; else STORAGE=filesystem; fi ;;
-      *) echo "Type 1, 2 or 3 to toggle, or Enter to continue." ;;
-    esac
-  done
+toggle_service() {
+  case "$1" in
+    0) if [[ "${VPN}" -eq 1 ]]; then VPN=0; else VPN=1; fi ;;
+    1) if [[ "${MQTT}" == off ]]; then MQTT="${PREFERRED_MQTT}"; else MQTT=off; fi ;;
+    2) if [[ "${STORAGE}" == filesystem ]]; then STORAGE="${PREFERRED_STORAGE}"; else STORAGE=filesystem; fi ;;
+  esac
 }
+
+draw_service() {
+  local selected="$1" on="$2" title="$3" what="$4" for="$5" extra="${6:-}"
+  local ptr="    " box
+  [[ "${selected}" -eq 1 ]] && ptr="  > "
+  [[ "${on}" -eq 1 ]] && box="[x]" || box="[ ]"
+  printf '%s%s  %s\n' "${ptr}" "${box}" "${title}"
+  printf '         What: %s\n' "${what}"
+  printf '         For:  %s\n' "${for}"
+  printf '         %-60s\n' "${extra}"
+  echo
+}
+
+# 3 items x 5 lines. Redraw in place (arrows + space, no typing numbers).
+MENU_LINES=15
+
+draw_services_menu() {
+  local idx="$1" mqtt_on=0 storage_on=0 mqtt_extra storage_extra
+  [[ "${MQTT}" != off ]] && mqtt_on=1
+  [[ "${STORAGE}" != filesystem ]] && storage_on=1
+  mqtt_extra="Bundled EMQX on this host."
+  [[ "${MQTT}" == external ]] && mqtt_extra="Your existing broker."
+  storage_extra="Bundled MinIO on this host. Off = files on this disk."
+  [[ "${STORAGE}" == s3 ]] && storage_extra="Your S3 bucket. Off = files on this disk."
+  draw_service "$([[ "${idx}" -eq 0 ]] && echo 1 || echo 0)" "${VPN}" \
+    "WireGuard (vpn)" \
+    "a private tunnel devices dial" \
+    "browser SSH and app endpoints, without public SSH"
+  draw_service "$([[ "${idx}" -eq 1 ]] && echo 1 || echo 0)" "${mqtt_on}" \
+    "MQTT (data plane)" \
+    "a TLS broker for device messages" \
+    "live telemetry and commands. Enroll/HTTP work without it." \
+    "${mqtt_extra}"
+  draw_service "$([[ "${idx}" -eq 2 ]] && echo 1 || echo 0)" "${storage_on}" \
+    "Artifact storage" \
+    "where OS images, firmware, and compose bundles live" \
+    "operators upload in the console; devices download via the API" \
+    "${storage_extra}"
+}
+
+select_services() {
+  local idx=0 key rest first=1
+  echo
+  echo "Optional services — all on."
+  echo "Up/down to move, space to check or uncheck, Enter to continue."
+  tput civis 2>/dev/null || true
+  trap 'tput cnorm 2>/dev/null || true' RETURN
+  while true; do
+    if [[ "${first}" -eq 0 ]]; then
+      printf '\033[%sA' "${MENU_LINES}"
+    fi
+    first=0
+    draw_services_menu "${idx}"
+    printf '\033[J'
+    IFS= read -rsn1 key || true
+    if [[ "${key}" == $'\x1b' ]]; then
+      read -rsn2 rest || true
+      case "${rest}" in
+        '[A'|'[D') idx=$(((idx + 2) % 3)) ;;
+        '[B'|'[C') idx=$(((idx + 1) % 3)) ;;
+      esac
+    elif [[ "${key}" == ' ' ]]; then
+      toggle_service "${idx}"
+    elif [[ -z "${key}" || "${key}" == $'\n' || "${key}" == $'\r' ]]; then
+      break
+    fi
+  done
+  tput cnorm 2>/dev/null || true
+}
+
+if [[ -z "${DOMAIN}" || "${DOMAIN}" != *.* || "${DOMAIN}" == *[^-A-Za-z0-9.]* ]]; then
+  echo "PLATFORM_DOMAIN is empty. Set it and run again:" >&2
+  echo >&2
+  echo "  export PLATFORM_DOMAIN=fleet.example.com" >&2
+  echo "  make up" >&2
+  echo >&2
+  echo "or:" >&2
+  echo >&2
+  echo "  make up PLATFORM_DOMAIN=fleet.example.com" >&2
+  exit 1
+fi
 
 if is_tty; then
   echo
   echo "MeteorCloud production install on this VM"
-  echo "The console and API will be https://<your-domain> after DNS is in place."
-  echo
-  if [[ -z "${DOMAIN}" ]]; then
-    DOMAIN="$(normalize_domain "$(ask_line "Domain for this install (e.g. fleet.example.com)")")"
-  fi
+  echo "Console and API: https://${DOMAIN} after DNS is in place."
   select_services
-fi
-
-if [[ -z "${DOMAIN}" || "${DOMAIN}" != *.* || "${DOMAIN}" == *[^-A-Za-z0-9.]* ]]; then
-  echo "Production install needs your domain. Example:" >&2
-  echo "  make up PLATFORM_DOMAIN=fleet.example.com" >&2
-  print_dns_guide "fleet.example.com" "<server public IP>" >&2
-  exit 1
 fi
 
 load_existing_secrets() {

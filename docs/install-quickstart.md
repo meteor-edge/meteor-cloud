@@ -30,26 +30,33 @@ The app runs in Docker, so it does not depend on the host distro. `make up` runs
 **Ansible** on this machine: it installs Docker (and WireGuard) with the packages
 for that OS, then starts Compose.
 
-`make up` shows a **checkbox of optional services, all on**:
+`PLATFORM_DOMAIN` is required (the script exits if it is missing):
+
+```bash
+export PLATFORM_DOMAIN=fleet.example.com
+make up
+# or: make up PLATFORM_DOMAIN=fleet.example.com
+```
+
+Then a **checkbox** of optional services (all on). **Up/down** to move, **space**
+to check or uncheck, **Enter** to continue.
 
 ```text
-  [x] 1  WireGuard (vpn)
+  > [x]  WireGuard (vpn)
          What: a private tunnel devices dial.
          For:  browser SSH and app endpoints, without public SSH.
 
-  [x] 2  MQTT (data plane)
+    [x]  MQTT (data plane)
          What: a TLS broker for device messages.
-         For:  live telemetry and commands. Enroll/HTTP work without it.
+         For:  live telemetry and commands.
 
-  [x] 3  Artifact storage
+    [x]  Artifact storage
          What: where OS images, firmware, and compose bundles live.
          For:  operators upload in the console; devices download via the API.
 ```
 
-Type a number to toggle, Enter to continue. It then prints DNS records for
-**that** setup. Uncheck MQTT if you only need enroll and HTTP. Uncheck object
-store to keep artifacts on this disk. `--storage=s3` or `--mqtt=external` still
-ask for bucket or broker details before install.
+It then prints DNS records for that setup. `--storage=s3` or `--mqtt=external`
+still ask for bucket or broker details before install.
 
 Clone **on the host**:
 
@@ -90,7 +97,7 @@ gitignored). Re-run `make up` to upgrade; the same secrets are reused.
 | `make down` | Stop the stack; data stays in `/opt/edge-platform` |
 | `make down ARGS=--destroy-data` | Stop and delete `/opt/edge-platform` |
 
-`PLATFORM_DOMAIN` is required. Re-runs remember it from `~/.meteorcloud/install.env`.
+Re-runs remember the domain from `~/.meteorcloud/install.env` if you omit it.
 Override the URL with `PLATFORM_PUBLIC_URL=https://fleet.example.com` only if you
 need a different scheme or host.
 

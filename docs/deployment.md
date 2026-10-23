@@ -66,11 +66,13 @@ cd meteor-cloud
 make up PLATFORM_DOMAIN=fleet.example.com
 ```
 
-Give the domain **before** install (or type it when asked). `make up` shows a
-checkbox of optional services (WireGuard, MQTT, MinIO), **all on**; type a
-number to toggle, Enter to continue. It then prints DNS records for that setup.
-`--storage=s3` or `--mqtt=external` still ask for bucket or broker settings.
-Open `https://fleet.example.com`, not the public IP. Full list: [DNS records](dns.md).
+`PLATFORM_DOMAIN` is required (`export PLATFORM_DOMAIN=fleet.example.com` or
+`make up PLATFORM_DOMAIN=fleet.example.com`); the script exits if it is empty.
+Then a checkbox of optional services (WireGuard, MQTT, MinIO), **all on**:
+up/down to move, space to check, Enter to continue. It prints DNS records for
+that setup. `--storage=s3` or `--mqtt=external` still ask for bucket or broker
+settings. Open `https://fleet.example.com`, not the public IP. Full list:
+[DNS records](dns.md).
 
 | Command | What it does |
 | --- | --- |
