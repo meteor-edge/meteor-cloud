@@ -120,8 +120,8 @@ stop-console: ## Stop the console Compose project
 stop-website: ## Website is not in this repo
 	@echo "The public website is not in this tree. From a meteor-ui clone: make stop-website"
 
-up: ## Install MeteorCloud on this VM / existing server
-	$(ANSIBLE_DIR)/install-selfhost.sh $(ARGS)
+up: ## Install on this VM (PLATFORM_DOMAIN=example.com)
+	PLATFORM_DOMAIN="$(or $(PLATFORM_DOMAIN),$(DOMAIN))" $(ANSIBLE_DIR)/install-selfhost.sh $(ARGS)
 
 install-selfhost: up
 

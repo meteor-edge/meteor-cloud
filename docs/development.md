@@ -1,5 +1,8 @@
 # Development Guide
 
+Laptop testing and contributor workflow (`make dev`). Production on a VM is
+`make up` ([Install quickstart](install-quickstart.md)), not this page.
+
 ## Prerequisites
 
 - Docker and Docker Compose v2.24+
@@ -22,7 +25,6 @@ make install
 `make install` installs control-plane, data-plane, installer, agent, and console dependencies.
 
 For a product walkthrough (console + first device), start with [Getting started](getting-started.md).
-Production on a VM is `make up`, not `make dev` ([Install quickstart](install-quickstart.md)).
 
 ## Running the stack
 

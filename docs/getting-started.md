@@ -1,9 +1,15 @@
 # Getting started
 
-Run MeteorCloud on your machine, open the console, and enroll a Linux device with `meteorcli`.
+Run MeteorCloud on your **laptop** for testing and development, open the console, and enroll a Linux device with `meteorcli`.
 
-This page is **local development** (`make dev`). To install production on a VM,
-clone the repo on that host and run `make up` ([Install quickstart](install-quickstart.md)).
+| | Laptop (this page) | Production |
+| --- | --- | --- |
+| Command | `make dev` | `make up` on the VM |
+| Stop | `make stop` | `make down` |
+| Login | `owner@example.com` / `dev-password-123` (`make seed`) | printed at the end; `~/.meteorcloud/secrets.env` |
+| Guide | this page · [Development](development.md) | [Install quickstart](install-quickstart.md) |
+
+Do not run `make up` on a developer laptop. That path is Ansible + production Compose on a server.
 
 **Prerequisites:** Docker Compose v2.24+, Make, and (for the agent) Python 3.13+ on the device or the same host.
 

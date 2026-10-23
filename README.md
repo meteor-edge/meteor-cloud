@@ -57,26 +57,15 @@ MeteorCloud is split into three planes. The **console** is the operator UI; it t
 
 More detail: [docs/architecture.md](docs/architecture.md).
 
-## Quick start (this VM)
+## Testing and development (laptop)
 
-On the server that will host MeteorCloud (on-prem VM or an existing EC2):
+Compose on **your machine**. Not for production.
 
 ```bash
-# Ubuntu / Debian:     sudo apt-get update && sudo apt-get install -y git make
-# RHEL / Rocky / Alma: sudo dnf install -y git make
 git clone https://github.com/meteor-edge/meteor-cloud.git
 cd meteor-cloud
-make up
-```
-
-Login and generated secrets are printed at the end (also saved to `~/.meteorcloud/secrets.env`). Stop with `make down`. Guide: [docs/install-quickstart.md](docs/install-quickstart.md).
-
-## Quick start (local development)
-
-```bash
-cp deploy/compose/.env.example deploy/compose/.env   # make dev does this if missing
 make dev
-make seed      # optional: owner@example.com / dev-password-123
+make seed      # owner@example.com / dev-password-123
 ```
 
 | Surface | URL |
@@ -96,9 +85,28 @@ Kubernetes (local k3d + Helm):
 make k8s-up && make k8s-deploy && make k8s-status
 ```
 
-See [docs/development.md](docs/development.md).
+See [docs/getting-started.md](docs/getting-started.md) and [docs/development.md](docs/development.md).
 
-## Deployment
+## Production (VM)
+
+On the server that will host MeteorCloud (on-prem VM or an existing EC2). Ansible installs Docker and starts production Compose (optional WireGuard).
+
+```bash
+# Ubuntu / Debian:     sudo apt-get update && sudo apt-get install -y git make
+# RHEL / Rocky / Alma: sudo dnf install -y git make
+git clone https://github.com/meteor-edge/meteor-cloud.git
+cd meteor-cloud
+make up PLATFORM_DOMAIN=fleet.example.com
+```
+
+Create the printed DNS records (`fleet.example.com`, `*.fleet.example.com`,
+`vpn.fleet.example.com`) and open **https://fleet.example.com**. Login and secrets
+are printed at the end (`~/.meteorcloud/secrets.env`). Stop with `make down`.
+Guide: [docs/install-quickstart.md](docs/install-quickstart.md) · [docs/dns.md](docs/dns.md).
+
+To **create** a new AWS EC2 from a laptop: `make aws-up` ([docs/aws-deployment.md](docs/aws-deployment.md)). Do not run `make aws-up` on the VM.
+
+## Deployment paths
 
 Two independent paths; same images and settings.
 
@@ -152,7 +160,7 @@ Start with [Getting started](docs/getting-started.md), then the full index: [doc
 
 | Doc | Topic |
 | --- | --- |
-| [Getting started](docs/getting-started.md) | Local stack + first device |
+| [Getting started](docs/getting-started.md) | Laptop: `make dev` + first device |
 | [Concepts](docs/concepts.md) | Three planes, orgs, devices |
 | [API overview](docs/api.md) | Control-plane HTTP map |
 | [meteorcli](docs/meteorcli.md) | Device CLI |

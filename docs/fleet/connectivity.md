@@ -35,20 +35,20 @@ plane every 15s and never rewrites `wg0.conf`; after a `wg-quick` restart it
 re-adds peers on the next poll. Open **UDP 51820** to the gateway (security
 group, or a router port forward on-prem).
 
-### The address devices dial: `wg.<domain>`
+### The address devices dial: `vpn.<domain>`
 
-One of the three [DNS records](../dns.md) MeteorCloud needs.
+One of the [DNS records](../dns.md) MeteorCloud needs.
 
-Give the gateway a DNS name, e.g. `wg.meteor-edge.com`, as an **A record to its
+Give the gateway a DNS name, e.g. `vpn.fleet.example.com` (`wg.<domain>` also works), as an **A record to its
 public IP** (DNS only: no HTTP proxy such as Cloudflare's orange cloud, since
 WireGuard is UDP). Set it on the gateway host in the inventory:
 
 ```yaml
-vpn_public_host: wg.meteor-edge.com   # devices get Endpoint = wg.meteor-edge.com:51820
+vpn_public_host: vpn.fleet.example.com   # devices get Endpoint = vpn.fleet.example.com:51820
 ```
 
 Without it, devices dial the host's IP (`ansible_host`). The demo/E2E Terraform
-creates `wg.<env>.<domain>` itself. `wg` is reserved, so no app can take it.
+creates `wg.<env>.<domain>` itself. `vpn` and `wg` are reserved, so no app can take them.
 
 Reconnecting: devices send a keepalive every 25s, so after a reboot, a network
 change on the device, or a short outage, WireGuard reconnects on its own.

@@ -4,12 +4,16 @@ Learn and operate MeteorCloud — from first boot to production. Website: [meteo
 
 ## Start here
 
-| Step | Doc |
-| --- | --- |
-| 1. Run the stack locally | [Getting started](getting-started.md) (`make dev`) |
-| 2. Install on a VM | [Install quickstart](install-quickstart.md) (`make up`) |
-| 3. Understand the three planes | [Concepts](concepts.md) |
-| 4. Enroll a device with `meteorcli` | [Getting started → First device](getting-started.md#enroll-a-device) |
+| Goal | Command | Doc |
+| --- | --- | --- |
+| Test or develop on your **laptop** | `make dev` | [Getting started](getting-started.md) |
+| **Production** on a VM you already have | `make up` on that host | [Install quickstart](install-quickstart.md) |
+| **Production**: create a new AWS EC2 | `make aws-up` from a laptop | [AWS deployment](aws-deployment.md) |
+| **Production**: existing Kubernetes cluster | Helm | [Kubernetes](kubernetes.md) |
+| Understand the three planes | — | [Concepts](concepts.md) |
+| Enroll a device with `meteorcli` | — | [Getting started → First device](getting-started.md#enroll-a-device) |
+
+`make dev` is Compose on localhost (hot reload, seed user). `make up` is Ansible + production Compose on the server (Traefik, generated secrets, optional WireGuard). Do not mix them.
 
 ## Guides
 
@@ -46,14 +50,13 @@ Commands and APIs you look up while working.
 
 | Path | Doc |
 | --- | --- |
-| Local / contributor setup | [Development](development.md) |
-| Compose + Ansible (VM, EC2, on-prem) | [Deployment](deployment.md) |
+| Local testing / contributor setup (`make dev`) | [Getting started](getting-started.md) · [Development](development.md) |
+| Production on a VM (`make up`) | [Install quickstart](install-quickstart.md) · [Deployment](deployment.md) |
 | Kubernetes (existing cluster) | [Kubernetes](kubernetes.md) |
-| Install on a VM (`make up`) | [Install quickstart](install-quickstart.md) |
 | DNS records to create (domain, apps, WireGuard) | [DNS records](dns.md) |
 | `installation.yaml` | [Installer configuration](installer-configuration.md) |
 | Modular services (`cloud_app`, `vpn`) | [Services](services.md) |
-| AWS prerequisites & deploy | [Prerequisites](aws-prerequisites.md) · [AWS deployment](aws-deployment.md) |
+| Production: new AWS EC2 (`make aws-up`) | [Prerequisites](aws-prerequisites.md) · [AWS deployment](aws-deployment.md) |
 | Upgrades · destroy · logs | [Upgrades](upgrades.md) · [Destroy](destroy.md) · [Observability](observability.md) |
 | When something breaks | [Troubleshooting](troubleshooting.md) |
 | EC2 smoke test (CI) | [AWS CI](aws-ci.md) |

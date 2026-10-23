@@ -1,7 +1,8 @@
 # Deployment with Docker Compose and Ansible
 
-For one Linux server: a VM, an EC2 instance, or an on-prem machine. For
-Kubernetes clusters see [kubernetes.md](kubernetes.md).
+**Production** on one Linux server: a VM, an EC2 instance, or an on-prem machine.
+For testing on a laptop use `make dev` ([Getting started](getting-started.md)), not
+this page. For Kubernetes clusters see [kubernetes.md](kubernetes.md).
 
 The stack is defined once, in [`deploy/compose/`](../deploy/compose/). Ansible
 prepares the server and runs those same files; it does not keep its own copy.
@@ -62,8 +63,14 @@ installs Ansible if needed, then Docker Compose production and WireGuard.
 # RHEL / Rocky / Alma: sudo dnf install -y git make
 git clone https://github.com/meteor-edge/meteor-cloud.git
 cd meteor-cloud
-make up
+make up PLATFORM_DOMAIN=fleet.example.com
 ```
+
+Give the domain **before** install (or type it when asked). `make up` shows a
+checkbox of optional services (WireGuard, MQTT, MinIO), **all on**; type a
+number to toggle, Enter to continue. It then prints DNS records for that setup.
+`--storage=s3` or `--mqtt=external` still ask for bucket or broker settings.
+Open `https://fleet.example.com`, not the public IP. Full list: [DNS records](dns.md).
 
 | Command | What it does |
 | --- | --- |

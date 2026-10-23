@@ -29,16 +29,16 @@
   ansible.builtin.debug:
     msg: "{{ dns_web + (dns_wireguard if 'vpn' in enabled_services else []) }}"
   vars:
-    dns_ip: "{{ ansible_host | default(inventory_hostname) }} (this server's public IP)"
+    dns_ip: "{{ public_ipv4 | default(ansible_host) | default(inventory_hostname) }} (this server's public IP)"
     dns_web:
       - "DNS records MeteorCloud needs (A records, DNS only, TTL 60-300s):"
       - "{{ platform_domain }}  ->  {{ dns_ip }}   console, API (/api), MQTT (TCP 8883)"
       - "*.{{ apps_base_domain }}  ->  {{ dns_ip }}   public app URLs"
     dns_wg_host: "{{ vpn_gateway_endpoint | trim | regex_replace(':[0-9]+$', '') }}"
-    dns_wg_ip: "{{ hostvars[vpn_gateway_host].ansible_host | default(vpn_gateway_host) }} (WireGuard server's public IP)"
+    dns_wg_ip: "{{ hostvars[vpn_gateway_host].public_ipv4 | default(hostvars[vpn_gateway_host].ansible_host) | default(vpn_gateway_host) }} (WireGuard server's public IP)"
     dns_wireguard: "{{ [dns_wg_named] if dns_wg_host is not match('^[0-9.]+$') else [dns_wg_by_ip] }}"
     dns_wg_named: "{{ dns_wg_host }}  ->  {{ dns_wg_ip }}   WireGuard: devices connect here (UDP {{ vpn_listen_port }})"
     dns_wg_by_ip: >-
-      WireGuard: devices dial the IP {{ dns_wg_host }}. Better: create wg.{{ platform_domain }} -> {{ dns_wg_ip }}
-      and set vpn_public_host: wg.{{ platform_domain }} on that host, so devices follow an IP change.
+      WireGuard: devices dial the IP {{ dns_wg_host }}. Better: create vpn.{{ platform_domain }} -> {{ dns_wg_ip }}
+      and set vpn_public_host: vpn.{{ platform_domain }} on that host, so devices follow an IP change.
   when: platform_domain | length > 0

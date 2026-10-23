@@ -1,18 +1,55 @@
 # Install the platform (short guide)
 
-| You are… | Command | Guide |
-| --- | --- | --- |
-| On the VM that will run MeteorCloud | `make up` | this page |
-| On a laptop, creating a **new** AWS EC2 | `make aws-up` | [AWS](#create-a-new-aws-ec2-from-a-laptop) |
-| On a laptop, developing | `make dev` | [Getting started](getting-started.md) |
-| Installing into an existing Kubernetes cluster | Helm | [Kubernetes](kubernetes.md) |
+| Goal | Where | Command | Stop |
+| --- | --- | --- | --- |
+| Testing / development | Your laptop | `make dev` then `make seed` | `make stop` |
+| Production | The VM that will host it | `make up` (on that host) | `make down` |
+| Production, new AWS EC2 | Your laptop | `make aws-up` | `make aws-down` |
+| Production, existing cluster | Your cluster | Helm | `helm uninstall` |
 
-## On this VM (on-prem or an existing server)
+Local details: [Getting started](getting-started.md) · [Development](development.md).
+Production on a VM is this page. New EC2: [AWS](#create-a-new-aws-ec2-from-a-laptop). Kubernetes: [Kubernetes](kubernetes.md).
+
+## Testing and development (laptop)
+
+Docker Compose on **your machine**. Not Ansible, not Traefik, not WireGuard.
+
+```bash
+git clone https://github.com/meteor-edge/meteor-cloud.git
+cd meteor-cloud
+make dev
+make seed      # owner@example.com / dev-password-123
+```
+
+Console: http://localhost:5173 · API: http://localhost:8000 · stop: `make stop`.
+
+## Production on this VM (on-prem or an existing server)
 
 Linux host with sudo: **Ubuntu 22.04+**, **Debian 12+**, or **RHEL / CentOS / Rocky / AlmaLinux 9+**.
 The app runs in Docker, so it does not depend on the host distro. `make up` runs
 **Ansible** on this machine: it installs Docker (and WireGuard) with the packages
 for that OS, then starts Compose.
+
+`make up` shows a **checkbox of optional services, all on**:
+
+```text
+  [x] 1  WireGuard (vpn)
+         What: a private tunnel devices dial.
+         For:  browser SSH and app endpoints, without public SSH.
+
+  [x] 2  MQTT (data plane)
+         What: a TLS broker for device messages.
+         For:  live telemetry and commands. Enroll/HTTP work without it.
+
+  [x] 3  Artifact storage
+         What: where OS images, firmware, and compose bundles live.
+         For:  operators upload in the console; devices download via the API.
+```
+
+Type a number to toggle, Enter to continue. It then prints DNS records for
+**that** setup. Uncheck MQTT if you only need enroll and HTTP. Uncheck object
+store to keep artifacts on this disk. `--storage=s3` or `--mqtt=external` still
+ask for bucket or broker details before install.
 
 Clone **on the host**:
 
@@ -24,7 +61,19 @@ sudo apt-get update && sudo apt-get install -y git make
 
 git clone https://github.com/meteor-edge/meteor-cloud.git
 cd meteor-cloud
-make up
+make up PLATFORM_DOMAIN=fleet.example.com
+```
+
+Create the printed A records (plain DNS, no proxy), then open
+**https://fleet.example.com**. Storage is never a public hostname; downloads go
+through the API. Bundled MQTT uses `mqtt.fleet.example.com`. Full list:
+[DNS records](dns.md).
+
+Non-interactive (CI or a script):
+
+```bash
+METEORCLOUD_NONINTERACTIVE=1 make up PLATFORM_DOMAIN=fleet.example.com \
+  ARGS='--vpn --storage=filesystem --mqtt=off'
 ```
 
 Ansible is installed into `~/.meteorcloud-ansible` if it is missing. Secrets are
@@ -36,15 +85,16 @@ gitignored). Re-run `make up` to upgrade; the same secrets are reused.
 
 | Command | What it does |
 | --- | --- |
-| `make up` | Install or upgrade MeteorCloud + WireGuard on this host |
-| `make up ARGS=--no-vpn` | Same, without WireGuard |
+| `make up` | Install (checkbox of services, all on; Enter accepts) |
+| `make up ARGS='--no-vpn --mqtt=off --storage=filesystem'` | Same, no prompts for those |
 | `make down` | Stop the stack; data stays in `/opt/edge-platform` |
 | `make down ARGS=--destroy-data` | Stop and delete `/opt/edge-platform` |
 
-Optional: `PLATFORM_PUBLIC_URL=https://fleet.example.com make up` if the detected
-public URL is wrong (otherwise it uses the instance public IP, or `http://127.0.0.1`).
+`PLATFORM_DOMAIN` is required. Re-runs remember it from `~/.meteorcloud/install.env`.
+Override the URL with `PLATFORM_PUBLIC_URL=https://fleet.example.com` only if you
+need a different scheme or host.
 
-Details: [Deployment](deployment.md).
+Details: [Deployment](deployment.md) · [DNS records](dns.md).
 
 ## Create a new AWS EC2 from a laptop
 
@@ -69,15 +119,15 @@ services:
 
 Details: [Modular services](services.md)
 
-**Domain and DNS.** Set `platform.domain` (e.g. `meteor-edge.com`) for HTTPS,
-then create three A records once you know the server's IP (`make aws-up` prints them
+**Domain and DNS.** Set `platform.domain` (e.g. `fleet.example.com`) for HTTPS,
+then create the A records once you know the server's IP (`make aws-up` prints them
 at the end; plain DNS, no proxy):
 
-| Record | Points to | For |
+| Service | Record | For |
 | --- | --- | --- |
-| `meteor-edge.com` | server IP | console, API, MQTT |
-| `*.meteor-edge.com` | server IP | public app URLs |
-| `wg.meteor-edge.com` | server IP, or the dedicated gateway's IP | WireGuard (UDP 51820) |
+| `cloud_app` | `fleet.example.com` | console, API |
+| `cloud_app` (apps) | `*.fleet.example.com` | public app URLs |
+| `vpn` | `vpn.fleet.example.com` | WireGuard (UDP 51820) |
 
 Details: [DNS records](dns.md).
 
@@ -121,9 +171,8 @@ make aws-up
 ### Verify
 
 ```bash
-dig +short meteor-edge.com wg.meteor-edge.com app.meteor-edge.com   # all expected IPs
-curl http://<public-ip>/api/v1/health
-open http://<public-ip>/
+dig +short fleet.example.com vpn.fleet.example.com app.fleet.example.com
+curl -sS https://fleet.example.com/api/v1/health
 ```
 
 ## More

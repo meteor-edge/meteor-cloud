@@ -8,7 +8,7 @@ git pull
 make up
 ```
 
-Inventory and secrets in `deploy/ansible/inventory/selfhost/` are reused.
+Inventory, secrets, and `PLATFORM_DOMAIN` (`~/.meteorcloud/install.env`) are reused.
 
 On AWS, update enabled services without recreating EC2 (unless Terraform detects required infra changes):
 
