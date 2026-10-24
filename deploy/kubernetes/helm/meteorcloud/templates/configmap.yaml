@@ -31,7 +31,15 @@ data:
   WIREGUARD_CLIENT_CIDR: {{ .clientCidr | quote }}
   {{- end }}
   {{- end }}
-  SHELL_PROVIDER: none
+  {{- with .Values.connectivity.shell }}
+  SHELL_PROVIDER: {{ .provider | quote }}
+  SHELL_SSH_USER: {{ .sshUser | quote }}
+  {{- if eq .provider "ssh_gateway" }}
+  SHELL_SSH_IDENTITY_FILE: /run/meteorcloud/shell/id_ed25519
+  {{- end }}
+  {{- end }}
+  APPS_BASE_DOMAIN: {{ .Values.connectivity.apps.baseDomain | quote }}
+  APPS_RESERVED_NAMES: {{ .Values.connectivity.apps.reservedNames | quote }}
   CACHE_PROVIDER: {{ .Values.cache.provider | quote }}
   OBJECT_STORAGE_PROVIDER: {{ .Values.objectStorage.provider | quote }}
   OBJECT_STORAGE_PATH: /data/artifacts

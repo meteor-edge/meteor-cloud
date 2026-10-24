@@ -110,6 +110,39 @@ python3 scripts/smoke_test.py https://fleet.example.com
 Upgrades use the same `helm upgrade --install` with new image tags. Migrations run
 in the API's init container before the new version serves traffic.
 
+## Device WireGuard (gateway VM)
+
+The WireGuard server never runs in the cluster. It runs on its own AWS or
+on-prem VM, set up by `deploy/ansible/playbooks/wireguard.yml`
+(see [fleet/connectivity.md](fleet/connectivity.md)). The chart only connects
+to it:
+
+1. Run the playbook with `vpn_control_plane_url` set to the private address of
+   `connectivity.gatewayService` (an internal load balancer). It writes
+   `deploy/ansible/artifacts/wireguard-<gateway>/helm-values.yaml`.
+2. Give the pods a route to the device network (`10.8.0.0/16`) through the
+   gateway with `vpn_routed_cidrs`. On EKS, pod IPs are VPC IPs: disable the
+   gateway's source/dest check and route the device network to its ENI.
+3. Create the browser SSH key Secret (skip it with `connectivity.shell.provider: none`):
+
+   ```bash
+   ssh-keygen -t ed25519 -N "" -C meteorcloud-shell-gateway -f id_ed25519
+   kubectl -n meteorcloud create secret generic meteorcloud-shell \
+     --from-file=id_ed25519 --from-file=id_ed25519.pub
+   ```
+
+4. Install with the generated values and the gateway's token:
+
+   ```bash
+   helm upgrade --install meteorcloud deploy/kubernetes/helm/meteorcloud -n meteorcloud \
+     -f my-values.yaml -f deploy/ansible/artifacts/wireguard-<gateway>/helm-values.yaml \
+     --set-string secrets.connectivityInternalToken="$EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN"
+   ```
+
+   With `secrets.existingSecret`, put `CONNECTIVITY_INTERNAL_TOKEN` in that Secret instead.
+
+Set `connectivity.apps.baseDomain` to the domain of your public app hostnames.
+
 ## Staging options
 
 - **k3s on a VM.** Install k3s (`curl -sfL https://get.k3s.io | sh -`). It includes

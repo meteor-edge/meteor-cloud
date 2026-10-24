@@ -65,6 +65,21 @@ connectivity:
       # service.beta.kubernetes.io/aws-load-balancer-type: external
       # service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
     loadBalancerSourceRanges: []   # e.g. ["10.0.1.20/32"], the gateway's private IP
+  # Browser SSH: the API pods ssh to each device's WireGuard IP, so pods need a
+  # route to clientCidr through the gateway (vpn_routed_cidrs; EKS pod IPs are
+  # VPC IPs). Devices install publicKey into authorized_keys. Create the key:
+  #   ssh-keygen -t ed25519 -N "" -C meteorcloud-shell-gateway -f id_ed25519
+  #   kubectl -n meteorcloud create secret generic meteorcloud-shell \
+  #     --from-file=id_ed25519 --from-file=id_ed25519.pub
+  shell:
+    provider: none           # none | ssh_gateway (needs provider=wireguard)
+    existingSecret: ""       # Secret with id_ed25519 and id_ed25519.pub
+    sshUser: root            # fallback when a device does not report its login
+  # Public app hostnames shown to users: <app>.<device>.<org>.<baseDomain> or
+  # <name>.<baseDomain>. reservedNames: comma-separated names already in use.
+  apps:
+    baseDomain: meteor-edge.com
+    reservedNames: ""
 
 # --- PostgreSQL (required) -------------------------------------------------
 postgresql:

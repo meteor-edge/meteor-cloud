@@ -83,6 +83,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq $v.connectivity.provider "wireguard") (or (not $v.connectivity.wireguard.serverPublicKey) (not $v.connectivity.wireguard.serverEndpoint)) }}
 {{- fail "connectivity.provider=wireguard needs connectivity.wireguard.serverPublicKey and serverEndpoint (from deploy/ansible/playbooks/wireguard.yml)" }}
 {{- end }}
+{{- if not (has $v.connectivity.shell.provider (list "none" "ssh_gateway")) }}
+{{- fail "connectivity.shell.provider must be none or ssh_gateway" }}
+{{- end }}
+{{- if and (eq $v.connectivity.shell.provider "ssh_gateway") (or (ne $v.connectivity.provider "wireguard") (not $v.connectivity.shell.existingSecret)) }}
+{{- fail "connectivity.shell.provider=ssh_gateway needs connectivity.provider=wireguard and connectivity.shell.existingSecret (id_ed25519, id_ed25519.pub)" }}
+{{- end }}
 {{- if not (has $v.cache.provider (list "memory" "redis")) }}
 {{- fail "cache.provider must be memory or redis" }}
 {{- end }}

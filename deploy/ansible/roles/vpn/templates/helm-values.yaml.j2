@@ -11,3 +11,9 @@ connectivity:
     serverEndpoint: "{{ vpn_gateway_endpoint | trim }}"
     serverAddress: "{{ vpn_server_address }}"
     clientCidr: "{{ vpn_network_cidr }}"
+  # Browser SSH from the API pods (they need a route to {{ vpn_network_cidr }}
+  # through this gateway). Create the meteorcloud-shell Secret first, see the
+  # chart's values.yaml (connectivity.shell); set provider: none to skip it.
+  shell:
+    provider: ssh_gateway
+    existingSecret: meteorcloud-shell
