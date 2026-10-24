@@ -106,7 +106,7 @@ export function PendingEnrollmentRequests({
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-semibold">Pending enrollment requests</h2>
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-glow">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-glow">
         <table className="min-w-full text-left text-sm">
           <thead className="border-b border-border bg-background text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
@@ -115,8 +115,8 @@ export function PendingEnrollmentRequests({
               <th className="px-4 py-3 font-semibold">MAC address</th>
               <th className="px-4 py-3 font-semibold">Architecture</th>
               <th className="px-4 py-3 font-semibold">Requested</th>
-              <th className="px-4 py-3 font-semibold">Status</th>
-              {canManage && <th className="px-4 py-3 font-semibold">Actions</th>}
+              <th className="px-4 py-3 font-semibold whitespace-nowrap">Status</th>
+              {canManage && <th className="px-4 py-3 font-semibold whitespace-nowrap">Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -133,19 +133,19 @@ export function PendingEnrollmentRequests({
                 <td className="px-4 py-3 text-muted-foreground">
                   {formatDateTime(entry.created_at)}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 whitespace-nowrap">
                   {entry.status === "approved" ? (
-                    <span className="rounded-full bg-ember px-2 py-0.5 text-xs font-medium text-midnight">
+                    <span className="inline-flex whitespace-nowrap rounded-full bg-ember px-2 py-0.5 text-xs font-medium text-midnight">
                       Awaiting device
                     </span>
                   ) : (
-                    <span className="rounded-full bg-sky-blue px-2 py-0.5 text-xs font-medium text-midnight">
+                    <span className="inline-flex whitespace-nowrap rounded-full bg-sky-blue px-2 py-0.5 text-xs font-medium text-midnight">
                       Pending approval
                     </span>
                   )}
                 </td>
                 {canManage && (
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     {entry.status === "pending" ? (
                       <div className="flex gap-2">
                         <Button
@@ -164,7 +164,9 @@ export function PendingEnrollmentRequests({
                         </Button>
                       </div>
                     ) : (
-                      <span className="text-xs text-muted-foreground">Waiting for claim</span>
+                      <span className="whitespace-nowrap text-xs text-muted-foreground">
+                        Waiting for claim
+                      </span>
                     )}
                   </td>
                 )}

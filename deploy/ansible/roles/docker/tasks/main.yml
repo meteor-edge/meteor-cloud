@@ -27,9 +27,11 @@
         signed_by: /etc/apt/keyrings/docker.asc
         state: present
 
+    # Always refreshed, so a just-added repo is seen; a cache refresh is not a host change.
     - name: Refresh apt cache after adding Docker
       ansible.builtin.apt:
         update_cache: true
+      changed_when: false
 
 - name: Add Docker yum repository
   when: ansible_pkg_mgr in ['dnf', 'yum']

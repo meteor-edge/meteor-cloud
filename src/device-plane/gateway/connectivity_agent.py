@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
+from datetime import datetime, timezone  # no datetime.UTC: the host python3 may be 3.10
 from typing import Any
 
 logger = logging.getLogger("meteorcloud.gateway")
@@ -123,7 +123,7 @@ def sync_once(
             method="POST",
             body={
                 "items": [
-                    {"public_key": key, "last_handshake_at": datetime.fromtimestamp(unix, tz=UTC).isoformat()}
+                    {"public_key": key, "last_handshake_at": datetime.fromtimestamp(unix, tz=timezone.utc).isoformat()}
                     for key, unix in changed.items()
                 ]
             },
