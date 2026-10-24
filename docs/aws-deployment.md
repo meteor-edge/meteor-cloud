@@ -5,14 +5,16 @@ Deploy modular services to a single AWS EC2 instance with one command.
 ## Quick start
 
 ```bash
-export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
-export EDGE_PLATFORM_JWT_SECRET='...'
-
 # Edit installation.yaml — services, region, SSH key, etc.
 make aws-up
 ```
 
-Equivalent: `edge-installer apply installation.yaml`
+`make aws-up` generates Postgres, JWT, and connectivity secrets when they are
+unset, prints them at the end, and saves them at `~/.meteorcloud/secrets.env`.
+Re-runs reuse that file. Override any value by exporting it first.
+
+Equivalent: `edge-installer apply installation.yaml` (that path still requires
+the env vars; use `make aws-up` to generate them).
 
 This is the **create a new EC2** path only (`make aws-up`: Terraform creates the host, Ansible deploys Compose). If you already have the VM, clone the repo on it and run `make up` ([Install quickstart](install-quickstart.md)). Kubernetes uses Helm ([kubernetes.md](kubernetes.md)). To smoke-test a throwaway instance from GitHub Actions, see [EC2 smoke test](aws-ci.md).
 
@@ -36,12 +38,12 @@ See [Modular services](services.md) for details and adding new services.
 By default the installer clones and builds from:
 
 ```text
-https://github.com/shahabkamali/MeteorCloud.git
+https://github.com/meteor-edge/meteor-cloud.git
 ```
 
 ```yaml
 deployment:
-  repository_url: https://github.com/shahabkamali/MeteorCloud.git
+  repository_url: https://github.com/meteor-edge/meteor-cloud.git
   git_ref: master
   image_source: git
   backend_image: edge-platform-backend:0.2.0

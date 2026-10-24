@@ -41,6 +41,7 @@ def test_build_ansible_extra_vars_includes_observability_defaults() -> None:
     assert extra["observability_enabled"] == "false"
     assert extra["observability_backend"] == "prometheus"
     assert extra["log_format"] == "console"
+    assert extra["demo_data"] == "true"
 
 
 def test_build_ansible_extra_vars_reflects_enabled_observability() -> None:

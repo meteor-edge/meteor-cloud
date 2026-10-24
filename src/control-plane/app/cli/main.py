@@ -57,6 +57,60 @@ def create_admin() -> int:
         session.close()
 
 
+DEMO_ORG_NAME = "Demo Organization"
+DEMO_ORG_SLUG = "demo-organization"
+
+
+def create_demo() -> int:
+    """Create Demo Organization and make the admin its owner. Idempotent."""
+    email = os.environ.get("EDGE_PLATFORM_ADMIN_EMAIL", "").strip()
+    if not email:
+        logger.info("Admin email not configured; skipping create-demo.")
+        return 0
+
+    from app.tenancy.models import OrganizationRole
+    from app.tenancy.repository import MembershipRepository, OrganizationRepository
+
+    session = SessionLocal()
+    try:
+        user = UserRepository(session).get_by_email(email)
+        if user is None:
+            logger.error("create-demo needs the administrator account (%s) first.", email)
+            return 1
+        organizations = OrganizationRepository(session)
+        memberships = MembershipRepository(session)
+        organization = organizations.get_by_slug(DEMO_ORG_SLUG)
+        if organization is None:
+            organization = organizations.create(
+                name=DEMO_ORG_NAME,
+                slug=DEMO_ORG_SLUG,
+                description="Seeded so you can explore the console after make up.",
+                created_by_user_id=user.id,
+            )
+            logger.info("Created organization %s", DEMO_ORG_SLUG)
+        else:
+            logger.info("Organization already exists: %s", DEMO_ORG_SLUG)
+        existing = memberships.get_user_membership(
+            organization_id=organization.id,
+            user_id=user.id,
+        )
+        if existing is None:
+            memberships.create(
+                organization_id=organization.id,
+                user_id=user.id,
+                role=OrganizationRole.OWNER,
+            )
+            logger.info("Added %s as owner of %s", email, DEMO_ORG_SLUG)
+        session.commit()
+        return 0
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to create demo organization")
+        return 1
+    finally:
+        session.close()
+
+
 def _resolve_device(
     session: Session, target: str, settings: Settings
 ) -> tuple[DeviceConnectivity, Device, ConnectivityService] | int:
@@ -179,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="app.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("create-admin", help="Create the initial administrator if missing.")
+    subparsers.add_parser("create-demo", help="Create Demo Organization for the administrator.")
     target_parser = subparsers.add_parser("shell-target", help="Resolve a device for meteorcloud-ssh.")
     target_parser.add_argument("target", help="Device ID or WireGuard address")
     sign_parser = subparsers.add_parser(
@@ -190,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "create-admin":
         return create_admin()
+    if args.command == "create-demo":
+        return create_demo()
     if args.command == "shell-target":
         return shell_target(args.target)
     if args.command == "sign-ssh-cert":

@@ -124,6 +124,18 @@ variable "vpn_root_volume_size_gb" {
   description = "Root EBS volume size in GB for a dedicated WireGuard gateway"
 }
 
+variable "platform_domain" {
+  type        = string
+  default     = ""
+  description = "Public hostname (e.g. fleet.example.com). With dns_zone_id, Terraform creates the A records."
+}
+
+variable "dns_zone_id" {
+  type        = string
+  default     = ""
+  description = "Route53 hosted zone id (Z…). Empty: do not create records."
+}
+
 variable "tags" {
   type        = map(string)
   default     = {}

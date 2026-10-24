@@ -4,7 +4,6 @@
 cp .env.example .env        # E2E_ENV_NAME, E2E_DNS_ZONE_ID, E2E_DOMAIN, ...
 ./meteorcloud-testenv validate
 ./meteorcloud-testenv up        # provision + configure + 55 acceptance checks
-./demo.sh up                    # demo setup to explore by hand (up --no-tests + seed)
 ./meteorcloud-testenv status    # hosts, SSH commands, URLs, DNS records, last result
 ./meteorcloud-testenv test      # re-run the suite on the same environment
 ./meteorcloud-testenv logs      # redacted diagnostics into .state/<env>/logs/

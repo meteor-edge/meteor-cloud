@@ -78,6 +78,6 @@ ansible-playbook -i inventory/<name>/hosts.yml playbooks/site.yml
 
 ## Cost and cleanup
 
-Uses one `t3.small` for the length of the job. If the destroy step itself fails,
+Uses one EC2 instance (sized from the containers; git image builds use `t3.medium`) for the length of the job. If the destroy step itself fails,
 terminate leftover instances tagged `ManagedBy=edge-installer` with name
 `ci-<run id>`, and delete the `ci-<run id>` key pair.

@@ -53,6 +53,10 @@ to check or uncheck, **Enter** to continue.
     [x]  Artifact storage
          What: where OS images, firmware, and compose bundles live.
          For:  operators upload in the console; devices download via the API.
+
+    [x]  Demo organization
+         What: Demo Organization owned by the admin login.
+         For:  open the console and explore. Add devices with meteorcli.
 ```
 
 It then prints DNS records for that setup. `--storage=s3` or `--mqtt=external`
@@ -95,7 +99,7 @@ gitignored). Re-run `make up` to upgrade; the same secrets are reused.
 | Command | What it does |
 | --- | --- |
 | `make up` | Install (checkbox of services, all on; Enter accepts) |
-| `make up ARGS='--no-vpn --mqtt=off --storage=filesystem'` | Same, no prompts for those |
+| `make up ARGS='--no-vpn --mqtt=off --storage=filesystem --no-demo'` | Same, no prompts for those |
 | `make down` | Stop the stack; data stays in `/opt/edge-platform` |
 | `make down ARGS=--destroy-data` | Stop and delete `/opt/edge-platform` |
 
@@ -129,7 +133,7 @@ services:
 Details: [Modular services](services.md)
 
 **Domain and DNS.** Set `platform.domain` (e.g. `fleet.example.com`) for HTTPS,
-then create the A records once you know the server's IP (`make aws-up` prints them
+then create the A records once you know the server's IP (`make aws-up ARGS='--demo'` creates them in Route53 when the domain is in this account; otherwise it prints them
 at the end; plain DNS, no proxy):
 
 | Service | Record | For |
@@ -142,26 +146,32 @@ Details: [DNS records](dns.md).
 
 ### Secrets
 
-```bash
-export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
-export EDGE_PLATFORM_JWT_SECRET='...'
+`make aws-up` generates `EDGE_PLATFORM_POSTGRES_PASSWORD`,
+`EDGE_PLATFORM_JWT_SECRET`, and `EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN` if
+they are unset, prints them when it finishes, and writes
+`~/.meteorcloud/secrets.env` (mode 0600). Re-runs reuse that file. Export a
+value first to keep your own. If an existing Postgres volume was initialised
+with a different password, Ansible updates the role to match (data stays).
 
-# optional
-export EDGE_PLATFORM_ADMIN_EMAIL='admin@example.com'
-export EDGE_PLATFORM_ADMIN_PASSWORD='...'
-export EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY='...'
-```
+Optional: `EDGE_PLATFORM_ADMIN_EMAIL`, `EDGE_PLATFORM_ADMIN_PASSWORD`,
+`EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY`.
 
 ### Deploy
 
 ```bash
-edge-installer validate installation.yaml
-make aws-up
+make aws-up ARGS='--demo'
 ```
+
+On a terminal it asks for the **domain** (you can change the default). `--demo`
+creates *Demo Organization* and, if that name sits in a Route53 zone in this
+AWS account, the A records (`<domain>`, `*.<domain>`, `wg.<domain>`).
+
+Without `--demo`, set `platform.domain` and `aws.dns_zone_id` in
+`installation.yaml` to create the same records.
 
 | Make | Installer | Action |
 |------|-----------|--------|
-| `make aws-up` | `edge-installer apply` | Create EC2 and deploy enabled services |
+| `make aws-up` | `edge-installer apply` | Create EC2 and deploy. `ARGS='--demo'` asks for a domain and creates Route53 records |
 | `make plan` | `edge-installer plan` | Preview Terraform |
 | `make status-aws` | `edge-installer status` | Status + health |
 | `make aws-down` | `edge-installer destroy --yes` | Tear down AWS |

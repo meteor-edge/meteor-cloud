@@ -46,18 +46,22 @@ zone) and IAM (role + instance profile for DNS-01).
 Cost: one `t3.medium` control plane, `t3.micro` devices (and gateway), EIPs and
 two Route53 records while the environment exists. Nothing runs after `down`.
 
-## Demo setup (explore by hand)
+## Product demo vs this lab
+
+A single server does not need this lab. `make up` or `make aws-up` with
+`--demo` (or the **Demo organization** checkbox) creates Demo Organization
+for the admin login. Enroll devices yourself with `meteorcli`.
+
+`seed` is only for this multi-VM lab (extra device VMs, DNS, and sample apps):
 
 ```bash
 tests/e2e/meteorcloud-testenv up --no-tests   # machines only, ~25 min
-tests/e2e/meteorcloud-testenv seed            # demo data, ~5-15 min
+tests/e2e/meteorcloud-testenv seed            # lab data, ~5-15 min
 ```
 
 `seed` prints the console URL, the logins (`.state/<env>/demo-login.env`, the
 admin in `secrets.env`), each device's public and WireGuard address and the
-app URL. Open a device in the console for the browser shell. Running `test`
-afterwards re-registers the devices for its own run, so seed a fresh
-environment for demos.
+app URL. Running `test` afterwards re-registers the devices for its own run.
 
 ## What is tested
 

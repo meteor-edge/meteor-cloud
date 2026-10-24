@@ -1,5 +1,5 @@
 ---
-repository_url: https://github.com/shahabkamali/MeteorCloud.git
+repository_url: https://github.com/meteor-edge/meteor-cloud.git
 git_ref: master
 image_source: git
 backend_image: edge-platform-backend:0.2.0

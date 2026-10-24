@@ -69,9 +69,10 @@ Ansible prints the last 150 log lines of every service when `docker compose up -
 
 Common causes:
 
-- `POSTGRES_PASSWORD` changed after the database was initialised. PostgreSQL keeps the
-  first password; restore the old secret, or (losing all data) stop the stack and empty
-  `/opt/edge-platform/data/postgres`.
+- `POSTGRES_PASSWORD` changed after the database was initialised. The official
+  image keeps the first role password in the volume. The next `make up` /
+  `make aws-up` resets that role to the current secret (data stays). To wipe
+  the database instead, stop the stack and empty `/opt/edge-platform/data/postgres`.
 - Images not built or wrong tag (`image_source: registry` needs pushed images).
 - Git ref not pushed before deploy (`image_source: git`).
 - DNS not pointing at the server, so Let's Encrypt cannot issue a certificate.

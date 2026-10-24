@@ -32,6 +32,10 @@ def test_terraform_variables_include_tags(tmp_path: Path) -> None:
     assert variables["tags"]["ManagedBy"] == "edge-installer"
     assert variables["vpn_placement"] == "same_host"
     assert variables["vpn_instance_type"] == "t3.micro"
+    assert variables["instance_type"] == "t3.medium"
+    assert int(variables["root_volume_size_gb"]) >= 40
+    assert variables["platform_domain"] == ""
+    assert variables["dns_zone_id"] == ""
 
 
 def test_terraform_output_parsing() -> None:

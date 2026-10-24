@@ -236,3 +236,23 @@ def test_observability_settings_rejects_unknown_field() -> None:
 def test_gcp_provider_is_rejected() -> None:
     with pytest.raises(ValidationError):
         InstallationSettings(name="demo", environment="production", provider="gcp")
+
+
+def test_validate_dns_zone_needs_domain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "key.pem"
+    key_path.write_text("key", encoding="utf-8")
+    monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "secret")
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+
+    config = load_configuration(EXAMPLE)
+    config.aws.ssh_private_key_path = str(key_path)
+    config.aws.dns_zone_id = "Z123"
+    config.platform.domain = None
+    errors = validate_configuration(config)
+
+    assert any("dns_zone_id requires platform.domain" in item for item in errors)
+
+    config.platform.domain = "fleet.example.com"
+    assert not any("dns_zone_id" in item for item in validate_configuration(config))

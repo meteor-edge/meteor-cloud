@@ -16,6 +16,7 @@ class InstallationSettings(BaseModel):
     name: str = Field(min_length=1, max_length=63)
     environment: Literal["development", "staging", "production"]
     provider: Literal["aws"] = "aws"
+    demo: bool = False
 
 
 class PlatformSettings(BaseModel):
@@ -31,7 +32,8 @@ class AwsSettings(BaseModel):
 
     region: str = Field(min_length=1)
     availability_zone: str | None = None
-    instance_type: str = "t3.small"
+    # auto: pick t3/t4g from enabled containers. A smaller explicit type is raised.
+    instance_type: str = "auto"
     architecture: Literal["amd64", "arm64"] = "amd64"
     ami_id: str | None = None
     ssh_key_name: str = Field(min_length=1)
@@ -39,6 +41,8 @@ class AwsSettings(BaseModel):
     root_volume_size_gb: int = Field(default=30, ge=8, le=1024)
     assign_elastic_ip: bool = True
     profile: str | None = None
+    # With platform.domain, Terraform creates A records in this hosted zone.
+    dns_zone_id: str = ""
 
 
 class NetworkSettings(BaseModel):
@@ -87,7 +91,7 @@ class ComponentsSettings(BaseModel):
 class DeploymentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    repository_url: str = "https://github.com/shahabkamali/MeteorCloud.git"
+    repository_url: str = "https://github.com/meteor-edge/meteor-cloud.git"
     git_ref: str = "master"
     image_source: Literal["git", "registry"] = "git"
     backend_image: str = Field(min_length=1)

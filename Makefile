@@ -128,15 +128,18 @@ install-selfhost: up
 down: ## Stop MeteorCloud on this VM (keeps data; ARGS=--destroy-data to wipe)
 	$(ANSIBLE_DIR)/install-selfhost.sh --down $(ARGS)
 
-aws-up: ## Create a new AWS EC2 and deploy (Terraform + Ansible)
+aws-up: ## Create a new AWS EC2 and deploy (Terraform + Ansible). ARGS='--demo' creates Route53 DNS.
 	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
-	cd $(INSTALLER_DIR) && edge-installer apply $(abspath $(CONFIG))
+	./scripts/ensure-platform-secrets.sh --run --report -- \
+		sh -c 'cd "$(INSTALLER_DIR)" && exec edge-installer apply "$(abspath $(CONFIG))" $(ARGS)'
 
 aws-down: ## Destroy the AWS installation
 	cd $(INSTALLER_DIR) && edge-installer destroy $(abspath $(CONFIG)) --yes
 
 plan: ## Preview infrastructure changes for enabled services
-	cd $(INSTALLER_DIR) && edge-installer plan $(abspath $(CONFIG))
+	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
+	./scripts/ensure-platform-secrets.sh --run -- \
+		sh -c 'cd "$(INSTALLER_DIR)" && edge-installer plan "$(abspath $(CONFIG))"'
 
 status-aws: ## Show AWS installation status and health
 	cd $(INSTALLER_DIR) && edge-installer status $(abspath $(CONFIG))
@@ -260,7 +263,7 @@ e2e-check: ## Full-stack E2E tooling checks (unit tests, Terraform validate, she
 	for root in aws onprem; do \
 		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate terraform init -backend=false -input=false >/dev/null \
 		&& TF_DATA_DIR=.terraform-validate terraform validate) || exit 1; done
-	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/demo.sh $(E2E_DIR)/testapp/serve.sh; \
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/testapp/serve.sh; \
 	else echo "shellcheck not installed; skipped"; fi
 
 e2e-up: ## Create a full-stack E2E environment and run the suite (tests/e2e/.env)

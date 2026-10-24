@@ -39,7 +39,7 @@ All playbooks are safe to re-run. A second run with unchanged settings reports n
 | `firewall` | UFW or firewalld: SSH from allowed CIDRs, HTTP/HTTPS, MQTT 8883 when the broker is bundled |
 | `platform_directories` | `/opt/edge-platform/` layout with the UIDs the containers need |
 | `platform_config` | Copies `deploy/compose/`, renders `compose/.env` (mode 0600), MQTT certificates |
-| `platform_deployment` | Builds (git) or pulls (registry) images, `docker compose up --wait`, first admin |
+| `platform_deployment` | Builds (git) or pulls (registry) images, aligns bundled Postgres password, `docker compose up --wait`, first admin |
 | `health_check` | `/health` and `/` through Traefik, from the host itself |
 | `vpn` | WireGuard gateway (packages, kernel module, forwarding, server key, `wg0`, peer agent), site links, control-plane hand-off |
 

@@ -8,6 +8,7 @@ Creates the EC2 host for the Docker Compose deployment (used by `edge-installer`
 |--------|------|--------------|
 | `cloud_app` | `modules/cloud_app` | `cloud_app` in `enabled_services` |
 | `vpn` | `modules/cloud_app` UDP rule (`same_host`) or `modules/vpn_gateway` (`dedicated`) | `vpn` in `enabled_services` |
+| `dns` | `modules/dns` + `modules/dns_role` | `platform_domain` and `dns_zone_id` set |
 
 ## Variables
 

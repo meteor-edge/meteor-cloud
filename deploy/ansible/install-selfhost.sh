@@ -5,7 +5,7 @@
 # Clone the repo on the host, then from the repo root:
 #
 #   make up PLATFORM_DOMAIN=fleet.example.com
-#   make up ARGS='--no-vpn --mqtt=off --storage=filesystem'
+#   make up ARGS='--no-vpn --mqtt=off --storage=filesystem --no-demo'
 #   make down
 #   make down ARGS=--destroy-data
 #
@@ -26,11 +26,13 @@ VENV="${HOME}/.meteorcloud-ansible"
 VPN=1
 MQTT=bundled
 STORAGE=minio
+DEMO=1
 DOWN=0
 DESTROY_DATA=0
 ASK_VPN=1
 ASK_MQTT=1
 ASK_STORAGE=1
+ASK_DEMO=1
 
 usage() {
   sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
@@ -38,6 +40,7 @@ usage() {
   echo "  --no-vpn | --vpn"
   echo "  --mqtt=off|bundled|external"
   echo "  --storage=filesystem|s3|minio"
+  echo "  --demo | --no-demo"
   echo "  --down | --destroy-data"
   exit 2
 }
@@ -54,6 +57,8 @@ while [[ $# -gt 0 ]]; do
       STORAGE="${1#--storage=}"
       ASK_STORAGE=0
       ;;
+    --demo) DEMO=1; ASK_DEMO=0 ;;
+    --no-demo) DEMO=0; ASK_DEMO=0 ;;
     --down) DOWN=1 ;;
     --destroy-data) DOWN=1; DESTROY_DATA=1 ;;
     -h|--help) usage ;;
@@ -276,7 +281,11 @@ print_dns_guide() {
 if [[ "${ASK_VPN}" -eq 1 && -n "${ENABLE_VPN:-}" ]]; then VPN="${ENABLE_VPN}"; fi
 if [[ "${ASK_MQTT}" -eq 1 && -n "${MQTT_MODE:-}" ]]; then MQTT="${MQTT_MODE}"; fi
 if [[ "${ASK_STORAGE}" -eq 1 && -n "${STORAGE_MODE:-}" ]]; then STORAGE="${STORAGE_MODE}"; fi
+if [[ "${ASK_DEMO}" -eq 1 && -n "${ENABLE_DEMO:-}" ]]; then DEMO="${ENABLE_DEMO}"; fi
 DOMAIN_RAW="${PLATFORM_DOMAIN:-${DOMAIN:-}}"
+if is_tty; then
+  DOMAIN_RAW="$(ask_line "Domain (console and API HTTPS)" "${DOMAIN_RAW}")"
+fi
 DOMAIN="$(normalize_domain "${DOMAIN_RAW}")"
 
 PREFERRED_MQTT="${MQTT}"
@@ -291,6 +300,7 @@ toggle_service() {
     0) if [[ "${VPN}" -eq 1 ]]; then VPN=0; else VPN=1; fi ;;
     1) if [[ "${MQTT}" == off ]]; then MQTT="${PREFERRED_MQTT}"; else MQTT=off; fi ;;
     2) if [[ "${STORAGE}" == filesystem ]]; then STORAGE="${PREFERRED_STORAGE}"; else STORAGE=filesystem; fi ;;
+    3) if [[ "${DEMO}" -eq 1 ]]; then DEMO=0; else DEMO=1; fi ;;
   esac
 }
 
@@ -306,8 +316,8 @@ draw_service() {
   echo
 }
 
-# 3 items x 5 lines. Redraw in place (arrows + space, no typing numbers).
-MENU_LINES=15
+# 4 items x 5 lines. Redraw in place (arrows + space, no typing numbers).
+MENU_LINES=20
 
 draw_services_menu() {
   local idx="$1" mqtt_on=0 storage_on=0 mqtt_extra storage_extra
@@ -331,6 +341,10 @@ draw_services_menu() {
     "where OS images, firmware, and compose bundles live" \
     "operators upload in the console; devices download via the API" \
     "${storage_extra}"
+  draw_service "$([[ "${idx}" -eq 3 ]] && echo 1 || echo 0)" "${DEMO}" \
+    "Demo organization" \
+    "Demo Organization in the console, owned by the admin login" \
+    "explore the UI after install. Devices you add yourself with meteorcli."
 }
 
 select_services() {
@@ -351,8 +365,8 @@ select_services() {
     if [[ "${key}" == $'\x1b' ]]; then
       read -rsn2 rest || true
       case "${rest}" in
-        '[A'|'[D') idx=$(((idx + 2) % 3)) ;;
-        '[B'|'[C') idx=$(((idx + 1) % 3)) ;;
+        '[A'|'[D') idx=$(((idx + 3) % 4)) ;;
+        '[B'|'[C') idx=$(((idx + 1) % 4)) ;;
       esac
     elif [[ "${key}" == ' ' ]]; then
       toggle_service "${idx}"
@@ -443,7 +457,18 @@ if [[ "${MQTT}" == external ]]; then
 fi
 
 print_dns_guide "${DOMAIN}" "${PUBLIC_IP:-<this server public IP>}"
-if is_tty; then
+if [[ "${DEMO}" -eq 1 && -n "${PUBLIC_IP}" ]] && command -v aws >/dev/null 2>&1; then
+  echo "Creating Route53 records for ${DOMAIN} -> ${PUBLIC_IP}"
+  if ! PYTHONPATH="${REPO}/infrastructure/installer${PYTHONPATH:+:${PYTHONPATH}}" \
+    python3 -m edge_installer.deployment.route53 --domain "${DOMAIN}" --ip "${PUBLIC_IP}"; then
+    echo "Route53 create failed. Create the printed records yourself, or fix AWS credentials." >&2
+    if is_tty; then
+      ask_yn "Continue without Route53" Y || exit 1
+    else
+      exit 1
+    fi
+  fi
+elif is_tty; then
   echo "Create those records, then continue. HTTPS works after DNS reaches this host."
   ask_yn "Continue installation" Y || exit 1
 fi
@@ -452,6 +477,7 @@ fi
   printf 'PLATFORM_DOMAIN=%s\n' "${DOMAIN}"
   printf 'ENABLE_VPN=%s\n' "${VPN}"
   printf 'STORAGE_MODE=%s\n' "${STORAGE}"
+  printf 'ENABLE_DEMO=%s\n' "${DEMO}"
   printf 'MQTT_MODE=%s\n' "${MQTT}"
   printf 'MQTT_BROKER_HOST=%s\n' "${MQTT_BROKER_HOST}"
   printf 'MQTT_BROKER_PORT=%s\n' "${MQTT_BROKER_PORT}"
@@ -615,6 +641,7 @@ PLAY_ARGS=(
   -e "minio_enabled=${MINIO_ENABLED}"
   -e "mqtt_enabled=${MQTT_ENABLED}"
   -e "mqtt_broker=${MQTT_BROKER}"
+  -e "demo_data=$([[ "${DEMO}" -eq 1 ]] && echo true || echo false)"
 )
 if [[ "${VPN}" -eq 1 ]]; then
   PLAY_ARGS+=(-e "connectivity_internal_token=${EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN}")
@@ -646,6 +673,9 @@ echo
 echo "Login"
 echo "  email     ${EDGE_PLATFORM_ADMIN_EMAIL}"
 echo "  password  ${EDGE_PLATFORM_ADMIN_PASSWORD}"
+if [[ "${DEMO}" -eq 1 ]]; then
+  echo "  org       Demo Organization"
+fi
 echo
 if [[ "${SECRETS_REUSED}" -eq 1 ]]; then
   echo "Secrets (reused; copy and keep):"

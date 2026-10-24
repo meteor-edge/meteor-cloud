@@ -29,6 +29,7 @@ def build_ansible_extra_vars(
         "platform_domain": config.platform.domain or "",
         "platform_public_url": url,
         "enabled_services": enabled,
+        "demo_data": str(config.installation.demo).lower(),
         "repository_url": config.deployment.repository_url,
         "git_ref": config.deployment.git_ref,
         "image_source": config.deployment.image_source,

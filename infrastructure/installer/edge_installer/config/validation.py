@@ -78,6 +78,12 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
     if config.platform.domain and config.platform.public_url:
         errors.append("platform.domain and platform.public_url cannot both be set")
 
+    zone = (config.aws.dns_zone_id if config.aws else "") or ""
+    if zone.strip() and not (config.platform.domain or "").strip():
+        errors.append("aws.dns_zone_id requires platform.domain")
+    if (config.platform.domain or "").strip() and zone.strip() and config.aws is None:
+        errors.append("aws settings are required to create Route53 records")
+
     if config.observability.enabled and config.observability.backend == "cloudwatch":
         errors.append(
             "observability.backend=cloudwatch is not implemented yet; "

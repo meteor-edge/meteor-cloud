@@ -63,11 +63,17 @@ once their tunnel goes quiet (about 3 minutes) and reconnect. See
 
 ## Where you see this list
 
+- **`make aws-up ARGS='--demo'`** asks for the domain, finds the Route53 zone
+  that contains it, and Terraform creates `<domain>`, `*.<domain>`, and
+  `wg.<domain>`. Or set `platform.domain` and `aws.dns_zone_id` in
+  `installation.yaml`.
+- **`make up`** asks for the domain. With `--demo` and the AWS CLI it upserts
+  those records to the matching hosted zone; otherwise it prints them.
 - **`make up`** prints the records (with the public IP it detected) before and
   after the install.
 - **Ansible** prints them at the end of every install
   (`Show the DNS records this installation needs`).
-- **Demo / E2E** (`tests/e2e/demo.sh status`) prints them too. With
+- **Full-stack E2E** (`tests/e2e/meteorcloud-testenv status`) prints them too. With
   `E2E_DNS_PROVIDER=route53` Terraform creates the zone names; with `manual` it
   prints them right after the servers exist so you can add them.
 

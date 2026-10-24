@@ -35,7 +35,7 @@ docs_public_url: http://localhost:3000/docs
 # image_source=registry pulls the image references below.
 image_source: git
 platform_source_archive: ""
-repository_url: https://github.com/shahabkamali/MeteorCloud.git
+repository_url: https://github.com/meteor-edge/meteor-cloud.git
 git_ref: master
 backend_image: edge-platform-backend:0.2.0
 data_plane_image: edge-platform-data-plane:0.2.0
@@ -90,6 +90,7 @@ grafana_admin_password: "{{ EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD | default(looku
 jwt_secret: "{{ EDGE_PLATFORM_JWT_SECRET | default(lookup('env', 'EDGE_PLATFORM_JWT_SECRET'), true) }}"
 admin_email: "{{ EDGE_PLATFORM_ADMIN_EMAIL | default(lookup('env', 'EDGE_PLATFORM_ADMIN_EMAIL'), true) }}"
 admin_password: "{{ EDGE_PLATFORM_ADMIN_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_ADMIN_PASSWORD'), true) }}"
+demo_data: false
 
 # Host firewall (UFW). Off by default: cloud security groups usually do this.
 firewall_enabled: false
