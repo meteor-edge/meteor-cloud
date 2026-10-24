@@ -5,8 +5,10 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEV_CONNECTIVITY_INTERNAL_TOKEN = "dev-connectivity-internal"
 
 
 class Settings(BaseSettings):
@@ -132,7 +134,9 @@ class Settings(BaseSettings):
     wireguard_client_cidr: str = Field(default="10.8.0.0/16", alias="WIREGUARD_CLIENT_CIDR")
     wireguard_client_dns: str = Field(default="", alias="WIREGUARD_CLIENT_DNS")
     wireguard_persistent_keepalive: int = Field(default=25, alias="WIREGUARD_PERSISTENT_KEEPALIVE")
-    connectivity_internal_token: str = Field(default="dev-connectivity-internal", alias="CONNECTIVITY_INTERNAL_TOKEN")
+    connectivity_internal_token: str = Field(
+        default=DEV_CONNECTIVITY_INTERNAL_TOKEN, alias="CONNECTIVITY_INTERNAL_TOKEN"
+    )
     connectivity_handshake_stale_seconds: int = Field(
         default=180,
         alias="CONNECTIVITY_HANDSHAKE_STALE_SECONDS",
@@ -165,6 +169,8 @@ class Settings(BaseSettings):
     shell_idle_timeout_seconds: int = Field(default=600, alias="SHELL_IDLE_TIMEOUT_SECONDS")
     shell_max_duration_seconds: int = Field(default=3600, alias="SHELL_MAX_DURATION_SECONDS")
     shell_max_sessions_per_user: int = Field(default=4, alias="SHELL_MAX_SESSIONS_PER_USER")
+    # How often an open shell re-checks it is still allowed (revoke, disable, lost permission).
+    shell_recheck_seconds: int = Field(default=10, ge=1, alias="SHELL_RECHECK_SECONDS")
     # "local" = accounts in the PostgreSQL users table.
     identity_provider: Literal["local"] = Field(default="local", alias="IDENTITY_PROVIDER")
 
@@ -241,6 +247,21 @@ class Settings(BaseSettings):
         if text in {"true", "1", "yes", "on"}:
             return "json"
         return text
+
+    @model_validator(mode="after")
+    def _require_real_connectivity_token(self) -> Settings:
+        # The gateway agent and Traefik authenticate with this token; a known default would let
+        # anything that reaches the API list peers and post handshakes.
+        if (
+            self.app_env == "production"
+            and self.connectivity_provider != "none"
+            and self.connectivity_internal_token in {"", DEV_CONNECTIVITY_INTERNAL_TOKEN}
+        ):
+            raise ValueError(
+                "CONNECTIVITY_INTERNAL_TOKEN must be set to a non-default secret when "
+                "CONNECTIVITY_PROVIDER is enabled and APP_ENV=production"
+            )
+        return self
 
 
 @lru_cache

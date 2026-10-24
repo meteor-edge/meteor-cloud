@@ -277,18 +277,22 @@ def test_local_ssh_user_prefers_sudo_user(monkeypatch) -> None:
     assert local_ssh_user() == "pi"
 
 
-def test_elevate_wireguard_uses_sudo_only_for_privileged_commands(monkeypatch) -> None:
+def test_elevate_wireguard_goes_through_the_root_helper(monkeypatch) -> None:
     monkeypatch.setattr("edge_agent.wireguard.os.geteuid", lambda: 1000)
-    monkeypatch.setattr("edge_agent.wireguard.shutil.which", lambda name: f"/usr/bin/{name}")
+    helper = ["sudo", "-n", "/usr/local/libexec/meteorcli-wg"]
     assert _elevate_wireguard(["wg", "genkey"]) == ["wg", "genkey"]
-    assert _elevate_wireguard(["wg-quick", "up", "/tmp/wg0.conf"]) == [
-        "sudo",
-        "-n",
-        "/usr/bin/wg-quick",
-        "up",
-        "/tmp/wg0.conf",
+    assert _elevate_wireguard(["wg-quick", "up", "/tmp/wg0.conf"]) == [*helper, "up", "/tmp/wg0.conf"]
+    assert _elevate_wireguard(["wg-quick", "down", "/tmp/wg0.conf"]) == [*helper, "down"]
+    assert _elevate_wireguard(["wg", "show", "wg0"]) == [*helper, "show"]
+    assert _elevate_wireguard(["wg", "show", "wg0", "endpoints"]) == [*helper, "show", "endpoints"]
+    assert _elevate_wireguard(["wg", "set", "wg0", "peer", "K", "endpoint", "1.2.3.4:51820"]) == [
+        *helper,
+        "set-endpoint",
+        "K",
+        "1.2.3.4:51820",
     ]
-    assert _elevate_wireguard(["wg", "show", "wg0"]) == ["sudo", "-n", "/usr/bin/wg", "show", "wg0"]
+    # Nothing else is elevated: no wg-quick hooks, no `wg set ... private-key <file>`.
+    assert _elevate_wireguard(["wg", "set", "wg0", "private-key", "/etc/shadow"])[0] == "wg"
     monkeypatch.setattr("edge_agent.wireguard.os.geteuid", lambda: 0)
     assert _elevate_wireguard(["wg-quick", "up", "/tmp/wg0.conf"]) == ["wg-quick", "up", "/tmp/wg0.conf"]
 

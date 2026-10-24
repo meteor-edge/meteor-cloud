@@ -197,7 +197,8 @@ class SshGatewayProvider:
             elif self._identity_file:
                 args.extend(["-i", self._identity_file])
             args.extend(self._extra_args)
-            args.append(f"{username}@{host}")
+            # "--" ends option parsing: the destination is never read as an ssh option.
+            args.extend(["--", f"{username}@{host}"])
             return SshGatewayConnection(self._runner(args), known_hosts=known_hosts, key_dir=key_dir)
         except Exception:
             if known_hosts:

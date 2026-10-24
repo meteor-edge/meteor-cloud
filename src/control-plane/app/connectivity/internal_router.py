@@ -5,6 +5,7 @@ Not a user API. The gateway must send ``X-Connectivity-Internal-Token``.
 
 from __future__ import annotations
 
+import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
@@ -22,7 +23,7 @@ def _require_internal_token(
     x_connectivity_internal_token: Annotated[str | None, Header()] = None,
 ) -> None:
     expected = settings.connectivity_internal_token
-    if not expected or x_connectivity_internal_token != expected:
+    if not expected or not hmac.compare_digest((x_connectivity_internal_token or "").encode(), expected.encode()):
         raise UnauthorizedError("connectivity_internal_forbidden", "Invalid connectivity internal token.")
 
 

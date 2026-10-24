@@ -23,7 +23,6 @@ Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
 # WireGuard handshakes every 2 minutes while traffic flows (keepalive keeps it flowing).
 STALE_HANDSHAKE_SECONDS = 180
-_PRIVILEGED_WG = frozenset({"show", "set", "addconf", "syncconf"})
 
 # Registration is a refresh, not a keepalive: the tunnel runs from the local wg0.conf between calls.
 REGISTER_REFRESH_SECONDS = 900
@@ -71,16 +70,25 @@ class ConnectivityState:
         self.next_register_at = self.clock() + BLOCKED_RETRY_SECONDS * self.jitter(0.8, 1.2)
 
 
+# Root-owned helper installed by installcli.sh; the only command the agent may sudo.
+# It brings wg0 up from a sanitized, root-owned copy of wg0.conf (no wg-quick hooks).
+WG_HELPER = "/usr/local/libexec/meteorcli-wg"
+
+
 def _elevate_wireguard(args: Sequence[str]) -> list[str]:
-    """Create/change wg0 needs CAP_NET_ADMIN. Use passwordless sudo when not root."""
+    """Create/change wg0 needs CAP_NET_ADMIN. When not root, go through the sudo helper."""
     cmd = list(args)
     if os.geteuid() == 0 or not cmd:
         return cmd
-    if cmd[0] == "wg-quick" or (cmd[0] == "wg" and len(cmd) > 1 and cmd[1] in _PRIVILEGED_WG):
-        resolved = shutil.which(cmd[0])
-        if resolved:
-            cmd[0] = resolved
-        return ["sudo", "-n", *cmd]
+    helper = ["sudo", "-n", WG_HELPER]
+    if cmd[0] == "wg-quick" and len(cmd) == 3 and cmd[1] == "up":
+        return [*helper, "up", cmd[2]]
+    if cmd[0] == "wg-quick" and len(cmd) == 3 and cmd[1] == "down":
+        return [*helper, "down"]
+    if cmd[0] == "wg" and len(cmd) in (3, 4) and cmd[1] == "show" and cmd[2] == "wg0":
+        return [*helper, "show", *cmd[3:]]
+    if cmd[0] == "wg" and len(cmd) == 7 and cmd[1:3] == ["set", "wg0"] and cmd[3] == "peer" and cmd[5] == "endpoint":
+        return [*helper, "set-endpoint", cmd[4], cmd[6]]
     return cmd
 
 
@@ -482,7 +490,7 @@ def sync_connectivity(
     except (subprocess.CalledProcessError, FileNotFoundError, PermissionError) as exc:
         logger.warning(
             "Could not apply WireGuard interface: %s. "
-            "meteorcli run does not need root; installcli.sh adds passwordless sudo for wg/wg-quick.",
+            "meteorcli run does not need root; installcli.sh adds passwordless sudo for " + WG_HELPER + ".",
             exc,
         )
     try:

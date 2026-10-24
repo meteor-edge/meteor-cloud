@@ -101,7 +101,7 @@ helm -n meteorcloud test meteorcloud --logs
 | WireGuard not running | Set `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` and re-deploy |
 | Cannot connect | Check UDP port in SG (`services.vpn.listen_port`, default 51820) |
 | No peer config | Run the gateway agent (`src/device-plane/gateway/connectivity_agent.py`) so it applies `wg set` from the control plane. Do not paste `[Peer]` blocks into `wg0.conf` |
-| Device has no WG IP | `CONNECTIVITY_PROVIDER=wireguard`, `wireguard-tools` installed, and `meteorcli run` (passwordless sudo for `wg` / `wg-quick` from `installcli.sh`) |
+| Device has no WG IP | `CONNECTIVITY_PROVIDER=wireguard`, `wireguard-tools` installed, and `meteorcli run` (passwordless sudo for the `meteorcli-wg` helper from `installcli.sh`; re-run `sudo ./installcli.sh` after upgrading) |
 | Browser terminal fails | Device `sshd` up, `SHELL_PROVIDER=ssh_gateway`, gateway host can route to `10.8.0.0/16`, connectivity status `active` |
 | Browser: `UNPROTECTED PRIVATE KEY` then Permission denied | Platform key must be `0600`. Re-run `make up`, or `sudo chmod 600 /opt/edge-platform/shell/id_ed25519` then Reconnect. Do not use `0640` or group `meteorcloud-shell` |
 | Device card shows **Reconnecting** | The agent checks in but the tunnel is down. On the device: `sudo wg show` (handshake?), UDP 51820 reachable, `vpn.<domain>` resolves. The agent re-resolves the DNS name and restarts `wg0` on its own |

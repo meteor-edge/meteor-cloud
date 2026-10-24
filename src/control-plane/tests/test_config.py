@@ -83,3 +83,17 @@ def test_connectivity_and_shell_providers() -> None:
     assert Settings(_env_file=None, CONNECTIVITY_PROVIDER="wireguard").connectivity_provider == "wireguard"
     assert Settings(_env_file=None, SHELL_PROVIDER="echo").shell_provider == "echo"
     assert Settings(_env_file=None, SHELL_PROVIDER="ssh_gateway").shell_provider == "ssh_gateway"
+
+
+def test_production_connectivity_refuses_default_internal_token() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            APP_ENV="production",
+            CONNECTIVITY_PROVIDER="wireguard",
+            CONNECTIVITY_INTERNAL_TOKEN="dev-connectivity-internal",
+        )
+    assert Settings(
+        _env_file=None, APP_ENV="production", CONNECTIVITY_PROVIDER="wireguard", CONNECTIVITY_INTERNAL_TOKEN="s3cret"
+    ).connectivity_internal_token == "s3cret"
+    assert Settings(_env_file=None, APP_ENV="production", CONNECTIVITY_PROVIDER="none").connectivity_provider == "none"

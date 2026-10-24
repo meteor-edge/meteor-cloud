@@ -7,11 +7,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
+from app.connectivity.models import ConnectivityStatus
 from app.connectivity.service import ConnectivityService, ssh_principal
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
@@ -27,6 +28,20 @@ from app.tenancy.models import OrganizationMembership
 def _new_ticket() -> tuple[str, str]:
     token = generate_shell_ticket()
     return token.plaintext, token.token_hash
+
+
+def close_sessions_for_device(session: Session, *, device_id: uuid.UUID) -> int:
+    """Mark a device's pending and open shells closed (no commit). Open bridges end on their next recheck."""
+    result = session.execute(
+        update(DeviceShellSession)
+        .where(
+            DeviceShellSession.device_id == device_id,
+            DeviceShellSession.status.in_((ShellSessionStatus.PENDING.value, ShellSessionStatus.OPEN.value)),
+        )
+        .values(status=ShellSessionStatus.CLOSED.value, closed_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    )
+    return int(result.rowcount or 0)
 
 
 @dataclass(frozen=True)
@@ -134,6 +149,8 @@ class ShellService:
             + timedelta(seconds=self.settings.shell_ticket_ttl_seconds),
         )
         self.session.add(row)
+        # The id is assigned at flush; the audit record needs it.
+        self.session.flush()
         self.audit.record(
             actor=actor,
             organization_id=organization_id,
@@ -208,6 +225,28 @@ class ShellService:
             host_key=peer.ssh_host_key,
             certificate=certificate,
         )
+
+    def session_still_allowed(self, session_id: uuid.UUID) -> bool:
+        """An open shell may continue: not closed (revoke), device usable, peer active, user still allowed."""
+        try:
+            row = self.session.get(DeviceShellSession, session_id, populate_existing=True)
+            if row is None or row.status != ShellSessionStatus.OPEN.value or row.actor_user_id is None:
+                return False
+            device = self.devices.get(organization_id=row.organization_id, device_id=row.device_id)
+            if device is None or not device.is_enabled or device.credential_hash is None:
+                return False
+            peer = self.connectivity.rows.get(device.id)
+            if peer is None or peer.status != ConnectivityStatus.ACTIVE.value or peer.wg_address is None:
+                return False
+            membership = self.authz.get_active_membership(
+                user_id=row.actor_user_id, organization_id=row.organization_id
+            )
+            return membership is not None and self.authz.check(
+                membership, "device.shell", device_group_id=device.device_group_id
+            )
+        finally:
+            # End the read transaction so the pooled connection is not held between checks.
+            self.session.rollback()
 
     def close_session(self, session_id: uuid.UUID, *, actor: User | None = None) -> None:
         row = self.session.get(DeviceShellSession, session_id)

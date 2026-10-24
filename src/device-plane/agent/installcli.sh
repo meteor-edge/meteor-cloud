@@ -122,7 +122,7 @@ uninstall() {
     echo "Removed ${PREFIX}"
   fi
   if [[ "${EUID}" -eq 0 ]]; then
-    rm -f /etc/sudoers.d/meteorcli-wireguard
+    rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg
     echo "Left /etc/meteorcli in place (device credentials)."
   else
     echo "Left ${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli in place (device credentials)."
@@ -131,26 +131,33 @@ uninstall() {
 
 install_wireguard_sudoers() {
   # Creating wg0 needs CAP_NET_ADMIN. meteorcli run stays unprivileged and
-  # calls `sudo -n wg` / `wg-quick` for those steps only.
+  # calls `sudo -n meteorcli-wg` for those steps only. The helper is root-owned
+  # and never passes the user's config (or its PostUp hooks) to wg-quick, so
+  # this rule does not amount to passwordless root.
   local dest=/etc/sudoers.d/meteorcli-wireguard
+  local helper=/usr/local/libexec/meteorcli-wg
   local user="${SUDO_USER:-}"
-  local wg_bin wg_quick_bin tmp
+  local python_bin tmp
   [[ "${EUID}" -eq 0 ]] || return 0
   if [[ -z "${user}" || "${user}" == root ]]; then
     return 0
   fi
-  wg_bin="$(command -v wg || echo /usr/bin/wg)"
-  wg_quick_bin="$(command -v wg-quick || echo /usr/bin/wg-quick)"
+  python_bin="$(command -v python3 || echo /usr/bin/python3)"
+  install -d -o root -g root -m 0755 "$(dirname "${helper}")"
+  tmp="$(mktemp)"
+  { echo "#!${python_bin} -I"; tail -n +2 "${SCRIPT_DIR}/packaging/meteorcli-wg"; } > "${tmp}"
+  install -o root -g root -m 0755 "${tmp}" "${helper}"
+  rm -f "${tmp}"
   tmp="$(mktemp)"
   cat > "${tmp}" <<EOF
-# meteorcli: bring up wg0 without \`sudo meteorcli\`
+# meteorcli: bring up wg0 without \`sudo meteorcli\` (this helper only; see ${helper})
 Defaults:${user} !requiretty
-${user} ALL=(root) NOPASSWD: ${wg_bin}, ${wg_quick_bin}
+${user} ALL=(root) NOPASSWD: ${helper}
 EOF
   chmod 440 "${tmp}"
   if visudo -cf "${tmp}" >/dev/null 2>&1; then
     mv "${tmp}" "${dest}"
-    echo "Passwordless sudo for ${user}: ${wg_bin}, ${wg_quick_bin}"
+    echo "Passwordless sudo for ${user}: ${helper}"
   else
     rm -f "${tmp}"
     echo "warning: could not install ${dest}; meteorcli run as ${user} cannot create wg0." >&2
