@@ -17,6 +17,7 @@ data:
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   LOG_FORMAT: {{ .Values.config.logFormat | quote }}
   REGISTRATION_REQUIRE_HTTPS: {{ .Values.config.registrationRequireHttps | toString | quote }}
+  FORWARDED_ALLOW_IPS: {{ .Values.config.forwardedAllowIps | quote }}
   DATABASE_PROVIDER: postgresql
   TELEMETRY_PROVIDER: postgresql
   DEPLOYMENT_PROVIDER: native

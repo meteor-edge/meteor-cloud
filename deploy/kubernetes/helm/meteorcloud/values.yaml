@@ -16,6 +16,10 @@ config:
   logLevel: INFO
   logFormat: json
   registrationRequireHttps: true
+  # Proxies whose X-Forwarded-Proto/For the API trusts (uvicorn FORWARDED_ALLOW_IPS).
+  # The ingress terminates TLS, so without this every request looks like plain HTTP
+  # and device registration fails with https_required. The API Service is not public.
+  forwardedAllowIps: "*"
   # Extra non-secret environment variables for the API, e.g. rate limits:
   #   DEVICE_OFFLINE_THRESHOLD_SECONDS: "150"
   extraEnv: {}
