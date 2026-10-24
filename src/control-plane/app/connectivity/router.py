@@ -92,3 +92,21 @@ def revoke_device_connectivity(
         organization_id=organization_id,
         device_id=device_id,
     )
+
+
+@router.post(
+    "/api/v1/organizations/{organization_id}/devices/{device_id}/connectivity/reenroll",
+    response_model=DeviceConnectivityResponse,
+)
+def reenroll_device_connectivity(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: ConnectivitySvc,
+) -> DeviceConnectivityResponse:
+    """Forget the device's WireGuard key, address and SSH host key so it can register again."""
+    return service.reenroll(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+    )

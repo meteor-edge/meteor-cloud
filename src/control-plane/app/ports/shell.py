@@ -22,6 +22,16 @@ class DeviceShellConnection(Protocol):
         """True once the remote shell has exited and all its output was read."""
         ...
 
+    @property
+    def failure(self) -> str | None:
+        """Why the session could not be opened (e.g. SSH refused), or None."""
+        ...
+
+    @property
+    def received_output(self) -> bool:
+        """True once the device sent anything."""
+        ...
+
 
 class DeviceShellProvider(Protocol):
     """Open an interactive session to a private device address."""
@@ -32,6 +42,10 @@ class DeviceShellProvider(Protocol):
         host: str,
         port: int,
         username: str,
+        host_key: str | None = None,
     ) -> DeviceShellConnection:
-        """Connect to ``host:port``. Implementations must refuse non-private hosts."""
+        """Connect to ``host:port``. Implementations must refuse non-private hosts.
+
+        ``host_key`` is the device's pinned SSH host key; a different key must be rejected.
+        """
         ...

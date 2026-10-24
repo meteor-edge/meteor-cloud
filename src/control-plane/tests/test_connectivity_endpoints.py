@@ -41,6 +41,18 @@ def _device_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+INTERNAL = {"X-Connectivity-Internal-Token": "test-connectivity-internal"}
+
+
+def _report_handshake(client: TestClient, public_key: str, when: str | None = None) -> None:
+    """What the gateway agent posts after `wg show wg0 dump`."""
+    item: dict[str, str] = {"public_key": public_key}
+    if when is not None:
+        item["last_handshake_at"] = when
+    response = client.post("/internal/connectivity/handshakes", headers=INTERNAL, json={"items": [item]})
+    assert response.status_code == 200, response.text
+
+
 def test_wireguard_register_allocates_address_and_revokes(
     client: TestClient, db_session: Session
 ) -> None:
@@ -278,6 +290,7 @@ def test_internal_peers_and_shell_ticket(client: TestClient, db_session: Session
     )
     assert denied.status_code == 403
 
+    _report_handshake(client, WG_KEY_B)
     session = client.post(
         f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/shell-sessions",
         headers=headers,
@@ -397,6 +410,7 @@ def test_shell_ticket_concurrent_redemption(
         headers=_device_headers(reg["device_token"]),
         json={"public_key": WG_KEY_A},
     )
+    _report_handshake(client, WG_KEY_A)
     created = client.post(
         f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/shell-sessions",
         headers=headers,

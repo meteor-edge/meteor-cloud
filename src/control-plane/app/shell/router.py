@@ -51,9 +51,10 @@ async def shell_websocket(
     consumed = False
     connection = None
     try:
-        _row, host, port, username = service.consume_ticket(session_id=session_id, ticket=ticket)
+        row, host, port, username, host_key = service.consume_ticket(session_id=session_id, ticket=ticket)
         consumed = True
-        connection = service._require_provider().connect(host=host, port=port, username=username)
+        device_id = row.device_id
+        connection = service._require_provider().connect(host=host, port=port, username=username, host_key=host_key)
     except AppError as exc:
         if consumed:
             service.close_session(session_id)
@@ -136,6 +137,10 @@ async def shell_websocket(
         stop.set()
         if connection is not None:
             connection.close()
+            # Diagnostics only: ssh's own error line, or that the device answered.
+            failure = connection.failure
+            if failure or connection.received_output:
+                service.connectivity.record_ssh_result(device_id, error=failure)
         service.close_session(session_id)
         try:
             await websocket.close()

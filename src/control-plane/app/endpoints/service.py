@@ -129,6 +129,11 @@ class EndpointService:
             apps_domain=normalize_domain(self.settings.apps_base_domain), hostname=base, available=False
         )
 
+    def _reject_reserved_port(self, port: int) -> None:
+        # Public app routing must never front the device's SSH daemon.
+        if port == self.settings.shell_ssh_port:
+            raise ValidationAppError("reserved_port", f"Port {port} is the device SSH port and cannot be published.")
+
     def _public_url(self, hostname: str) -> str:
         return f"https://{hostname}"
 
@@ -201,6 +206,7 @@ class EndpointService:
         membership = self._require_membership(organization_id, actor.id)
         device = self._device(organization_id, payload.device_id)
         self.authz.require(membership, "endpoint.create", device_group_id=device.device_group_id)
+        self._reject_reserved_port(payload.port)
         hostname = self._validate_hostname(payload.hostname, organization_id=organization_id, device=device)
         if self.endpoints.get_by_hostname(hostname) is not None:
             raise ConflictError("hostname_taken", "This hostname is already registered.")
@@ -277,6 +283,7 @@ class EndpointService:
                 raise ConflictError("hostname_taken", "This hostname is already registered.")
             row.hostname = hostname
         if payload.port is not None:
+            self._reject_reserved_port(payload.port)
             clash = self.endpoints.enabled_on_port(device_id=row.device_id, port=payload.port)
             if clash is not None and clash.id != row.id and (payload.enabled is not False) and row.enabled:
                 raise ConflictError(
@@ -374,10 +381,18 @@ class EndpointService:
                 row.availability = EndpointAvailability.UNKNOWN.value
 
     def routable_upstreams(self) -> list[tuple[ApplicationEndpoint, str]]:
-        """Enabled + ready endpoints whose upstream is the device WireGuard address."""
+        """Enabled + ready endpoints whose upstream is the device WireGuard address.
+
+        The address comes from the device's connectivity record, never from the endpoint itself.
+        """
         result: list[tuple[ApplicationEndpoint, str]] = []
         cidr = self.settings.wireguard_client_cidr
         for row in self.endpoints.list_enabled_ready():
+            if row.port == self.settings.shell_ssh_port:
+                continue
+            device = self.devices.get(organization_id=row.organization_id, device_id=row.device_id)
+            if device is None or not device.is_enabled or device.credential_hash is None:
+                continue
             peer = self.connectivity.get(row.device_id)
             if peer is None or peer.wg_address is None or peer.status != ConnectivityStatus.ACTIVE.value:
                 continue

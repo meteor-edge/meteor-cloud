@@ -171,6 +171,13 @@ export type DeviceConnectivity = {
   status: string;
   last_handshake_at: string | null;
   connected: boolean;
+  /** From recent evidence: the gateway's handshake, then the agent's check-in. */
+  state?: "connected" | "reconnecting" | "offline" | "pending" | "revoked";
+  agent_last_seen_at?: string | null;
+  ssh_host_key_fingerprint?: string | null;
+  last_ssh_ok_at?: string | null;
+  last_ssh_error?: string | null;
+  last_ssh_error_at?: string | null;
   server_address: string;
   ssh_user: string;
   ssh_port: number;

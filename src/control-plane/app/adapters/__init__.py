@@ -98,6 +98,7 @@ def shell_provider(settings: Settings) -> DeviceShellProvider | None:
         return SshGatewayProvider(
             identity_file=settings.shell_ssh_identity_file,
             client_cidr=settings.wireguard_client_cidr,
+            require_host_key=settings.shell_require_host_key,
         )
     raise RuntimeError(
         f"Unsupported shell.provider={settings.shell_provider!r}; "

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.connectivity.models import ConnectivityStatus, DeviceConnectivity
+from app.devices.models import Device
 
 
 class ConnectivityRepository:
@@ -32,12 +33,17 @@ class ConnectivityRepository:
         )
 
     def list_active_peers(self) -> list[DeviceConnectivity]:
+        """Peers the gateway should have: active rows of enabled devices that still hold a credential."""
         return list(
             self.session.scalars(
-                select(DeviceConnectivity).where(
+                select(DeviceConnectivity)
+                .join(Device, Device.id == DeviceConnectivity.device_id)
+                .where(
                     DeviceConnectivity.status == ConnectivityStatus.ACTIVE.value,
                     DeviceConnectivity.wg_public_key.is_not(None),
                     DeviceConnectivity.wg_address.is_not(None),
+                    Device.is_enabled.is_(True),
+                    Device.credential_hash.is_not(None),
                 )
             ).all()
         )

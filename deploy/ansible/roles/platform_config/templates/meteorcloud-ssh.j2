@@ -1,9 +1,14 @@
 #!/bin/sh
 # SSH from this host to a device over WireGuard (same key as the browser terminal).
+#   meteorcloud-ssh [ssh options] [user@]<device-id | 10.8.0.x> [command]
+# The device is looked up in MeteorCloud: revoked, disabled and offline devices are refused,
+# and its SSH host key (pinned at enrollment) must match. Without Docker access the lookup is
+# skipped and the host key is trusted on first use (~/.config/meteorcloud/shell/known_hosts).
 # OpenSSH requires the private key to be 0600, so operators use a personal copy.
 set -eu
 PLATFORM_KEY="{{ shell_ssh_dir }}/id_ed25519"
-USER_KEY="${HOME}/.config/meteorcloud/shell/id_ed25519"
+USER_DIR="${HOME}/.config/meteorcloud/shell"
+USER_KEY="${USER_DIR}/id_ed25519"
 KEY=""
 if [ -r "${USER_KEY}" ]; then
   KEY="${USER_KEY}"
@@ -18,8 +23,74 @@ else
   echo "  chmod 600 ~/.config/meteorcloud/shell/id_ed25519" >&2
   exit 1
 fi
-if [ "$#" -lt 1 ]; then
-  echo "usage: meteorcloud-ssh [user@]10.8.0.x [ssh options...]" >&2
+
+# Find the destination like ssh does: the first word that is not an option or an option's value.
+POSITION=0
+INDEX=0
+SKIP=0
+DESTINATION=""
+for ARG do
+  INDEX=$((INDEX + 1))
+  if [ "${SKIP}" = 1 ]; then SKIP=0; continue; fi
+  case "${ARG}" in
+    -[BbcDEeFIiJLlmOoPpQRSWw]) SKIP=1 ;;
+    -*) ;;
+    *) DESTINATION="${ARG}"; POSITION="${INDEX}"; break ;;
+  esac
+done
+if [ -z "${DESTINATION}" ]; then
+  echo "usage: meteorcloud-ssh [ssh options] [user@]<device-id | 10.8.0.x> [command]" >&2
   exit 2
 fi
-exec ssh -i "${KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "$@"
+LOGIN=""
+TARGET="${DESTINATION}"
+case "${DESTINATION}" in
+  *@*) LOGIN="${DESTINATION%%@*}"; TARGET="${DESTINATION#*@}" ;;
+esac
+
+PORT=""
+KNOWN=""
+BACKEND="$(docker ps -q --filter label=com.docker.compose.project={{ compose_project_name }} \
+  --filter label=com.docker.compose.service=backend 2>/dev/null | head -n 1 || true)"
+if [ -n "${BACKEND}" ]; then
+  # Exit 3: the device is unknown, revoked, disabled or offline (message on stderr).
+  RESOLVED="$(docker exec "${BACKEND}" python -m app.cli shell-target "${TARGET}")" || exit $?
+  # Fields: user, WireGuard address, SSH port, pinned host key ("-" when the agent never reported one).
+  RESOLVED_USER="$(printf '%s' "${RESOLVED}" | cut -f1)"
+  TARGET="$(printf '%s' "${RESOLVED}" | cut -f2)"
+  PORT="$(printf '%s' "${RESOLVED}" | cut -f3)"
+  HOST_KEY="$(printf '%s' "${RESOLVED}" | cut -f4)"
+  LOGIN="${LOGIN:-${RESOLVED_USER}}"
+  if [ "${HOST_KEY}" != "-" ]; then
+    KNOWN="$(mktemp)"
+    trap 'rm -f "${KNOWN}"' EXIT INT TERM
+    if [ "${PORT}" = "22" ]; then NAME="${TARGET}"; else NAME="[${TARGET}]:${PORT}"; fi
+    printf '%s %s\n' "${NAME}" "${HOST_KEY}" > "${KNOWN}"
+  fi
+else
+  echo "meteorcloud-ssh: cannot reach the MeteorCloud API container (needs Docker access);" >&2
+  echo "  connecting without checking the device's status or pinned host key." >&2
+fi
+
+# Same arguments in the same order, with the destination replaced by the trusted address.
+COUNT=$#
+INDEX=0
+for ARG do
+  INDEX=$((INDEX + 1))
+  if [ "${INDEX}" = "${POSITION}" ]; then
+    set -- "$@" "${LOGIN:+${LOGIN}@}${TARGET}"
+  else
+    set -- "$@" "${ARG}"
+  fi
+done
+shift "${COUNT}"
+
+if [ -n "${KNOWN}" ]; then
+  # Pinned host key: a different key is refused. Not exec, so the trap removes the file.
+  ssh -i "${KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+    -o UserKnownHostsFile="${KNOWN}" -o GlobalKnownHostsFile=/dev/null -p "${PORT}" "$@"
+  exit $?
+fi
+mkdir -p "${USER_DIR}"
+exec ssh -i "${KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+  -o UserKnownHostsFile="${USER_DIR}/known_hosts" ${PORT:+-p "${PORT}"} "$@"

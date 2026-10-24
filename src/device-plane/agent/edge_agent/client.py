@@ -8,6 +8,7 @@ Credentials passed here are never logged.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -63,6 +64,9 @@ class EdgeClient:
             raise self._to_api_error(exc) from exc
         except urllib.error.URLError as exc:  # network-level failure
             raise AgentApiError(0, "network_error", str(exc.reason)) from exc
+        except (TimeoutError, OSError, http.client.HTTPException) as exc:
+            # Read timeouts and dropped connections surface outside URLError; retry them the same way.
+            raise AgentApiError(0, "network_error", str(exc) or type(exc).__name__) from exc
 
     def _post(
         self,
@@ -129,11 +133,18 @@ class EdgeClient:
         return self._post("/api/v1/agent/heartbeat", payload, bearer=device_token)
 
     def register_wireguard(
-        self, *, device_token: str, public_key: str, ssh_user: str | None = None
+        self,
+        *,
+        device_token: str,
+        public_key: str,
+        ssh_user: str | None = None,
+        ssh_host_key: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"public_key": public_key}
         if ssh_user:
             body["ssh_user"] = ssh_user
+        if ssh_host_key:
+            body["ssh_host_key"] = ssh_host_key
         return self._post(
             "/api/v1/agent/connectivity/wireguard",
             body,

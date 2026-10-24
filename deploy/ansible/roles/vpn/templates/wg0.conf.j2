@@ -34,7 +34,12 @@ PublicKey = {{ link.public_key }}
 AllowedIPs = {{ link.address }}/32
 {% endfor %}
 {% else %}
-# Co-located with the API.
-PostUp = iptables -A FORWARD -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -A FORWARD -i %i -j DROP; sysctl -w net.ipv4.ip_forward=1; iptables -I DOCKER-USER -o %i -j ACCEPT || true; iptables -I DOCKER-USER -i %i -j DROP || true; iptables -I DOCKER-USER -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
-PostDown = iptables -D FORWARD -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -D FORWARD -i %i -j DROP; iptables -D DOCKER-USER -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true; iptables -D DOCKER-USER -i %i -j DROP || true; iptables -D DOCKER-USER -o %i -j ACCEPT || true
+# Co-located with the API. Same isolation as a dedicated gateway: devices only answer.
+#   FORWARD (top): replies from devices pass, every other packet from a device is dropped,
+#     including device -> device (it enters and leaves %i) and device -> internet.
+#   FORWARD (end): this host and its containers may open connections to devices.
+#   INPUT: devices cannot open connections to this host (its sshd, Traefik, ...).
+#   DOCKER-USER: the same for traffic to containers (Docker's FORWARD rules run first).
+PostUp = iptables -I FORWARD -i %i -j DROP; iptables -I FORWARD -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -I INPUT -i %i -m conntrack --ctstate NEW,INVALID -j DROP; sysctl -w net.ipv4.ip_forward=1; iptables -I DOCKER-USER -o %i -j ACCEPT || true; iptables -I DOCKER-USER -i %i -j DROP || true; iptables -I DOCKER-USER -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
+PostDown = iptables -D FORWARD -i %i -j DROP; iptables -D FORWARD -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -D INPUT -i %i -m conntrack --ctstate NEW,INVALID -j DROP; iptables -D DOCKER-USER -i %i -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true; iptables -D DOCKER-USER -i %i -j DROP || true; iptables -D DOCKER-USER -o %i -j ACCEPT || true
 {% endif %}

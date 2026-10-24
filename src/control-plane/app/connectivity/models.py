@@ -44,6 +44,11 @@ class DeviceConnectivity(Base, TimestampMixin):
         server_default=ConnectivityStatus.PENDING.value,
     )
     last_handshake_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Device SSH host key ("<type> <base64>"), pinned on the first authenticated registration.
+    ssh_host_key: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    last_ssh_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_ssh_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_ssh_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (

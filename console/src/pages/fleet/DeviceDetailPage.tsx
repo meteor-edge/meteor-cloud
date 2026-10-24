@@ -262,7 +262,12 @@ export function DeviceDetailPage() {
       {token && (
         <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
           <h2 className="text-lg font-semibold">WireGuard network</h2>
-          <DeviceNetworkPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+          <DeviceNetworkPanel
+            token={token}
+            organizationId={organizationId}
+            deviceId={deviceId}
+            canManage={canManage}
+          />
         </div>
       )}
 

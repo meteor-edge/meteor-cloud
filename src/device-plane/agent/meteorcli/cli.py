@@ -562,10 +562,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     client = EdgeClient(config.server_url)
     artifacts_dir = paths.config_path.parent / "artifacts"
 
-    def _payload() -> dict:
-        from edge_agent.wireguard import sync_connectivity
+    from edge_agent.wireguard import ConnectivityState, sync_connectivity
 
-        sync_connectivity(client, device_token, paths.config_path.parent)
+    # One schedule per run loop; --once registers every time.
+    wg_state = None if args.once else ConnectivityState()
+
+    def _payload() -> dict:
+        sync_connectivity(client, device_token, paths.config_path.parent, state=wg_state)
         payload: dict = {"capabilities": collect_capabilities()}
         reports = reconcile_software(client, device_token, artifacts_dir)
         if reports:

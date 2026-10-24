@@ -131,10 +131,15 @@ class FakeClient:
         return list(self.software_response)
 
     def register_wireguard(
-        self, *, device_token: str, public_key: str, ssh_user: str | None = None
+        self,
+        *,
+        device_token: str,
+        public_key: str,
+        ssh_user: str | None = None,
+        ssh_host_key: str | None = None,
     ) -> dict[str, Any]:
         self.wireguard_calls.append(
-            {"device_token": device_token, "public_key": public_key, "ssh_user": ssh_user}
+            {"device_token": device_token, "public_key": public_key, "ssh_user": ssh_user, "ssh_host_key": ssh_host_key}
         )
         if self.wireguard_error is not None:
             raise self.wireguard_error

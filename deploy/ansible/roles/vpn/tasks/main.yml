@@ -75,6 +75,29 @@
     mode: "0600"
   notify: Restart wireguard
 
+# Co-located: wg0's PostUp adds DOCKER-USER rules, which need Docker's chains to exist.
+- name: Create the wg-quick@wg0 drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/wg-quick@wg0.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: not (vpn_standalone | bool)
+
+- name: Start WireGuard after Docker on the API host
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/wg-quick@wg0.service.d/10-meteorcloud.conf
+    content: |
+      # Managed by Ansible (MeteorCloud vpn role).
+      [Unit]
+      After=docker.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd units
+  when: not (vpn_standalone | bool)
+
 - name: Enable and start WireGuard interface
   ansible.builtin.systemd:
     name: wg-quick@wg0

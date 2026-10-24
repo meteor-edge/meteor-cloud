@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -138,8 +139,10 @@ class ShellService:
             device_id=device_id,
         )
 
-    def consume_ticket(self, *, session_id: uuid.UUID, ticket: str) -> tuple[DeviceShellSession, str, int, str]:
-        """Validate a one-time ticket. Returns session, host, port, username."""
+    def consume_ticket(
+        self, *, session_id: uuid.UUID, ticket: str
+    ) -> tuple[DeviceShellSession, str, int, str, str | None]:
+        """Validate a one-time ticket. Returns session, host, port, username, pinned host key."""
         self._require_provider()
         row = self.session.get(DeviceShellSession, session_id, with_for_update=True)
         if row is None:
@@ -151,17 +154,30 @@ class ShellService:
             row.closed_at = datetime.now(UTC)
             self.session.commit()
             raise UnauthorizedError("invalid_shell_ticket", "This shell ticket has expired.")
-        if hash_token(ticket) != row.ticket_hash:
+        if not hmac.compare_digest(hash_token(ticket), row.ticket_hash):
             raise UnauthorizedError("invalid_shell_ticket", "Invalid shell ticket.")
+        # The ticket is spent from here on, whatever happens next.
+        row.status = ShellSessionStatus.CLOSED.value
+        row.closed_at = datetime.now(UTC)
+        self.session.commit()
         device = self.devices.get(organization_id=row.organization_id, device_id=row.device_id)
         if device is None or not device.is_enabled:
             raise ConflictError("device_disabled", "This device is not available.")
+        # Access may have been removed after the ticket was issued.
+        if row.actor_user_id is None:
+            raise UnauthorizedError("invalid_shell_ticket", "The user who opened this session no longer exists.")
+        membership = self.authz.get_active_membership(user_id=row.actor_user_id, organization_id=row.organization_id)
+        if membership is None or not self.authz.check(
+            membership, "device.shell", device_group_id=device.device_group_id
+        ):
+            raise ForbiddenError("insufficient_permission", "You no longer have shell access to this device.")
         peer = self.connectivity.require_reachable(device=device)
         host = self.connectivity.wg_host(peer)
         row.status = ShellSessionStatus.OPEN.value
         row.opened_at = datetime.now(UTC)
+        row.closed_at = None
         self.session.commit()
-        return row, host, self.settings.shell_ssh_port, self.connectivity.ssh_user_for(peer)
+        return row, host, self.settings.shell_ssh_port, self.connectivity.ssh_user_for(peer), peer.ssh_host_key
 
     def close_session(self, session_id: uuid.UUID, *, actor: User | None = None) -> None:
         row = self.session.get(DeviceShellSession, session_id)

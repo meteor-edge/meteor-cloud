@@ -6,12 +6,14 @@ import errno
 import ipaddress
 import logging
 import os
+import random
 import shutil
 import socket
 import stat
 import subprocess
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,51 @@ Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 # WireGuard handshakes every 2 minutes while traffic flows (keepalive keeps it flowing).
 STALE_HANDSHAKE_SECONDS = 180
 _PRIVILEGED_WG = frozenset({"show", "set", "addconf", "syncconf"})
+
+# Registration is a refresh, not a keepalive: the tunnel runs from the local wg0.conf between calls.
+REGISTER_REFRESH_SECONDS = 900
+RETRY_BASE_SECONDS = 30
+RETRY_MAX_SECONDS = 1800
+# Revoked or key mismatch: an operator has to act (re-enroll); check back now and then.
+BLOCKED_RETRY_SECONDS = 1800
+_BLOCKED_CODES = frozenset({"connectivity_revoked", "wireguard_key_changed"})
+SSH_HOST_KEY_PATHS = (
+    Path("/etc/ssh/ssh_host_ed25519_key.pub"),
+    Path("/etc/ssh/ssh_host_ecdsa_key.pub"),
+    Path("/etc/ssh/ssh_host_rsa_key.pub"),
+)
+_SSH_HOST_KEY_TYPES = frozenset({"ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"})
+
+
+@dataclass
+class ConnectivityState:
+    """When to call the registration API next. Lives for one `run` loop; restarts register at once."""
+
+    next_register_at: float = 0.0
+    failures: int = 0
+    blocked: str | None = None
+    clock: Callable[[], float] = time.monotonic
+    jitter: Callable[[float, float], float] = field(default=random.uniform)
+
+    def due(self) -> bool:
+        return self.clock() >= self.next_register_at
+
+    def succeeded(self) -> None:
+        self.failures = 0
+        self.blocked = None
+        self.next_register_at = self.clock() + REGISTER_REFRESH_SECONDS * self.jitter(0.8, 1.2)
+
+    def failed(self) -> float:
+        """Bounded exponential backoff with jitter. Returns the delay."""
+        self.failures += 1
+        delay = min(RETRY_BASE_SECONDS * 2 ** (self.failures - 1), RETRY_MAX_SECONDS) * self.jitter(0.5, 1.0)
+        self.next_register_at = self.clock() + delay
+        return delay
+
+    def block(self, code: str) -> None:
+        self.failures = 0
+        self.blocked = code
+        self.next_register_at = self.clock() + BLOCKED_RETRY_SECONDS * self.jitter(0.8, 1.2)
 
 
 def _elevate_wireguard(args: Sequence[str]) -> list[str]:
@@ -229,50 +276,105 @@ def install_gateway_ssh_key(public_key: str, *, authorized_keys: Path | None = N
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
+def local_ssh_host_key(paths: Sequence[Path] = SSH_HOST_KEY_PATHS) -> str | None:
+    """This device's sshd host public key ("<type> <base64>"), so the server can pin it."""
+    for path in paths:
+        try:
+            parts = path.read_text(encoding="utf-8").split()
+        except OSError:
+            continue
+        if len(parts) >= 2 and parts[0] in _SSH_HOST_KEY_TYPES:
+            return f"{parts[0]} {parts[1]}"
+    return None
+
+
+def _peer_from_config(conf: Path) -> tuple[str, str]:
+    """(server public key, endpoint) from the [Peer] section of the local wg0.conf."""
+    public_key = endpoint = ""
+    for line in conf.read_text(encoding="utf-8").splitlines():
+        name, _, value = line.partition("=")
+        if name.strip() == "PublicKey":
+            public_key = value.strip()
+        elif name.strip() == "Endpoint":
+            endpoint = value.strip()
+    return public_key, endpoint
+
+
+def keep_tunnel_up(directory: Path, *, runner: Runner = _default_runner) -> None:
+    """Bring wg0 up from the last config and follow gateway DNS changes. No API call.
+
+    Lets the tunnel come back after a reboot or outage even while the control plane is unreachable.
+    """
+    conf = directory / "wg0.conf"
+    if not conf.is_file():
+        return
+    try:
+        apply_interface(conf, runner=runner, config_changed=False)
+        server_public_key, server_endpoint = _peer_from_config(conf)
+        if server_public_key and server_endpoint:
+            refresh_endpoint(
+                conf.stem, server_public_key=server_public_key, server_endpoint=server_endpoint, runner=runner
+            )
+    except (subprocess.CalledProcessError, FileNotFoundError, PermissionError, OSError) as exc:
+        logger.debug("WireGuard interface not up yet: %s", exc)
+
+
+def _tear_down(directory: Path, *, runner: Runner) -> None:
+    conf = directory / "wg0.conf"
+    if not conf.is_file():
+        return
+    try:
+        runner(["wg-quick", "down", str(conf)])
+    except (subprocess.CalledProcessError, FileNotFoundError, PermissionError):
+        pass
+
+
 def sync_connectivity(
     client: Any,
     device_token: str,
     config_dir: Path,
     *,
     runner: Runner = _default_runner,
+    state: ConnectivityState | None = None,
 ) -> dict[str, Any] | None:
-    """Register this device's public key and bring the tunnel up. Private key stays local."""
+    """Register this device's public key and bring the tunnel up. Private key stays local.
+
+    With ``state`` (the run loop), the API is called only when a refresh or retry is due;
+    in between, the tunnel is kept up from the local config.
+    """
     if not wireguard_available():
         logger.info("WireGuard tools not installed; skipping device tunnel")
         return None
+    directory = wireguard_dir(config_dir)
+    if state is not None and not state.due():
+        if state.blocked is None:
+            keep_tunnel_up(directory, runner=runner)
+        return None
     try:
-        private_key, public_key = ensure_keypair(wireguard_dir(config_dir), runner=runner)
+        private_key, public_key = ensure_keypair(directory, runner=runner)
         response = client.register_wireguard(
             device_token=device_token,
             public_key=public_key,
             ssh_user=local_ssh_user(),
+            ssh_host_key=local_ssh_host_key(),
         )
-        server_public_key = str(response.get("server_public_key") or "")
-        server_endpoint = str(response.get("server_endpoint") or "")
-        conf, changed = write_client_config(
-            wireguard_dir(config_dir),
-            private_key=private_key,
-            address=str(response.get("wg_address") or ""),
-            server_public_key=server_public_key,
-            server_endpoint=server_endpoint,
-            allowed_ips=str(response.get("allowed_ips") or "10.8.0.1/32"),
-            keepalive=int(response.get("persistent_keepalive") or 25),
-        )
-        try:
-            apply_interface(conf, runner=runner, config_changed=changed)
-            refresh_endpoint(conf.stem, server_public_key=server_public_key,
-                             server_endpoint=server_endpoint, runner=runner)
-        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError) as exc:
-            logger.warning(
-                "Could not apply WireGuard interface: %s. "
-                "meteorcli run does not need root; installcli.sh adds passwordless sudo for wg/wg-quick.",
-                exc,
-            )
-        install_gateway_ssh_key(str(response.get("ssh_gateway_public_key") or ""))
-        return response
     except Exception as exc:
-        if getattr(exc, "code", None) == "connectivity_disabled":
+        code = getattr(exc, "code", None)
+        if code == "connectivity_disabled":
             logger.info("Device connectivity is disabled; skipping WireGuard")
+            if state is not None:
+                state.block(code)
+            return None
+        if code in _BLOCKED_CODES:
+            if state is None or state.blocked != code:
+                logger.warning(
+                    "WireGuard access refused (%s): %s Tunnel stopped; an operator must re-enroll this device.",
+                    code,
+                    getattr(exc, "message", exc),
+                )
+            _tear_down(directory, runner=runner)
+            if state is not None:
+                state.block(code)
             return None
         if isinstance(exc, PermissionError):
             logger.warning(
@@ -281,5 +383,49 @@ def sync_connectivity(
                 exc,
             )
             return None
-        logger.exception("WireGuard registration failed")
+        delay = state.failed() if state is not None else 0.0
+        if code is not None:
+            logger.warning(
+                "WireGuard registration failed (%s); keeping the current tunnel, retrying in %.0fs", code, delay
+            )
+        else:
+            logger.exception("WireGuard registration failed")
+        keep_tunnel_up(directory, runner=runner)
         return None
+
+    server_public_key = str(response.get("server_public_key") or "")
+    server_endpoint = str(response.get("server_endpoint") or "")
+    try:
+        conf, changed = write_client_config(
+            directory,
+            private_key=private_key,
+            address=str(response.get("wg_address") or ""),
+            server_public_key=server_public_key,
+            server_endpoint=server_endpoint,
+            allowed_ips=str(response.get("allowed_ips") or "10.8.0.1/32"),
+            keepalive=int(response.get("persistent_keepalive") or 25),
+        )
+    except PermissionError as exc:
+        logger.warning(
+            "WireGuard config is not writable (%s). "
+            "If you previously used sudo meteorcli, run: sudo chown -R \"$USER\" ~/.config/meteorcli",
+            exc,
+        )
+        return None
+    try:
+        apply_interface(conf, runner=runner, config_changed=changed)
+        refresh_endpoint(conf.stem, server_public_key=server_public_key,
+                         server_endpoint=server_endpoint, runner=runner)
+    except (subprocess.CalledProcessError, FileNotFoundError, PermissionError) as exc:
+        logger.warning(
+            "Could not apply WireGuard interface: %s. "
+            "meteorcli run does not need root; installcli.sh adds passwordless sudo for wg/wg-quick.",
+            exc,
+        )
+    try:
+        install_gateway_ssh_key(str(response.get("ssh_gateway_public_key") or ""))
+    except OSError as exc:
+        logger.warning("Could not install the gateway SSH key: %s", exc)
+    if state is not None:
+        state.succeeded()
+    return response

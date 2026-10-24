@@ -103,6 +103,11 @@ helm -n meteorcloud test meteorcloud --logs
 | Device has no WG IP | `CONNECTIVITY_PROVIDER=wireguard`, `wireguard-tools` installed, and `meteorcli run` (passwordless sudo for `wg` / `wg-quick` from `installcli.sh`) |
 | Browser terminal fails | Device `sshd` up, `SHELL_PROVIDER=ssh_gateway`, gateway host can route to `10.8.0.0/16`, connectivity status `active` |
 | Browser: `UNPROTECTED PRIVATE KEY` then Permission denied | Platform key must be `0600`. Re-run `make up`, or `sudo chmod 600 /opt/edge-platform/shell/id_ed25519` then Reconnect. Do not use `0640` or group `meteorcloud-shell` |
+| Device card shows **Reconnecting** | The agent checks in but the tunnel is down. On the device: `sudo wg show` (handshake?), UDP 51820 reachable, `vpn.<domain>` resolves. The agent re-resolves the DNS name and restarts `wg0` on its own |
+| `wireguard_key_changed` in the agent log | The device presented a new WireGuard key (reinstalled or cloned). Verify it, then **Re-enroll** on the device page |
+| `Host key verification failed` / "host key changed" | The device's sshd key differs from the one pinned at enrollment. Check the device (reinstall?), then **Re-enroll** it to trust the new key |
+| `device_offline` when opening a terminal | No WireGuard handshake in the last 3 minutes; see Reconnecting |
+| `meteorcloud-ssh: … is revoked` | Access was revoked; re-enroll the device to restore it |
 | `meteorcloud-ssh` cannot read the key | Use `~/.config/meteorcloud/shell/id_ed25519` (`make up` copies it, mode `0600`). Do not chmod the platform key so the group can read it |
 
 ## Security notes

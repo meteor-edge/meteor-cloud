@@ -119,9 +119,18 @@ Install `wireguard` / `wireguard-tools` on the Pi. `meteorcli run` (as the
 device user; `installcli.sh` allows passwordless `sudo` for `wg` / `wg-quick`):
 
 1. Generates a keypair under `~/.config/meteorcli/wireguard/` (or `/etc/meteorcli` for the service)
-2. POSTs the **public** key and this login (`pi`, `ubuntu`, …) to `/api/v1/agent/connectivity/wireguard`
+2. POSTs the **public** key, this login (`pi`, `ubuntu`, …) and the sshd **public** host key
+   (`/etc/ssh/ssh_host_ed25519_key.pub`) to `/api/v1/agent/connectivity/wireguard`
 3. Writes `wg0.conf` and runs `wg-quick up`
 4. Installs `SHELL_GATEWAY_PUBLIC_KEY` into that user's `authorized_keys` when configured
+
+The key and the address never change on reconnects or restarts. The agent
+registers at start and then every ~15 minutes, not on every heartbeat. If that
+fails, it retries with exponential backoff and jitter (30 s doubling up to 30 min).
+On every heartbeat, without calling the API, it brings `wg0` back up from the
+local `wg0.conf` and looks up the gateway's DNS name again when handshakes stop.
+So a device recovers on its own after a reboot, a lost uplink, a gateway IP
+change, or a control-plane outage.
 
 `sshd` must be running for browser SSH. Do not forward port 22 on the home
 router.
@@ -138,6 +147,12 @@ fallback. On the MeteorCloud server (`make up` installs the helper):
 meteorcloud-ssh pi@10.8.0.2
 ```
 
+It also takes a device ID (`meteorcloud-ssh <device-id>`). With Docker access it
+asks the API container about the target first, so revoked, disabled and offline
+devices are refused with a clear message and the pinned host key is enforced.
+Without Docker access it warns and connects to the given address, trusting its
+host key on first use (`~/.config/meteorcloud/shell/known_hosts`).
+
 That uses your copy of the gateway key (`~/.config/meteorcloud/shell/id_ed25519`,
 mode `0600`). `make up` installs it. OpenSSH rejects a group-readable platform
 key, so `/opt/edge-platform/shell/id_ed25519` stays `0600` for the browser
@@ -145,11 +160,77 @@ container only. ed25519 is the key algorithm, not a password.
 
 Devices cannot reach each other; only the server (`10.8.0.1`) can reach them.
 
+### States
+
+| State | Meaning |
+| --- | --- |
+| `connected` | The gateway saw a handshake in the last 3 minutes |
+| `reconnecting` | No recent handshake, but the agent still checks in: the tunnel is down and the agent is bringing it back |
+| `offline` | No recent handshake and no recent check-in |
+| `pending` | Waiting for the agent to register a key (new device or after re-enroll) |
+| `revoked` | Access removed; the device cannot reconnect until re-enrolled |
+
+A handshake shows that the tunnel works, not that SSH or an app does. The card
+also shows the agent's last check-in, the pinned SSH host-key fingerprint, and
+the last browser SSH session or the error ssh printed.
+
+### Revoke, disable, re-enroll
+
+- **Revoke access** (`POST …/connectivity/revoke`) drops the peer at the next
+  gateway sync (~15 s), disables the device's app endpoints and refuses new
+  registrations. Disabling the device or revoking its credential also removes the
+  peer and its app routes, and re-enabling it restores them.
+- **Re-enroll** (`POST …/connectivity/reenroll`, `device.update`) is the explicit
+  recovery path for a replaced or reinstalled device, or one that was revoked by
+  mistake. It forgets the WireGuard key, address and pinned host key. The agent's
+  next scheduled check (≤ 30 min, or restart `meteorcli`) registers again with
+  its own credential and gets a new address.
+- A device that presents a **different WireGuard key** while active is refused
+  (`wireguard_key_changed`, audited) until an operator re-enrolls it. Keys never
+  rotate on their own.
+
+### SSH host keys
+
+The first host key a device reports over its authenticated registration is
+pinned. Browser SSH and `meteorcloud-ssh` then use `StrictHostKeyChecking=yes`
+against that key only, so a changed key fails instead of being trusted. If the
+device reports a different key later, for example after an OS reinstall, the pin
+is kept and the card shows the mismatch. Check the device, then **Re-enroll** it
+to trust the new key.
+
+Migration: devices running an older agent never report a host key and keep
+trust-on-first-use (`accept-new`). Update `meteorcli` on them. Once every device
+reports a key, set `SHELL_REQUIRE_HOST_KEY=true` to refuse unpinned devices.
+
+### Network isolation and ports
+
+Inbound ports:
+
+| Host | Port | From |
+| --- | --- | --- |
+| WireGuard gateway | UDP `51820` (`vpn_listen_port`) | devices (internet) |
+| Platform | TCP `80`, `443`; TCP `8883` with bundled MQTT | internet |
+| Any host | TCP `22` | `firewall_allowed_ssh_cidrs` only |
+
+Device SSH (`22`) is never published. It is reachable only through the tunnel,
+and only from the gateway side. Both gateway layouts (dedicated or co-located)
+apply the same `wg0` rules: devices may only answer connections. They cannot
+reach other devices, the gateway host, the internet, or containers (`DOCKER-USER`).
+App endpoints cannot use the device SSH port. AllowedIPs are IPv4 `/32`s and
+IPv6 forwarding stays off, so IPv6 packets from devices are dropped. On a
+co-located host, `wg-quick@wg0` starts after Docker so the `DOCKER-USER` rules
+always apply. The rules live in `wg0.conf` (`PostUp`), so they come back on every
+boot and on every `wg-quick` restart.
+
 ## Browser terminal
 
 Operators with `device.shell` (owner/admin/operator) open **Terminal** on the
 device page. Flow: JWT → short-lived ticket → WebSocket → SSH gateway →
 `ssh user@{wg_address}` over WireGuard.
+
+Tickets live 60 s and work once. A wrong, expired or used ticket is refused.
+`device.shell` is checked again when the ticket is used, and the device must be
+enabled and have a recent handshake (`device_offline` otherwise).
 
 `make up` with WireGuard turns this on (`SHELL_PROVIDER=ssh_gateway` and a
 `0600` gateway key under `/opt/edge-platform/shell`). The API host must be able
@@ -183,6 +264,16 @@ list them in `APPS_RESERVED_NAMES`.
 Let’s Encrypt **HTTP-01** stays on `PLATFORM_DOMAIN`. App hostnames use Traefik
 **DNS-01** (`letsencrypt-dns`, default Route53). Put AWS keys in host env, never
 in git. See [Endpoints](endpoints.md).
+
+## Follow-up: per-session SSH credentials
+
+Browser SSH and `meteorcloud-ssh` share one long-lived gateway key, which every
+device trusts in `authorized_keys`. Replacing it with an SSH certificate
+authority would need an sshd change on every device (`TrustedUserCAKeys`), plus
+a signer on the server. That would give short-lived certificates per session or
+per operator. It is not done yet. Until then, keep the private key `0600`. It is
+never sent to devices or the browser. Rotating it means re-running `make up` with
+a new key, then `meteorcli run` on each device.
 
 ## Related
 

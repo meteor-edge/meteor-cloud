@@ -49,19 +49,32 @@ def _request(url: str, token: str, *, method: str = "GET", body: dict[str, Any] 
         return json.loads(raw) if raw else {}
 
 
-def current_peers(interface: str, *, runner: Runner = _run) -> dict[str, int]:
-    """Public key -> latest handshake (unix seconds, 0 = never) for each peer on the interface."""
+def _peer_dump(interface: str, *, runner: Runner = _run) -> dict[str, tuple[str, int]]:
+    """Public key -> (allowed-ips, latest handshake in unix seconds, 0 = never) for each peer."""
     try:
         dump = runner(["wg", "show", interface, "dump"]).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
         return {}
-    peers: dict[str, int] = {}
+    peers: dict[str, tuple[str, int]] = {}
     # The first line is the interface itself; peer lines are: key, psk, endpoint, allowed-ips, handshake, ...
     for line in dump.splitlines()[1:]:
         parts = line.split("\t")
+        allowed = parts[3] if len(parts) > 3 else ""
         handshake = parts[4] if len(parts) > 4 else ""
-        peers[parts[0]] = int(handshake) if handshake.isdigit() else 0
+        peers[parts[0]] = (allowed, int(handshake) if handshake.isdigit() else 0)
     return peers
+
+
+def current_peers(interface: str, *, runner: Runner = _run) -> dict[str, int]:
+    """Public key -> latest handshake (unix seconds, 0 = never) for each peer on the interface."""
+    return {key: handshake for key, (_allowed, handshake) in _peer_dump(interface, runner=runner).items()}
+
+
+def _same_allowed_ips(left: str, right: str) -> bool:
+    def normalize(value: str) -> set[str]:
+        return {item.strip() for item in value.split(",") if item.strip() and item.strip() != "(none)"}
+
+    return normalize(left) == normalize(right)
 
 
 def apply_peers(
@@ -71,15 +84,17 @@ def apply_peers(
     keep: frozenset[str] = frozenset(),
     runner: Runner = _run,
 ) -> None:
+    """Make the interface's device peers match the authorized list: add missing, fix changed, drop the rest."""
     wanted = {str(peer["public_key"]): str(peer["allowed_ips"]) for peer in desired if peer["public_key"] not in keep}
-    present = set(current_peers(interface, runner=runner))
-    for key in present - set(wanted) - keep:
+    present = _peer_dump(interface, runner=runner)
+    for key in set(present) - set(wanted) - keep:
         runner(["wg", "set", interface, "peer", key, "remove"])
         logger.info("Removed WireGuard peer %s", key[:8])
     for key, allowed in wanted.items():
+        if key in present and _same_allowed_ips(present[key][0], allowed):
+            continue  # already applied: no `wg set` every cycle for every peer
         runner(["wg", "set", interface, "peer", key, "allowed-ips", allowed])
-        if key not in present:
-            logger.info("Added WireGuard peer %s", key[:8])
+        logger.info("%s WireGuard peer %s", "Updated" if key in present else "Added", key[:8])
 
 
 def sync_once(
@@ -89,21 +104,33 @@ def sync_once(
     interface: str,
     keep: frozenset[str] = frozenset(),
     runner: Runner = _run,
+    reported: dict[str, int] | None = None,
 ) -> None:
+    """One reconcile pass. ``reported`` (kept by the caller) skips handshakes the API already has.
+
+    If the API cannot be reached, the peers on the interface are left as they are, so devices
+    stay connected through control-plane outages.
+    """
     payload = _request(f"{api_url.rstrip('/')}/internal/connectivity/peers", token)
     apply_peers(interface=interface, desired=list(payload.get("peers") or []), keep=keep, runner=runner)
-    items = [
-        {"public_key": key, "last_handshake_at": datetime.fromtimestamp(unix, tz=UTC).isoformat()}
-        for key, unix in current_peers(interface, runner=runner).items()
-        if unix > 0 and key not in keep
-    ]
-    if items:
+    handshakes = {key: unix for key, unix in current_peers(interface, runner=runner).items() if unix > 0 and key not in keep}
+    sent = reported if reported is not None else {}
+    changed = {key: unix for key, unix in handshakes.items() if sent.get(key) != unix}
+    if changed:
         _request(
             f"{api_url.rstrip('/')}/internal/connectivity/handshakes",
             token,
             method="POST",
-            body={"items": items},
+            body={
+                "items": [
+                    {"public_key": key, "last_handshake_at": datetime.fromtimestamp(unix, tz=UTC).isoformat()}
+                    for key, unix in changed.items()
+                ]
+            },
         )
+    if reported is not None:
+        reported.clear()
+        reported.update(handshakes)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -128,9 +155,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.once:
         sync_once(api_url=args.api_url, token=args.token, interface=args.interface, keep=keep)
         return 0
+    reported: dict[str, int] = {}
     while True:
         try:
-            sync_once(api_url=args.api_url, token=args.token, interface=args.interface, keep=keep)
+            sync_once(api_url=args.api_url, token=args.token, interface=args.interface, keep=keep, reported=reported)
         except Exception:
             logger.exception("Peer sync failed")
         time.sleep(max(5, args.interval))

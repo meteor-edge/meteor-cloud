@@ -75,6 +75,18 @@ export function revokeDeviceConnectivity(
   );
 }
 
+/** Forget the device's WireGuard key, address and SSH host key; it registers again on its own. */
+export function reenrollDeviceConnectivity(
+  token: string,
+  organizationId: string,
+  deviceId: string,
+): Promise<import("@/api/fleet/types").DeviceConnectivity> {
+  return apiRequest(
+    `/api/v1/organizations/${organizationId}/devices/${deviceId}/connectivity/reenroll`,
+    { method: "POST", token, body: {} },
+  );
+}
+
 export function createShellSession(
   token: string,
   organizationId: string,
