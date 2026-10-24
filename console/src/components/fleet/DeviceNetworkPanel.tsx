@@ -17,6 +17,8 @@ type DeviceNetworkPanelProps = {
   deviceId: string;
   /** Revoke and re-enroll need device.update. */
   canManage?: boolean;
+  /** The SSH command is shown only to members who may open a device shell. */
+  canShell?: boolean;
 };
 
 const REFRESH_MS = 15_000;
@@ -74,6 +76,7 @@ export function DeviceNetworkPanel({
   organizationId,
   deviceId,
   canManage = false,
+  canShell = false,
 }: DeviceNetworkPanelProps) {
   const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
@@ -171,12 +174,12 @@ export function DeviceNetworkPanel({
       {shown.hint && <p className="text-sm text-muted-foreground">{shown.hint}</p>}
       {net.last_ssh_error && (
         <p className="text-sm text-destructive">
-          Last SSH error{net.last_ssh_error_at ? ` (${formatDateTime(net.last_ssh_error_at)})` : ""}:{" "}
-          {net.last_ssh_error}
+          Last SSH error{net.last_ssh_error_at ? ` (${formatDateTime(net.last_ssh_error_at)})` : ""}
+          : {net.last_ssh_error}
         </p>
       )}
 
-      {sshCommand && !revoked && (
+      {canShell && sshCommand && !revoked && (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             SSH over WireGuard

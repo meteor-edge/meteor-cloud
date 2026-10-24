@@ -256,3 +256,12 @@ def test_validate_dns_zone_needs_domain(
 
     config.platform.domain = "fleet.example.com"
     assert not any("dns_zone_id" in item for item in validate_configuration(config))
+
+
+def test_external_mqtt_requires_broker_host() -> None:
+    from edge_installer.config.models import MqttServiceSettings
+
+    with pytest.raises(ValueError, match="broker_host"):
+        MqttServiceSettings(enabled=True, broker="external")
+    with pytest.raises(ValueError, match="8883"):
+        MqttServiceSettings(enabled=True, broker="bundled", broker_port=1883)

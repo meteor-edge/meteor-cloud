@@ -101,6 +101,18 @@ variable "vpn_allowed_client_cidrs" {
   description = "CIDR blocks allowed to connect to WireGuard"
 }
 
+variable "mqtt_listen_port" {
+  type        = number
+  default     = 0
+  description = "TCP port of the bundled MQTT broker on the cloud_app instance; 0 opens nothing"
+}
+
+variable "mqtt_allowed_client_cidrs" {
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+  description = "CIDR blocks allowed to connect to the bundled MQTT broker"
+}
+
 variable "vpn_placement" {
   type        = string
   default     = "same_host"

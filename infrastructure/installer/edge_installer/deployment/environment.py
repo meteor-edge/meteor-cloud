@@ -47,6 +47,7 @@ def build_ansible_extra_vars(
         "vpn_listen_port": str(config.services.vpn.listen_port),
         "vpn_network_cidr": config.services.vpn.network_cidr,
         "vpn_server_address": config.services.vpn.server_address,
+        **_mqtt_extra_vars(config),
     }
     # Ansible derives CONNECTIVITY_PROVIDER and the device endpoint from the gateway
     # host (generating its key when none is given); extra-vars would override that.
@@ -67,6 +68,22 @@ def build_ansible_extra_vars(
     return extra
 
 
+def _mqtt_extra_vars(config: InstallationConfig) -> dict[str, str]:
+    mqtt = config.services.mqtt
+    if not mqtt.enabled:
+        return {"mqtt_enabled": "false"}
+    extra = {
+        "mqtt_enabled": "true",
+        "mqtt_broker": mqtt.broker,
+        "mqtt_broker_port": str(mqtt.broker_port),
+    }
+    # Bundled: the role defaults reach EMQX inside Compose and advertise the platform host.
+    if mqtt.broker == "external":
+        extra["mqtt_broker_host"] = mqtt.broker_host
+        extra["mqtt_public_host"] = mqtt.broker_host
+    return extra
+
+
 def secret_env_vars() -> dict[str, str]:
     keys = (
         "EDGE_PLATFORM_POSTGRES_PASSWORD",
@@ -76,6 +93,8 @@ def secret_env_vars() -> dict[str, str]:
         "EDGE_PLATFORM_ADMIN_PASSWORD",
         "EDGE_PLATFORM_ACME_EMAIL",
         "EDGE_PLATFORM_REDIS_PASSWORD",
+        "EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD",
+        "EDGE_PLATFORM_MQTT_INTERNAL_TOKEN",
         "APP_SECRET_KEY",
     )
     return {key: value for key in keys if (value := os.environ.get(key))}

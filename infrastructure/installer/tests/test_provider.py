@@ -82,3 +82,15 @@ def test_missing_output_raises_validation_error() -> None:
     with pytest.raises(ValidationError):
         TerraformOutputs.model_validate({"instance_id": "i-1"})
 
+
+
+def test_terraform_variables_open_mqtt_only_for_bundled_broker(tmp_path: Path) -> None:
+    config = load_configuration(EXAMPLE)
+    assert TerraformRunner(config, tmp_path).variables()["mqtt_listen_port"] == 8883
+
+    config.services.mqtt.broker = "external"
+    config.services.mqtt.broker_host = "mqtt.example.net"
+    assert TerraformRunner(config, tmp_path).variables()["mqtt_listen_port"] == 0
+
+    config.services.mqtt.enabled = False
+    assert TerraformRunner(config, tmp_path).variables()["mqtt_listen_port"] == 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 from pathlib import Path
 
@@ -25,6 +26,12 @@ def _load_ca_cert(settings: Settings) -> str | None:
     if not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
+
+
+def mqtt_config_version(settings: Settings) -> str:
+    """Changes when devices must refetch: broker host, port, or CA."""
+    material = f"{settings.mqtt_public_host}:{settings.mqtt_broker_port}\n{_load_ca_cert(settings) or ''}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
 def issue_mqtt_credentials(

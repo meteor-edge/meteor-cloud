@@ -37,13 +37,23 @@ module "cloud_app" {
   iam_instance_profile = local.route53 ? module.dns_role[0].instance_profile_name : ""
   metadata_hop_limit   = local.route53 ? 2 : 1
   # vpn_placement = "same_host": WireGuard runs on this instance.
-  extra_ingress = contains(var.enabled_services, "vpn") && var.vpn_placement == "same_host" ? [{
-    description = "WireGuard VPN"
-    from_port   = var.vpn_listen_port
-    to_port     = var.vpn_listen_port
-    protocol    = "udp"
-    cidr_blocks = var.vpn_allowed_client_cidrs
-  }] : []
+  extra_ingress = concat(
+    contains(var.enabled_services, "vpn") && var.vpn_placement == "same_host" ? [{
+      description = "WireGuard VPN"
+      from_port   = var.vpn_listen_port
+      to_port     = var.vpn_listen_port
+      protocol    = "udp"
+      cidr_blocks = var.vpn_allowed_client_cidrs
+    }] : [],
+    # Bundled EMQX on this instance (mqtt_listen_port = 0 when MQTT is off or external).
+    var.mqtt_listen_port > 0 ? [{
+      description = "MQTT over TLS"
+      from_port   = var.mqtt_listen_port
+      to_port     = var.mqtt_listen_port
+      protocol    = "tcp"
+      cidr_blocks = var.mqtt_allowed_client_cidrs
+    }] : [],
+  )
   tags = var.tags
 }
 

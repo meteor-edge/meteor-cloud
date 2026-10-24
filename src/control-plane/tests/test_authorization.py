@@ -248,3 +248,19 @@ def test_member_access_and_preview(client: TestClient, db_session: Session) -> N
     )
     assert preview.status_code == 200, preview.text
     assert preview.json()["allowed"] is True
+
+
+def test_only_owner_and_admin_may_open_a_device_shell(db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, owner_membership = create_org_with_owner(db_session, owner)
+    authz = AuthzService(db_session)
+    assert authz.check(owner_membership, "device.shell")
+    for role in (
+        OrganizationRole.ADMIN,
+        OrganizationRole.OPERATOR,
+        OrganizationRole.DEVELOPER,
+        OrganizationRole.VIEWER,
+    ):
+        user = create_user(db_session, email=f"{role.value}@example.com")
+        membership = add_member(db_session, org, user, role)
+        assert authz.check(membership, "device.shell") is (role == OrganizationRole.ADMIN), role

@@ -143,11 +143,32 @@ class VpnServiceSettings(BaseModel):
     root_volume_size_gb: int = Field(default=16, ge=8, le=1024)
 
 
+class MqttServiceSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # bundled: EMQX on the cloud_app instance (TLS 8883). external: devices use broker_host.
+    enabled: bool = False
+    broker: Literal["bundled", "external"] = "bundled"
+    broker_host: str = ""
+    broker_port: int = Field(default=8883, ge=1, le=65535)
+    allowed_client_cidrs: list[str] = Field(default_factory=lambda: ["0.0.0.0/0"])
+
+    @model_validator(mode="after")
+    def _check_broker(self) -> MqttServiceSettings:
+        if self.enabled and self.broker == "external" and not self.broker_host.strip():
+            raise ValueError("services.mqtt.broker_host is required for an external broker")
+        if self.enabled and self.broker == "bundled" and self.broker_port != 8883:
+            raise ValueError("services.mqtt.broker_port must be 8883 for the bundled broker")
+        return self
+
+
 class ServicesSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cloud_app: CloudAppServiceSettings = Field(default_factory=CloudAppServiceSettings)
     vpn: VpnServiceSettings = Field(default_factory=VpnServiceSettings)
+    # Deployed by Ansible with cloud_app, not a separate Terraform service.
+    mqtt: MqttServiceSettings = Field(default_factory=MqttServiceSettings)
 
     def enabled_map(self) -> dict[str, bool]:
         return {

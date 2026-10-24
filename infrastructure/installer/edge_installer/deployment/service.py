@@ -77,6 +77,7 @@ class PlatformDeploymentService:
                 report = self.health.verify(
                     url,
                     timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+                    mqtt_port=self._mqtt_port(),
                 )
                 health = report.as_dict()
             else:
@@ -90,6 +91,11 @@ class PlatformDeploymentService:
             state = self._save_state(outputs, url, health, enabled)
             return ApplyResult(state=state, outputs=outputs, health=health)
 
+    def _mqtt_port(self) -> int | None:
+        """Port to probe from outside, only for a broker on this installation."""
+        mqtt = self.config.services.mqtt
+        return mqtt.broker_port if mqtt.enabled and mqtt.broker == "bundled" else None
+
     def status(self) -> dict[str, object]:
         state = load_state(self.config.installation.name)
         result: dict[str, object] = {"state": state.model_dump() if state else None}
@@ -100,6 +106,7 @@ class PlatformDeploymentService:
                 result["health"] = self.health.verify(
                     state.platform_url,
                     timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+                    mqtt_port=self._mqtt_port(),
                 ).as_dict()
         except InstallerError:
             result["health"] = {"status": "unknown"}
@@ -123,6 +130,7 @@ class PlatformDeploymentService:
                 report = self.health.verify(
                     url,
                     timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+                    mqtt_port=self._mqtt_port(),
                 )
                 health = report.as_dict()
             state.platform_version = self.config.platform.version

@@ -23,6 +23,41 @@
   delay: 5
   until: frontend_health.status == 200
 
+# Devices verify the broker against the CA the API hands out and the public host,
+# so check exactly that (a SAN without the public host fails here, not on devices).
+- name: Check the MQTT broker over TLS
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - s_client
+      - -connect
+      - "127.0.0.1:{{ mqtt_broker_port }}"
+      - -servername
+      - "{{ mqtt_public_host }}"
+      - -verify_hostname
+      - "{{ mqtt_public_host }}"
+      - -CAfile
+      - "{{ platform_certs_dir }}/ca.crt"
+      - -verify_return_error
+      - -brief
+    stdin: ""
+  register: mqtt_health
+  changed_when: false
+  retries: 20
+  delay: 5
+  until: mqtt_health.rc == 0
+  when: mqtt_enabled | bool and mqtt_broker == 'bundled'
+
+- name: Check the WireGuard interface is up
+  ansible.builtin.command: wg show wg0 listen-port
+  delegate_to: "{{ vpn_gateway_host }}"
+  register: wireguard_health
+  changed_when: false
+  failed_when: >-
+    wireguard_health.rc != 0
+    or (wireguard_health.stdout | trim) != (vpn_listen_port | string)
+  when: "'vpn' in enabled_services"
+
 
 # A checklist for whoever owns the DNS zone. Plain A records ("DNS only": no HTTP proxy).
 - name: Show the DNS records this installation needs

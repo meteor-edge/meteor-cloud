@@ -71,6 +71,12 @@ class TerraformRunner:
             "vpn_placement": cfg.services.vpn.placement,
             "vpn_instance_type": cfg.services.vpn.instance_type,
             "vpn_root_volume_size_gb": cfg.services.vpn.root_volume_size_gb,
+            "mqtt_listen_port": (
+                cfg.services.mqtt.broker_port
+                if cfg.services.mqtt.enabled and cfg.services.mqtt.broker == "bundled"
+                else 0
+            ),
+            "mqtt_allowed_client_cidrs": cfg.services.mqtt.allowed_client_cidrs,
             "platform_domain": cfg.platform.domain or "",
             "dns_zone_id": aws.dns_zone_id.strip(),
             "tags": {

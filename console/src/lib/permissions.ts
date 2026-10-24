@@ -51,8 +51,9 @@ export function canManageEndpoints(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "operator" || role === "developer";
 }
 
+/** Browser SSH is root-capable, so only owners and admins. Prefer /me/access when available. */
 export function canOpenDeviceShell(role: string | undefined): boolean {
-  return role === "owner" || role === "admin" || role === "operator";
+  return role === "owner" || role === "admin";
 }
 
 /** Rollback a finished Deploy (owner/admin only). */

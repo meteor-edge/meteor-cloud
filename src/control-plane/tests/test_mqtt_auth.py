@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -193,3 +194,45 @@ def test_revoke_mqtt_api_rejects_authenticate(client: TestClient, db_session: Se
         json={"username": body["mqtt"]["username"], "password": body["mqtt"]["password"]},
     )
     assert response.json()["result"] == "deny"
+
+
+def test_agent_refetches_mqtt_credentials_with_current_ca(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = _register(client, db_session)
+    device = {"Authorization": f"Bearer {body['device_token']}"}
+    monkeypatch.setattr(get_settings(), "mqtt_enabled", True)
+
+    status = client.get("/api/v1/agent/mqtt", headers=device)
+    assert status.status_code == 200, status.text
+    version = status.json()["config_version"]
+    assert status.json()["enabled"] is True and version
+
+    issued = client.post("/api/v1/agent/mqtt/credentials", headers=device)
+    assert issued.status_code == 200, issued.text
+    fresh = issued.json()
+    assert fresh["config_version"] == version
+    assert fresh["password"] != body["mqtt"]["password"]
+    # Only the newest password authenticates.
+    for password, result in ((body["mqtt"]["password"], "deny"), (fresh["password"], "allow")):
+        response = client.post(
+            "/internal/mqtt/authenticate",
+            headers=INTERNAL,
+            json={"username": fresh["username"], "password": password},
+        )
+        assert response.json()["result"] == result
+
+
+def test_agent_mqtt_endpoints_when_mqtt_is_off(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = _register(client, db_session)
+    device = {"Authorization": f"Bearer {body['device_token']}"}
+    monkeypatch.setattr(get_settings(), "mqtt_enabled", False)
+
+    assert client.get("/api/v1/agent/mqtt", headers=device).json() == {
+        "enabled": False,
+        "config_version": None,
+    }
+    assert client.post("/api/v1/agent/mqtt/credentials", headers=device).status_code == 404
+    assert client.get("/api/v1/agent/mqtt").status_code == 401

@@ -116,7 +116,7 @@ _OPERATOR = _VIEWER | frozenset(
         "device.create",
         "device.update",
         "device.reboot",
-        "device.shell",
+        # device.shell is owner/admin only: a root-capable shell on the device.
         "deployment.create",
         "deployment.cancel",
         "endpoint.create",

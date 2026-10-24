@@ -224,7 +224,7 @@ boot and on every `wg-quick` restart.
 
 ## Browser terminal
 
-Operators with `device.shell` (owner/admin/operator) open **Terminal** on the
+Members with `device.shell` (owner and admin only) open **Terminal** on the
 device page. Flow: JWT → short-lived ticket → WebSocket → SSH gateway →
 `ssh user@{wg_address}` over WireGuard.
 

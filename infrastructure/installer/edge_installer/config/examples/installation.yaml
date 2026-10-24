@@ -43,6 +43,14 @@ services:
     # instance (instance_type, root_volume_size_gb), linked to the API host.
     placement: same_host
 
+  # Device MQTT. bundled: EMQX on the cloud_app host, TLS on 8883 (self-signed CA,
+  # handed to devices with their credentials). external: set broker_host.
+  mqtt:
+    enabled: true
+    broker: bundled
+    allowed_client_cidrs:
+      - 0.0.0.0/0
+
 components:
   postgres:
     enabled: true

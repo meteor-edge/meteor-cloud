@@ -67,3 +67,27 @@ def test_latest_migration_downgrades_and_upgrades(migrations_url: str) -> None:
     _alembic(migrations_url, "upgrade", "head")
     _alembic(migrations_url, "downgrade", "-1")
     _alembic(migrations_url, "upgrade", "head")
+
+
+def test_upgrade_restores_permissions_missing_from_an_older_catalog(migrations_url: str) -> None:
+    # Databases seeded before device.shell existed lacked it, so even owners were denied.
+    _alembic(migrations_url, "upgrade", "head")
+    _alembic(migrations_url, "downgrade", "0021_connectivity_ssh_auth")
+    engine = create_engine(migrations_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM permissions WHERE resource = 'device' AND action = 'shell'"))
+        _alembic(migrations_url, "upgrade", "head")
+        with engine.connect() as connection:
+            granted = connection.scalar(
+                text(
+                    "SELECT count(*) FROM role_permissions rp"
+                    " JOIN permissions p ON p.id = rp.permission_id"
+                    " JOIN roles r ON r.id = rp.role_id"
+                    " WHERE r.key = 'owner' AND r.organization_id IS NULL"
+                    " AND p.resource = 'device' AND p.action = 'shell'"
+                )
+            )
+    finally:
+        engine.dispose()
+    assert granted == 1

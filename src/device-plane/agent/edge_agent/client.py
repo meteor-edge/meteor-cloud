@@ -154,6 +154,12 @@ class EdgeClient:
             bearer=device_token,
         )
 
+    def get_mqtt_status(self, *, device_token: str) -> dict[str, Any]:
+        return self._get("/api/v1/agent/mqtt", bearer=device_token)
+
+    def fetch_mqtt_credentials(self, *, device_token: str) -> dict[str, Any]:
+        return self._post("/api/v1/agent/mqtt/credentials", {}, bearer=device_token)
+
     def get_software(self, *, device_token: str) -> list[dict[str, Any]]:
         """Fetch desired software for this device."""
         result = self._get("/api/v1/agent/software", bearer=device_token)

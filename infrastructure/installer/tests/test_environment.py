@@ -128,3 +128,34 @@ def test_build_ansible_extra_vars_dedicated_gateway_link_endpoint() -> None:
 
     assert extra["vpn_link_endpoint"] == "10.0.0.9:51820"
     assert "vpn_link_endpoint" not in build_ansible_extra_vars(config, _outputs())
+
+def test_build_ansible_extra_vars_enables_bundled_mqtt() -> None:
+    config = load_configuration(EXAMPLE)
+    extra = build_ansible_extra_vars(config, _outputs())
+
+    assert extra["mqtt_enabled"] == "true"
+    assert extra["mqtt_broker"] == "bundled"
+    assert extra["mqtt_broker_port"] == "8883"
+    # Bundled keeps the role defaults (emqx in Compose, the platform host for devices).
+    assert "mqtt_broker_host" not in extra
+    assert "mqtt_public_host" not in extra
+
+
+def test_build_ansible_extra_vars_external_mqtt_uses_broker_host() -> None:
+    config = load_configuration(EXAMPLE)
+    config.services.mqtt.broker = "external"
+    config.services.mqtt.broker_host = "mqtt.example.net"
+    extra = build_ansible_extra_vars(config, _outputs())
+
+    assert extra["mqtt_broker"] == "external"
+    assert extra["mqtt_broker_host"] == "mqtt.example.net"
+    assert extra["mqtt_public_host"] == "mqtt.example.net"
+
+
+def test_build_ansible_extra_vars_disables_mqtt() -> None:
+    config = load_configuration(EXAMPLE)
+    config.services.mqtt.enabled = False
+    extra = build_ansible_extra_vars(config, _outputs())
+
+    assert extra["mqtt_enabled"] == "false"
+    assert "mqtt_broker" not in extra

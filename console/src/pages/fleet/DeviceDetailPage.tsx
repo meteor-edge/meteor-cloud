@@ -13,10 +13,12 @@ import {
   setDeviceEnabled,
   updateDevice,
 } from "@/api/fleet";
+import { getMyAccess } from "@/api/access";
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
 import { DeviceEndpointsPanel } from "@/components/fleet/DeviceEndpointsPanel";
+import { DeviceMqttStatus } from "@/components/fleet/DeviceMqttStatus";
 import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
@@ -71,6 +73,14 @@ export function DeviceDetailPage() {
     queryKey: ["device", organizationId, deviceId, token],
     queryFn: () => getDevice(token!, organizationId, deviceId),
     enabled: Boolean(token && organizationId && deviceId),
+    // Keeps the MQTT status current, like the WireGuard panel.
+    refetchInterval: 15_000,
+  });
+  const accessQuery = useQuery({
+    queryKey: ["my-access", token],
+    queryFn: () => getMyAccess(token!),
+    enabled: Boolean(token),
+    retry: false,
   });
   const typesQuery = useQuery({
     queryKey: ["device-types", organizationId, token],
@@ -86,7 +96,13 @@ export function DeviceDetailPage() {
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
   const canDeploy = canManageDeployments(orgQuery.data?.current_user_role);
   const canEndpoints = canManageEndpoints(orgQuery.data?.current_user_role);
-  const canShell = canOpenDeviceShell(orgQuery.data?.current_user_role);
+  // Effective permissions cover custom roles; the role check is the fallback.
+  const orgAccess = accessQuery.data?.organizations.find(
+    (entry) => entry.organization_id === organizationId,
+  );
+  const canShell = orgAccess
+    ? orgAccess.permissions.includes("device.shell")
+    : canOpenDeviceShell(orgQuery.data?.current_user_role);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
@@ -267,6 +283,7 @@ export function DeviceDetailPage() {
             organizationId={organizationId}
             deviceId={deviceId}
             canManage={canManage}
+            canShell={canShell}
           />
         </div>
       )}
@@ -285,14 +302,7 @@ export function DeviceDetailPage() {
 
       <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
         <h2 className="text-lg font-semibold">MQTT Connection</h2>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Detail label="MQTT configured" value={device.mqtt_configured ? "yes" : "no"} />
-          <Detail label="Last MQTT status" value={device.mqtt_status ?? "unknown"} />
-          <Detail
-            label="Last status timestamp"
-            value={device.mqtt_status_at ? formatDateTime(device.mqtt_status_at) : "—"}
-          />
-        </div>
+        <DeviceMqttStatus device={device} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Detail label="Device ID" value={device.id} />
           <Detail

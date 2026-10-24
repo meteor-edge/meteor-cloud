@@ -7,7 +7,7 @@ installation:
 platform:
   version: "0.2.0"
   # Public hostname. With aws.dns_zone_id, apply creates the A records.
-  domain: null
+  domain: demo.meteor-edge.io
   public_url: null
 
 aws:
@@ -20,7 +20,7 @@ aws:
   ssh_private_key_path: ~/.ssh/edge-platform.pem
   root_volume_size_gb: 30
   assign_elastic_ip: true
-  dns_zone_id: ""
+  dns_zone_id: Z01257273R31PYCK7HDEK
 
 network:
   allowed_ssh_cidrs:
@@ -41,6 +41,14 @@ services:
     # same_host: WireGuard on the cloud_app instance. dedicated: its own EC2
     # instance (instance_type, root_volume_size_gb), linked to the API host.
     placement: same_host
+
+  # Device MQTT. bundled: EMQX on the cloud_app host, TLS on 8883 (self-signed CA,
+  # handed to devices with their credentials). external: set broker_host.
+  mqtt:
+    enabled: true
+    broker: bundled
+    allowed_client_cidrs:
+      - 0.0.0.0/0
 
 components:
   postgres:

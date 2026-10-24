@@ -41,11 +41,17 @@ const connectivity: DeviceConnectivity = {
   updated_at: "2026-10-23T10:00:00Z",
 };
 
-function renderPanel(canManage = false) {
+function renderPanel(canManage = false, canShell = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <DeviceNetworkPanel token="t" organizationId="org-1" deviceId="dev-1" canManage={canManage} />
+      <DeviceNetworkPanel
+        token="t"
+        organizationId="org-1"
+        deviceId="dev-1"
+        canManage={canManage}
+        canShell={canShell}
+      />
     </QueryClientProvider>,
   );
 }
@@ -54,6 +60,13 @@ describe("DeviceNetworkPanel", () => {
   beforeEach(() => {
     getMock.mockReset();
     reenrollMock.mockReset();
+  });
+
+  it("hides the SSH command from members who cannot open a shell", async () => {
+    getMock.mockResolvedValue(connectivity);
+    renderPanel(false, false);
+    expect(await screen.findByText("10.8.0.2")).toBeInTheDocument();
+    expect(screen.queryByText(/meteorcloud-ssh/)).not.toBeInTheDocument();
   });
 
   it("shows the internal IP and the SSH command", async () => {
@@ -109,7 +122,12 @@ describe("DeviceNetworkPanel", () => {
       wg_address: null,
       connected: false,
     });
-    reenrollMock.mockResolvedValue({ ...connectivity, status: "pending", state: "pending", wg_address: null });
+    reenrollMock.mockResolvedValue({
+      ...connectivity,
+      status: "pending",
+      state: "pending",
+      wg_address: null,
+    });
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderPanel(true);
     expect(await screen.findByText("Revoked")).toBeInTheDocument();
