@@ -1,6 +1,6 @@
 # Contributing to MeteorCloud
 
-This is **one git repository**. Operators install images or run `make up`. Contributors clone the tree. Devices should not need a cloud checkout to install `meteorcli` (that Release artifact is the intended path; today the installer still runs from `src/device-plane/agent/`).
+This is **one git repository**. Operators install images or run `make up`. Contributors clone the tree. Devices install `meteorcli` from a GitHub Release, not a cloud checkout.
 
 Coding agents: follow [AGENTS.md](AGENTS.md).
 
@@ -18,16 +18,13 @@ make up PLATFORM_DOMAIN=fleet.example.com
 
 Details: [docs/install-quickstart.md](docs/install-quickstart.md). Laptop testing is `make dev` ([docs/getting-started.md](docs/getting-started.md)), not `make up`.
 
-**Device agent**
-
-Today, copy or clone enough to reach the agent directory, then:
+**Device agent** (no cloud clone):
 
 ```bash
-cd src/device-plane/agent
-./installcli.sh
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
 ```
 
-See [docs/meteorcli.md](docs/meteorcli.md) and [src/device-plane/agent/README.md](src/device-plane/agent/README.md). A GitHub Release tarball so devices never clone this repo is **not implemented yet**.
+See [docs/meteorcli.md](docs/meteorcli.md). Maintainers: `make agent-dist` then `git tag agent-v<version> && git push origin agent-v<version>`.
 
 **Bugs and features:** [GitHub Issues](https://github.com/meteor-edge/meteor-cloud/issues).
 
@@ -67,6 +64,7 @@ make test                  # installer, control-plane, data-plane, agent, consol
 make backend-test
 make data-plane-test
 make agent-test
+make agent-dist            # pack meteorcli for a GitHub Release
 make console-test
 make check-plane-imports   # planes must not import each other
 make lint

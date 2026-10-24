@@ -20,7 +20,7 @@ These rules apply to **any** coding agent working in this repository (Cursor, Cl
 - VPN is an optional deploy service, not a reason to restructure the repo.
 - Console talks only to the control-plane API. Production uses same-origin (`window.location.origin`).
 - Device types are catalog rows, not separate codebases.
-- The device agent source stays in this repo. Devices should install a published artifact, not clone the cloud (that Release pipeline is not built yet; do not pretend it exists).
+- The device agent source stays in this repo. Devices install from a GitHub Release (`install-meteorcli.sh`), not by cloning the cloud. Publish with tag `agent-v<pyproject-version>`.
 
 ## Directory notes
 

@@ -47,8 +47,8 @@ Pick one path.
 2. On the device:
 
 ```bash
-cd src/device-plane/agent
-./installcli.sh
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
+# from a cloud checkout instead: cd src/device-plane/agent && ./installcli.sh
 meteorcli register --server http://localhost:8000 --token reg_... --name edge-01
 meteorcli run
 ```
@@ -61,6 +61,7 @@ Details: [Registration tokens](fleet/registration-tokens.md), [Device registrati
 2. On the device:
 
 ```bash
+# install meteorcli first (same curl as Path A) if the device does not have it
 meteorcli config --domain localhost:8000 --api-key key_...
 meteorcli test
 meteorcli request-token --name edge-01

@@ -9,7 +9,7 @@ MeteorCloud is modular. Planes do not import each other’s internals; they talk
 | **Git repository** | Where source is edited | One repo (`meteor-cloud`) |
 | **Code / module** | Folders and packages | `console/`, `src/control-plane/` (`app`), `src/data-plane/` (`data_plane`), `src/device-plane/agent/` (`meteorcli`, `edge_agent`), `src/device-plane/gateway/`, `src/device-plane/runtime/` |
 | **Deployable service** | What Compose/Helm start | API, console, optional data-plane + EMQX, optional VPN on the **host** |
-| **Published artifact** | What a machine downloads | Container images; intended `meteorcli` GitHub Release tarball (not built yet) |
+| **Published artifact** | What a machine downloads | Container images; `meteorcli` GitHub Release (`agent-v*`) |
 
 VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install enables them. Device types in the API are catalog rows ([Device types](fleet/device-types.md)), not extra code trees.
 
@@ -23,7 +23,7 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 6. Deployment infrastructure stays under `deploy/` and `infrastructure/`, not domain modules.
 7. VPN is an optional deploy capability (Compose + Ansible). It is not a reason to split the repo.
 8. The console keeps same-origin API access in production (`window.location.origin`). Locally it uses `VITE_API_BASE_URL`.
-9. The device agent must be installable without cloning this repository. **Today** `installcli.sh` still `pip install`s the agent directory and needs sibling `src/device-plane/runtime/`. A GitHub Release tarball is the target; it is not implemented.
+9. The device agent must be installable without cloning this repository. Publish with `git tag agent-v<pyproject-version>` (CI). Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `./installcli.sh` in `src/device-plane/agent/` (needs sibling `runtime/`).
 10. Device types are configuration, not automatically separate codebases.
 
 `make check-plane-imports` enforces rule 3 on `src/`.
@@ -123,9 +123,9 @@ Keep **one** data-plane MQTT subscriber until shared subscriptions exist.
 
 Source: [`src/device-plane/agent/`](../src/device-plane/agent/). Runtime adapters (systemd, docker, compose) live in sibling [`src/device-plane/runtime/`](../src/device-plane/runtime/) and are force-included in the wheel.
 
-**Today:** `./installcli.sh` from that directory (`pip install` of the local tree). A device that only wants the agent still needs those two directories.
+**On a device:** `curl` `install-meteorcli.sh` from GitHub Releases (`latest` or `METEORCLI_VERSION=`). The tarball is agent + `runtime` + `installcli.sh` only (`make agent-dist`). SHA256SUMS is checked when `sha256sum` is present.
 
-**Target (not implemented):** GitHub Release tag `agent-v*`, assets `meteorcli-<version>.tar.gz` (agent + `runtime` + `installcli.sh` only, no secrets) and `install-meteorcli.sh`. Devices `curl` the installer and never clone this repo. Remaining work: pack script (`make agent-dist`), remote install mode, CI release on tag, console/docs one-liner. Version is the agent `pyproject.toml` version. Integrity verification (checksums) is not implemented.
+**Publish:** tag `agent-v<version>` matching [`pyproject.toml`](../src/device-plane/agent/pyproject.toml); workflow [`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml). From a checkout: `./installcli.sh` in the agent directory.
 
 ## Provider selection
 

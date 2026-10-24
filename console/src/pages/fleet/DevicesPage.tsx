@@ -32,10 +32,16 @@ import { cn, formatDateTime, formatRelativeTime } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
 
+const METEORCLI_INSTALL =
+  "curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash";
+
 function buildRegisterCommand(serverOrigin: string, token: string): string {
-  return ["meteorcli register \\", `  --server ${serverOrigin} \\`, `  --token ${token}`].join(
-    "\n",
-  );
+  return [
+    METEORCLI_INSTALL,
+    "meteorcli register \\",
+    `  --server ${serverOrigin} \\`,
+    `  --token ${token}`,
+  ].join("\n");
 }
 
 export function DevicesPage() {
