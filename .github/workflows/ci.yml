@@ -275,7 +275,19 @@ jobs:
       - name: Destroy with Ansible
         if: always()
         working-directory: deploy/ansible
-        run: ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml -e platform_destroy_data=true playbooks/destroy.yml
+        run: |
+          # Recreate inputs: this step runs even when deploy was skipped or
+          # failed before writing /tmp/inventory.ini and /tmp/vars.yml.
+          printf '[platform]\nlocalhost ansible_connection=local ansible_python_interpreter=%s\n' "$(command -v python3)" > /tmp/inventory.ini
+          cat > /tmp/vars.yml <<'EOF'
+          platform_root: /tmp/meteorcloud
+          image_source: registry
+          image_pull_policy: never
+          backend_image: meteorcloud/backend:ci
+          frontend_image: meteorcloud/console:ci
+          data_plane_image: meteorcloud/data-plane:ci
+          EOF
+          ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml -e platform_destroy_data=true playbooks/destroy.yml
 
   helm:
     name: Helm (lint + template)
