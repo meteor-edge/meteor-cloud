@@ -161,7 +161,7 @@ class ShellService:
         row.status = ShellSessionStatus.OPEN.value
         row.opened_at = datetime.now(UTC)
         self.session.commit()
-        return row, host, self.settings.shell_ssh_port, self.settings.shell_ssh_user
+        return row, host, self.settings.shell_ssh_port, self.connectivity.ssh_user_for(peer)
 
     def close_session(self, session_id: uuid.UUID, *, actor: User | None = None) -> None:
         row = self.session.get(DeviceShellSession, session_id)

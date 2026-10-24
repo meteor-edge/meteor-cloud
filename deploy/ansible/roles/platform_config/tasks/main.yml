@@ -110,19 +110,46 @@
 - name: Create the browser SSH gateway key
   when: shell_provider == 'ssh_gateway'
   block:
+    - name: Create the group that may read the gateway key
+      ansible.builtin.group:
+        name: "{{ shell_ssh_group }}"
+        state: present
+
     - name: Create the SSH gateway key directory
       ansible.builtin.file:
         path: "{{ shell_ssh_dir }}"
         state: directory
         owner: root
-        group: root
-        mode: "0700"
+        group: "{{ shell_ssh_group }}"
+        mode: "0750"
 
-    # The API (root in its container) uses it to open `ssh root@<wg address>` for the browser terminal.
+    # The API (root in its container) uses it to open SSH to the device WireGuard address.
     - name: Generate the SSH gateway key once
       ansible.builtin.command:
         cmd: ssh-keygen -q -t ed25519 -N "" -C meteorcloud-shell-gateway -f {{ shell_ssh_dir }}/id_ed25519
         creates: "{{ shell_ssh_dir }}/id_ed25519"
+
+    - name: Restrict the gateway private key to the shell group
+      ansible.builtin.file:
+        path: "{{ shell_ssh_dir }}/id_ed25519"
+        owner: root
+        group: "{{ shell_ssh_group }}"
+        mode: "0640"
+
+    - name: Add the install user to the shell group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: "{{ shell_ssh_group }}"
+        append: true
+      when: ansible_user is defined and ansible_user != 'root'
+
+    - name: Add ubuntu to the shell group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: "{{ shell_ssh_group }}"
+        append: true
+      when: ansible_user | default('') == 'root'
+      failed_when: false
 
     - name: Read the SSH gateway public key
       ansible.builtin.slurp:
@@ -132,6 +159,14 @@
     - name: Publish the SSH gateway public key to devices
       ansible.builtin.set_fact:
         shell_gateway_public_key: "{{ shell_gateway_pub.content | b64decode | trim }}"
+
+    - name: Install meteorcloud-ssh helper
+      ansible.builtin.template:
+        src: meteorcloud-ssh.j2
+        dest: /usr/local/bin/meteorcloud-ssh
+        owner: root
+        group: root
+        mode: "0755"
 
 - name: Render Compose environment file
   ansible.builtin.template:

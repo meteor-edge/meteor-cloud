@@ -68,12 +68,15 @@ class ConnectivityService:
             last_handshake_at=row.last_handshake_at,
             connected=self.handshake_is_fresh(row),
             server_address=self.settings.wireguard_server_address.split("/", 1)[0],
-            ssh_user=self.settings.shell_ssh_user,
+            ssh_user=self.ssh_user_for(row),
             ssh_port=self.settings.shell_ssh_port,
             revoked_at=row.revoked_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+    def ssh_user_for(self, row: DeviceConnectivity) -> str:
+        return (row.ssh_user or "").strip() or self.settings.shell_ssh_user
 
     def handshake_is_fresh(self, row: DeviceConnectivity) -> bool:
         if row.status != ConnectivityStatus.ACTIVE.value or row.last_handshake_at is None:
@@ -136,6 +139,8 @@ class ConnectivityService:
             row.provider = provider.name
             row.status = ConnectivityStatus.ACTIVE.value
             row.revoked_at = None
+        if payload.ssh_user:
+            row.ssh_user = payload.ssh_user
         self.session.commit()
         self.session.refresh(row)
         address = str(row.wg_address)
@@ -147,7 +152,7 @@ class ConnectivityService:
             server_endpoint=self.settings.wireguard_server_endpoint,
             allowed_ips=provider.client_allowed_ips(self.settings.wireguard_server_address),
             persistent_keepalive=self.settings.wireguard_persistent_keepalive,
-            ssh_user=self.settings.shell_ssh_user,
+            ssh_user=self.ssh_user_for(row),
             ssh_gateway_public_key=self.settings.shell_gateway_public_key or None,
         )
 

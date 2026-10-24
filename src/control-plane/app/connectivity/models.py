@@ -35,6 +35,8 @@ class DeviceConnectivity(Base, TimestampMixin):
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="wireguard")
     wg_public_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     wg_address: Mapped[str | None] = mapped_column(INET, nullable=True, unique=True)
+    # Login the agent installs the browser-SSH key for (pi, ubuntu, …). Empty: SHELL_SSH_USER.
+    ssh_user: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

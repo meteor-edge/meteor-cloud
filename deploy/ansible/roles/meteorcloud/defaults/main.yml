@@ -164,6 +164,9 @@ apps_base_domain: "{{ platform_domain | default('meteor-edge.com', true) }}"
 # Override with shell_provider: none if you want the tunnel without the terminal.
 shell_provider: "{{ 'ssh_gateway' if 'vpn' in enabled_services else 'none' }}"
 shell_ssh_dir: "{{ platform_root }}/shell"
+# Login users in this group can run meteorcloud-ssh without sudo. The private
+# key stays 0640 (not world-readable).
+shell_ssh_group: meteorcloud-shell
 shell_ssh_identity_file: "{{ '/run/meteorcloud/shell/id_ed25519' if shell_provider == 'ssh_gateway' else '' }}"
 shell_gateway_public_key: ""
 # Region for Traefik's Route53 DNS-01 (wildcard app certificates). Credentials come from the

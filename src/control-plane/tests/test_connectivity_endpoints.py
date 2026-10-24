@@ -25,6 +25,18 @@ WG_KEY_A = base64.b64encode(bytes(range(32))).decode()
 WG_KEY_B = base64.b64encode(bytes(range(32, 64))).decode()
 
 
+def test_wireguard_register_request_accepts_device_ssh_user() -> None:
+    from pydantic import ValidationError
+
+    from app.connectivity.schemas import AgentWireGuardRegisterRequest
+
+    body = AgentWireGuardRegisterRequest(public_key=WG_KEY_A, ssh_user="  pi  ")
+    assert body.ssh_user == "pi"
+    assert AgentWireGuardRegisterRequest(public_key=WG_KEY_A).ssh_user is None
+    with pytest.raises(ValidationError):
+        AgentWireGuardRegisterRequest(public_key=WG_KEY_A, ssh_user="../root")
+
+
 def _device_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
@@ -58,6 +70,18 @@ def test_wireguard_register_allocates_address_and_revokes(
     assert shown["ssh_user"] == "root"
     assert shown["ssh_port"] == 22
     assert shown["connected"] is False  # no handshake reported yet
+
+    as_pi = client.post(
+        "/api/v1/agent/connectivity/wireguard",
+        headers=_device_headers(reg["device_token"]),
+        json={"public_key": WG_KEY_A, "ssh_user": "pi"},
+    )
+    assert as_pi.status_code == 200, as_pi.text
+    listed_pi = client.get(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/connectivity",
+        headers=headers,
+    )
+    assert listed_pi.json()["ssh_user"] == "pi"
 
     revoked = client.post(
         f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/connectivity/revoke",

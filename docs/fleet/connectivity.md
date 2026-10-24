@@ -118,10 +118,10 @@ See [`deploy/ansible/README.md`](../../deploy/ansible/README.md#wireguard-gatewa
 Install `wireguard` / `wireguard-tools` on the Pi. `meteorcli run` (as the
 device user; `installcli.sh` allows passwordless `sudo` for `wg` / `wg-quick`):
 
-1. Generates a keypair under `/etc/meteorcli/wireguard/`
-2. POSTs the **public** key to `/api/v1/agent/connectivity/wireguard`
+1. Generates a keypair under `~/.config/meteorcli/wireguard/` (or `/etc/meteorcli` for the service)
+2. POSTs the **public** key and this login (`pi`, `ubuntu`, …) to `/api/v1/agent/connectivity/wireguard`
 3. Writes `wg0.conf` and runs `wg-quick up`
-4. Installs `SHELL_GATEWAY_PUBLIC_KEY` into `authorized_keys` when configured
+4. Installs `SHELL_GATEWAY_PUBLIC_KEY` into that user's `authorized_keys` when configured
 
 `sshd` must be running for browser SSH. Do not forward port 22 on the home
 router.
@@ -130,13 +130,16 @@ router.
 
 The device page's **WireGuard network** card shows the device's internal IP
 (e.g. `10.8.0.2`), whether its tunnel is connected (a recent handshake), and the
-SSH command to reach it, e.g. `ssh root@10.8.0.2` (`SHELL_SSH_USER`, plus `-p`
-when `SHELL_SSH_PORT` is not 22). Run it on the MeteorCloud server with the
-browser-terminal key, which every device trusts once it joins:
+SSH command to reach it (`ssh pi@10.8.0.2` when `meteorcli` runs as `pi`).
+The agent reports that user; `SHELL_SSH_USER` (default `root`) is only the
+fallback. On the MeteorCloud server (`make up` installs the helper):
 
 ```bash
-sudo ssh -i /opt/edge-platform/shell/id_ed25519 root@10.8.0.2   # Ansible installs
+meteorcloud-ssh pi@10.8.0.2
 ```
+
+That uses the gateway key (`id_ed25519` under `/opt/edge-platform/shell`).
+ed25519 is only the key algorithm (short modern SSH key), not a password.
 
 Devices cannot reach each other; only the server (`10.8.0.1`) can reach them.
 

@@ -1,0 +1,14 @@
+#!/bin/sh
+# SSH from this host to a device over WireGuard (same key as the browser terminal).
+set -eu
+KEY="{{ shell_ssh_dir }}/id_ed25519"
+if [ ! -r "${KEY}" ]; then
+  echo "meteorcloud-ssh: cannot read ${KEY}." >&2
+  echo "Ask to be added to group {{ shell_ssh_group }}, then log out and back in." >&2
+  exit 1
+fi
+if [ "$#" -lt 1 ]; then
+  echo "usage: meteorcloud-ssh [user@]10.8.0.x [ssh options...]" >&2
+  exit 2
+fi
+exec ssh -i "${KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "$@"

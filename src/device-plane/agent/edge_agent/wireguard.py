@@ -192,11 +192,34 @@ def refresh_endpoint(
         logger.info("WireGuard server %s now at %s (was %s)", host, target, current or "unset")
 
 
+def local_ssh_user() -> str:
+    """User the browser terminal should SSH as (the account that owns authorized_keys)."""
+    sudo_user = (os.environ.get("SUDO_USER") or "").strip()
+    if os.geteuid() == 0 and sudo_user and sudo_user != "root":
+        return sudo_user
+    try:
+        import pwd
+
+        return pwd.getpwuid(os.getuid()).pw_name
+    except (ImportError, KeyError, OSError):
+        return (os.environ.get("USER") or "root").strip() or "root"
+
+
+def ssh_authorized_keys_path(username: str | None = None) -> Path:
+    name = username or local_ssh_user()
+    try:
+        import pwd
+
+        return Path(pwd.getpwnam(name).pw_dir) / ".ssh" / "authorized_keys"
+    except (ImportError, KeyError, OSError):
+        return Path.home() / ".ssh" / "authorized_keys"
+
+
 def install_gateway_ssh_key(public_key: str, *, authorized_keys: Path | None = None) -> None:
     key = (public_key or "").strip()
     if not key:
         return
-    path = authorized_keys or Path.home() / ".ssh" / "authorized_keys"
+    path = authorized_keys or ssh_authorized_keys_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8") if path.is_file() else ""
     if key in existing:
@@ -219,7 +242,11 @@ def sync_connectivity(
         return None
     try:
         private_key, public_key = ensure_keypair(wireguard_dir(config_dir), runner=runner)
-        response = client.register_wireguard(device_token=device_token, public_key=public_key)
+        response = client.register_wireguard(
+            device_token=device_token,
+            public_key=public_key,
+            ssh_user=local_ssh_user(),
+        )
         server_public_key = str(response.get("server_public_key") or "")
         server_endpoint = str(response.get("server_endpoint") or "")
         conf, changed = write_client_config(

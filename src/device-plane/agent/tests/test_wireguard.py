@@ -14,6 +14,7 @@ from edge_agent.wireguard import (
     apply_interface,
     ensure_keypair,
     install_gateway_ssh_key,
+    local_ssh_user,
     refresh_endpoint,
     sync_connectivity,
     write_client_config,
@@ -116,7 +117,10 @@ def test_sync_connectivity_does_not_upload_private_key(tmp_path: Path) -> None:
         response = sync_connectivity(client, "dev_token", directory, runner=runner)
 
     assert response is not None
-    client.register_wireguard.assert_called_once_with(device_token="dev_token", public_key="PUBLICKEY")
+    client.register_wireguard.assert_called_once()
+    assert client.register_wireguard.call_args.kwargs["public_key"] == "PUBLICKEY"
+    assert "ssh_user" in client.register_wireguard.call_args.kwargs
+    assert "SECRETKEY" not in str(client.register_wireguard.call_args)
     assert "SECRETKEY" not in str(client.register_wireguard.call_args)
 
 
@@ -186,6 +190,12 @@ def test_refresh_endpoint_skips_ip_endpoints_and_unchanged_names() -> None:
     refresh_endpoint("wg0", server_public_key="SERVER", server_endpoint="wg.example.com:51820",
                      runner=runner, resolve=lambda host: "203.0.113.1", now=lambda: 5000)
     assert not any(call[:2] == ["wg", "set"] for call in calls)
+
+
+def test_local_ssh_user_prefers_sudo_user(monkeypatch) -> None:
+    monkeypatch.setattr("edge_agent.wireguard.os.geteuid", lambda: 0)
+    monkeypatch.setenv("SUDO_USER", "pi")
+    assert local_ssh_user() == "pi"
 
 
 def test_elevate_wireguard_uses_sudo_only_for_privileged_commands(monkeypatch) -> None:

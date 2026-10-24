@@ -10,11 +10,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class AgentWireGuardRegisterRequest(BaseModel):
     public_key: str = Field(min_length=40, max_length=64)
+    ssh_user: str | None = Field(default=None, max_length=32)
 
     @field_validator("public_key")
     @classmethod
     def _strip_key(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("ssh_user")
+    @classmethod
+    def _normalize_ssh_user(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        name = value.strip()
+        if not name:
+            return None
+        if name in {".", ".."} or "/" in name or "\\" in name:
+            raise ValueError("Invalid SSH user.")
+        if not name.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("Invalid SSH user.")
+        return name
 
 
 class AgentWireGuardRegisterResponse(BaseModel):

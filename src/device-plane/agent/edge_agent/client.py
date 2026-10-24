@@ -128,10 +128,15 @@ class EdgeClient:
     def heartbeat(self, *, device_token: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._post("/api/v1/agent/heartbeat", payload, bearer=device_token)
 
-    def register_wireguard(self, *, device_token: str, public_key: str) -> dict[str, Any]:
+    def register_wireguard(
+        self, *, device_token: str, public_key: str, ssh_user: str | None = None
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"public_key": public_key}
+        if ssh_user:
+            body["ssh_user"] = ssh_user
         return self._post(
             "/api/v1/agent/connectivity/wireguard",
-            {"public_key": public_key},
+            body,
             bearer=device_token,
         )
 
