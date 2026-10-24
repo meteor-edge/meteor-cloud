@@ -1,28 +1,32 @@
 #!/bin/sh
-# SSH from this host to a device over WireGuard (same key as the browser terminal).
+# SSH from this host to a device over WireGuard.
 #   meteorcloud-ssh [ssh options] [user@]<device-id | 10.8.0.x> [command]
 # The device is looked up in MeteorCloud: revoked, disabled and offline devices are refused,
-# and its SSH host key (pinned at enrollment) must match. Without Docker access the lookup is
-# skipped and the host key is trusted on first use (~/.config/meteorcloud/shell/known_hosts).
-# OpenSSH requires the private key to be 0600, so operators use a personal copy.
+# and its SSH host key (pinned at enrollment) must match. Devices that trust the SSH
+# certificate authority get a throw-away key and a short-lived certificate for that device
+# only (recorded in the audit log). Others use the shared gateway key; OpenSSH requires it
+# to be 0600, so operators use a personal copy. Without Docker access the lookup is skipped
+# and the host key is trusted on first use (~/.config/meteorcloud/shell/known_hosts).
 set -eu
 PLATFORM_KEY="{{ shell_ssh_dir }}/id_ed25519"
 USER_DIR="${HOME}/.config/meteorcloud/shell"
 USER_KEY="${USER_DIR}/id_ed25519"
-KEY=""
-if [ -r "${USER_KEY}" ]; then
-  KEY="${USER_KEY}"
-elif [ -r "${PLATFORM_KEY}" ]; then
-  KEY="${PLATFORM_KEY}"
-else
-  echo "meteorcloud-ssh: no readable gateway key." >&2
-  echo "Expected ${USER_KEY} (0600). Re-run make up, or:" >&2
-  echo "  mkdir -p ~/.config/meteorcloud/shell" >&2
-  echo "  sudo cp ${PLATFORM_KEY} ~/.config/meteorcloud/shell/id_ed25519" >&2
-  echo "  sudo chown \"\$USER:\$USER\" ~/.config/meteorcloud/shell/id_ed25519" >&2
-  echo "  chmod 600 ~/.config/meteorcloud/shell/id_ed25519" >&2
-  exit 1
-fi
+
+gateway_key() {
+  if [ -r "${USER_KEY}" ]; then
+    KEY="${USER_KEY}"
+  elif [ -r "${PLATFORM_KEY}" ]; then
+    KEY="${PLATFORM_KEY}"
+  else
+    echo "meteorcloud-ssh: no readable gateway key." >&2
+    echo "Expected ${USER_KEY} (0600). Re-run make up, or:" >&2
+    echo "  mkdir -p ~/.config/meteorcloud/shell" >&2
+    echo "  sudo cp ${PLATFORM_KEY} ~/.config/meteorcloud/shell/id_ed25519" >&2
+    echo "  sudo chown \"\$USER:\$USER\" ~/.config/meteorcloud/shell/id_ed25519" >&2
+    echo "  chmod 600 ~/.config/meteorcloud/shell/id_ed25519" >&2
+    exit 1
+  fi
+}
 
 # Find the destination like ssh does: the first word that is not an option or an option's value.
 POSITION=0
@@ -50,26 +54,43 @@ esac
 
 PORT=""
 KNOWN=""
+AUTH="key"
+WORK=""
+trap 'rm -rf "${WORK}"' EXIT INT TERM
 BACKEND="$(docker ps -q --filter label=com.docker.compose.project={{ compose_project_name }} \
   --filter label=com.docker.compose.service=backend 2>/dev/null | head -n 1 || true)"
 if [ -n "${BACKEND}" ]; then
   # Exit 3: the device is unknown, revoked, disabled or offline (message on stderr).
   RESOLVED="$(docker exec "${BACKEND}" python -m app.cli shell-target "${TARGET}")" || exit $?
-  # Fields: user, WireGuard address, SSH port, pinned host key ("-" when the agent never reported one).
+  # Fields: user, WireGuard address, SSH port, pinned host key ("-" when never reported),
+  # and "ca" when the device accepts certificates (missing from older servers).
   RESOLVED_USER="$(printf '%s' "${RESOLVED}" | cut -f1)"
   TARGET="$(printf '%s' "${RESOLVED}" | cut -f2)"
   PORT="$(printf '%s' "${RESOLVED}" | cut -f3)"
   HOST_KEY="$(printf '%s' "${RESOLVED}" | cut -f4)"
+  AUTH="$(printf '%s' "${RESOLVED}" | cut -s -f5)"
   LOGIN="${LOGIN:-${RESOLVED_USER}}"
+  WORK="$(mktemp -d)"
   if [ "${HOST_KEY}" != "-" ]; then
-    KNOWN="$(mktemp)"
-    trap 'rm -f "${KNOWN}"' EXIT INT TERM
+    KNOWN="${WORK}/known_hosts"
     if [ "${PORT}" = "22" ]; then NAME="${TARGET}"; else NAME="[${TARGET}]:${PORT}"; fi
     printf '%s %s\n' "${NAME}" "${HOST_KEY}" > "${KNOWN}"
   fi
 else
   echo "meteorcloud-ssh: cannot reach the MeteorCloud API container (needs Docker access);" >&2
   echo "  connecting without checking the device's status or pinned host key." >&2
+fi
+
+IDENTITY=""
+if [ "${AUTH}" = "ca" ]; then
+  # A key that lives for this connection only, certified for this one device.
+  ssh-keygen -q -t ed25519 -N "" -C meteorcloud-ssh -f "${WORK}/id_ed25519"
+  docker exec -i "${BACKEND}" python -m app.cli sign-ssh-cert "${TARGET}" \
+    --identity "$(id -un)@$(hostname)" < "${WORK}/id_ed25519.pub" > "${WORK}/id_ed25519-cert.pub" || exit $?
+  IDENTITY="-i ${WORK}/id_ed25519 -o CertificateFile=${WORK}/id_ed25519-cert.pub"
+else
+  gateway_key
+  IDENTITY="-i ${KEY}"
 fi
 
 # Same arguments in the same order, with the destination replaced by the trusted address.
@@ -86,11 +107,13 @@ done
 shift "${COUNT}"
 
 if [ -n "${KNOWN}" ]; then
-  # Pinned host key: a different key is refused. Not exec, so the trap removes the file.
-  ssh -i "${KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+  # Pinned host key: a different key is refused. Not exec, so the trap removes the files.
+  # shellcheck disable=SC2086 # IDENTITY holds paths from mktemp/known locations, no spaces.
+  ssh ${IDENTITY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
     -o UserKnownHostsFile="${KNOWN}" -o GlobalKnownHostsFile=/dev/null -p "${PORT}" "$@"
   exit $?
 fi
 mkdir -p "${USER_DIR}"
-exec ssh -i "${KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+# shellcheck disable=SC2086
+ssh ${IDENTITY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
   -o UserKnownHostsFile="${USER_DIR}/known_hosts" ${PORT:+-p "${PORT}"} "$@"

@@ -149,6 +149,32 @@
       ansible.builtin.set_fact:
         shell_gateway_public_key: "{{ shell_gateway_pub.content | b64decode | trim }}"
 
+    # Signs per-session certificates; devices trust it for their own principal only.
+    - name: Generate the SSH user CA once
+      ansible.builtin.command:
+        cmd: ssh-keygen -q -t ed25519 -N "" -C meteorcloud-ssh-ca -f {{ shell_ssh_dir }}/ca
+        creates: "{{ shell_ssh_dir }}/ca"
+      when: shell_ssh_ca_enabled | bool
+
+    - name: Lock the SSH user CA private key
+      ansible.builtin.file:
+        path: "{{ shell_ssh_dir }}/ca"
+        owner: root
+        group: root
+        mode: "0600"
+      when: shell_ssh_ca_enabled | bool
+
+    - name: Read the SSH user CA public key
+      ansible.builtin.slurp:
+        src: "{{ shell_ssh_dir }}/ca.pub"
+      register: shell_ca_pub
+      when: shell_ssh_ca_enabled | bool
+
+    - name: Publish the SSH user CA to devices
+      ansible.builtin.set_fact:
+        shell_ssh_ca_public_key: "{{ shell_ca_pub.content | b64decode | trim }}"
+      when: shell_ssh_ca_enabled | bool
+
     - name: Read local login accounts
       ansible.builtin.getent:
         database: passwd
@@ -184,7 +210,14 @@
         mode: "0600"
         remote_src: true
       loop: "{{ shell_ssh_operator_names }}"
-      when: item in getent_passwd
+      when: item in getent_passwd and not (shell_gateway_key_retired | bool)
+
+    - name: Remove operator copies of the retired gateway key
+      ansible.builtin.file:
+        path: "{{ getent_passwd[item][4] }}/.config/meteorcloud/shell/id_ed25519"
+        state: absent
+      loop: "{{ shell_ssh_operator_names }}"
+      when: item in getent_passwd and shell_gateway_key_retired | bool
 
     - name: Install meteorcloud-ssh helper
       ansible.builtin.template:

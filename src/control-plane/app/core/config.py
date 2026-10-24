@@ -155,6 +155,12 @@ class Settings(BaseSettings):
     shell_gateway_public_key: str = Field(default="", alias="SHELL_GATEWAY_PUBLIC_KEY")
     # Refuse SSH to devices that never reported a host key (older agents) instead of trusting on first use.
     shell_require_host_key: bool = Field(default=False, alias="SHELL_REQUIRE_HOST_KEY")
+    # SSH user CA: each session signs a fresh key for one device (principal meteorcloud-device-<id>).
+    shell_ssh_ca_file: str = Field(default="", alias="SHELL_SSH_CA_FILE")
+    shell_ssh_ca_public_key: str = Field(default="", alias="SHELL_SSH_CA_PUBLIC_KEY")
+    shell_ssh_cert_ttl_seconds: int = Field(default=120, ge=30, le=3600, alias="SHELL_SSH_CERT_TTL_SECONDS")
+    # Once every device reports ssh_auth=ca: stop handing out the shared gateway key.
+    shell_gateway_key_retired: bool = Field(default=False, alias="SHELL_GATEWAY_KEY_RETIRED")
     shell_ticket_ttl_seconds: int = Field(default=60, alias="SHELL_TICKET_TTL_SECONDS")
     shell_idle_timeout_seconds: int = Field(default=600, alias="SHELL_IDLE_TIMEOUT_SECONDS")
     shell_max_duration_seconds: int = Field(default=3600, alias="SHELL_MAX_DURATION_SECONDS")

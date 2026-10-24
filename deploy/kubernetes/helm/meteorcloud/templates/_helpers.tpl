@@ -89,6 +89,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq $v.connectivity.shell.provider "ssh_gateway") (or (ne $v.connectivity.provider "wireguard") (not $v.connectivity.shell.existingSecret)) }}
 {{- fail "connectivity.shell.provider=ssh_gateway needs connectivity.provider=wireguard and connectivity.shell.existingSecret (id_ed25519, id_ed25519.pub)" }}
 {{- end }}
+{{- if and $v.connectivity.apps.proxy.enabled (or (ne $v.connectivity.provider "wireguard") (not $v.connectivity.apps.baseDomain) (not $v.connectivity.apps.proxy.acme.email)) }}
+{{- fail "connectivity.apps.proxy.enabled needs connectivity.provider=wireguard, connectivity.apps.baseDomain and connectivity.apps.proxy.acme.email" }}
+{{- end }}
 {{- if not (has $v.cache.provider (list "memory" "redis")) }}
 {{- fail "cache.provider must be memory or redis" }}
 {{- end }}

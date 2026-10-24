@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 
 import structlog
 from structlog.stdlib import ProcessorFormatter
+
+_TICKET_QUERY = re.compile(r"(\bticket=)[^&\s\"]+")
+
+
+class RedactTicketFilter(logging.Filter):
+    """uvicorn logs WebSocket paths with their query; hide ``?ticket=`` from older shell clients."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _TICKET_QUERY.sub(r"\1[redacted]", arg) if isinstance(arg, str) else arg for arg in record.args
+            )
+        return True
 
 
 def configure_logging(level: str = "INFO", log_format: str = "console") -> None:
@@ -50,4 +64,8 @@ def configure_logging(level: str = "INFO", log_format: str = "console") -> None:
     )
 
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    for name in ("uvicorn.error", "uvicorn.access"):
+        named = logging.getLogger(name)
+        if not any(isinstance(item, RedactTicketFilter) for item in named.filters):
+            named.addFilter(RedactTicketFilter())
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

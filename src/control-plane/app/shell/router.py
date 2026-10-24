@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -17,6 +18,22 @@ from app.shell.schemas import ShellSessionCreateResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["shell"])
+
+# How long a socket opened without a ticket may wait for its {"type": "auth"} frame.
+AUTH_FRAME_TIMEOUT_SECONDS = 5.0
+
+
+async def _ticket_from_first_frame(websocket: WebSocket) -> str | None:
+    """Read ``{"type": "auth", "ticket": "..."}``, which keeps the ticket out of URLs and access logs."""
+    try:
+        message = await asyncio.wait_for(websocket.receive_text(), AUTH_FRAME_TIMEOUT_SECONDS)
+        frame = json.loads(message)
+    except (TimeoutError, ValueError, KeyError, WebSocketDisconnect):
+        return None
+    if not isinstance(frame, dict) or frame.get("type") != "auth":
+        return None
+    ticket = frame.get("ticket")
+    return ticket if isinstance(ticket, str) and ticket else None
 
 
 @router.post(
@@ -43,18 +60,27 @@ async def shell_websocket(
     session_id: uuid.UUID,
     service: ShellSvc,
 ) -> None:
+    # ?ticket= is still accepted for older clients, but it ends up in access logs.
     ticket = websocket.query_params.get("ticket") or websocket.headers.get("x-shell-ticket")
     await websocket.accept()
+    if not ticket:
+        ticket = await _ticket_from_first_frame(websocket)
     if not ticket:
         await websocket.close(code=4401, reason="Missing shell ticket")
         return
     consumed = False
     connection = None
     try:
-        row, host, port, username, host_key = service.consume_ticket(session_id=session_id, ticket=ticket)
+        target = service.consume_ticket(session_id=session_id, ticket=ticket)
         consumed = True
-        device_id = row.device_id
-        connection = service._require_provider().connect(host=host, port=port, username=username, host_key=host_key)
+        device_id = target.session.device_id
+        connection = service._require_provider().connect(
+            host=target.host,
+            port=target.port,
+            username=target.username,
+            host_key=target.host_key,
+            certificate=target.certificate,
+        )
     except AppError as exc:
         if consumed:
             service.close_session(session_id)

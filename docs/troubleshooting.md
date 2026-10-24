@@ -107,6 +107,9 @@ helm -n meteorcloud test meteorcloud --logs
 | `wireguard_key_changed` in the agent log | The device presented a new WireGuard key (reinstalled or cloned). Verify it, then **Re-enroll** on the device page |
 | `Host key verification failed` / "host key changed" | The device's sshd key differs from the one pinned at enrollment. Check the device (reinstall?), then **Re-enroll** it to trust the new key |
 | `device_offline` when opening a terminal | No WireGuard handshake in the last 3 minutes; see Reconnecting |
+| `shell_certificate_required` | The shared gateway key is retired but this device does not trust the SSH CA yet. Update the agent and run `meteorcli run`; the device card should show **SSH auth: certificate** |
+| `shell_certificate_failed` | The API could not sign a session certificate. Check that `SHELL_SSH_CA_FILE` exists in the API container, is `0600` and readable by the API user, and that `ssh-keygen` is installed |
+| Device card shows **SSH auth: shared key** after an agent update | The agent installs the CA line in the SSH user's `~/.ssh/authorized_keys`; check that file (line ending in `meteorcloud-ca`) and the agent log |
 | `meteorcloud-ssh: … is revoked` | Access was revoked; re-enroll the device to restore it |
 | `meteorcloud-ssh` cannot read the key | Use `~/.config/meteorcloud/shell/id_ed25519` (`make up` copies it, mode `0600`). Do not chmod the platform key so the group can read it |
 

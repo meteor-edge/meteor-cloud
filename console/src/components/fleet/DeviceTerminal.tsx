@@ -18,10 +18,10 @@ type DeviceTerminalProps = {
 
 type Status = "idle" | "connecting" | "connected" | "closed";
 
-function websocketUrl(path: string, ticket: string): string {
+function websocketUrl(path: string): string {
   const api = resolveApiBaseUrl();
   const wsBase = api.replace(/^http/, "ws");
-  return `${wsBase}${path}?ticket=${encodeURIComponent(ticket)}`;
+  return `${wsBase}${path}`;
 }
 
 export function DeviceTerminal({
@@ -86,9 +86,11 @@ export function DeviceTerminal({
     term.reset();
     try {
       const session = await createShellSession(token, organizationId, deviceId);
-      const socket = new WebSocket(websocketUrl(session.websocket_path, session.ticket));
+      // The ticket goes in the first frame, not the URL, so it never reaches access logs.
+      const socket = new WebSocket(websocketUrl(session.websocket_path));
       socket.binaryType = "arraybuffer";
       socket.onopen = () => {
+        socket.send(JSON.stringify({ type: "auth", ticket: session.ticket }));
         setStatus("connected");
         fitRef.current?.fit();
         term.focus();

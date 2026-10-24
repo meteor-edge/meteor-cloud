@@ -10,11 +10,15 @@ import ipaddress
 import os
 import re
 import select
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
+from app.adapters import ssh_certificates
 from app.core.exceptions import ValidationAppError
+from app.ports.shell import ShellCertificate
 
 
 def _default_runner(args: Sequence[str]) -> subprocess.Popen[bytes]:
@@ -34,9 +38,16 @@ _CONTROL_CHARS = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x1f\x7f
 
 
 class SshGatewayConnection:
-    def __init__(self, process: subprocess.Popen[bytes], *, known_hosts: str | None = None) -> None:
+    def __init__(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        known_hosts: str | None = None,
+        key_dir: str | None = None,
+    ) -> None:
         self._process = process
         self._known_hosts = known_hosts
+        self._key_dir = key_dir
         self._tail = b""
         self.received_output = False
 
@@ -86,6 +97,9 @@ class SshGatewayConnection:
             except FileNotFoundError:
                 pass
             self._known_hosts = None
+        if self._key_dir:
+            shutil.rmtree(self._key_dir, ignore_errors=True)
+            self._key_dir = None
 
     @property
     def closed(self) -> bool:
@@ -102,16 +116,30 @@ class SshGatewayProvider:
         identity_file: str = "",
         client_cidr: str = "10.8.0.0/16",
         require_host_key: bool = False,
+        ca_file: str = "",
+        cert_ttl_seconds: int = 120,
         extra_args: Sequence[str] | None = None,
         runner: Callable[[Sequence[str]], subprocess.Popen[bytes]] = _default_runner,
+        keygen_runner: ssh_certificates.Runner | None = None,
     ) -> None:
         self._identity_file = identity_file
         self._client_cidr = client_cidr
         self._require_host_key = require_host_key
+        self._ca_file = ca_file
+        self._cert_ttl_seconds = cert_ttl_seconds
+        self._keygen = keygen_runner or ssh_certificates.run_keygen
         self._extra_args = list(extra_args or [])
         self._runner = runner
 
-    def connect(self, *, host: str, port: int, username: str, host_key: str | None = None) -> SshGatewayConnection:
+    def connect(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        host_key: str | None = None,
+        certificate: ShellCertificate | None = None,
+    ) -> SshGatewayConnection:
         if not host or host.startswith("-"):
             raise ValidationAppError("invalid_shell_host", "Refusing SSH to an invalid host.")
         try:
@@ -160,16 +188,36 @@ class SshGatewayProvider:
         else:
             # Older agents do not report a host key: trust on first use (set SHELL_REQUIRE_HOST_KEY to refuse).
             args.extend(["-o", "StrictHostKeyChecking=accept-new"])
-        if self._identity_file:
-            args.extend(["-i", self._identity_file])
-        args.extend(self._extra_args)
-        args.append(f"{username}@{host}")
+        key_dir = None
         try:
-            return SshGatewayConnection(self._runner(args), known_hosts=known_hosts)
+            if certificate is not None:
+                key_dir = tempfile.mkdtemp(prefix="meteorcloud-ssh-")  # 0700
+                key, cert = self._session_key(Path(key_dir), certificate)
+                args.extend(["-i", str(key), "-o", f"CertificateFile={cert}"])
+            elif self._identity_file:
+                args.extend(["-i", self._identity_file])
+            args.extend(self._extra_args)
+            args.append(f"{username}@{host}")
+            return SshGatewayConnection(self._runner(args), known_hosts=known_hosts, key_dir=key_dir)
         except Exception:
             if known_hosts:
                 os.unlink(known_hosts)
+            if key_dir:
+                shutil.rmtree(key_dir, ignore_errors=True)
             raise
+
+    def _session_key(self, directory: Path, certificate: ShellCertificate) -> tuple[Path, Path]:
+        """A key that exists for this session only, and a certificate for one device's principal."""
+        key = ssh_certificates.generate_key(directory, runner=self._keygen)
+        cert = ssh_certificates.sign_public_key(
+            key.with_name(key.name + ".pub"),
+            ca_file=self._ca_file,
+            key_id=certificate.key_id,
+            principal=certificate.principal,
+            ttl_seconds=self._cert_ttl_seconds,
+            runner=self._keygen,
+        )
+        return key, cert
 
 
 def _host_key_algorithms(host_key: str) -> str:
@@ -219,6 +267,14 @@ class EchoShellConnection:
 
 
 class EchoShellProvider:
-    def connect(self, *, host: str, port: int, username: str, host_key: str | None = None) -> EchoShellConnection:
-        del host, port, username, host_key
+    def connect(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        host_key: str | None = None,
+        certificate: ShellCertificate | None = None,
+    ) -> EchoShellConnection:
+        del host, port, username, host_key, certificate
         return EchoShellConnection()

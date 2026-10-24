@@ -85,6 +85,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.connectivity.shell.existingSecret }}
                   key: id_ed25519.pub
+            {{- if .Values.connectivity.shell.certificates }}
+            - name: SHELL_SSH_CA_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.connectivity.shell.existingSecret }}
+                  key: ca.pub
+            {{- end }}
           {{- end }}
           readinessProbe:
             httpGet: { path: /health, port: http }
@@ -140,6 +147,10 @@ spec:
             items:
               - key: id_ed25519
                 path: id_ed25519
+              {{- if .Values.connectivity.shell.certificates }}
+              - key: ca
+                path: ca
+              {{- end }}
         {{- end }}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:

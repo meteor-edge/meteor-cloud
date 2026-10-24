@@ -36,6 +36,10 @@ data:
   SHELL_SSH_USER: {{ .sshUser | quote }}
   {{- if eq .provider "ssh_gateway" }}
   SHELL_SSH_IDENTITY_FILE: /run/meteorcloud/shell/id_ed25519
+  {{- if .certificates }}
+  SHELL_SSH_CA_FILE: /run/meteorcloud/shell/ca
+  {{- end }}
+  SHELL_GATEWAY_KEY_RETIRED: {{ .gatewayKeyRetired | quote }}
   {{- end }}
   {{- end }}
   APPS_BASE_DOMAIN: {{ .Values.connectivity.apps.baseDomain | quote }}

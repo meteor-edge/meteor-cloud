@@ -21,7 +21,9 @@ from edge_agent.wireguard import (
     local_ssh_host_key,
     local_ssh_user,
     refresh_endpoint,
+    sync_authorized_keys,
     sync_connectivity,
+    trusted_ssh_ca,
     write_client_config,
 )
 
@@ -118,6 +120,8 @@ def test_sync_connectivity_does_not_upload_private_key(tmp_path: Path) -> None:
     with (
         patch("edge_agent.wireguard.wireguard_available", return_value=True),
         patch("edge_agent.wireguard.socket.getaddrinfo", side_effect=OSError("offline")),
+        # Never the developer's real ~/.ssh/authorized_keys.
+        patch("edge_agent.wireguard.ssh_authorized_keys_path", return_value=tmp_path / "authorized_keys"),
     ):
         response = sync_connectivity(client, "dev_token", directory, runner=runner)
 
@@ -153,7 +157,77 @@ def test_install_gateway_ssh_key_is_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "authorized_keys"
     install_gateway_ssh_key("ssh-ed25519 AAAA gw", authorized_keys=path)
     install_gateway_ssh_key("ssh-ed25519 AAAA gw", authorized_keys=path)
-    assert path.read_text(encoding="utf-8").count("AAAA gw") == 1
+    assert path.read_text(encoding="utf-8").splitlines() == ["ssh-ed25519 AAAA meteorcloud-gateway"]
+
+
+CA = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICA"
+CA_2 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICB"
+GATEWAY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGW meteorcloud-shell-gateway"
+PRINCIPAL = "meteorcloud-device-1234"
+
+
+def test_authorized_keys_managed_lines_only(tmp_path: Path) -> None:
+    path = tmp_path / "authorized_keys"
+    path.write_text(f"ssh-rsa AAAAB3operator me@laptop\n{GATEWAY}\n", encoding="utf-8")
+
+    # Phase 1: the legacy gateway line is kept as it is, the CA line is added.
+    trusted = sync_authorized_keys(gateway_key=GATEWAY, ca_key=CA + " ca", principal=PRINCIPAL, authorized_keys=path)
+    assert trusted == CA
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines == [
+        "ssh-rsa AAAAB3operator me@laptop",
+        GATEWAY,
+        f'cert-authority,principals="{PRINCIPAL}" {CA} meteorcloud-ca',
+    ]
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    assert trusted_ssh_ca(path) == CA
+
+    # A rotated CA replaces its line; a response without CA or gateway key removes nothing.
+    sync_authorized_keys(ca_key=CA_2, principal=PRINCIPAL, authorized_keys=path)
+    sync_authorized_keys(authorized_keys=path)
+    text = path.read_text(encoding="utf-8")
+    assert CA not in text and CA_2 in text and GATEWAY in text
+
+    # Phase 2: the server retires the shared key; the operator's own key survives.
+    sync_authorized_keys(gateway_key_retired=True, ca_key=CA_2, principal=PRINCIPAL, authorized_keys=path)
+    assert path.read_text(encoding="utf-8").splitlines() == [
+        "ssh-rsa AAAAB3operator me@laptop",
+        f'cert-authority,principals="{PRINCIPAL}" {CA_2} meteorcloud-ca',
+    ]
+
+
+def test_sync_connectivity_reports_ca_trust_right_away(tmp_path: Path) -> None:
+    client = MagicMock()
+    client.register_wireguard.return_value = {
+        "wg_address": "10.8.0.9/32",
+        "server_public_key": "SERVER",
+        "server_endpoint": "gw:51820",
+        "ssh_ca_public_key": CA,
+        "ssh_principal": PRINCIPAL,
+    }
+    directory = tmp_path / "meteorcli"
+    wg = directory / "wireguard"
+    wg.mkdir(parents=True)
+    (wg / "private.key").write_text("SECRETKEY\n", encoding="utf-8")
+    (wg / "public.key").write_text("PUBLICKEY\n", encoding="utf-8")
+    keys = tmp_path / "authorized_keys"
+
+    def runner(args, **kwargs):
+        del args, kwargs
+        return MagicMock(stdout="", returncode=0)
+
+    with (
+        patch("edge_agent.wireguard.wireguard_available", return_value=True),
+        patch("edge_agent.wireguard.socket.getaddrinfo", side_effect=OSError("offline")),
+        patch("edge_agent.wireguard.ssh_authorized_keys_path", return_value=keys),
+    ):
+        sync_connectivity(client, "dev_token", directory, runner=runner)
+        reported = [call.kwargs["ssh_ca_public_key"] for call in client.register_wireguard.call_args_list]
+        assert reported == [None, CA]
+        # Already trusted: one call, which says so.
+        client.register_wireguard.reset_mock()
+        sync_connectivity(client, "dev_token", directory, runner=runner)
+        assert [call.kwargs["ssh_ca_public_key"] for call in client.register_wireguard.call_args_list] == [CA]
 
 
 def _wg(show: dict[str, str], calls: list[list[str]]):

@@ -71,6 +71,12 @@ describe("DeviceNetworkPanel", () => {
     expect(screen.getByText("Waiting for the device")).toBeInTheDocument();
   });
 
+  it("shows how browser SSH authenticates", async () => {
+    getMock.mockResolvedValue({ ...connectivity, ssh_auth: "ca" });
+    renderPanel();
+    expect(await screen.findByText("Certificate (per session)")).toBeInTheDocument();
+  });
+
   it("explains when the device has not joined yet", async () => {
     getMock.mockRejectedValue(new ApiError(404, "connectivity_not_found", "not yet"));
     renderPanel();

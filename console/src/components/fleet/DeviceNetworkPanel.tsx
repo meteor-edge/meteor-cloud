@@ -159,6 +159,11 @@ export function DeviceNetworkPanel({
             </span>
           </Field>
         )}
+        {net.ssh_auth !== undefined && (
+          <Field label="SSH auth">
+            {net.ssh_auth === "ca" ? "Certificate (per session)" : "Shared gateway key"}
+          </Field>
+        )}
         {net.last_ssh_ok_at !== undefined && (
           <Field label="Last SSH session">{when(net.last_ssh_ok_at)}</Field>
         )}
@@ -185,8 +190,8 @@ export function DeviceNetworkPanel({
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            Run it on the MeteorCloud server ({net.server_address} inside the tunnel). Same key as
-            the browser terminal; no sudo. Devices cannot reach each other.
+            Run it on the MeteorCloud server ({net.server_address} inside the tunnel); no sudo.
+            Devices cannot reach each other.
           </p>
         </div>
       )}

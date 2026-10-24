@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, func, or_, select
@@ -11,13 +12,13 @@ from sqlalchemy.orm import Session
 
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
-from app.connectivity.service import ConnectivityService
+from app.connectivity.service import ConnectivityService, ssh_principal
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
 from app.devices.repository import DeviceRepository
 from app.devices.tokens import generate_shell_ticket, hash_token
 from app.identity.models import User
-from app.ports.shell import DeviceShellProvider
+from app.ports.shell import DeviceShellProvider, ShellCertificate
 from app.shell.models import DeviceShellSession, ShellSessionStatus
 from app.shell.schemas import ShellSessionCreateResponse
 from app.tenancy.models import OrganizationMembership
@@ -26,6 +27,18 @@ from app.tenancy.models import OrganizationMembership
 def _new_ticket() -> tuple[str, str]:
     token = generate_shell_ticket()
     return token.plaintext, token.token_hash
+
+
+@dataclass(frozen=True)
+class ShellTarget:
+    """Where and how to open a redeemed session; never taken from the client."""
+
+    session: DeviceShellSession
+    host: str
+    port: int
+    username: str
+    host_key: str | None
+    certificate: ShellCertificate | None
 
 
 class ShellService:
@@ -139,10 +152,8 @@ class ShellService:
             device_id=device_id,
         )
 
-    def consume_ticket(
-        self, *, session_id: uuid.UUID, ticket: str
-    ) -> tuple[DeviceShellSession, str, int, str, str | None]:
-        """Validate a one-time ticket. Returns session, host, port, username, pinned host key."""
+    def consume_ticket(self, *, session_id: uuid.UUID, ticket: str) -> ShellTarget:
+        """Validate a one-time ticket and return the device to open."""
         self._require_provider()
         row = self.session.get(DeviceShellSession, session_id, with_for_update=True)
         if row is None:
@@ -173,11 +184,30 @@ class ShellService:
             raise ForbiddenError("insufficient_permission", "You no longer have shell access to this device.")
         peer = self.connectivity.require_reachable(device=device)
         host = self.connectivity.wg_host(peer)
+        certificate = None
+        if self.connectivity.uses_certificates(peer):
+            actor = self.session.get(User, row.actor_user_id)
+            certificate = ShellCertificate(
+                principal=ssh_principal(device.id),
+                key_id=f"shell:{row.id}:{actor.email if actor else row.actor_user_id}",
+            )
+        elif self.settings.shell_gateway_key_retired:
+            raise ConflictError(
+                "shell_certificate_required",
+                "This device does not trust the SSH certificate authority yet. Update its agent, then retry.",
+            )
         row.status = ShellSessionStatus.OPEN.value
         row.opened_at = datetime.now(UTC)
         row.closed_at = None
         self.session.commit()
-        return row, host, self.settings.shell_ssh_port, self.connectivity.ssh_user_for(peer), peer.ssh_host_key
+        return ShellTarget(
+            session=row,
+            host=host,
+            port=self.settings.shell_ssh_port,
+            username=self.connectivity.ssh_user_for(peer),
+            host_key=peer.ssh_host_key,
+            certificate=certificate,
+        )
 
     def close_session(self, session_id: uuid.UUID, *, actor: User | None = None) -> None:
         row = self.session.get(DeviceShellSession, session_id)

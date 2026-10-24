@@ -18,6 +18,7 @@ k3d, GKE, EKS, AKS, OpenShift, and customer clusters.
 | Data plane | Deployment (1 replica) | `mqtt.enabled` |
 | EMQX | Deployment + Service (LoadBalancer, 8883 TLS) | `mqtt.enabled` and `mqtt.broker=bundled` |
 | Redis | Deployment (no persistence) | `cache.provider=redis` and `cache.redis.mode=bundled` |
+| Apps proxy | Traefik Deployment + LoadBalancer Service + PVC (ACME) for public app hostnames | `connectivity.apps.proxy.enabled` |
 | Test pod | `helm test` hook | `helm test` |
 
 No MinIO, Kafka, or ClickHouse.
@@ -142,6 +143,38 @@ to it:
    With `secrets.existingSecret`, put `CONNECTIVITY_INTERNAL_TOKEN` in that Secret instead.
 
 Set `connectivity.apps.baseDomain` to the domain of your public app hostnames.
+
+### Public app hostnames
+
+The generic `ingress` serves the console and API only. App endpoints
+(`<app>.<device>.<org>.<baseDomain>`) need the optional apps proxy, a Traefik
+Deployment that works the same way as the Compose `traefik` service. It polls
+the backend's routing document and gets wildcard certificates over DNS-01:
+
+```yaml
+connectivity:
+  apps:
+    baseDomain: apps.example.com
+    proxy:
+      enabled: true
+      acme:
+        email: ops@example.com
+        dnsProvider: route53
+        existingSecret: meteorcloud-dns   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+```
+
+- Point `*.<baseDomain>` (and `<baseDomain>`) at the `<release>-apps-proxy`
+  LoadBalancer Service.
+- The proxy pods connect to device WireGuard IPs, so they need the same route
+  to the device network as browser SSH (step 2 above).
+- With IRSA, leave `acme.existingSecret` empty and give `serviceAccount` a role
+  that allows Route53 changes for the zone.
+- Certificates live on a small PVC (`helm.sh/resource-policy: keep`), so a
+  reinstall doesn't hit Let's Encrypt rate limits. Set
+  `acme.caServer: https://acme-staging-v02.api.letsencrypt.org/directory`
+  while testing.
+- The proxy authenticates to the routing document with
+  `CONNECTIVITY_INTERNAL_TOKEN`.
 
 ## Staging options
 

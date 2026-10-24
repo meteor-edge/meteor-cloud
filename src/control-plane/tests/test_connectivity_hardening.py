@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.ssh_gateway import SshGatewayProvider
+from app.connectivity.dependencies import _build_connectivity_rate_limiter, get_connectivity_rate_limiter
 from app.connectivity.models import DeviceConnectivity
 from app.connectivity.schemas import AgentWireGuardRegisterRequest, ssh_host_key_fingerprint
+from app.core.config import get_settings
 from app.core.exceptions import ValidationAppError
 from app.devices.models import Device
+from app.devices.rate_limit import InMemoryRateLimiter
+from app.shell import router as shell_router
 from app.shell.models import DeviceShellSession, ShellSessionStatus
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_user
@@ -75,6 +81,26 @@ def test_reregistration_keeps_address_and_is_idempotent(client: TestClient, db_s
         assert again.json()["wg_address"] == first.json()["wg_address"]
     assert _peer_keys(client) == {WG_KEY_A}
     assert db_session.query(DeviceConnectivity).count() == 1
+
+
+def test_registration_rate_limit_counts_across_requests(client: TestClient, db_session: Session) -> None:
+    limiter = InMemoryRateLimiter(limit=2, window_seconds=60)
+    client.app.dependency_overrides[get_connectivity_rate_limiter] = lambda: limiter
+    _org, _headers, token, _release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pi-limited", mac="aa:bb:cc:dd:01:09")
+    assert [_register_wg(client, reg["device_token"], WG_KEY_A).status_code for _ in range(3)] == [200, 200, 429]
+    assert _register_wg(client, reg["device_token"], WG_KEY_A).json()["error"]["code"] == "rate_limited"
+
+
+def test_memory_rate_limiter_is_shared_between_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CACHE_PROVIDER", "memory")
+    get_settings.cache_clear()
+    _build_connectivity_rate_limiter.cache_clear()
+    try:
+        assert get_connectivity_rate_limiter() is get_connectivity_rate_limiter()
+    finally:
+        _build_connectivity_rate_limiter.cache_clear()
+        get_settings.cache_clear()
 
 
 def test_key_change_requires_reenroll(client: TestClient, db_session: Session) -> None:
@@ -386,6 +412,34 @@ def test_shell_session_records_ssh_result(client: TestClient, db_session: Sessio
     assert shown["last_ssh_error"] is None
 
 
+def test_shell_ticket_in_first_frame(client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    org, headers, reg = _shell_ready_device(client, db_session, name="pi-frame", mac="aa:bb:cc:dd:01:13")
+    _report_handshake(client, WG_KEY_A)
+    url = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/shell-sessions"
+
+    created = client.post(url, headers=headers).json()
+    assert "ticket" not in created["websocket_path"]
+    with client.websocket_connect(created["websocket_path"]) as websocket:
+        websocket.send_text(json.dumps({"type": "auth", "ticket": created["ticket"]}))
+        assert "MeteorCloud" in websocket.receive_bytes().decode()
+        websocket.send_text("exit\n")
+        websocket.receive_bytes()
+
+    def closed_with(path: str, frame: str | None) -> int:
+        with client.websocket_connect(path) as websocket:
+            if frame is not None:
+                websocket.send_text(frame)
+            with pytest.raises(WebSocketDisconnect) as closed:
+                websocket.receive_text()
+            return closed.value.code
+
+    fresh = client.post(url, headers=headers).json()["websocket_path"]
+    assert closed_with(fresh, "not json") == 4401
+    assert closed_with(fresh, json.dumps({"type": "data", "ticket": "sh_x"})) == 4401
+    monkeypatch.setattr(shell_router, "AUTH_FRAME_TIMEOUT_SECONDS", 0.1)
+    assert closed_with(fresh, None) == 4401
+
+
 # --- Application routing -------------------------------------------------------------
 
 
@@ -422,8 +476,8 @@ def test_shell_target_cli_resolves_trusted_records(
 
     _report_handshake(client, WG_KEY_A)
     assert cli.shell_target(reg["device_id"]) == 0
-    user, host, port, key = capsys.readouterr().out.strip().split("\t")
-    assert (user, port, key) == ("pi", "22", HOST_KEY_1.rsplit(" ", 1)[0])
+    user, host, port, key, auth = capsys.readouterr().out.strip().split("\t")
+    assert (user, port, key, auth) == ("pi", "22", HOST_KEY_1.rsplit(" ", 1)[0], "key")
     assert host.startswith("10.8.0.")
     assert cli.shell_target(host) == 0
     capsys.readouterr()

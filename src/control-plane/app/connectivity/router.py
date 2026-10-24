@@ -7,15 +7,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
-from app.connectivity.dependencies import ConnectivitySvc
+from app.connectivity.dependencies import ConnectivitySvc, get_connectivity_rate_limiter
 from app.connectivity.schemas import (
     AgentWireGuardRegisterRequest,
     AgentWireGuardRegisterResponse,
     DeviceConnectivityResponse,
 )
-from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError
 from app.devices.dependencies import CurrentDevice
+from app.devices.rate_limit import RateLimiter
 from app.identity.dependencies import CurrentUser
 
 router = APIRouter(tags=["connectivity"])
@@ -32,16 +32,8 @@ class ConnectivityRateLimitError(AppError):
 
 def enforce_connectivity_rate_limit(
     request: Request,
-    settings: Annotated[Settings, Depends(get_settings)],
+    limiter: Annotated[RateLimiter, Depends(get_connectivity_rate_limiter)],
 ) -> None:
-    from app.adapters import rate_limiter as build_limiter
-
-    limiter = build_limiter(
-        settings,
-        limit=settings.connectivity_rate_limit_requests,
-        window_seconds=settings.connectivity_rate_limit_window_seconds,
-        prefix="conn_rl",
-    )
     client = request.client.host if request.client else "unknown"
     if not limiter.allow(client):
         raise ConnectivityRateLimitError()

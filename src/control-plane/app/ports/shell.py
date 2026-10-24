@@ -7,7 +7,16 @@ taken from the client.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
+
+
+@dataclass(frozen=True)
+class ShellCertificate:
+    """Log in with a fresh key and a short-lived certificate instead of the shared gateway key."""
+
+    principal: str
+    key_id: str
 
 
 class DeviceShellConnection(Protocol):
@@ -43,9 +52,11 @@ class DeviceShellProvider(Protocol):
         port: int,
         username: str,
         host_key: str | None = None,
+        certificate: ShellCertificate | None = None,
     ) -> DeviceShellConnection:
         """Connect to ``host:port``. Implementations must refuse non-private hosts.
 
         ``host_key`` is the device's pinned SSH host key; a different key must be rejected.
+        ``certificate``: authenticate with a per-session certificate for that principal.
         """
         ...

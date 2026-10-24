@@ -137,9 +137,16 @@ class FakeClient:
         public_key: str,
         ssh_user: str | None = None,
         ssh_host_key: str | None = None,
+        ssh_ca_public_key: str | None = None,
     ) -> dict[str, Any]:
         self.wireguard_calls.append(
-            {"device_token": device_token, "public_key": public_key, "ssh_user": ssh_user, "ssh_host_key": ssh_host_key}
+            {
+                "device_token": device_token,
+                "public_key": public_key,
+                "ssh_user": ssh_user,
+                "ssh_host_key": ssh_host_key,
+                "ssh_ca_public_key": ssh_ca_public_key,
+            }
         )
         if self.wireguard_error is not None:
             raise self.wireguard_error

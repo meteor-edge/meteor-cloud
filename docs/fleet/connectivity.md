@@ -228,14 +228,17 @@ Operators with `device.shell` (owner/admin/operator) open **Terminal** on the
 device page. Flow: JWT → short-lived ticket → WebSocket → SSH gateway →
 `ssh user@{wg_address}` over WireGuard.
 
-Tickets live 60 s and work once. A wrong, expired or used ticket is refused.
+Tickets live 60 s and work once. The console sends the ticket in the first
+WebSocket frame, never in the URL, so it stays out of access logs (`?ticket=` still
+works for older clients, but it is redacted from the API's logs). A wrong, expired or used ticket is refused.
 `device.shell` is checked again when the ticket is used, and the device must be
 enabled and have a recent handshake (`device_offline` otherwise).
 
 `make up` with WireGuard turns this on (`SHELL_PROVIDER=ssh_gateway` and a
-`0600` gateway key under `/opt/edge-platform/shell`). The API host must be able
-to reach `10.8.0.0/16`. Re-run `meteorcli run` on each device so it installs
-the gateway public key. Tests use `SHELL_PROVIDER=echo`. Set
+`0600` gateway key and SSH CA under `/opt/edge-platform/shell`). The API host
+must be able to reach `10.8.0.0/16`. Re-run `meteorcli run` on each device so it
+installs the CA (and, until it is retired, the gateway key); see
+[SSH certificates](#ssh-certificates-instead-of-the-shared-key). Tests use `SHELL_PROVIDER=echo`. Set
 `shell_provider: none` in inventory if you want the tunnel without the terminal.
 
 ## Test locally (no real tunnel)
@@ -265,15 +268,53 @@ Let’s Encrypt **HTTP-01** stays on `PLATFORM_DOMAIN`. App hostnames use Traefi
 **DNS-01** (`letsencrypt-dns`, default Route53). Put AWS keys in host env, never
 in git. See [Endpoints](endpoints.md).
 
-## Follow-up: per-session SSH credentials
+## SSH certificates instead of the shared key
 
-Browser SSH and `meteorcloud-ssh` share one long-lived gateway key, which every
-device trusts in `authorized_keys`. Replacing it with an SSH certificate
-authority would need an sshd change on every device (`TrustedUserCAKeys`), plus
-a signer on the server. That would give short-lived certificates per session or
-per operator. It is not done yet. Until then, keep the private key `0600`. It is
-never sent to devices or the browser. Rotating it means re-running `make up` with
-a new key, then `meteorcli run` on each device.
+Every browser terminal and `meteorcloud-ssh` session logs in with a key that
+exists for that session only, plus a certificate signed by the server's SSH user
+CA. A certificate:
+
+- is valid for about 2 minutes (`SHELL_SSH_CERT_TTL_SECONDS`), which only
+  matters at login;
+- names one device (principal `meteorcloud-device-<id>`). Devices trust the CA
+  only for their own principal, so it can't open any other device;
+- allows a PTY only, with no agent, port or X11 forwarding;
+- carries a key ID (`shell:<session>:<user email>` or `cli:<user>@<host>`), which
+  shows up in the device's `auth.log`. `meteorcloud-ssh` certificates are also
+  in the audit log (`device.shell.certificate`).
+
+The device side needs no sshd change and no root. The agent adds one line to
+`authorized_keys`:
+
+```text
+cert-authority,principals="meteorcloud-device-<id>" ssh-ed25519 AAAA… meteorcloud-ca
+```
+
+The agent manages only lines ending in `meteorcloud-ca` or
+`meteorcloud-gateway` (or the older `meteorcloud-shell-gateway`). It never
+touches your own keys.
+
+**Rollout**
+
+1. **Both mechanisms (default).** `make up` creates `/opt/edge-platform/shell/ca`
+   (0600) next to the gateway key and sets `SHELL_SSH_CA_FILE` and
+   `SHELL_SSH_CA_PUBLIC_KEY`. Updated agents install the CA line and report it.
+   Their device page then shows **SSH auth: certificate**. Devices with older
+   agents keep using the shared key. On Kubernetes, add `ca` and `ca.pub` to the
+   `connectivity.shell.existingSecret` Secret and set
+   `connectivity.shell.certificates: true`.
+2. **Retire the shared key.** Do this once every device shows certificate: set
+   `shell_gateway_key_retired: true` (Helm:
+   `connectivity.shell.gatewayKeyRetired: true`) and re-run `make up`.
+   - The server stops sending the gateway key, and agents remove its line.
+   - Sessions to devices that are still on the shared key are refused with
+     `shell_certificate_required`.
+   - Ansible deletes the operators' copies in `~/.config/meteorcloud/shell/`.
+
+Keep the CA and gateway private keys `0600`. They are never sent to devices or
+the browser. To rotate the CA, replace `ca` and `ca.pub` and re-run `make up`.
+Agents replace their CA line on the next registration (within about 15 minutes).
+Until they do, those devices use the shared key, or are refused after phase 2.
 
 ## Related
 

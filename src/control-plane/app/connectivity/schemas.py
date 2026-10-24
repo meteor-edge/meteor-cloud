@@ -41,6 +41,8 @@ class AgentWireGuardRegisterRequest(BaseModel):
     ssh_user: str | None = Field(default=None, max_length=32)
     # Device sshd host public key (e.g. /etc/ssh/ssh_host_ed25519_key.pub). Never a private key.
     ssh_host_key: str | None = Field(default=None, max_length=2048)
+    # The SSH user CA the device's authorized_keys already trusts (from an earlier response).
+    ssh_ca_public_key: str | None = Field(default=None, max_length=2048)
 
     @field_validator("public_key")
     @classmethod
@@ -61,7 +63,7 @@ class AgentWireGuardRegisterRequest(BaseModel):
             raise ValueError("Invalid SSH user.")
         return name
 
-    @field_validator("ssh_host_key")
+    @field_validator("ssh_host_key", "ssh_ca_public_key")
     @classmethod
     def _normalize_host_key(cls, value: str | None) -> str | None:
         if value is None or not value.strip():
@@ -79,7 +81,12 @@ class AgentWireGuardRegisterResponse(BaseModel):
     allowed_ips: str
     persistent_keepalive: int
     ssh_user: str
+    # Empty once SHELL_GATEWAY_KEY_RETIRED is set; ssh_gateway_key_retired tells agents to remove it.
     ssh_gateway_public_key: str | None = None
+    ssh_gateway_key_retired: bool = False
+    # Trust this CA for certificates naming ssh_principal (authorized_keys cert-authority line).
+    ssh_ca_public_key: str | None = None
+    ssh_principal: str | None = None
 
 
 class DeviceConnectivityResponse(BaseModel):
@@ -99,6 +106,8 @@ class DeviceConnectivityResponse(BaseModel):
     state: str = "pending"
     agent_last_seen_at: datetime | None = None
     ssh_host_key_fingerprint: str | None = None
+    # "ca" (short-lived certificates) or "key" (shared gateway key).
+    ssh_auth: str = "key"
     last_ssh_ok_at: datetime | None = None
     last_ssh_error: str | None = None
     last_ssh_error_at: datetime | None = None

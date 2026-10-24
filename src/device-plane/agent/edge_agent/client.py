@@ -139,12 +139,15 @@ class EdgeClient:
         public_key: str,
         ssh_user: str | None = None,
         ssh_host_key: str | None = None,
+        ssh_ca_public_key: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"public_key": public_key}
         if ssh_user:
             body["ssh_user"] = ssh_user
         if ssh_host_key:
             body["ssh_host_key"] = ssh_host_key
+        if ssh_ca_public_key:
+            body["ssh_ca_public_key"] = ssh_ca_public_key
         return self._post(
             "/api/v1/agent/connectivity/wireguard",
             body,

@@ -175,6 +175,8 @@ export type DeviceConnectivity = {
   state?: "connected" | "reconnecting" | "offline" | "pending" | "revoked";
   agent_last_seen_at?: string | null;
   ssh_host_key_fingerprint?: string | null;
+  /** "ca": short-lived certificates; "key": the shared gateway key. */
+  ssh_auth?: "ca" | "key";
   last_ssh_ok_at?: string | null;
   last_ssh_error?: string | null;
   last_ssh_error_at?: string | null;

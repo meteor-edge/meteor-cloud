@@ -145,7 +145,8 @@ def dns_records(cfg: Config, hosts: list[Host]) -> list[tuple[str, str, str]]:
 
 
 def say_dns_records(cfg: Config, hosts: list[Host]) -> None:
-    if not cfg.has_public_dns:
+    # No hosts yet, or destroyed: nothing to point records at.
+    if not cfg.has_public_dns or not any(h.role == "control_plane" for h in hosts):
         return
     if cfg.dns_provider == "route53":
         say("  DNS records    created by Terraform in Route53:")

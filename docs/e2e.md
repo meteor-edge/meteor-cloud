@@ -11,7 +11,7 @@ meteorcloud-testenv up
   terraform   control plane EC2 (+ dedicated WireGuard gateway), N device EC2s,
               DNS <env>.<domain> and *.<env>.<domain>, Traefik DNS-01 role
   ansible     site.yml (cloud_app + vpn) and device.yml, run twice (2nd: changed=0)
-  suite       52 checks in 10 stages -> report.json + summary.txt
+  suite       55 checks in 10 stages -> report.json + summary.txt
 ```
 
 | Command | What it does |

@@ -167,6 +167,15 @@ shell_provider: "{{ 'ssh_gateway' if 'vpn' in enabled_services else 'none' }}"
 shell_ssh_dir: "{{ platform_root }}/shell"
 shell_ssh_identity_file: "{{ '/run/meteorcloud/shell/id_ed25519' if shell_provider == 'ssh_gateway' else '' }}"
 shell_gateway_public_key: ""
+# SSH user CA next to the gateway key: every browser or meteorcloud-ssh session gets a fresh
+# key and a certificate valid for one device for a couple of minutes. Agents that trust it
+# report ssh_auth=ca; the others keep using the shared key until shell_gateway_key_retired.
+shell_ssh_ca_enabled: true
+shell_ssh_ca_file: "{{ '/run/meteorcloud/shell/ca' if shell_provider == 'ssh_gateway' and shell_ssh_ca_enabled | bool else '' }}"
+shell_ssh_ca_public_key: ""
+# Phase 2, once every device shows "SSH auth: certificate": stop sending the shared key
+# (agents remove it from authorized_keys) and delete the operator copies.
+shell_gateway_key_retired: false
 # Extra login names that receive ~/.config/meteorcloud/shell/id_ed25519.
 # ansible_user, ubuntu, and debian are always included when those accounts exist.
 shell_ssh_operator_users: []

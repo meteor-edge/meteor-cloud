@@ -46,6 +46,8 @@ class DeviceConnectivity(Base, TimestampMixin):
     last_handshake_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Device SSH host key ("<type> <base64>"), pinned on the first authenticated registration.
     ssh_host_key: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # "ca" once the agent trusts this server's SSH user CA (short-lived certificates); else the shared key.
+    ssh_auth: Mapped[str | None] = mapped_column(String(16), nullable=True)
     last_ssh_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_ssh_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_ssh_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

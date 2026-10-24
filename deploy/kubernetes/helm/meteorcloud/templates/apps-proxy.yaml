@@ -1,0 +1,156 @@
+{{- if .Values.connectivity.apps.proxy.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $secretName := include "meteorcloud.secretName" . }}
+{{- with .Values.connectivity.apps.proxy }}
+# Public app hostnames (Compose: the traefik service). Routes come from the
+# backend's routing document; upstreams are device WireGuard IPs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-apps-proxy
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" $ "component" "apps-proxy") | nindent 4 }}
+spec:
+  replicas: 1
+  # One writer for acme.json (ReadWriteOnce).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" "apps-proxy") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" "apps-proxy") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "meteorcloud.serviceAccountName" $ }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: traefik
+          image: "{{ .image.repository }}:{{ .image.tag }}"
+          imagePullPolicy: {{ .image.pullPolicy }}
+          args:
+            - --providers.http.endpoint=http://{{ $fullname }}-backend:8000/internal/routing/traefik
+            - --providers.http.pollInterval=5s
+            # Kubernetes expands $(VAR) from the container's env.
+            - --providers.http.headers.X-Routing-Internal-Token=$(CONNECTIVITY_INTERNAL_TOKEN)
+            # Unprivileged ports; the Service maps 80 and 443 onto them.
+            - --entrypoints.web.address=:8000
+            - --entrypoints.web.http.redirections.entrypoint.to=websecure
+            - --entrypoints.web.http.redirections.entrypoint.scheme=https
+            - --entrypoints.websecure.address=:8443
+            - --certificatesresolvers.letsencrypt-dns.acme.email={{ .acme.email }}
+            - --certificatesresolvers.letsencrypt-dns.acme.storage=/acme/acme-dns.json
+            - --certificatesresolvers.letsencrypt-dns.acme.dnschallenge.provider={{ .acme.dnsProvider }}
+            {{- with .acme.caServer }}
+            - --certificatesresolvers.letsencrypt-dns.acme.caserver={{ . }}
+            {{- end }}
+            - --entrypoints.ping.address=:8082
+            - --ping=true
+            - --ping.entrypoint=ping
+          env:
+            - name: CONNECTIVITY_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: CONNECTIVITY_INTERNAL_TOKEN
+          {{- with .acme.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          ports:
+            - name: web
+              containerPort: 8000
+            - name: websecure
+              containerPort: 8443
+            - name: ping
+              containerPort: 8082
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: ping
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: ping
+            initialDelaySeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: acme
+              mountPath: /acme
+          {{- with .resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: acme
+          persistentVolumeClaim:
+            claimName: {{ $fullname }}-apps-proxy-acme
+      {{- with .nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-apps-proxy
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" $ "component" "apps-proxy") | nindent 4 }}
+  {{- with .service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .service.type }}
+  {{- with .service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" "apps-proxy") | nindent 4 }}
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+    - name: websecure
+      port: 443
+      targetPort: websecure
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-apps-proxy-acme
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" $ "component" "apps-proxy") | nindent 4 }}
+  annotations:
+    # Keep issued certificates across uninstall (Let's Encrypt rate limits).
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .persistence.size }}
+{{- end }}
+{{- end }}

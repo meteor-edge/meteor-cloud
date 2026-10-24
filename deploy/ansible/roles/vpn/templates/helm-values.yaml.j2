@@ -17,3 +17,12 @@ connectivity:
   shell:
     provider: ssh_gateway
     existingSecret: meteorcloud-shell
+  # Public app hostnames: optional Traefik proxy (docs/kubernetes.md). Its pods
+  # also need the route to {{ vpn_network_cidr }}.
+  # apps:
+  #   baseDomain: apps.example.com
+  #   proxy:
+  #     enabled: true
+  #     acme:
+  #       email: ops@example.com
+  #       existingSecret: meteorcloud-dns

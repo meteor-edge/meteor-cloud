@@ -30,7 +30,7 @@ from app.authorization import models as _authorization_models  # noqa: F401
 from app.authorization.roles import get_system_role_id
 from app.authorization.seed import seed_authorization_catalog
 from app.connectivity import models as _connectivity_models  # noqa: F401
-from app.connectivity.router import enforce_connectivity_rate_limit
+from app.connectivity.dependencies import get_connectivity_rate_limiter
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Base
@@ -121,8 +121,9 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
     application.dependency_overrides[get_enroll_poll_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
-    # Otherwise counted in the developer's Redis (CACHE_PROVIDER defaults to redis) across tests and runs.
-    application.dependency_overrides[enforce_connectivity_rate_limit] = lambda: None
+    application.dependency_overrides[get_connectivity_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
     with TestClient(application) as test_client:
         yield test_client
     application.dependency_overrides.clear()

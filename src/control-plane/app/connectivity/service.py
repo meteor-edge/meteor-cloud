@@ -20,6 +20,7 @@ from app.connectivity.schemas import (
     DeviceConnectivityResponse,
     HandshakeReportItem,
     InternalPeer,
+    normalize_ssh_host_key,
     ssh_host_key_fingerprint,
 )
 from app.core.config import Settings, get_settings
@@ -31,6 +32,12 @@ from app.ports.connectivity import DeviceConnectivityProvider
 from app.tenancy.models import OrganizationMembership
 
 HOST_KEY_CHANGED = "Device SSH host key changed; re-enroll the device to trust the new key."
+SSH_AUTH_CA = "ca"
+
+
+def ssh_principal(device_id: uuid.UUID) -> str:
+    """The only principal a device's cert-authority line accepts, so a certificate opens one device."""
+    return f"meteorcloud-device-{device_id}"
 
 
 class ConnectivityService:
@@ -74,6 +81,7 @@ class ConnectivityService:
             state=self.state_for(row, device),
             agent_last_seen_at=device.last_seen_at if device is not None else None,
             ssh_host_key_fingerprint=ssh_host_key_fingerprint(row.ssh_host_key),
+            ssh_auth=row.ssh_auth or "key",
             last_ssh_ok_at=row.last_ssh_ok_at,
             last_ssh_error=row.last_ssh_error,
             last_ssh_error_at=row.last_ssh_error_at,
@@ -140,8 +148,27 @@ class ConnectivityService:
             allowed_ips=provider.client_allowed_ips(self.settings.wireguard_server_address),
             persistent_keepalive=self.settings.wireguard_persistent_keepalive,
             ssh_user=self.ssh_user_for(row),
-            ssh_gateway_public_key=self.settings.shell_gateway_public_key or None,
+            ssh_gateway_public_key=(
+                None if self.settings.shell_gateway_key_retired else self.settings.shell_gateway_public_key or None
+            ),
+            ssh_gateway_key_retired=self.settings.shell_gateway_key_retired,
+            ssh_ca_public_key=self.ssh_ca_public_key(),
+            ssh_principal=ssh_principal(device.id) if self.ssh_ca_public_key() else None,
         )
+
+    def ssh_ca_public_key(self) -> str | None:
+        """The configured SSH user CA ("<type> <base64>"), when certificates can be signed."""
+        if not (self.settings.shell_ssh_ca_file and self.settings.shell_ssh_ca_public_key.strip()):
+            return None
+        return normalize_ssh_host_key(self.settings.shell_ssh_ca_public_key)
+
+    def _trusts_ca(self, reported: str | None) -> bool:
+        ca = self.ssh_ca_public_key()
+        return bool(ca and reported == ca)
+
+    def uses_certificates(self, row: DeviceConnectivity) -> bool:
+        """Sign a certificate for this device (it trusts the current CA)."""
+        return row.ssh_auth == SSH_AUTH_CA and self.ssh_ca_public_key() is not None
 
     def _allocate(self) -> str:
         return allocate_address(
@@ -213,6 +240,7 @@ class ConnectivityService:
             row.ssh_user = payload.ssh_user
         if payload.ssh_host_key:
             self._pin_host_key(row, device, payload.ssh_host_key)
+        row.ssh_auth = SSH_AUTH_CA if self._trusts_ca(payload.ssh_ca_public_key) else None
         self.session.commit()
         self.session.refresh(row)
         return row
@@ -324,6 +352,7 @@ class ConnectivityService:
         row.wg_public_key = None
         row.wg_address = None
         row.ssh_host_key = None
+        row.ssh_auth = None
         row.last_handshake_at = None
         row.last_ssh_error = None
         row.last_ssh_error_at = None
