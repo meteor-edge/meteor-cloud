@@ -56,7 +56,7 @@ Compose files:
 | `deploy/compose/data-plane.yml` | profiles `mqtt` (`data-plane`), `emqx` |
 | `deploy/compose/console.yml` | `console` (Vite dev server) |
 | `deploy/compose/docker-compose.yml` | `include:` of those three |
-| `deploy/compose/docker-compose.dev.yml` | Source mounts and hot reload (`make dev`) |
+| `deploy/compose/docker-compose.dev.yml` | Source mounts and hot reload (`make dev`). Console runs `npm install` on start so new packages (for example `@xterm/*`) land in the container `node_modules` volume |
 | `deploy/compose/docker-compose.prod.yml` | Production overlay: Traefik, restart policies, no internal ports |
 
 `COMPOSE_PROFILES` in `deploy/compose/.env` selects the bundled services. Remove a

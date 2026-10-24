@@ -122,9 +122,38 @@ uninstall() {
     echo "Removed ${PREFIX}"
   fi
   if [[ "${EUID}" -eq 0 ]]; then
+    rm -f /etc/sudoers.d/meteorcli-wireguard
     echo "Left /etc/meteorcli in place (device credentials)."
   else
     echo "Left ${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli in place (device credentials)."
+  fi
+}
+
+install_wireguard_sudoers() {
+  # Creating wg0 needs CAP_NET_ADMIN. meteorcli run stays unprivileged and
+  # calls `sudo -n wg` / `wg-quick` for those steps only.
+  local dest=/etc/sudoers.d/meteorcli-wireguard
+  local user="${SUDO_USER:-}"
+  local wg_bin wg_quick_bin tmp
+  [[ "${EUID}" -eq 0 ]] || return 0
+  if [[ -z "${user}" || "${user}" == root ]]; then
+    return 0
+  fi
+  wg_bin="$(command -v wg || echo /usr/bin/wg)"
+  wg_quick_bin="$(command -v wg-quick || echo /usr/bin/wg-quick)"
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<EOF
+# meteorcli: bring up wg0 without \`sudo meteorcli\`
+Defaults:${user} !requiretty
+${user} ALL=(root) NOPASSWD: ${wg_bin}, ${wg_quick_bin}
+EOF
+  chmod 440 "${tmp}"
+  if visudo -cf "${tmp}" >/dev/null 2>&1; then
+    mv "${tmp}" "${dest}"
+    echo "Passwordless sudo for ${user}: ${wg_bin}, ${wg_quick_bin}"
+  else
+    rm -f "${tmp}"
+    echo "warning: could not install ${dest}; meteorcli run as ${user} cannot create wg0." >&2
   fi
 }
 
@@ -245,16 +274,18 @@ install_meteorcli() {
   if [[ "${WITH_SERVICE}" -eq 1 ]]; then
     install_service
   fi
+  install_wireguard_sudoers
   if [[ "${EUID}" -eq 0 ]]; then
-    echo "Next: sudo meteorcli config --domain <host> --api-key key_..."
-    echo "      sudo meteorcli test"
-    echo "      sudo meteorcli register|request-token  (writes /etc/meteorcli for the service)"
-    echo "      sudo systemctl start meteorcli"
+    echo "Next: meteorcli config --domain <host> --api-key key_..."
+    echo "      meteorcli test"
+    echo "      meteorcli register|request-token, then meteorcli run"
+    echo "      (meteorcli.service uses /etc/meteorcli: sudo meteorcli register, then systemctl start meteorcli)"
   else
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: for meteorcli.service use sudo ./installcli.sh --with-service (migrates ~/.config/meteorcli)."
+    echo "Tip: sudo ./installcli.sh adds passwordless sudo for wg/wg-quick so run does not need root."
+    echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
   fi
 }
 

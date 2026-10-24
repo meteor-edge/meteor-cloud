@@ -558,6 +558,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if loaded is None:
         return 1
     config, device_token = loaded
+    chown_config_dir(paths.config_path.parent)
     client = EdgeClient(config.server_url)
     artifacts_dir = paths.config_path.parent / "artifacts"
 
@@ -594,8 +595,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     config.device_id, mqtt_config, server_url=config.server_url
                 )
                 mqtt_session.start()
-        except Exception:
-            logger.exception("MQTT failed to start; continuing with heartbeats")
+        except Exception as exc:
+            logger.error("MQTT failed to start; continuing with heartbeats: %s", exc)
         run_loop(
             client,
             device_token,

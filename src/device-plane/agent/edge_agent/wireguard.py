@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import ipaddress
 import logging
 import os
@@ -20,10 +21,34 @@ Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
 # WireGuard handshakes every 2 minutes while traffic flows (keepalive keeps it flowing).
 STALE_HANDSHAKE_SECONDS = 180
+_PRIVILEGED_WG = frozenset({"show", "set", "addconf", "syncconf"})
+
+
+def _elevate_wireguard(args: Sequence[str]) -> list[str]:
+    """Create/change wg0 needs CAP_NET_ADMIN. Use passwordless sudo when not root."""
+    cmd = list(args)
+    if os.geteuid() == 0 or not cmd:
+        return cmd
+    if cmd[0] == "wg-quick" or (cmd[0] == "wg" and len(cmd) > 1 and cmd[1] in _PRIVILEGED_WG):
+        resolved = shutil.which(cmd[0])
+        if resolved:
+            cmd[0] = resolved
+        return ["sudo", "-n", *cmd]
+    return cmd
 
 
 def _default_runner(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(args), check=True, capture_output=True, text=True, timeout=30)
+    return subprocess.run(_elevate_wireguard(args), check=True, capture_output=True, text=True, timeout=30)
+
+
+def _try_chmod(path: Path, mode: int) -> None:
+    try:
+        os.chmod(path, mode)
+    except PermissionError:
+        return
+    except OSError as exc:
+        if exc.errno not in (errno.EPERM, errno.EACCES):
+            raise
 
 
 def wireguard_available() -> bool:
@@ -41,7 +66,7 @@ def wireguard_dir(config_dir: Path) -> Path:
 def ensure_keypair(directory: Path, *, runner: Runner = _default_runner) -> tuple[str, str]:
     """Return (private_key, public_key). Private key is written mode 0600."""
     directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, stat.S_IRWXU)
+    _try_chmod(directory, stat.S_IRWXU)
     private_path = directory / "private.key"
     public_path = directory / "public.key"
     if private_path.is_file() and public_path.is_file():
@@ -60,13 +85,13 @@ def ensure_keypair(directory: Path, *, runner: Runner = _default_runner) -> tupl
     ).stdout.strip()
     _write_secret(private_path, private_key)
     public_path.write_text(public_key + "\n", encoding="utf-8")
-    os.chmod(public_path, stat.S_IRUSR | stat.S_IWUSR)
+    _try_chmod(public_path, stat.S_IRUSR | stat.S_IWUSR)
     return private_key, public_key
 
 
 def _write_secret(path: Path, value: str) -> None:
     path.write_text(value + "\n", encoding="utf-8")
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    _try_chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
 def write_client_config(
@@ -95,7 +120,7 @@ def write_client_config(
     changed = previous != content
     if changed:
         conf.write_text(content, encoding="utf-8")
-        os.chmod(conf, stat.S_IRUSR | stat.S_IWUSR)
+        _try_chmod(conf, stat.S_IRUSR | stat.S_IWUSR)
     return conf, changed
 
 
@@ -210,13 +235,24 @@ def sync_connectivity(
             apply_interface(conf, runner=runner, config_changed=changed)
             refresh_endpoint(conf.stem, server_public_key=server_public_key,
                              server_endpoint=server_endpoint, runner=runner)
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-            logger.warning("Could not apply WireGuard interface: %s", exc)
+        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError) as exc:
+            logger.warning(
+                "Could not apply WireGuard interface: %s. "
+                "meteorcli run does not need root; installcli.sh adds passwordless sudo for wg/wg-quick.",
+                exc,
+            )
         install_gateway_ssh_key(str(response.get("ssh_gateway_public_key") or ""))
         return response
     except Exception as exc:
         if getattr(exc, "code", None) == "connectivity_disabled":
             logger.info("Device connectivity is disabled; skipping WireGuard")
+            return None
+        if isinstance(exc, PermissionError):
+            logger.warning(
+                "WireGuard config is not writable (%s). "
+                "If you previously used sudo meteorcli, run: sudo chown -R \"$USER\" ~/.config/meteorcli",
+                exc,
+            )
             return None
         logger.exception("WireGuard registration failed")
         return None

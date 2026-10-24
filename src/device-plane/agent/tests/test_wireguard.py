@@ -9,7 +9,10 @@ from unittest.mock import MagicMock, patch
 
 from edge_agent.client import AgentApiError
 from edge_agent.wireguard import (
+    _elevate_wireguard,
+    _try_chmod,
     apply_interface,
+    ensure_keypair,
     install_gateway_ssh_key,
     refresh_endpoint,
     sync_connectivity,
@@ -183,3 +186,40 @@ def test_refresh_endpoint_skips_ip_endpoints_and_unchanged_names() -> None:
     refresh_endpoint("wg0", server_public_key="SERVER", server_endpoint="wg.example.com:51820",
                      runner=runner, resolve=lambda host: "203.0.113.1", now=lambda: 5000)
     assert not any(call[:2] == ["wg", "set"] for call in calls)
+
+
+def test_elevate_wireguard_uses_sudo_only_for_privileged_commands(monkeypatch) -> None:
+    monkeypatch.setattr("edge_agent.wireguard.os.geteuid", lambda: 1000)
+    monkeypatch.setattr("edge_agent.wireguard.shutil.which", lambda name: f"/usr/bin/{name}")
+    assert _elevate_wireguard(["wg", "genkey"]) == ["wg", "genkey"]
+    assert _elevate_wireguard(["wg-quick", "up", "/tmp/wg0.conf"]) == [
+        "sudo",
+        "-n",
+        "/usr/bin/wg-quick",
+        "up",
+        "/tmp/wg0.conf",
+    ]
+    assert _elevate_wireguard(["wg", "show", "wg0"]) == ["sudo", "-n", "/usr/bin/wg", "show", "wg0"]
+    monkeypatch.setattr("edge_agent.wireguard.os.geteuid", lambda: 0)
+    assert _elevate_wireguard(["wg-quick", "up", "/tmp/wg0.conf"]) == ["wg-quick", "up", "/tmp/wg0.conf"]
+
+
+def test_try_chmod_ignores_permission_errors(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "dir"
+    path.mkdir()
+
+    def boom(_target, _mode):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("edge_agent.wireguard.os.chmod", boom)
+    _try_chmod(path, 0o700)
+
+    def runner(args, **kwargs):
+        del kwargs
+        result = MagicMock()
+        result.stdout = "PRIVATE\n" if args == ["wg", "genkey"] else ""
+        return result
+
+    with patch("edge_agent.wireguard.subprocess.run") as pub:
+        pub.return_value = MagicMock(stdout="PUBLIC\n")
+        ensure_keypair(path, runner=runner)
