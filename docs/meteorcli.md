@@ -40,7 +40,7 @@ Config directory: `~/.config/meteorcli` (or `/etc/meteorcli` as root).
 | `register` | Enroll with a registration token |
 | `request-token` | Device-initiated enroll; poll for approval |
 | `claim` | Fetch device token after a later approval |
-| `run` | Heartbeats + MQTT loop (`--once` for a single pass). Run as the device user; WireGuard uses passwordless sudo for `wg` / `wg-quick` only |
+| `run` | Heartbeats + MQTT loop (`--once` for a single pass). Run as the device user; WireGuard uses passwordless sudo for the `meteorcli-wg` helper only |
 | `status` | Show non-secret local config |
 | `mqtt-test` / `mqtt-listen` | MQTT diagnostics |
 

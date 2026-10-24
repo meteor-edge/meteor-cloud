@@ -317,6 +317,9 @@ class ConnectivityService:
         EndpointService(self.session, settings=self.settings).disable_for_device(
             organization_id=organization_id, device_id=device_id
         )
+        from app.shell.service import close_sessions_for_device
+
+        close_sessions_for_device(self.session, device_id=device_id)
         self.audit.record(
             actor=actor,
             organization_id=organization_id,
@@ -361,6 +364,9 @@ class ConnectivityService:
         EndpointService(self.session, settings=self.settings).disable_for_device(
             organization_id=organization_id, device_id=device_id
         )
+        from app.shell.service import close_sessions_for_device
+
+        close_sessions_for_device(self.session, device_id=device_id)
         self.audit.record(
             actor=actor,
             organization_id=organization_id,

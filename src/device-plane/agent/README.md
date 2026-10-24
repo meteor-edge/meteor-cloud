@@ -43,8 +43,11 @@ Re-run the script to upgrade. Uninstall with `./installcli.sh --uninstall`
 
 `meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
 and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`).
-`sudo ./installcli.sh` installs passwordless sudo for `wg` / `wg-quick` only, so
-the agent can create `wg0` without running the whole CLI as root. When the
+`sudo ./installcli.sh` installs a root-owned helper, `/usr/local/libexec/meteorcli-wg`,
+and passwordless sudo for that helper only, so the agent can create `wg0` without
+running the whole CLI as root. The helper only accepts meteorcli's own `wg0.conf`
+keys (no `PostUp`/`PreUp` hooks or other `wg-quick` options) and fixed `wg` calls
+on `wg0`, so the sudo rule does not grant root. When the
 control plane has WireGuard enabled, `run` registers this device’s **public**
 key and brings up a tunnel (private key stays on the device). See
 [Device connectivity](../../../docs/fleet/connectivity.md).

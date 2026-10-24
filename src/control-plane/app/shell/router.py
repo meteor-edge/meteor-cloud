@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 import uuid
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -16,6 +19,8 @@ from app.shell.dependencies import ShellSvc
 from app.shell.schemas import ShellSessionCreateResponse
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 router = APIRouter(tags=["shell"])
 
@@ -68,13 +73,24 @@ async def shell_websocket(
     if not ticket:
         await websocket.close(code=4401, reason="Missing shell ticket")
         return
+    # Redeeming the ticket, starting ssh (and signing its certificate) and the periodic access
+    # check run in threads so they never stall the event loop. The request Session is not
+    # thread-safe and a cancelled to_thread call can still be running, so every use holds this lock.
+    db_lock = threading.Lock()
+
+    def locked(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+        with db_lock:
+            return fn(*args, **kwargs)
+
     consumed = False
     connection = None
+    device_id = None
     try:
-        target = service.consume_ticket(session_id=session_id, ticket=ticket)
+        target = await asyncio.to_thread(locked, service.consume_ticket, session_id=session_id, ticket=ticket)
         consumed = True
         device_id = target.session.device_id
-        connection = service._require_provider().connect(
+        connection = await asyncio.to_thread(
+            service._require_provider().connect,
             host=target.host,
             port=target.port,
             username=target.username,
@@ -83,13 +99,13 @@ async def shell_websocket(
         )
     except AppError as exc:
         if consumed:
-            service.close_session(session_id)
+            locked(service.close_session, session_id)
         await websocket.send_text(f"error: {exc.message}")
         await websocket.close(code=4400, reason=exc.code[:120])
         return
     except Exception:
         if consumed:
-            service.close_session(session_id)
+            locked(service.close_session, session_id)
         logger.exception("Failed to open device shell")
         await websocket.send_text("error: could not open a shell to this device")
         await websocket.close(code=1011)
@@ -98,36 +114,30 @@ async def shell_websocket(
         await websocket.close(code=1011)
         return
 
-    idle = service.settings.shell_idle_timeout_seconds
-    max_duration = service.settings.shell_max_duration_seconds
-    last_activity = time.monotonic()
-    stop = asyncio.Event()
+    settings = service.settings
+    idle = settings.shell_idle_timeout_seconds
+    started = time.monotonic()
+    last_activity = started
 
-    async def from_device() -> None:
+    async def from_device() -> str | None:
         nonlocal last_activity
-        while not stop.is_set():
+        while True:
             chunk = await asyncio.to_thread(connection.read, 4096)
             if chunk:
                 last_activity = time.monotonic()
                 await websocket.send_bytes(chunk)
             elif connection.closed:
                 # The shell exited (e.g. `exit`): end the session instead of waiting for the idle timeout.
-                stop.set()
-                return
-            elif time.monotonic() - last_activity > idle:
-                await websocket.send_text("\r\n[idle timeout]\r\n")
-                stop.set()
-                return
+                return None
             else:
                 await asyncio.sleep(0.05)
 
-    async def from_browser() -> None:
+    async def from_browser() -> str | None:
         nonlocal last_activity
-        while not stop.is_set():
+        while True:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":
-                stop.set()
-                return
+                return None
             data = message.get("bytes")
             if data is None and message.get("text") is not None:
                 data = str(message["text"]).encode("utf-8")
@@ -135,39 +145,55 @@ async def shell_websocket(
                 last_activity = time.monotonic()
                 await asyncio.to_thread(connection.write, data)
 
+    async def watchdog() -> str:
+        """Idle and duration limits, and access removed while the shell is open."""
+        next_check = started + settings.shell_recheck_seconds
+        while True:
+            await asyncio.sleep(0.5)
+            now = time.monotonic()
+            if now - last_activity > idle:
+                return "\r\n[idle timeout]\r\n"
+            if now - started > settings.shell_max_duration_seconds:
+                return "\r\n[session time limit reached]\r\n"
+            if now >= next_check:
+                next_check = now + settings.shell_recheck_seconds
+                if not await asyncio.to_thread(locked, service.session_still_allowed, session_id):
+                    return "\r\n[session ended: access to this device was removed]\r\n"
+
+    tasks = [
+        asyncio.create_task(from_device()),
+        asyncio.create_task(from_browser()),
+        asyncio.create_task(watchdog()),
+    ]
     try:
-        device_task = asyncio.create_task(from_device())
-        browser_task = asyncio.create_task(from_browser())
-        done, pending = await asyncio.wait(
-            {device_task, browser_task},
-            timeout=float(max_duration),
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if not done:
-            await websocket.send_text("\r\n[session time limit reached]\r\n")
-        for task in pending:
-            task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             if task.cancelled():
                 continue
             exc = task.exception()
             if exc is not None:
                 raise exc
+            reason = task.result()
+            if reason:
+                await websocket.send_text(reason)
     except WebSocketDisconnect:
         pass
     except Exception:
         logger.exception("Shell session %s ended with an error", session_id)
     finally:
-        stop.set()
-        if connection is not None:
-            connection.close()
+        for task in tasks:
+            task.cancel()
+        # Cleanup stays synchronous so it still runs to the end if this coroutine is cancelled
+        # (it is quick: ssh exits on SIGTERM, then two small writes). The lock waits for a
+        # recheck that may still be running in a worker thread.
+        connection.close()
+        with db_lock:
             # Diagnostics only: ssh's own error line, or that the device answered.
             failure = connection.failure
-            if failure or connection.received_output:
+            if device_id is not None and (failure or connection.received_output):
                 service.connectivity.record_ssh_result(device_id, error=failure)
-        service.close_session(session_id)
+            service.close_session(session_id)
+        await asyncio.gather(*tasks, return_exceptions=True)
         try:
             await websocket.close()
         except Exception:

@@ -57,7 +57,8 @@ class AgentWireGuardRegisterRequest(BaseModel):
         name = value.strip()
         if not name:
             return None
-        if name in {".", ".."} or "/" in name or "\\" in name:
+        # A leading "-" would be parsed by ssh as an option (it ends up in "user@host").
+        if name in {".", ".."} or name.startswith("-") or "/" in name or "\\" in name:
             raise ValueError("Invalid SSH user.")
         if not name.replace("-", "").replace("_", "").isalnum():
             raise ValueError("Invalid SSH user.")

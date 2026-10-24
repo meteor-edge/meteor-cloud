@@ -486,3 +486,70 @@ def test_shell_target_cli_resolves_trusted_records(
     assert cli.shell_target(reg["device_id"]) == 3
     assert "revoked" in capsys.readouterr().err
     assert cli.shell_target("not-a-device") == 2
+
+
+def test_open_shell_ends_when_access_is_removed(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.shell.service import ShellService
+
+    org, headers, reg = _shell_ready_device(client, db_session, name="pi-cut", mac="aa:bb:cc:dd:01:20")
+    _report_handshake(client, WG_KEY_A)
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/shell-sessions", headers=headers
+    ).json()
+    monkeypatch.setattr(get_settings(), "shell_recheck_seconds", 1)
+    # The recheck itself is covered below; here it just reports that access is gone.
+    monkeypatch.setattr(ShellService, "session_still_allowed", lambda self, session_id: False)
+    with client.websocket_connect(created["websocket_path"] + f"?ticket={created['ticket']}") as websocket:
+        assert "MeteorCloud" in websocket.receive_bytes().decode()
+        assert "access to this device was removed" in websocket.receive_text()
+
+
+def test_revoke_closes_shells_and_recheck_refuses(client: TestClient, db_session: Session) -> None:
+    from app.adapters import connectivity_provider, shell_provider
+    from app.audit.models import AuditEvent
+    from app.connectivity.service import ConnectivityService
+    from app.shell.service import ShellService
+
+    org, headers, reg = _shell_ready_device(client, db_session, name="pi-rev", mac="aa:bb:cc:dd:01:21")
+    _report_handshake(client, WG_KEY_A)
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/shell-sessions", headers=headers
+    ).json()
+    session_id = uuid.UUID(created["session_id"])
+    audit = db_session.query(AuditEvent).filter(AuditEvent.action == "device.shell.start").one()
+    assert audit.metadata_["session_id"] == str(session_id)
+
+    row = db_session.get(DeviceShellSession, session_id)
+    row.status = ShellSessionStatus.OPEN.value
+    db_session.commit()
+    settings = get_settings()
+    service = ShellService(
+        db_session,
+        connectivity=ConnectivityService(db_session, provider=connectivity_provider(settings), settings=settings),
+        provider=shell_provider(settings),
+        settings=settings,
+    )
+    assert service.session_still_allowed(session_id)
+
+    revoked = client.post(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/connectivity/revoke", headers=headers
+    )
+    assert revoked.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(DeviceShellSession, session_id).status == ShellSessionStatus.CLOSED.value
+    assert not service.session_still_allowed(session_id)
+
+
+def test_ssh_user_and_destination_cannot_become_ssh_options() -> None:
+    with pytest.raises(ValueError):
+        AgentWireGuardRegisterRequest(public_key=WG_KEY_A, ssh_user="-Fx")
+    seen: list[list[str]] = []
+
+    def runner(args):
+        seen.append(list(args))
+        return type("P", (), {"stdout": None, "stdin": None, "poll": lambda self: None})()
+
+    SshGatewayProvider(runner=runner).connect(host="10.8.0.5", port=22, username="pi")
+    assert seen[0][-2:] == ["--", "pi@10.8.0.5"]
