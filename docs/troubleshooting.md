@@ -102,6 +102,8 @@ helm -n meteorcloud test meteorcloud --logs
 | No peer config | Run the gateway agent (`src/device-plane/gateway/connectivity_agent.py`) so it applies `wg set` from the control plane. Do not paste `[Peer]` blocks into `wg0.conf` |
 | Device has no WG IP | `CONNECTIVITY_PROVIDER=wireguard`, `wireguard-tools` installed, and `meteorcli run` (passwordless sudo for `wg` / `wg-quick` from `installcli.sh`) |
 | Browser terminal fails | Device `sshd` up, `SHELL_PROVIDER=ssh_gateway`, gateway host can route to `10.8.0.0/16`, connectivity status `active` |
+| Browser: `UNPROTECTED PRIVATE KEY` then Permission denied | Platform key must be `0600`. Re-run `make up`, or `sudo chmod 600 /opt/edge-platform/shell/id_ed25519` then Reconnect. Do not use `0640` or group `meteorcloud-shell` |
+| `meteorcloud-ssh` cannot read the key | Use `~/.config/meteorcloud/shell/id_ed25519` (`make up` copies it, mode `0600`). Do not chmod the platform key so the group can read it |
 
 ## Security notes
 

@@ -110,45 +110,34 @@
 - name: Create the browser SSH gateway key
   when: shell_provider == 'ssh_gateway'
   block:
-    - name: Create the group that may read the gateway key
-      ansible.builtin.group:
-        name: "{{ shell_ssh_group }}"
-        state: present
-
     - name: Create the SSH gateway key directory
       ansible.builtin.file:
         path: "{{ shell_ssh_dir }}"
         state: directory
         owner: root
-        group: "{{ shell_ssh_group }}"
-        mode: "0750"
+        group: root
+        mode: "0700"
 
     # The API (root in its container) uses it to open SSH to the device WireGuard address.
+    # OpenSSH refuses group-readable private keys (0640), so this file stays 0600.
     - name: Generate the SSH gateway key once
       ansible.builtin.command:
         cmd: ssh-keygen -q -t ed25519 -N "" -C meteorcloud-shell-gateway -f {{ shell_ssh_dir }}/id_ed25519
         creates: "{{ shell_ssh_dir }}/id_ed25519"
 
-    - name: Restrict the gateway private key to the shell group
+    - name: Lock the platform gateway private key
       ansible.builtin.file:
         path: "{{ shell_ssh_dir }}/id_ed25519"
         owner: root
-        group: "{{ shell_ssh_group }}"
-        mode: "0640"
+        group: root
+        mode: "0600"
 
-    - name: Add the install user to the shell group
-      ansible.builtin.user:
-        name: "{{ ansible_user }}"
-        groups: "{{ shell_ssh_group }}"
-        append: true
-      when: ansible_user is defined and ansible_user != 'root'
-
-    - name: Add ubuntu to the shell group
-      ansible.builtin.user:
-        name: ubuntu
-        groups: "{{ shell_ssh_group }}"
-        append: true
-      when: ansible_user | default('') == 'root'
+    # Older installs used 0640 + group meteorcloud-shell so ubuntu could read the
+    # platform key. OpenSSH then ignored it and browser SSH failed.
+    - name: Drop leftover meteorcloud-shell group
+      ansible.builtin.group:
+        name: meteorcloud-shell
+        state: absent
       failed_when: false
 
     - name: Read the SSH gateway public key
@@ -159,6 +148,43 @@
     - name: Publish the SSH gateway public key to devices
       ansible.builtin.set_fact:
         shell_gateway_public_key: "{{ shell_gateway_pub.content | b64decode | trim }}"
+
+    - name: Read local login accounts
+      ansible.builtin.getent:
+        database: passwd
+
+    - name: List login accounts that get a meteorcloud-ssh key
+      ansible.builtin.set_fact:
+        shell_ssh_operator_names: >-
+          {{
+            (
+              [ansible_user | default('')]
+              + ['ubuntu', 'debian']
+              + (shell_ssh_operator_users | default([]))
+            )
+            | unique | reject('eq', '') | reject('eq', 'root') | list
+          }}
+
+    - name: Create the operator meteorcloud-ssh key directory
+      ansible.builtin.file:
+        path: "{{ getent_passwd[item][4] }}/.config/meteorcloud/shell"
+        state: directory
+        owner: "{{ item }}"
+        group: "{{ item }}"
+        mode: "0700"
+      loop: "{{ shell_ssh_operator_names }}"
+      when: item in getent_passwd
+
+    - name: Install a 0600 copy of the gateway key for meteorcloud-ssh
+      ansible.builtin.copy:
+        src: "{{ shell_ssh_dir }}/id_ed25519"
+        dest: "{{ getent_passwd[item][4] }}/.config/meteorcloud/shell/id_ed25519"
+        owner: "{{ item }}"
+        group: "{{ item }}"
+        mode: "0600"
+        remote_src: true
+      loop: "{{ shell_ssh_operator_names }}"
+      when: item in getent_passwd
 
     - name: Install meteorcloud-ssh helper
       ansible.builtin.template:

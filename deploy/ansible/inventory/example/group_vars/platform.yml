@@ -36,6 +36,9 @@ mqtt_enabled: false
 # Browser SSH (device page Terminal). Default is ssh_gateway when `vpn` is
 # enabled; set none to keep the tunnel without the terminal.
 # shell_provider: none
+# Extra logins that get ~/.config/meteorcloud/shell/id_ed25519 (ansible_user,
+# ubuntu, and debian already do):
+# shell_ssh_operator_users: [admin]
 
 # Host firewall (UFW) for on-prem servers without a cloud security group.
 firewall_enabled: true

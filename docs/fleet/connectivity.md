@@ -130,7 +130,7 @@ router.
 
 The device page's **WireGuard network** card shows the device's internal IP
 (e.g. `10.8.0.2`), whether its tunnel is connected (a recent handshake), and the
-SSH command to reach it (`ssh pi@10.8.0.2` when `meteorcli` runs as `pi`).
+SSH command to reach it (`meteorcloud-ssh pi@10.8.0.2` when `meteorcli` runs as `pi`).
 The agent reports that user; `SHELL_SSH_USER` (default `root`) is only the
 fallback. On the MeteorCloud server (`make up` installs the helper):
 
@@ -138,8 +138,10 @@ fallback. On the MeteorCloud server (`make up` installs the helper):
 meteorcloud-ssh pi@10.8.0.2
 ```
 
-That uses the gateway key (`id_ed25519` under `/opt/edge-platform/shell`).
-ed25519 is only the key algorithm (short modern SSH key), not a password.
+That uses your copy of the gateway key (`~/.config/meteorcloud/shell/id_ed25519`,
+mode `0600`). `make up` installs it. OpenSSH rejects a group-readable platform
+key, so `/opt/edge-platform/shell/id_ed25519` stays `0600` for the browser
+container only. ed25519 is the key algorithm, not a password.
 
 Devices cannot reach each other; only the server (`10.8.0.1`) can reach them.
 
@@ -150,8 +152,8 @@ device page. Flow: JWT → short-lived ticket → WebSocket → SSH gateway →
 `ssh user@{wg_address}` over WireGuard.
 
 `make up` with WireGuard turns this on (`SHELL_PROVIDER=ssh_gateway` and a
-gateway key under `/opt/edge-platform/shell`). The API host must be able to
-reach `10.8.0.0/16`. Re-run `sudo meteorcli run` on each device so it installs
+`0600` gateway key under `/opt/edge-platform/shell`). The API host must be able
+to reach `10.8.0.0/16`. Re-run `meteorcli run` on each device so it installs
 the gateway public key. Tests use `SHELL_PROVIDER=echo`. Set
 `shell_provider: none` in inventory if you want the tunnel without the terminal.
 

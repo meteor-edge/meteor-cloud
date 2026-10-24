@@ -510,6 +510,12 @@ write_secrets() {
 write_secrets "${SECRETS}"
 write_secrets "${HOME_SECRETS}"
 
+# Login user (not root) so meteorcloud-ssh gets a 0600 key even if make up ran via sudo.
+SELFHOST_USER="${SUDO_USER:-${USER}}"
+if [[ "${SELFHOST_USER}" == "root" && "${USER}" != "root" ]]; then
+  SELFHOST_USER="${USER}"
+fi
+
 {
   cat <<EOF
 all:
@@ -519,7 +525,7 @@ all:
         meteorcloud-1:
           ansible_host: 127.0.0.1
           ansible_connection: local
-          ansible_user: ${USER}
+          ansible_user: ${SELFHOST_USER}
           ansible_python_interpreter: /usr/bin/python3
 EOF
   if [[ -n "${PUBLIC_IP}" ]]; then

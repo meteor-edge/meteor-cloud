@@ -1,10 +1,21 @@
 #!/bin/sh
 # SSH from this host to a device over WireGuard (same key as the browser terminal).
+# OpenSSH requires the private key to be 0600, so operators use a personal copy.
 set -eu
-KEY="{{ shell_ssh_dir }}/id_ed25519"
-if [ ! -r "${KEY}" ]; then
-  echo "meteorcloud-ssh: cannot read ${KEY}." >&2
-  echo "Ask to be added to group {{ shell_ssh_group }}, then log out and back in." >&2
+PLATFORM_KEY="{{ shell_ssh_dir }}/id_ed25519"
+USER_KEY="${HOME}/.config/meteorcloud/shell/id_ed25519"
+KEY=""
+if [ -r "${USER_KEY}" ]; then
+  KEY="${USER_KEY}"
+elif [ -r "${PLATFORM_KEY}" ]; then
+  KEY="${PLATFORM_KEY}"
+else
+  echo "meteorcloud-ssh: no readable gateway key." >&2
+  echo "Expected ${USER_KEY} (0600). Re-run make up, or:" >&2
+  echo "  mkdir -p ~/.config/meteorcloud/shell" >&2
+  echo "  sudo cp ${PLATFORM_KEY} ~/.config/meteorcloud/shell/id_ed25519" >&2
+  echo "  sudo chown \"\$USER:\$USER\" ~/.config/meteorcloud/shell/id_ed25519" >&2
+  echo "  chmod 600 ~/.config/meteorcloud/shell/id_ed25519" >&2
   exit 1
 fi
 if [ "$#" -lt 1 ]; then

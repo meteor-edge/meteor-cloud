@@ -50,13 +50,13 @@ describe("DeviceNetworkPanel", () => {
     renderPanel();
     expect(await screen.findByText("10.8.0.2")).toBeInTheDocument();
     expect(screen.getByText("Connected")).toBeInTheDocument();
-    expect(screen.getByText("ssh root@10.8.0.2")).toBeInTheDocument();
+    expect(screen.getByText("meteorcloud-ssh root@10.8.0.2")).toBeInTheDocument();
   });
 
   it("adds the port when SSH is not on 22", async () => {
     getMock.mockResolvedValue({ ...connectivity, ssh_port: 2222, connected: false });
     renderPanel();
-    expect(await screen.findByText("ssh -p 2222 root@10.8.0.2")).toBeInTheDocument();
+    expect(await screen.findByText("meteorcloud-ssh -p 2222 root@10.8.0.2")).toBeInTheDocument();
     expect(screen.getByText("Waiting for the device")).toBeInTheDocument();
   });
 

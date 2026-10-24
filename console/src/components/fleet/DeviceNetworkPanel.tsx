@@ -52,7 +52,9 @@ export function DeviceNetworkPanel({ token, organizationId, deviceId }: DeviceNe
   const net = query.data!;
   const revoked = net.status !== "active";
   const port = net.ssh_port !== 22 ? ` -p ${net.ssh_port}` : "";
-  const sshCommand = net.wg_address ? `ssh${port} ${net.ssh_user}@${net.wg_address}` : "";
+  const sshCommand = net.wg_address
+    ? `meteorcloud-ssh${port} ${net.ssh_user}@${net.wg_address}`
+    : "";
 
   async function copy() {
     await navigator.clipboard.writeText(sshCommand);
@@ -95,9 +97,8 @@ export function DeviceNetworkPanel({ token, organizationId, deviceId }: DeviceNe
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            Run it on the MeteorCloud server ({net.server_address} inside the tunnel) with the
-            browser-terminal key; on Ansible installs add{" "}
-            <code>-i /opt/edge-platform/shell/id_ed25519</code>. Devices cannot reach each other.
+            Run it on the MeteorCloud server ({net.server_address} inside the tunnel). Same key as
+            the browser terminal; no sudo. Devices cannot reach each other.
           </p>
         </div>
       )}

@@ -161,14 +161,15 @@ routing_internal_token: >-
 apps_base_domain: "{{ platform_domain | default('meteor-edge.com', true) }}"
 # Browser SSH. On with WireGuard: Ansible creates the gateway SSH key on the API
 # host once (shell_ssh_dir), mounts it into the API, and devices install its public key.
-# Override with shell_provider: none if you want the tunnel without the terminal.
+# The platform private key stays 0600 (OpenSSH rejects 0640). meteorcloud-ssh uses a
+# personal 0600 copy. Override with shell_provider: none to keep the tunnel only.
 shell_provider: "{{ 'ssh_gateway' if 'vpn' in enabled_services else 'none' }}"
 shell_ssh_dir: "{{ platform_root }}/shell"
-# Login users in this group can run meteorcloud-ssh without sudo. The private
-# key stays 0640 (not world-readable).
-shell_ssh_group: meteorcloud-shell
 shell_ssh_identity_file: "{{ '/run/meteorcloud/shell/id_ed25519' if shell_provider == 'ssh_gateway' else '' }}"
 shell_gateway_public_key: ""
+# Extra login names that receive ~/.config/meteorcloud/shell/id_ed25519.
+# ansible_user, ubuntu, and debian are always included when those accounts exist.
+shell_ssh_operator_users: []
 # Region for Traefik's Route53 DNS-01 (wildcard app certificates). Credentials come from the
 # instance role (IMDSv2, hop limit 2) or, off AWS, a scoped IAM key from the controller env.
 traefik_aws_region: ""

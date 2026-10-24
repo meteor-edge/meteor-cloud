@@ -57,7 +57,7 @@ to check or uncheck, **Enter** to continue.
 
 It then prints DNS records for that setup. `--storage=s3` or `--mqtt=external`
 still ask for bucket or broker details before install. WireGuard also turns on
-browser SSH (Terminal on the device page). From the VM:
+browser SSH (Terminal on the device page). From the VM, no sudo:
 `meteorcloud-ssh pi@10.8.0.2`.
 
 Clone **on the host**:
