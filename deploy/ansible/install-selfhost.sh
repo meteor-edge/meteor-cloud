@@ -96,6 +96,12 @@ else
   exit 1
 fi
 
+# Ansible refuses to start when SSH forwards a locale this host lacks
+# (e.g. LC_TIME=de_DE.UTF-8 from the laptop). Fall back to C.UTF-8 then.
+if ! python3 -c 'import locale; locale.setlocale(locale.LC_ALL, "")' 2>/dev/null; then
+  export LC_ALL=C.UTF-8
+fi
+
 ansible_bin() {
   if command -v ansible-playbook >/dev/null 2>&1; then
     command -v ansible-playbook
