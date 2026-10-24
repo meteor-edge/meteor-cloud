@@ -19,6 +19,8 @@ class MqttConfig:
     tls: bool = True
     ca_cert: str | None = None
     ca_path: str | None = None
+    # Server's MQTT config version when this was fetched; None for configs from registration.
+    config_version: str | None = None
 
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
@@ -54,6 +56,7 @@ def write_mqtt_config(config_dir: Path, mqtt: MqttConfig) -> None:
         "tls": mqtt.tls,
         "password": mqtt.password,
         "ca_cert_path": ca_cert_path,
+        "config_version": mqtt.config_version,
     }
     write_secret_file(mqtt_path, json.dumps(payload))
 
@@ -91,6 +94,7 @@ def read_mqtt_config(config_dir: Path) -> MqttConfig | None:
             tls=True,
             ca_cert=ca_cert,
             ca_path=str(ca_cert_path) if ca_cert_path else None,
+            config_version=data.get("config_version") or None,
         )
     except (json.JSONDecodeError, TypeError, ValueError):
         return None

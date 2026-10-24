@@ -157,6 +157,8 @@ beforeEach(() => {
     page: 1,
     page_size: 10,
   });
+  vi.mocked(fleetApi.listDeviceSoftware).mockResolvedValue([]);
+  vi.mocked(fleetApi.listEndpoints).mockResolvedValue([]);
   vi.mocked(fleetApi.listenMqttEvents).mockReturnValue(() => {});
   vi.mocked(fleetApi.publishMqttTest).mockResolvedValue({
     topic: "devices/device-1/events",

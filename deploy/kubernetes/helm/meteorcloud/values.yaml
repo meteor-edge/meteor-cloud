@@ -16,6 +16,10 @@ config:
   logLevel: INFO
   logFormat: json
   registrationRequireHttps: true
+  # Proxies whose X-Forwarded-Proto/For the API trusts (uvicorn FORWARDED_ALLOW_IPS).
+  # The ingress terminates TLS, so without this every request looks like plain HTTP
+  # and device registration fails with https_required. The API Service is not public.
+  forwardedAllowIps: "*"
   # Extra non-secret environment variables for the API, e.g. rate limits:
   #   DEVICE_OFFLINE_THRESHOLD_SECONDS: "150"
   extraEnv: {}
@@ -31,12 +35,90 @@ config:
 #   MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN      mqtt.enabled
 #   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled broker
 #   EDGE_PLATFORM_ADMIN_EMAIL/PASSWORD               optional first administrator
+#   CONNECTIVITY_INTERNAL_TOKEN                      connectivity.provider=wireguard
 secrets:
   existingSecret: ""
   jwtSecret: ""
+  # Shared with the WireGuard gateway agent (EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN).
+  # Empty: generated once; read it back from the Secret for the gateway.
+  connectivityInternalToken: ""
   admin:
     email: ""
     password: ""
+
+# --- Device connectivity (WireGuard, optional) -----------------------------
+# The WireGuard server runs outside the cluster on its own VM (AWS EC2 or
+# on-prem), set up by deploy/ansible/playbooks/wireguard.yml. That playbook
+# writes the values below to artifacts/wireguard-<gateway>/helm-values.yaml.
+connectivity:
+  provider: none             # none | wireguard
+  wireguard:
+    serverPublicKey: ""
+    serverEndpoint: ""       # host:port devices dial, e.g. wg.example.com:51820
+    serverAddress: 10.8.0.1/16
+    clientCidr: 10.8.0.0/16
+  # Private Service the gateway agent polls (/internal/connectivity/*). Keep it
+  # internal: an internal load balancer restricted to the gateway's address.
+  # Set vpn_control_plane_url on the gateway to http://<this address>:8000.
+  gatewayService:
+    enabled: false
+    type: LoadBalancer
+    annotations: {}
+      # AWS (load balancer controller):
+      # service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      # service.beta.kubernetes.io/aws-load-balancer-type: external
+      # service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    loadBalancerSourceRanges: []   # e.g. ["10.0.1.20/32"], the gateway's private IP
+  # Browser SSH: the API pods ssh to each device's WireGuard IP, so pods need a
+  # route to clientCidr through the gateway (vpn_routed_cidrs; EKS pod IPs are
+  # VPC IPs). Devices install the public key into authorized_keys. Create the key:
+  #   ssh-keygen -t ed25519 -N "" -C meteorcloud-shell-gateway -f id_ed25519
+  #   kubectl -n meteorcloud create secret generic meteorcloud-shell \
+  #     --from-file=id_ed25519 --from-file=id_ed25519.pub
+  shell:
+    provider: none           # none | ssh_gateway (needs provider=wireguard)
+    existingSecret: ""       # Secret with id_ed25519 and id_ed25519.pub
+    sshUser: root            # fallback when a device does not report its login
+    # Short-lived per-session certificates. Add an SSH user CA to the same Secret:
+    #   ssh-keygen -t ed25519 -N "" -C meteorcloud-ssh-ca -f ca
+    #   ... --from-file=ca --from-file=ca.pub
+    certificates: false
+    # Once every device shows "SSH auth: certificate": stop handing out the shared key.
+    gatewayKeyRetired: false
+  # Public app hostnames shown to users: <app>.<device>.<org>.<baseDomain> or
+  # <name>.<baseDomain>. reservedNames: comma-separated names already in use.
+  apps:
+    baseDomain: meteor-edge.com
+    reservedNames: ""
+    # Serves the app hostnames: Traefik polls the backend's routing document
+    # (/internal/routing/traefik) and gets wildcard certificates over DNS-01,
+    # like the Compose deployment. Point *.<baseDomain> at its Service. Its
+    # pods proxy to device WireGuard IPs, so they need the same route to
+    # clientCidr through the gateway as browser SSH.
+    proxy:
+      enabled: false
+      image:
+        repository: traefik
+        tag: v3.3
+        pullPolicy: IfNotPresent
+      service:
+        type: LoadBalancer
+        annotations: {}
+        loadBalancerSourceRanges: []
+      acme:
+        email: ""
+        dnsProvider: route53   # any Traefik/lego DNS provider
+        # Secret with the provider's variables (e.g. AWS_ACCESS_KEY_ID,
+        # AWS_SECRET_ACCESS_KEY, AWS_REGION). Leave empty with IRSA:
+        # annotate serviceAccount instead.
+        existingSecret: ""
+        caServer: ""           # e.g. Let's Encrypt staging while testing
+      persistence:
+        size: 128Mi
+        storageClass: ""
+      resources: {}
+      nodeSelector: {}
+      tolerations: []
 
 # --- PostgreSQL (required) -------------------------------------------------
 postgresql:

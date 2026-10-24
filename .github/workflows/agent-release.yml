@@ -1,0 +1,55 @@
+# Publish meteorcli (agent + runtime only) as a GitHub Release.
+# Create a tag that matches src/device-plane/agent/pyproject.toml:
+#   git tag agent-v0.1.0 && git push origin agent-v0.1.0
+name: meteorcli release
+
+on:
+  push:
+    tags:
+      - "agent-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Pack and publish meteorcli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: src/device-plane/agent/pyproject.toml
+      - name: Check tag matches agent version
+        run: |
+          tag="${GITHUB_REF_NAME#agent-v}"
+          ver="$(python -c "import tomllib; print(tomllib.load(open('src/device-plane/agent/pyproject.toml', 'rb'))['project']['version'])")"
+          if [[ "${tag}" != "${ver}" ]]; then
+            echo "error: tag agent-v${tag} does not match pyproject version ${ver}" >&2
+            exit 1
+          fi
+      - name: Install agent test deps
+        run: python -m pip install -e "src/device-plane/agent[dev]"
+      - name: Test agent
+        working-directory: src/device-plane/agent
+        run: python -m pytest -q
+      - name: Pack release assets
+        run: make agent-dist
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver="$(python -c "import tomllib; print(tomllib.load(open('src/device-plane/agent/pyproject.toml', 'rb'))['project']['version'])")"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "meteorcli ${ver}" \
+            --notes "Device agent only (not the cloud repo). Install:
+          \`\`\`bash
+          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-meteorcli.sh | bash
+          \`\`\`
+          Pin a version with \`METEORCLI_VERSION=${ver}\`." \
+            dist/meteorcli.tar.gz \
+            "dist/meteorcli-${ver}.tar.gz" \
+            dist/install-meteorcli.sh \
+            dist/SHA256SUMS

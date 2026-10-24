@@ -29,6 +29,7 @@ def build_ansible_extra_vars(
         "platform_domain": config.platform.domain or "",
         "platform_public_url": url,
         "enabled_services": enabled,
+        "demo_data": str(config.installation.demo).lower(),
         "repository_url": config.deployment.repository_url,
         "git_ref": config.deployment.git_ref,
         "image_source": config.deployment.image_source,
@@ -46,12 +47,40 @@ def build_ansible_extra_vars(
         "vpn_listen_port": str(config.services.vpn.listen_port),
         "vpn_network_cidr": config.services.vpn.network_cidr,
         "vpn_server_address": config.services.vpn.server_address,
+        **_mqtt_extra_vars(config),
     }
+    # Ansible derives CONNECTIVITY_PROVIDER and the device endpoint from the gateway
+    # host (generating its key when none is given); extra-vars would override that.
     vpn_key = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY", "")
     if vpn_key:
         extra["vpn_server_private_key"] = vpn_key
+    if outputs.vpn_gateway_private_ip:
+        # The API host reaches a dedicated gateway inside the VPC.
+        extra["vpn_link_endpoint"] = f"{outputs.vpn_gateway_private_ip}:{config.services.vpn.listen_port}"
+    vpn_pub = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PUBLIC_KEY", "").strip()
+    if vpn_pub:
+        extra["wireguard_server_public_key"] = vpn_pub
+    connectivity_token = os.environ.get("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN", "").strip()
+    if connectivity_token:
+        extra["connectivity_internal_token"] = connectivity_token
     if db_url := os.environ.get("EDGE_PLATFORM_DATABASE_URL", "").strip():
         extra["external_database_url"] = db_url
+    return extra
+
+
+def _mqtt_extra_vars(config: InstallationConfig) -> dict[str, str]:
+    mqtt = config.services.mqtt
+    if not mqtt.enabled:
+        return {"mqtt_enabled": "false"}
+    extra = {
+        "mqtt_enabled": "true",
+        "mqtt_broker": mqtt.broker,
+        "mqtt_broker_port": str(mqtt.broker_port),
+    }
+    # Bundled: the role defaults reach EMQX inside Compose and advertise the platform host.
+    if mqtt.broker == "external":
+        extra["mqtt_broker_host"] = mqtt.broker_host
+        extra["mqtt_public_host"] = mqtt.broker_host
     return extra
 
 
@@ -64,6 +93,8 @@ def secret_env_vars() -> dict[str, str]:
         "EDGE_PLATFORM_ADMIN_PASSWORD",
         "EDGE_PLATFORM_ACME_EMAIL",
         "EDGE_PLATFORM_REDIS_PASSWORD",
+        "EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD",
+        "EDGE_PLATFORM_MQTT_INTERNAL_TOKEN",
         "APP_SECRET_KEY",
     )
     return {key: value for key in keys if (value := os.environ.get(key))}

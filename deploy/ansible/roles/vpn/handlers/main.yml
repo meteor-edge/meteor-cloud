@@ -1,5 +1,25 @@
 ---
+- name: Apply kernel network settings
+  ansible.builtin.command:
+    cmd: sysctl -p /etc/sysctl.d/90-meteorcloud-wireguard.conf
+  changed_when: true
+
+- name: Reload systemd units
+  ansible.builtin.systemd:
+    daemon_reload: true
+
 - name: Restart wireguard
   ansible.builtin.systemd:
     name: wg-quick@wg0
     state: restarted
+
+- name: Restart site link
+  ansible.builtin.systemd:
+    name: wg-quick@wg-link
+    state: restarted
+
+- name: Restart meteorcloud gateway
+  ansible.builtin.systemd:
+    name: meteorcloud-gateway
+    state: restarted
+    daemon_reload: true

@@ -16,6 +16,7 @@ class InstallationSettings(BaseModel):
     name: str = Field(min_length=1, max_length=63)
     environment: Literal["development", "staging", "production"]
     provider: Literal["aws"] = "aws"
+    demo: bool = False
 
 
 class PlatformSettings(BaseModel):
@@ -31,7 +32,8 @@ class AwsSettings(BaseModel):
 
     region: str = Field(min_length=1)
     availability_zone: str | None = None
-    instance_type: str = "t3.small"
+    # auto: pick t3/t4g from enabled containers. A smaller explicit type is raised.
+    instance_type: str = "auto"
     architecture: Literal["amd64", "arm64"] = "amd64"
     ami_id: str | None = None
     ssh_key_name: str = Field(min_length=1)
@@ -39,6 +41,8 @@ class AwsSettings(BaseModel):
     root_volume_size_gb: int = Field(default=30, ge=8, le=1024)
     assign_elastic_ip: bool = True
     profile: str | None = None
+    # With platform.domain, Terraform creates A records in this hosted zone.
+    dns_zone_id: str = ""
 
 
 class NetworkSettings(BaseModel):
@@ -87,7 +91,7 @@ class ComponentsSettings(BaseModel):
 class DeploymentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    repository_url: str = "https://github.com/shahabkamali/MeteorCloud.git"
+    repository_url: str = "https://github.com/meteor-edge/meteor-cloud.git"
     git_ref: str = "master"
     image_source: Literal["git", "registry"] = "git"
     backend_image: str = Field(min_length=1)
@@ -132,6 +136,30 @@ class VpnServiceSettings(BaseModel):
     network_cidr: str = "10.8.0.0/24"
     allowed_client_cidrs: list[str] = Field(default_factory=lambda: ["0.0.0.0/0"])
     server_address: str = "10.8.0.1/24"
+    # same_host: WireGuard on the cloud_app instance. dedicated: its own EC2 instance
+    # (Terraform module vpn_gateway), joined to the API host by a WireGuard site link.
+    placement: Literal["same_host", "dedicated"] = "same_host"
+    instance_type: str = "t3.micro"
+    root_volume_size_gb: int = Field(default=16, ge=8, le=1024)
+
+
+class MqttServiceSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # bundled: EMQX on the cloud_app instance (TLS 8883). external: devices use broker_host.
+    enabled: bool = False
+    broker: Literal["bundled", "external"] = "bundled"
+    broker_host: str = ""
+    broker_port: int = Field(default=8883, ge=1, le=65535)
+    allowed_client_cidrs: list[str] = Field(default_factory=lambda: ["0.0.0.0/0"])
+
+    @model_validator(mode="after")
+    def _check_broker(self) -> MqttServiceSettings:
+        if self.enabled and self.broker == "external" and not self.broker_host.strip():
+            raise ValueError("services.mqtt.broker_host is required for an external broker")
+        if self.enabled and self.broker == "bundled" and self.broker_port != 8883:
+            raise ValueError("services.mqtt.broker_port must be 8883 for the bundled broker")
+        return self
 
 
 class ServicesSettings(BaseModel):
@@ -139,6 +167,8 @@ class ServicesSettings(BaseModel):
 
     cloud_app: CloudAppServiceSettings = Field(default_factory=CloudAppServiceSettings)
     vpn: VpnServiceSettings = Field(default_factory=VpnServiceSettings)
+    # Deployed by Ansible with cloud_app, not a separate Terraform service.
+    mqtt: MqttServiceSettings = Field(default_factory=MqttServiceSettings)
 
     def enabled_map(self) -> dict[str, bool]:
         return {

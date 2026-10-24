@@ -36,6 +36,6 @@ observability:
 
 ## AWS install
 
-Set `observability.enabled: true` and `backend: prometheus` in `installation.yaml` (with Ansible directly: `observability_enabled: true` and `EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD`). Grafana binds to `127.0.0.1:3001` on the instance (SSH tunnel; not on Traefik). Skip on `t3.small` if RAM is tight.
+Set `observability.enabled: true` and `backend: prometheus` in `installation.yaml` (with Ansible directly: `observability_enabled: true` and `EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD`). Grafana binds to `127.0.0.1:3001` on the instance (SSH tunnel; not on Traefik). `make aws-up` sizes the host up (usually `t3.large`) when this is on.
 
 Alerts (Alertmanager / CloudWatch Alarms) are not in this cut.

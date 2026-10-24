@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
 from app.devices.identity import DeviceIdentity, match_existing_device
 from app.devices.models import Device, RegistrationToken
 from app.devices.repository import DeviceRepository, RegistrationTokenRepository
@@ -25,7 +25,8 @@ from app.devices.schemas import (
 )
 from app.devices.status import connectivity_status
 from app.devices.tokens import generate_device_token, hash_token
-from app.mqtt.credentials import issue_mqtt_credentials
+from app.mqtt.credentials import issue_mqtt_credentials, mqtt_config_version
+from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
 
 
 class RegistrationService:
@@ -201,6 +202,25 @@ class RegistrationService:
         device.registration_token_id = token.id
         device.is_enabled = True
         return self.devices.update(device)
+
+    def mqtt_status(self) -> AgentMqttStatusResponse:
+        if not self.settings.mqtt_enabled:
+            return AgentMqttStatusResponse(enabled=False)
+        return AgentMqttStatusResponse(enabled=True, config_version=mqtt_config_version(self.settings))
+
+    def reissue_mqtt_credentials(self, *, device: Device) -> AgentMqttCredentialsResponse:
+        """New password and the current CA, for devices registered before MQTT or a CA change."""
+        if not self.settings.mqtt_enabled:
+            raise NotFoundError("mqtt_disabled", "MQTT is not enabled on this server.")
+        try:
+            info = issue_mqtt_credentials(self.session, device, self.settings)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return AgentMqttCredentialsResponse(
+            **info.model_dump(), config_version=mqtt_config_version(self.settings)
+        )
 
     def heartbeat(
         self,

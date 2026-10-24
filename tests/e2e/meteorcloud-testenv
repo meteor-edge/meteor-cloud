@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# MeteorCloud test environment on AWS or your own machines: create, seed demo data, test, destroy. See tests/e2e/README.md.
+#   meteorcloud-testenv validate | up | seed | test | status | logs | down
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="${PYTHON:-python3}"
+
+if ! "${PYTHON}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+  echo "error: Python 3.10+ is required (set PYTHON=...)" >&2
+  exit 2
+fi
+
+export PYTHONPATH="${HERE}${PYTHONPATH:+:${PYTHONPATH}}"
+exec "${PYTHON}" -m e2e "$@"

@@ -8,6 +8,7 @@ Credentials passed here are never logged.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -63,6 +64,9 @@ class EdgeClient:
             raise self._to_api_error(exc) from exc
         except urllib.error.URLError as exc:  # network-level failure
             raise AgentApiError(0, "network_error", str(exc.reason)) from exc
+        except (TimeoutError, OSError, http.client.HTTPException) as exc:
+            # Read timeouts and dropped connections surface outside URLError; retry them the same way.
+            raise AgentApiError(0, "network_error", str(exc) or type(exc).__name__) from exc
 
     def _post(
         self,
@@ -127,6 +131,34 @@ class EdgeClient:
 
     def heartbeat(self, *, device_token: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._post("/api/v1/agent/heartbeat", payload, bearer=device_token)
+
+    def register_wireguard(
+        self,
+        *,
+        device_token: str,
+        public_key: str,
+        ssh_user: str | None = None,
+        ssh_host_key: str | None = None,
+        ssh_ca_public_key: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"public_key": public_key}
+        if ssh_user:
+            body["ssh_user"] = ssh_user
+        if ssh_host_key:
+            body["ssh_host_key"] = ssh_host_key
+        if ssh_ca_public_key:
+            body["ssh_ca_public_key"] = ssh_ca_public_key
+        return self._post(
+            "/api/v1/agent/connectivity/wireguard",
+            body,
+            bearer=device_token,
+        )
+
+    def get_mqtt_status(self, *, device_token: str) -> dict[str, Any]:
+        return self._get("/api/v1/agent/mqtt", bearer=device_token)
+
+    def fetch_mqtt_credentials(self, *, device_token: str) -> dict[str, Any]:
+        return self._post("/api/v1/agent/mqtt/credentials", {}, bearer=device_token)
 
     def get_software(self, *, device_token: str) -> list[dict[str, Any]]:
         """Fetch desired software for this device."""

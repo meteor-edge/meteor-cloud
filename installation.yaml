@@ -2,22 +2,25 @@ installation:
   name: production
   environment: production
   provider: aws
+  demo: true
 
 platform:
   version: "0.2.0"
-  domain: null
+  # Public hostname. With aws.dns_zone_id, apply creates the A records.
+  domain: demo.meteor-edge.io
   public_url: null
 
 aws:
   region: eu-central-1
   availability_zone: null
-  instance_type: t3.small
+  instance_type: auto
   architecture: amd64
   ami_id: null
   ssh_key_name: edge-platform-v2
   ssh_private_key_path: ~/.ssh/edge-platform.pem
   root_volume_size_gb: 30
   assign_elastic_ip: true
+  dns_zone_id: Z01257273R31PYCK7HDEK
 
 network:
   allowed_ssh_cidrs:
@@ -35,6 +38,17 @@ services:
     allowed_client_cidrs:
       - 0.0.0.0/0
     server_address: 10.8.0.1/24
+    # same_host: WireGuard on the cloud_app instance. dedicated: its own EC2
+    # instance (instance_type, root_volume_size_gb), linked to the API host.
+    placement: same_host
+
+  # Device MQTT. bundled: EMQX on the cloud_app host, TLS on 8883 (self-signed CA,
+  # handed to devices with their credentials). external: set broker_host.
+  mqtt:
+    enabled: true
+    broker: bundled
+    allowed_client_cidrs:
+      - 0.0.0.0/0
 
 components:
   postgres:
@@ -52,8 +66,8 @@ components:
     provider: traefik
 
 deployment:
-  repository_url: https://github.com/shahabkamali/MeteorCloud.git
-  git_ref: master
+  repository_url: https://github.com/shahabkamali/meteor-cloud.git  # TEMP test: revert to meteor-edge
+  git_ref: feature/device-connectivity-routing  # TEMP test: revert to master
   image_source: git
   backend_image: edge-platform-backend:0.2.0
   frontend_image: edge-platform-frontend:0.2.0

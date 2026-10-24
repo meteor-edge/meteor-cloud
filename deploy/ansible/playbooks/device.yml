@@ -1,0 +1,11 @@
+---
+# Prepare edge devices (inventory group `devices`) for meteorcli: Docker, WireGuard
+# tools, sshd, and meteorcli.service. Linux VMs, cloud instances or Raspberry Pis.
+- name: Prepare MeteorCloud devices
+  hosts: devices
+  become: true
+  roles:
+    - meteorcloud
+    - common
+    - docker
+    - device

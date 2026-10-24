@@ -5,8 +5,10 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEV_CONNECTIVITY_INTERNAL_TOKEN = "dev-connectivity-internal"
 
 
 class Settings(BaseSettings):
@@ -121,6 +123,54 @@ class Settings(BaseSettings):
     )
     # Deprecated alias; prefer DEPLOYMENT_PROVIDER. Kept so existing env files load.
     ota_provider: Literal["none"] = Field(default="none", alias="OTA_PROVIDER")
+    # Private device network. "none" disables peer APIs; "wireguard" is the v1 transport.
+    connectivity_provider: Literal["wireguard", "none"] = Field(
+        default="none",
+        alias="CONNECTIVITY_PROVIDER",
+    )
+    wireguard_server_public_key: str = Field(default="", alias="WIREGUARD_SERVER_PUBLIC_KEY")
+    wireguard_server_endpoint: str = Field(default="", alias="WIREGUARD_SERVER_ENDPOINT")
+    wireguard_server_address: str = Field(default="10.8.0.1/16", alias="WIREGUARD_SERVER_ADDRESS")
+    wireguard_client_cidr: str = Field(default="10.8.0.0/16", alias="WIREGUARD_CLIENT_CIDR")
+    wireguard_client_dns: str = Field(default="", alias="WIREGUARD_CLIENT_DNS")
+    wireguard_persistent_keepalive: int = Field(default=25, alias="WIREGUARD_PERSISTENT_KEEPALIVE")
+    connectivity_internal_token: str = Field(
+        default=DEV_CONNECTIVITY_INTERNAL_TOKEN, alias="CONNECTIVITY_INTERNAL_TOKEN"
+    )
+    connectivity_handshake_stale_seconds: int = Field(
+        default=180,
+        alias="CONNECTIVITY_HANDSHAKE_STALE_SECONDS",
+    )
+    connectivity_rate_limit_requests: int = Field(default=20, alias="CONNECTIVITY_RATE_LIMIT_REQUESTS")
+    connectivity_rate_limit_window_seconds: int = Field(
+        default=60,
+        alias="CONNECTIVITY_RATE_LIMIT_WINDOW_SECONDS",
+    )
+    # Public app hostnames: <app>.<device>.<org>.{APPS_BASE_DOMAIN} (suggested) or <name>.{APPS_BASE_DOMAIN}
+    # (custom). APPS_RESERVED_NAMES: comma-separated names that already exist under that domain.
+    apps_base_domain: str = Field(default="meteor-edge.com", alias="APPS_BASE_DOMAIN")
+    apps_reserved_names: str = Field(default="", alias="APPS_RESERVED_NAMES")
+    routing_internal_token: str = Field(default="", alias="ROUTING_INTERNAL_TOKEN")
+    # Browser SSH. "echo" is for tests only.
+    shell_provider: Literal["ssh_gateway", "echo", "none"] = Field(default="none", alias="SHELL_PROVIDER")
+    shell_ssh_user: str = Field(default="root", alias="SHELL_SSH_USER")
+    shell_ssh_port: int = Field(default=22, alias="SHELL_SSH_PORT")
+    shell_ssh_identity_file: str = Field(default="", alias="SHELL_SSH_IDENTITY_FILE")
+    shell_gateway_public_key: str = Field(default="", alias="SHELL_GATEWAY_PUBLIC_KEY")
+    # Refuse SSH to devices that never reported a host key (older agents) instead of trusting on first use.
+    shell_require_host_key: bool = Field(default=False, alias="SHELL_REQUIRE_HOST_KEY")
+    # SSH user CA: each session signs a fresh key for one device (principal meteorcloud-device-<id>).
+    shell_ssh_ca_file: str = Field(default="", alias="SHELL_SSH_CA_FILE")
+    shell_ssh_ca_public_key: str = Field(default="", alias="SHELL_SSH_CA_PUBLIC_KEY")
+    shell_ssh_cert_ttl_seconds: int = Field(default=120, ge=30, le=3600, alias="SHELL_SSH_CERT_TTL_SECONDS")
+    # Once every device reports ssh_auth=ca: stop handing out the shared gateway key.
+    shell_gateway_key_retired: bool = Field(default=False, alias="SHELL_GATEWAY_KEY_RETIRED")
+    shell_ticket_ttl_seconds: int = Field(default=60, alias="SHELL_TICKET_TTL_SECONDS")
+    shell_idle_timeout_seconds: int = Field(default=600, alias="SHELL_IDLE_TIMEOUT_SECONDS")
+    shell_max_duration_seconds: int = Field(default=3600, alias="SHELL_MAX_DURATION_SECONDS")
+    shell_max_sessions_per_user: int = Field(default=4, alias="SHELL_MAX_SESSIONS_PER_USER")
+    # How often an open shell re-checks it is still allowed (revoke, disable, lost permission).
+    shell_recheck_seconds: int = Field(default=10, ge=1, alias="SHELL_RECHECK_SECONDS")
     # "local" = accounts in the PostgreSQL users table.
     identity_provider: Literal["local"] = Field(default="local", alias="IDENTITY_PROVIDER")
 
@@ -165,6 +215,10 @@ class Settings(BaseSettings):
     )
 
     @property
+    def reserved_app_names(self) -> frozenset[str]:
+        return frozenset(name.strip().lower() for name in self.apps_reserved_names.split(",") if name.strip())
+
+    @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]
 
@@ -193,6 +247,21 @@ class Settings(BaseSettings):
         if text in {"true", "1", "yes", "on"}:
             return "json"
         return text
+
+    @model_validator(mode="after")
+    def _require_real_connectivity_token(self) -> Settings:
+        # The gateway agent and Traefik authenticate with this token; a known default would let
+        # anything that reaches the API list peers and post handshakes.
+        if (
+            self.app_env == "production"
+            and self.connectivity_provider != "none"
+            and self.connectivity_internal_token in {"", DEV_CONNECTIVITY_INTERNAL_TOKEN}
+        ):
+            raise ValueError(
+                "CONNECTIVITY_INTERNAL_TOKEN must be set to a non-default secret when "
+                "CONNECTIVITY_PROVIDER is enabled and APP_ENV=production"
+            )
+        return self
 
 
 @lru_cache

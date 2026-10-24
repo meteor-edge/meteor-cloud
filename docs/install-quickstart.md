@@ -1,14 +1,119 @@
 # Install the platform (short guide)
 
-Deploy MeteorCloud to an **AWS EC2** host with `edge-installer` (Terraform + Ansible + Docker Compose). For other servers run Ansible directly ([Deployment](deployment.md)); for Kubernetes use Helm ([Kubernetes](kubernetes.md)).
+| Goal | Where | Command | Stop |
+| --- | --- | --- | --- |
+| Testing / development | Your laptop | `make dev` then `make seed` | `make stop` |
+| Production | The VM that will host it | `make up` (on that host) | `make down` |
+| Production, new AWS EC2 | Your laptop | `make aws-up` | `make aws-down` |
+| Production, existing cluster | Your cluster | Helm | `helm uninstall` |
 
-## AWS (EC2)
+Local details: [Getting started](getting-started.md) · [Development](development.md).
+Production on a VM is this page. New EC2: [AWS](#create-a-new-aws-ec2-from-a-laptop). Kubernetes: [Kubernetes](kubernetes.md).
 
-- Python 3.13+, Terraform 1.5+, ansible-core 2.15+, AWS credentials, SSH key pair
+## Testing and development (laptop)
+
+Docker Compose on **your machine**. Not Ansible, not Traefik, not WireGuard.
+
+```bash
+git clone https://github.com/meteor-edge/meteor-cloud.git
+cd meteor-cloud
+make dev
+make seed      # owner@example.com / dev-password-123
+```
+
+Console: http://localhost:5173 · API: http://localhost:8000 · stop: `make stop`.
+
+## Production on this VM (on-prem or an existing server)
+
+Linux host with sudo: **Ubuntu 22.04+**, **Debian 12+**, or **RHEL / CentOS / Rocky / AlmaLinux 9+**.
+The app runs in Docker, so it does not depend on the host distro. `make up` runs
+**Ansible** on this machine: it installs Docker (and WireGuard) with the packages
+for that OS, then starts Compose.
+
+`PLATFORM_DOMAIN` is required (the script exits if it is missing):
+
+```bash
+export PLATFORM_DOMAIN=fleet.example.com
+make up
+# or: make up PLATFORM_DOMAIN=fleet.example.com
+```
+
+Then a **checkbox** of optional services (all on). **Up/down** to move, **space**
+to check or uncheck, **Enter** to continue.
+
+```text
+  > [x]  WireGuard (vpn)
+         What: a private tunnel devices dial.
+         For:  browser SSH and app endpoints, without public SSH.
+
+    [x]  MQTT (data plane)
+         What: a TLS broker for device messages.
+         For:  live telemetry and commands.
+
+    [x]  Artifact storage
+         What: where OS images, firmware, and compose bundles live.
+         For:  operators upload in the console; devices download via the API.
+
+    [x]  Demo organization
+         What: Demo Organization owned by the admin login.
+         For:  open the console and explore. Add devices with meteorcli.
+```
+
+It then prints DNS records for that setup. `--storage=s3` or `--mqtt=external`
+still ask for bucket or broker details before install. WireGuard also turns on
+browser SSH (Terminal on the device page). From the VM, no sudo:
+`meteorcloud-ssh pi@10.8.0.2`.
+
+Clone **on the host**:
+
+```bash
+# Ubuntu / Debian:
+sudo apt-get update && sudo apt-get install -y git make
+# RHEL / CentOS / Rocky / Alma:
+# sudo dnf install -y git make
+
+git clone https://github.com/meteor-edge/meteor-cloud.git
+cd meteor-cloud
+make up PLATFORM_DOMAIN=fleet.example.com
+```
+
+Create the printed A records (plain DNS, no proxy), then open
+**https://fleet.example.com**. Storage is never a public hostname; downloads go
+through the API. Bundled MQTT uses `mqtt.fleet.example.com`. Full list:
+[DNS records](dns.md).
+
+Non-interactive (CI or a script):
+
+```bash
+METEORCLOUD_NONINTERACTIVE=1 make up PLATFORM_DOMAIN=fleet.example.com \
+  ARGS='--vpn --storage=filesystem --mqtt=off'
+```
+
+Ansible is installed into `~/.meteorcloud-ansible` if it is missing. Secrets are
+generated for you (Postgres, JWT, admin login, WireGuard token). After install
+they are printed so you can copy them, and saved mode `0600` at
+`~/.meteorcloud/secrets.env` (your copy, outside the repo) and
+`deploy/ansible/inventory/selfhost/secrets.env` (used by `make up` / `make down`,
+gitignored). Re-run `make up` to upgrade; the same secrets are reused.
+
+| Command | What it does |
+| --- | --- |
+| `make up` | Install (checkbox of services, all on; Enter accepts) |
+| `make up ARGS='--no-vpn --mqtt=off --storage=filesystem --no-demo'` | Same, no prompts for those |
+| `make down` | Stop the stack; data stays in `/opt/edge-platform` |
+| `make down ARGS=--destroy-data` | Stop and delete `/opt/edge-platform` |
+
+Re-runs remember the domain from `~/.meteorcloud/install.env` if you omit it.
+Override the URL with `PLATFORM_PUBLIC_URL=https://fleet.example.com` only if you
+need a different scheme or host.
+
+Details: [Deployment](deployment.md) · [DNS records](dns.md).
+
+## Create a new AWS EC2 from a laptop
+
+- Python 3.13+, Terraform 1.7+, ansible-core 2.15+, AWS credentials, SSH key pair
 - Copy `infrastructure/installer/edge_installer/config/examples/installation.yaml`
 - See [AWS prerequisites](aws-prerequisites.md)
-
-## 2. Configure (AWS)
 
 ```bash
 cp infrastructure/installer/edge_installer/config/examples/installation.yaml ./installation.yaml
@@ -27,39 +132,53 @@ services:
 
 Details: [Modular services](services.md)
 
-## 3. Secrets
+**Domain and DNS.** Set `platform.domain` (e.g. `fleet.example.com`) for HTTPS,
+then create the A records once you know the server's IP (`make aws-up ARGS='--demo'` creates them in Route53 when the domain is in this account; otherwise it prints them
+at the end; plain DNS, no proxy):
+
+| Service | Record | For |
+| --- | --- | --- |
+| `cloud_app` | `fleet.example.com` | console, API |
+| `cloud_app` (apps) | `*.fleet.example.com` | public app URLs |
+| `vpn` | `vpn.fleet.example.com` | WireGuard (UDP 51820) |
+
+Details: [DNS records](dns.md).
+
+### Secrets
+
+`make aws-up` generates `EDGE_PLATFORM_POSTGRES_PASSWORD`,
+`EDGE_PLATFORM_JWT_SECRET`, and `EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN` if
+they are unset, prints them when it finishes, and writes
+`~/.meteorcloud/secrets.env` (mode 0600). Re-runs reuse that file. Export a
+value first to keep your own. If an existing Postgres volume was initialised
+with a different password, Ansible updates the role to match (data stays).
+
+Optional: `EDGE_PLATFORM_ADMIN_EMAIL`, `EDGE_PLATFORM_ADMIN_PASSWORD`,
+`EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY`.
+
+### Deploy
 
 ```bash
-export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
-export EDGE_PLATFORM_JWT_SECRET='...'
-
-# optional
-export EDGE_PLATFORM_ADMIN_EMAIL='admin@example.com'
-export EDGE_PLATFORM_ADMIN_PASSWORD='...'
-export EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY='...'
+make aws-up ARGS='--demo'
 ```
 
-## 4. Deploy
+On a terminal it asks for the **domain** (you can change the default). `--demo`
+creates *Demo Organization* and, if that name sits in a Route53 zone in this
+AWS account, the A records (`<domain>`, `*.<domain>`, `wg.<domain>`).
 
-```bash
-edge-installer validate installation.yaml
-make up
-```
-
-## Commands
+Without `--demo`, set `platform.domain` and `aws.dns_zone_id` in
+`installation.yaml` to create the same records.
 
 | Make | Installer | Action |
 |------|-----------|--------|
-| `make up` | `edge-installer apply` | Deploy all enabled services |
+| `make aws-up` | `edge-installer apply` | Create EC2 and deploy. `ARGS='--demo'` asks for a domain and creates Route53 records |
 | `make plan` | `edge-installer plan` | Preview Terraform |
 | `make status-aws` | `edge-installer status` | Status + health |
-| `make down` | `edge-installer destroy --yes` | Tear down |
+| `make aws-down` | `edge-installer destroy --yes` | Tear down AWS |
 | — | `edge-installer upgrade` | Update app on existing host |
 
-## What runs
-
 ```text
-make up
+make aws-up
   → Terraform (modules per enabled service)
   → SSH wait
   → Ansible site.yml
@@ -68,11 +187,11 @@ make up
   → health check (cloud_app)
 ```
 
-## Verify
+### Verify
 
 ```bash
-curl http://<public-ip>/api/v1/health
-open http://<public-ip>/
+dig +short fleet.example.com vpn.fleet.example.com app.fleet.example.com
+curl -sS https://fleet.example.com/api/v1/health
 ```
 
 ## More

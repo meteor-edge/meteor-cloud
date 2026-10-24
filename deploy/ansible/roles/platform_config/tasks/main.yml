@@ -29,13 +29,14 @@
       - redis_provider in ['bundled', 'external']
       - object_storage_provider in ['filesystem', 's3']
       - mqtt_broker in ['bundled', 'external']
-      - image_source in ['git', 'registry']
+      - image_source in ['git', 'archive', 'registry']
+      - image_source != 'archive' or platform_source_archive | length > 0
       # Devices and the data plane share MQTT_BROKER_PORT; the bundled EMQX listens on 8883.
       - mqtt_broker == 'external' or (mqtt_broker_port | int) == 8883
     fail_msg: >-
       Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
       redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external,
-      image_source git|registry; the bundled MQTT broker always uses port 8883.
+      image_source git|archive|registry (archive needs platform_source_archive); the bundled MQTT broker always uses port 8883.
     quiet: true
 
 # Hosts deployed before the Compose files moved into the repository ran a stack
@@ -83,6 +84,7 @@
   loop:
     - docker-compose.yml
     - docker-compose.prod.yml
+    - docker-compose.vpn.yml
     - docker-compose.observability.yml
     - control-plane.yml
     - data-plane.yml
@@ -98,6 +100,132 @@
     mode: "0644"
     directory_mode: "0755"
   register: platform_service_config
+
+- name: Read WireGuard gateway settings
+  ansible.builtin.include_role:
+    name: vpn
+    tasks_from: discover
+  when: "'vpn' in enabled_services"
+
+- name: Create the browser SSH gateway key
+  when: shell_provider == 'ssh_gateway'
+  block:
+    - name: Create the SSH gateway key directory
+      ansible.builtin.file:
+        path: "{{ shell_ssh_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    # The API (root in its container) uses it to open SSH to the device WireGuard address.
+    # OpenSSH refuses group-readable private keys (0640), so this file stays 0600.
+    - name: Generate the SSH gateway key once
+      ansible.builtin.command:
+        cmd: ssh-keygen -q -t ed25519 -N "" -C meteorcloud-shell-gateway -f {{ shell_ssh_dir }}/id_ed25519
+        creates: "{{ shell_ssh_dir }}/id_ed25519"
+
+    - name: Lock the platform gateway private key
+      ansible.builtin.file:
+        path: "{{ shell_ssh_dir }}/id_ed25519"
+        owner: root
+        group: root
+        mode: "0600"
+
+    # Older installs used 0640 + group meteorcloud-shell so ubuntu could read the
+    # platform key. OpenSSH then ignored it and browser SSH failed.
+    - name: Drop leftover meteorcloud-shell group
+      ansible.builtin.group:
+        name: meteorcloud-shell
+        state: absent
+      failed_when: false
+
+    - name: Read the SSH gateway public key
+      ansible.builtin.slurp:
+        src: "{{ shell_ssh_dir }}/id_ed25519.pub"
+      register: shell_gateway_pub
+
+    - name: Publish the SSH gateway public key to devices
+      ansible.builtin.set_fact:
+        shell_gateway_public_key: "{{ shell_gateway_pub.content | b64decode | trim }}"
+
+    # Signs per-session certificates; devices trust it for their own principal only.
+    - name: Generate the SSH user CA once
+      ansible.builtin.command:
+        cmd: ssh-keygen -q -t ed25519 -N "" -C meteorcloud-ssh-ca -f {{ shell_ssh_dir }}/ca
+        creates: "{{ shell_ssh_dir }}/ca"
+      when: shell_ssh_ca_enabled | bool
+
+    - name: Lock the SSH user CA private key
+      ansible.builtin.file:
+        path: "{{ shell_ssh_dir }}/ca"
+        owner: root
+        group: root
+        mode: "0600"
+      when: shell_ssh_ca_enabled | bool
+
+    - name: Read the SSH user CA public key
+      ansible.builtin.slurp:
+        src: "{{ shell_ssh_dir }}/ca.pub"
+      register: shell_ca_pub
+      when: shell_ssh_ca_enabled | bool
+
+    - name: Publish the SSH user CA to devices
+      ansible.builtin.set_fact:
+        shell_ssh_ca_public_key: "{{ shell_ca_pub.content | b64decode | trim }}"
+      when: shell_ssh_ca_enabled | bool
+
+    - name: Read local login accounts
+      ansible.builtin.getent:
+        database: passwd
+
+    - name: List login accounts that get a meteorcloud-ssh key
+      ansible.builtin.set_fact:
+        shell_ssh_operator_names: >-
+          {{
+            (
+              [ansible_user | default('')]
+              + ['ubuntu', 'debian']
+              + (shell_ssh_operator_users | default([]))
+            )
+            | unique | reject('eq', '') | reject('eq', 'root') | list
+          }}
+
+    - name: Create the operator meteorcloud-ssh key directory
+      ansible.builtin.file:
+        path: "{{ getent_passwd[item][4] }}/.config/meteorcloud/shell"
+        state: directory
+        owner: "{{ item }}"
+        group: "{{ item }}"
+        mode: "0700"
+      loop: "{{ shell_ssh_operator_names }}"
+      when: item in getent_passwd
+
+    - name: Install a 0600 copy of the gateway key for meteorcloud-ssh
+      ansible.builtin.copy:
+        src: "{{ shell_ssh_dir }}/id_ed25519"
+        dest: "{{ getent_passwd[item][4] }}/.config/meteorcloud/shell/id_ed25519"
+        owner: "{{ item }}"
+        group: "{{ item }}"
+        mode: "0600"
+        remote_src: true
+      loop: "{{ shell_ssh_operator_names }}"
+      when: item in getent_passwd and not (shell_gateway_key_retired | bool)
+
+    - name: Remove operator copies of the retired gateway key
+      ansible.builtin.file:
+        path: "{{ getent_passwd[item][4] }}/.config/meteorcloud/shell/id_ed25519"
+        state: absent
+      loop: "{{ shell_ssh_operator_names }}"
+      when: item in getent_passwd and shell_gateway_key_retired | bool
+
+    - name: Install meteorcloud-ssh helper
+      ansible.builtin.template:
+        src: meteorcloud-ssh.j2
+        dest: /usr/local/bin/meteorcloud-ssh
+        owner: root
+        group: root
+        mode: "0755"
 
 - name: Render Compose environment file
   ansible.builtin.template:

@@ -18,6 +18,15 @@ class MqttConnectInfo(BaseModel):
     ca_cert: str | None = None
 
 
+class AgentMqttStatusResponse(BaseModel):
+    enabled: bool
+    config_version: str | None = None
+
+
+class AgentMqttCredentialsResponse(MqttConnectInfo):
+    config_version: str
+
+
 class MqttAuthRequest(BaseModel):
     username: str = ""
     password: str = ""

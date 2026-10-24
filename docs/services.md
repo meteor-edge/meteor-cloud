@@ -7,7 +7,7 @@
 | Service | Description | Requires |
 |---------|-------------|----------|
 | `cloud_app` | Application stack via Docker Compose (API, console, PostgreSQL, Traefik; optional Redis, MQTT) | Docker on the host |
-| `vpn` | WireGuard VPN tunnel on the EC2 host | `cloud_app` (same host) |
+| `vpn` | WireGuard device gateway on the API host (or a dedicated AWS/on-prem server; see [Connectivity](fleet/connectivity.md)) | `cloud_app` (same host) |
 
 More services can be added following the extension guide below.
 
@@ -43,7 +43,7 @@ When `cloud_app` is disabled, Postgres/JWT secrets are not required. VPN alone i
 ## Deploy
 
 ```bash
-make up
+make aws-up
 ```
 
 The installer:
@@ -67,11 +67,11 @@ Secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD`, `EDGE_PLATFORM_JWT_SECRET`
 
 | Layer | Location |
 |-------|----------|
-| Terraform | `infrastructure/terraform/aws/modules/vpn/` (UDP SG rule) |
-| Ansible | `deploy/ansible/playbooks/services/vpn.yml`, `roles/vpn/` |
+| Terraform | `infrastructure/terraform/aws/modules/vpn/` (UDP rule, `same_host`), `modules/vpn_gateway/` (EC2 + SG + EIP, `dedicated`) |
+| Ansible | `deploy/ansible/playbooks/services/vpn.yml`, `roles/vpn/`; `playbooks/wireguard.yml` for a gateway alone |
 | Config | `services.vpn.*` |
 
-Secret: `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` (optional — installs packages without it)
+Secrets: `EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN` (or the MQTT internal token); `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` is optional, a key is generated on the gateway without it
 
 ## Directory layout
 

@@ -15,7 +15,7 @@ export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
 export EDGE_PLATFORM_JWT_SECRET='...'
 
 edge-installer validate ../../installation.yaml
-make -C ../.. up          # or: edge-installer apply ../../installation.yaml
+make -C ../.. aws-up      # or: edge-installer apply ../../installation.yaml
 ```
 
 ## Commands
@@ -25,14 +25,14 @@ make -C ../.. up          # or: edge-installer apply ../../installation.yaml
 | `edge-installer init` | Create sample `installation.yaml` |
 | `edge-installer validate [config]` | Check config, secrets, tools, AWS creds |
 | `edge-installer plan [config]` | Terraform plan (no changes) |
-| `edge-installer apply [config]` | Terraform + Ansible + health check |
+| `edge-installer apply [config]` | Terraform + Ansible + health check. `--demo` asks for a domain and creates Route53 records |
 | `edge-installer status [config]` | State, infrastructure, health |
 | `edge-installer upgrade [config]` | Update enabled services on existing host |
 | `edge-installer destroy [config]` | Tear down AWS + local state |
 
 Config path can be positional (`installation.yaml`) or `--config installation.yaml`.
 
-Makefile equivalents from repo root: `make up`, `make down`, `make plan`, `make status-aws`.
+Makefile equivalents from repo root: `make aws-up`, `make aws-down`, `make plan`, `make status-aws`. `make up` / `make down` install or stop MeteorCloud on the current VM.
 
 ## Modular services
 

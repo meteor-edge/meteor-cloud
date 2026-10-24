@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,9 +27,14 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Tenant organization."""
 
     __tablename__ = "organizations"
+    # As created by migration 0002: a unique constraint plus a plain index.
+    __table_args__ = (
+        UniqueConstraint("slug", name="organizations_slug_key"),
+        Index("ix_organizations_slug", "slug"),
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

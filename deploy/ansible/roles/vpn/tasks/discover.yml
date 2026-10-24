@@ -1,0 +1,23 @@
+---
+# Managed API host: read the gateway's public key so the Compose .env enables
+# WireGuard. Stays CONNECTIVITY_PROVIDER=none until the gateway is set up.
+- name: Read the WireGuard gateway public key
+  ansible.builtin.slurp:
+    src: /etc/wireguard/server.pub
+  delegate_to: "{{ vpn_gateway_host }}"
+  register: vpn_gateway_pub
+  failed_when: false
+
+- name: Enable WireGuard connectivity
+  ansible.builtin.set_fact:
+    connectivity_provider: wireguard
+    wireguard_server_public_key: "{{ vpn_gateway_pub.content | b64decode | trim }}"
+    wireguard_server_endpoint: "{{ vpn_gateway_endpoint | trim }}"
+  when: vpn_gateway_pub.content is defined
+
+- name: Note when the WireGuard gateway is not set up
+  ansible.builtin.debug:
+    msg: >-
+      No WireGuard gateway key on {{ vpn_gateway_host }} yet; devices get no tunnel.
+      Run playbooks/services/vpn.yml (deploy.yml does this when 'vpn' is enabled).
+  when: vpn_gateway_pub.content is not defined

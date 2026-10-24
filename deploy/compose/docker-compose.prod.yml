@@ -23,6 +23,10 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_DEBUG: "false"
+      # Trust Traefik's X-Forwarded-Proto/For so HTTPS requests are seen as https. Safe because the
+      # API is unpublished here: only Traefik (which overwrites client-sent forwarded headers),
+      # other containers and the host loopback reach it.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
 
   emqx:
     restart: unless-stopped
@@ -53,13 +57,22 @@ services:
     command:
       - --providers.file.filename=/etc/traefik/dynamic.yml
       - --providers.file.watch=true
+      - --providers.http.endpoint=http://backend:8000/internal/routing/traefik
+      - --providers.http.pollInterval=5s
+      - --providers.http.headers.X-Routing-Internal-Token=${ROUTING_INTERNAL_TOKEN:-dev-connectivity-internal}
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}
       - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencrypt-dns.acme.email=${ACME_EMAIL:-}
+      - --certificatesresolvers.letsencrypt-dns.acme.storage=/acme/acme-dns.json
+      - --certificatesresolvers.letsencrypt-dns.acme.dnschallenge.provider=${ACME_DNS_PROVIDER:-route53}
     environment:
       PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"

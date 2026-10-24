@@ -1,0 +1,11 @@
+---
+# Device host prepared for `meteorcli` (playbooks/device.yml): Docker, WireGuard tools,
+# sshd for browser SSH, and meteorcli as meteorcli.service. Registration is not done
+# here: run `sudo meteorcli register --server … --token-file …` (the E2E suite does).
+# meteorcli source: a controller .tar.gz of src/device-plane (device_source_archive),
+# else this repository's src/device-plane directory.
+device_source_archive: ""
+device_source_dir: "{{ playbook_dir }}/../../../src/device-plane/"
+device_install_dir: /opt/meteorcli-src
+# Start meteorcli.service once /etc/meteorcli/device-token exists (after registration).
+device_start_agent: true

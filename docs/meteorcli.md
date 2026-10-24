@@ -6,14 +6,32 @@ Package details and install script: [`src/device-plane/agent/README.md`](../src/
 
 ## Install
 
+On the device (does **not** clone this repository):
+
 ```bash
-cd src/device-plane/agent
-./installcli.sh          # current user (~/.local)
-sudo ./installcli.sh     # system-wide
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
+# system-wide + systemd:
+# curl -fsSL .../install-meteorcli.sh | sudo bash -s -- --with-service
 meteorcli --help
 ```
 
-Config directory: `~/.config/meteorcli` (or `/etc/meteorcli` as root).
+Pin a version: `METEORCLI_VERSION=0.1.0` (must match a published `agent-v*` tag).
+
+**Publish a release** (maintainers): set the version in
+`src/device-plane/agent/pyproject.toml`, then:
+
+```bash
+make agent-dist          # optional local check; writes dist/
+git tag agent-v0.1.0     # must match the pyproject version
+git push origin agent-v0.1.0
+```
+
+CI packs agent + `src/device-plane/runtime` (no tests, no secrets) and creates
+the GitHub Release. Laptop / from a checkout: `cd src/device-plane/agent && ./installcli.sh`.
+
+Config directory: `~/.config/meteorcli`, or `/etc/meteorcli` as root. With
+`meteorcli.service` installed, `sudo meteorcli …` also uses `/etc/meteorcli`, the
+directory the service reads.
 
 ## Commands
 
@@ -24,7 +42,7 @@ Config directory: `~/.config/meteorcli` (or `/etc/meteorcli` as root).
 | `register` | Enroll with a registration token |
 | `request-token` | Device-initiated enroll; poll for approval |
 | `claim` | Fetch device token after a later approval |
-| `run` | Heartbeats + MQTT loop (`--once` for a single pass) |
+| `run` | Heartbeats + MQTT loop (`--once` for a single pass). Run as the device user; WireGuard uses passwordless sudo for the `meteorcli-wg` helper only |
 | `status` | Show non-secret local config |
 | `mqtt-test` / `mqtt-listen` | MQTT diagnostics |
 

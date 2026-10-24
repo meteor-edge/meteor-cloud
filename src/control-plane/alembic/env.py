@@ -10,12 +10,18 @@ from alembic import context
 from app.artifacts import models as artifact_models  # noqa: F401
 from app.audit import models as audit_models  # noqa: F401
 from app.authorization import models as authorization_models  # noqa: F401
-from app.core.config import get_settings
-from app.core.models import Base
 
 # Import models so metadata is populated for autogenerate and migrations.
+from app.connectivity import models as connectivity_models  # noqa: F401
+from app.core.config import get_settings
+from app.core.models import Base
+from app.deployments import models as deployment_models  # noqa: F401
+from app.deployments import software_models  # noqa: F401
 from app.devices import models as fleet_models  # noqa: F401
+from app.endpoints import models as endpoint_models  # noqa: F401
 from app.identity import models as identity_models  # noqa: F401
+from app.releases import models as release_models  # noqa: F401
+from app.shell import models as shell_models  # noqa: F401
 from app.tenancy import models as organization_models  # noqa: F401
 
 config = context.config

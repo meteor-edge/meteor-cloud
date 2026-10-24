@@ -1,0 +1,12 @@
+# Managed by Ansible (MeteorCloud vpn role). Site link to the WireGuard gateway
+# {{ vpn_gateway_host }}: routes the device network {{ vpn_network_cidr }} through it;
+# the gateway agent reaches the API on {{ link_address }}:8000.
+[Interface]
+Address = {{ link_address }}/32
+{{ link_private_key_line }}
+
+[Peer]
+PublicKey = {{ hostvars[vpn_gateway_host].vpn_server_public_key }}
+Endpoint = {{ vpn_link_endpoint or (vpn_gateway_endpoint | trim) }}
+AllowedIPs = {{ vpn_network_cidr }}
+PersistentKeepalive = 25

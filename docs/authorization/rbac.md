@@ -116,6 +116,11 @@ Stored as `resource` + `action` columns; id is derived.
 | `device.update` | Update devices | Edit device metadata, type, group, enable/disable. |
 | `device.delete` | Delete devices | Remove devices. |
 | `device.reboot` | Reboot devices | Send reboot (and similar operate) commands. |
+| `device.shell` | Open device terminal | Open a browser SSH session over WireGuard. |
+| `endpoint.read` | View endpoints | List and open public application URLs. |
+| `endpoint.create` | Create endpoints | Register public application hostnames. |
+| `endpoint.update` | Update endpoints | Change or disable public application endpoints. |
+| `endpoint.delete` | Delete endpoints | Remove public application endpoints. |
 | `device_type.read` | View device types | List and open device types. |
 | `device_type.create` | Create device types | Create hardware models. |
 | `device_type.update` | Update device types | Edit device types. |
@@ -166,6 +171,11 @@ System roles: `organization_id IS NULL`, `is_system = true`, immutable via API.
 | device.update | ✓ | ✓ | ✓ | | |
 | device.delete | ✓ | ✓ | | | |
 | device.reboot | ✓ | ✓ | ✓ | | |
+| device.shell | ✓ | ✓ | ✓ | | |
+| endpoint.read | ✓ | ✓ | ✓ | ✓ | ✓ |
+| endpoint.create | ✓ | ✓ | ✓ | ✓ | |
+| endpoint.update | ✓ | ✓ | ✓ | ✓ | |
+| endpoint.delete | ✓ | ✓ | ✓ | ✓ | |
 | device_type.read | ✓ | ✓ | ✓ | ✓ | ✓ |
 | device_type.create | ✓ | ✓ | | ✓ | |
 | device_type.update | ✓ | ✓ | | ✓ | |
@@ -219,6 +229,7 @@ Mixing “org-wide + extra groups” is forbidden.
 |----------|------------|
 | Device | Device’s `device_group_id` must be in the binding set. Devices with `device_group_id IS NULL` are **only** visible to org-wide memberships. |
 | Device group | Group id must be in the binding set. |
+| Endpoint | Same as the device the hostname is attached to (`endpoint.*` is device-group scoped). |
 | Device type, artifact, deployment (org-level), members, organization, enrollment keys, mqtt test | **Not device-group scoped** in v1. If the role grants the permission, it applies org-wide. Document this clearly in the Access UI (“Organization-wide permissions” vs “Scoped to device groups”). |
 
 **Why:** Device types and artifacts are org catalogs today, not per-group. Scoping them later is possible without changing the permission ids.

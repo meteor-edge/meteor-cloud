@@ -77,6 +77,7 @@ class PlatformDeploymentService:
                 report = self.health.verify(
                     url,
                     timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+                    mqtt_port=self._mqtt_port(),
                 )
                 health = report.as_dict()
             else:
@@ -90,6 +91,11 @@ class PlatformDeploymentService:
             state = self._save_state(outputs, url, health, enabled)
             return ApplyResult(state=state, outputs=outputs, health=health)
 
+    def _mqtt_port(self) -> int | None:
+        """Port to probe from outside, only for a broker on this installation."""
+        mqtt = self.config.services.mqtt
+        return mqtt.broker_port if mqtt.enabled and mqtt.broker == "bundled" else None
+
     def status(self) -> dict[str, object]:
         state = load_state(self.config.installation.name)
         result: dict[str, object] = {"state": state.model_dump() if state else None}
@@ -100,6 +106,7 @@ class PlatformDeploymentService:
                 result["health"] = self.health.verify(
                     state.platform_url,
                     timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+                    mqtt_port=self._mqtt_port(),
                 ).as_dict()
         except InstallerError:
             result["health"] = {"status": "unknown"}
@@ -123,6 +130,7 @@ class PlatformDeploymentService:
                 report = self.health.verify(
                     url,
                     timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+                    mqtt_port=self._mqtt_port(),
                 )
                 health = report.as_dict()
             state.platform_version = self.config.platform.version
@@ -168,12 +176,16 @@ class PlatformDeploymentService:
         if self.config.aws is None:
             raise InstallerError("aws settings are required for SSH wait", stage="ssh")
         key_path = Path(self.config.aws.ssh_private_key_path).expanduser()
-        wait_for_server(
-            outputs.connect_ip,
-            outputs.ssh_username,
-            key_path,
-            timeout_seconds=self.config.deployment.health_check_timeout_seconds,
-        )
+        hosts = [outputs.connect_ip]
+        if outputs.vpn_gateway_public_ip:
+            hosts.append(outputs.vpn_gateway_public_ip)
+        for host in hosts:
+            wait_for_server(
+                host,
+                outputs.ssh_username,
+                key_path,
+                timeout_seconds=self.config.deployment.health_check_timeout_seconds,
+            )
 
     def _run_site(self, outputs: TerraformOutputs) -> None:
         inventory = installation_dir(self.config.installation.name) / "inventory.ini"
@@ -199,6 +211,8 @@ class PlatformDeploymentService:
         state.instance_id = outputs.instance_id
         state.public_ip = outputs.public_ip
         state.elastic_ip = outputs.elastic_ip or None
+        state.vpn_gateway_instance_id = outputs.vpn_gateway_instance_id or None
+        state.vpn_gateway_ip = outputs.vpn_gateway_public_ip or None
         state.platform_url = url
         state.platform_version = self.config.platform.version
         state.installed_components = self.config.enabled_component_names()

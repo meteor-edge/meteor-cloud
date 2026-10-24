@@ -1,0 +1,29 @@
+{{- if and (eq .Values.connectivity.provider "wireguard") .Values.connectivity.gatewayService.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- with .Values.connectivity.gatewayService }}
+# API for the external WireGuard gateway agent (/internal/connectivity/*).
+# Must stay private: an internal load balancer limited to the gateway.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-backend-gateway
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" $ "component" "backend") | nindent 4 }}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .type }}
+  {{- with .loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+{{- end }}
+{{- end }}

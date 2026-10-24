@@ -34,6 +34,7 @@ from app.devices.schemas import (
     AgentRegisterRequest,
     AgentRegisterResponse,
 )
+from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,17 @@ def device_heartbeat(
     service: RegistrationSvc,
 ) -> AgentHeartbeatResponse:
     return service.heartbeat(device=device, payload=payload)
+
+
+@router.get("/mqtt", response_model=AgentMqttStatusResponse)
+def agent_mqtt_status(device: CurrentDevice, service: RegistrationSvc) -> AgentMqttStatusResponse:
+    """Whether MQTT is on, and a version the agent compares with its stored config."""
+    return service.mqtt_status()
+
+
+@router.post("/mqtt/credentials", response_model=AgentMqttCredentialsResponse)
+def agent_mqtt_credentials(device: CurrentDevice, service: RegistrationSvc) -> AgentMqttCredentialsResponse:
+    return service.reissue_mqtt_credentials(device=device)
 
 
 @router.get("/software", response_model=list[DesiredSoftwareItem])

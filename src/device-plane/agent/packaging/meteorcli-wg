@@ -1,0 +1,188 @@
+#!/usr/bin/python3 -I
+"""Root helper that lets an unprivileged meteorcli manage wg0, and nothing else.
+
+installcli.sh installs this root-owned and grants passwordless sudo for this file
+only. It never hands the caller's config to wg-quick: it parses it, keeps only the
+keys meteorcli writes (no PreUp/PostUp/PreDown/PostDown, Table, SaveConfig, DNS...),
+writes a root-owned copy, and brings wg0 up from that. Other commands are fixed
+`wg` invocations on wg0 with validated arguments.
+
+  meteorcli-wg up <wg0.conf>        meteorcli-wg down
+  meteorcli-wg show [latest-handshakes|endpoints]
+  meteorcli-wg set-endpoint <server public key> <ip:port>
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import ipaddress
+import os
+import stat
+import subprocess
+import sys
+
+INTERFACE = "wg0"
+RUN_DIR = "/run/meteorcli-wg"
+CONF = os.path.join(RUN_DIR, INTERFACE + ".conf")
+WG = "wg"
+WG_QUICK = "wg-quick"
+MAX_CONF_BYTES = 8192
+SHOW_FIELDS = frozenset({"latest-handshakes", "endpoints"})
+ALLOWED = {
+    "interface": frozenset({"address", "privatekey"}),
+    "peer": frozenset({"publickey", "endpoint", "allowedips", "persistentkeepalive"}),
+}
+
+
+def fail(message: str) -> None:
+    print(f"meteorcli-wg: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def wg_key(value: str) -> str:
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raw = b""
+    if len(value) != 44 or len(raw) != 32:
+        fail("invalid WireGuard key")
+    return value
+
+
+def endpoint(value: str) -> str:
+    host, _, port = value.rpartition(":")
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        # wg-quick resolves names itself; keep them to plain DNS characters.
+        if not host or not all(ch.isalnum() or ch in "-." for ch in host):
+            fail("invalid endpoint")
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        fail("invalid endpoint")
+    return value
+
+
+def networks(value: str) -> str:
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    if not items:
+        fail("empty address list")
+    for item in items:
+        try:
+            ipaddress.ip_interface(item)
+        except ValueError:
+            fail("invalid address")
+    return ", ".join(items)
+
+
+def keepalive(value: str) -> str:
+    if not value.isdigit() or int(value) > 65535:
+        fail("invalid keepalive")
+    return value
+
+
+VALIDATORS = {
+    "address": networks,
+    "privatekey": wg_key,
+    "publickey": wg_key,
+    "endpoint": endpoint,
+    "allowedips": networks,
+    "persistentkeepalive": keepalive,
+}
+CANONICAL = {
+    "address": "Address",
+    "privatekey": "PrivateKey",
+    "publickey": "PublicKey",
+    "endpoint": "Endpoint",
+    "allowedips": "AllowedIPs",
+    "persistentkeepalive": "PersistentKeepalive",
+}
+
+
+def read_caller_file(path: str) -> str:
+    """Read the config as the caller could: no symlinks, a regular file the caller owns."""
+    caller = int(os.environ.get("SUDO_UID", os.getuid()))
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        fail("cannot open config")
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != caller:
+            fail("config must be a regular file owned by the caller")
+        data = handle.read(MAX_CONF_BYTES + 1)
+    if len(data) > MAX_CONF_BYTES:
+        fail("config too large")
+    return data.decode("utf-8", "strict")
+
+
+def sanitize(text: str) -> str:
+    section = None
+    out: list[str] = []
+    peers = 0
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            section = line.strip("[]").strip().lower()
+            if section not in ALLOWED or line != f"[{section.capitalize()}]":
+                fail("unexpected section")
+            peers += section == "peer"
+            out.append(f"\n[{section.capitalize()}]")
+            continue
+        key, sep, value = line.partition("=")
+        key = key.strip().lower()
+        if not sep or section is None or key not in ALLOWED[section]:
+            # Hooks and every other wg-quick option are refused, not dropped silently.
+            fail("unsupported config line")
+        out.append(f"{CANONICAL[key]} = {VALIDATORS[key](value.strip())}")
+    if peers != 1:
+        fail("config must have exactly one [Peer]")
+    return "\n".join(out).lstrip() + "\n"
+
+
+def write_root_conf(content: str) -> None:
+    os.makedirs(RUN_DIR, mode=0o700, exist_ok=True)
+    os.chmod(RUN_DIR, 0o700)
+    tmp = CONF + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    os.replace(tmp, CONF)
+
+
+def run(args: list[str], *, check: bool = True) -> int:
+    return subprocess.run(args, check=check).returncode
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        fail("must run as root (via sudo)")
+    if not argv:
+        fail("missing command")
+    command, rest = argv[0], argv[1:]
+    if command == "up" and len(rest) == 1:
+        write_root_conf(sanitize(read_caller_file(rest[0])))
+        if os.path.exists(f"/sys/class/net/{INTERFACE}"):
+            run([WG_QUICK, "down", CONF], check=False)
+        return run([WG_QUICK, "up", CONF])
+    if command == "down" and not rest:
+        if not os.path.exists(f"/sys/class/net/{INTERFACE}"):
+            return 0
+        if os.path.exists(CONF):
+            return run([WG_QUICK, "down", CONF], check=False)
+        return run(["ip", "link", "delete", "dev", INTERFACE], check=False)
+    if command == "show" and len(rest) <= 1 and all(field in SHOW_FIELDS for field in rest):
+        return run([WG, "show", INTERFACE, *rest])
+    if command == "set-endpoint" and len(rest) == 2:
+        return run([WG, "set", INTERFACE, "peer", wg_key(rest[0]), "endpoint", endpoint(rest[1])])
+    fail("unsupported command")
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(exc.returncode) from None

@@ -270,6 +270,11 @@ class DeviceSoftwareService:
                 device_id=device_id,
                 workload_key=row.workload_key,
             )
+            self._sync_endpoint_availability(
+                organization_id=organization_id,
+                device_id=device_id,
+                workload_key=row.workload_key,
+            )
 
         if commit:
             self.session.commit()
@@ -287,6 +292,21 @@ class DeviceSoftwareService:
         from app.deployments.service import DeploymentService
 
         DeploymentService(self.session).sync_progress_from_software(
+            organization_id=organization_id,
+            device_id=device_id,
+            workload_key=workload_key,
+        )
+
+    def _sync_endpoint_availability(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+        workload_key: str,
+    ) -> None:
+        from app.endpoints.service import EndpointService
+
+        EndpointService(self.session).sync_from_software(
             organization_id=organization_id,
             device_id=device_id,
             workload_key=workload_key,

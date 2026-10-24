@@ -77,6 +77,21 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq $v.postgresql.mode "external") (not $v.secrets.existingSecret) (not $v.postgresql.external.url) (not $v.postgresql.external.host) }}
 {{- fail "postgresql.mode=external needs postgresql.external.url, postgresql.external.host, or secrets.existingSecret with DATABASE_URL" }}
 {{- end }}
+{{- if not (has $v.connectivity.provider (list "none" "wireguard")) }}
+{{- fail "connectivity.provider must be none or wireguard" }}
+{{- end }}
+{{- if and (eq $v.connectivity.provider "wireguard") (or (not $v.connectivity.wireguard.serverPublicKey) (not $v.connectivity.wireguard.serverEndpoint)) }}
+{{- fail "connectivity.provider=wireguard needs connectivity.wireguard.serverPublicKey and serverEndpoint (from deploy/ansible/playbooks/wireguard.yml)" }}
+{{- end }}
+{{- if not (has $v.connectivity.shell.provider (list "none" "ssh_gateway")) }}
+{{- fail "connectivity.shell.provider must be none or ssh_gateway" }}
+{{- end }}
+{{- if and (eq $v.connectivity.shell.provider "ssh_gateway") (or (ne $v.connectivity.provider "wireguard") (not $v.connectivity.shell.existingSecret)) }}
+{{- fail "connectivity.shell.provider=ssh_gateway needs connectivity.provider=wireguard and connectivity.shell.existingSecret (id_ed25519, id_ed25519.pub)" }}
+{{- end }}
+{{- if and $v.connectivity.apps.proxy.enabled (or (ne $v.connectivity.provider "wireguard") (not $v.connectivity.apps.baseDomain) (not $v.connectivity.apps.proxy.acme.email)) }}
+{{- fail "connectivity.apps.proxy.enabled needs connectivity.provider=wireguard, connectivity.apps.baseDomain and connectivity.apps.proxy.acme.email" }}
+{{- end }}
 {{- if not (has $v.cache.provider (list "memory" "redis")) }}
 {{- fail "cache.provider must be memory or redis" }}
 {{- end }}

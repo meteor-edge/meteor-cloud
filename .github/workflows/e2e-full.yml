@@ -1,0 +1,159 @@
+name: Full-stack E2E
+
+# Manual: one real environment (control plane, WireGuard gateway, devices) on AWS,
+# built from this commit by tests/e2e/meteorcloud-testenv, then the full acceptance
+# suite: DNS + HTTPS, MinIO artifacts, meteorcli onboarding, WireGuard, browser SSH,
+# release -> Docker deploy -> public app, update, second device, tenancy.
+# Separate from the EC2 smoke test (aws-ci.yml). See docs/e2e.md.
+#
+# Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
+# Variables: E2E_DNS_ZONE_ID, E2E_DOMAIN (Route53 zone), optional AWS_REGION, E2E_ACME_EMAIL.
+# Without the DNS variables the public-domain checks are BLOCKED and the run fails.
+on:
+  workflow_dispatch:
+    inputs:
+      vpn_placement:
+        description: WireGuard gateway placement
+        type: choice
+        options: [same_host, dedicated]
+        default: same_host
+      device_count:
+        description: Simulated devices (2+ for the fleet and isolation checks)
+        type: choice
+        options: ["2", "3", "1"]
+        default: "2"
+      keep_environment:
+        description: Keep the environment after the run (destroy it later with meteorcloud-testenv down)
+        type: boolean
+        default: false
+
+concurrency:
+  group: e2e-full
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+psycopg://edge:edge@localhost:5432/edge_platform_test
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: edge
+          POSTGRES_PASSWORD: edge
+          POSTGRES_DB: edge_platform_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U edge -d edge_platform_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            src/control-plane/pyproject.toml
+            src/data-plane/pyproject.toml
+            infrastructure/installer/pyproject.toml
+            src/device-plane/agent/pyproject.toml
+      - name: Install dependencies
+        run: make install
+      - name: Test
+        run: make test
+
+  checks:
+    name: Infra and E2E tooling checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: Install Ansible and test tools
+        run: |
+          python -m pip install ansible ansible-lint pytest
+          sudo apt-get install -y shellcheck
+      - name: Terraform, Ansible and E2E tooling checks
+        run: |
+          make terraform-check
+          make ansible-check
+          make ansible-lint
+          make e2e-check
+
+  e2e:
+    name: Provision, test, destroy
+    needs: [test, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      E2E_ENV_NAME: ci-${{ github.run_id }}
+      E2E_PROVIDER: aws
+      E2E_AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      E2E_VPN_PLACEMENT: ${{ inputs.vpn_placement }}
+      E2E_DEVICE_COUNT: ${{ inputs.device_count }}
+      E2E_DNS_PROVIDER: ${{ vars.E2E_DNS_ZONE_ID && 'route53' || 'none' }}
+      E2E_DNS_ZONE_ID: ${{ vars.E2E_DNS_ZONE_ID }}
+      E2E_DOMAIN: ${{ vars.E2E_DOMAIN }}
+      E2E_ACME_EMAIL: ${{ vars.E2E_ACME_EMAIL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: Install Ansible
+        run: |
+          python -m pip install ansible
+          ansible-galaxy collection install community.general
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.E2E_AWS_REGION }}
+      - name: Allow SSH from this runner only
+        run: echo "E2E_ALLOWED_SSH_CIDRS=$(curl -fsS https://checkip.amazonaws.com)/32" >> "$GITHUB_ENV"
+      - name: Validate prerequisites
+        run: tests/e2e/meteorcloud-testenv validate
+      - name: Provision, configure and run the acceptance suite
+        run: tests/e2e/meteorcloud-testenv up
+      - name: Collect logs
+        if: always()
+        run: tests/e2e/meteorcloud-testenv logs || true
+      - name: Upload report and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ github.run_id }}
+          # Reports and logs are redacted; keys, secrets and Terraform state stay on the runner.
+          path: |
+            tests/e2e/.state/${{ env.E2E_ENV_NAME }}/report.json
+            tests/e2e/.state/${{ env.E2E_ENV_NAME }}/summary.txt
+            tests/e2e/.state/${{ env.E2E_ENV_NAME }}/reports/
+            tests/e2e/.state/${{ env.E2E_ENV_NAME }}/logs/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Summary
+        if: always()
+        run: |
+          f="tests/e2e/.state/${E2E_ENV_NAME}/summary.txt"
+          if [[ -f "$f" ]]; then { echo '```'; cat "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Destroy the environment
+        if: always() && !inputs.keep_environment
+        run: tests/e2e/meteorcloud-testenv down --yes

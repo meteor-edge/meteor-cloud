@@ -24,7 +24,7 @@ class AuditEvent(Base, UUIDPrimaryKeyMixin):
 
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
         nullable=True,
     )
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -1,0 +1,18 @@
+---
+# The security group filters traffic on AWS; enable UFW too if you want host-level filtering.
+firewall_enabled: false
+
+# Control plane not managed by this inventory (other host, other cloud, EKS).
+# The agent polls it privately; /internal is never served publicly.
+#   Compose host in the same VPC: publish the API on its private IP (BACKEND_BIND_ADDRESS).
+#   EKS/Helm: connectivity.gatewayService (internal NLB) and its address here.
+vpn_control_plane_url: http://10.0.1.5:8000
+
+# Let the control plane reach devices (browser SSH, app endpoints). Either:
+# 1. Routed VPC traffic (EKS pods have VPC IPs): list the VPC or pod CIDR, disable the
+#    instance's source/dest check, and route 10.8.0.0/16 to its ENI in the VPC route table.
+vpn_routed_cidrs: [10.0.0.0/16]
+# 2. Or a site link from a control-plane host outside the VPC (key generated there:
+#    `wg genkey | tee /etc/wireguard/link.key | wg pubkey`); the playbook writes its config.
+# vpn_site_links:
+#   - {name: cp-1, public_key: "<cp-1 public key>", address: 10.9.0.10}

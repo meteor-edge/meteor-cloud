@@ -2,6 +2,24 @@ variable "installation_name" {
   type = string
 }
 
+variable "extra_ingress" {
+  description = "More ingress rules (e.g. WireGuard). Declared inline: an aws_security_group_rule on this group would be removed by the next apply."
+  type = list(object({
+    description = string
+    from_port   = number
+    to_port     = number
+    protocol    = string
+    cidr_blocks = list(string)
+  }))
+  default = []
+}
+
+variable "instance_name" {
+  description = "EC2 Name tag; defaults to installation_name."
+  type        = string
+  default     = ""
+}
+
 variable "environment" {
   type = string
 }
@@ -66,4 +84,16 @@ variable "allow_https" {
 variable "tags" {
   type    = map(string)
   default = {}
+}
+
+variable "iam_instance_profile" {
+  type        = string
+  default     = ""
+  description = "Optional IAM instance profile (for example Route53 access for Traefik DNS-01)"
+}
+
+variable "metadata_hop_limit" {
+  type        = number
+  default     = 1
+  description = "IMDSv2 hop limit; 2 lets containers on the host use the instance role"
 }

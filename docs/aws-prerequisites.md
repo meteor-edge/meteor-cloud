@@ -66,20 +66,16 @@ Scoped EC2 permissions in the deployment region are sufficient.
 
 ## Secrets
 
-Export before `validate`, `plan`, or `apply`:
+`make aws-up` and `make plan` generate these if they are unset (and print them
+after `make aws-up`): `EDGE_PLATFORM_POSTGRES_PASSWORD`,
+`EDGE_PLATFORM_JWT_SECRET`, `EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN`. Saved
+at `~/.meteorcloud/secrets.env`. Export a value first to keep your own.
 
-```bash
-# Required when cloud_app is enabled
-export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
-export EDGE_PLATFORM_JWT_SECRET='...'
+Calling `edge-installer` directly still requires the env vars.
 
-# Optional
-export EDGE_PLATFORM_ADMIN_EMAIL='admin@example.com'
-export EDGE_PLATFORM_ADMIN_PASSWORD='...'
-export EDGE_PLATFORM_ACME_EMAIL='ops@example.com'
-export EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY='...'
-export EDGE_PLATFORM_REDIS_PASSWORD='...'
-```
+Optional: `EDGE_PLATFORM_ADMIN_EMAIL`, `EDGE_PLATFORM_ADMIN_PASSWORD`,
+`EDGE_PLATFORM_ACME_EMAIL`, `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY`,
+`EDGE_PLATFORM_REDIS_PASSWORD`.
 
 Generate a WireGuard private key:
 
@@ -100,7 +96,7 @@ Set `network.allowed_ssh_cidrs` to your public IP `/32` (or wider for testing).
 ## Deploy
 
 ```bash
-make up
+make aws-up
 ```
 
 See [Install quickstart](install-quickstart.md) and [AWS deployment](aws-deployment.md).

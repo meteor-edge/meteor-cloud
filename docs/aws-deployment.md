@@ -5,16 +5,18 @@ Deploy modular services to a single AWS EC2 instance with one command.
 ## Quick start
 
 ```bash
-export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
-export EDGE_PLATFORM_JWT_SECRET='...'
-
 # Edit installation.yaml — services, region, SSH key, etc.
-make up
+make aws-up
 ```
 
-Equivalent: `edge-installer apply installation.yaml`
+`make aws-up` generates Postgres, JWT, and connectivity secrets when they are
+unset, prints them at the end, and saves them at `~/.meteorcloud/secrets.env`.
+Re-runs reuse that file. Override any value by exporting it first.
 
-This is the EC2 path only (Terraform creates the host, Ansible deploys Compose). Kubernetes uses Helm ([kubernetes.md](kubernetes.md)). To smoke-test a throwaway instance from GitHub Actions, see [EC2 smoke test](aws-ci.md).
+Equivalent: `edge-installer apply installation.yaml` (that path still requires
+the env vars; use `make aws-up` to generate them).
+
+This is the **create a new EC2** path only (`make aws-up`: Terraform creates the host, Ansible deploys Compose). If you already have the VM, clone the repo on it and run `make up` ([Install quickstart](install-quickstart.md)). Kubernetes uses Helm ([kubernetes.md](kubernetes.md)). To smoke-test a throwaway instance from GitHub Actions, see [EC2 smoke test](aws-ci.md).
 
 ## Configure services
 
@@ -36,12 +38,12 @@ See [Modular services](services.md) for details and adding new services.
 By default the installer clones and builds from:
 
 ```text
-https://github.com/shahabkamali/MeteorCloud.git
+https://github.com/meteor-edge/meteor-cloud.git
 ```
 
 ```yaml
 deployment:
-  repository_url: https://github.com/shahabkamali/MeteorCloud.git
+  repository_url: https://github.com/meteor-edge/meteor-cloud.git
   git_ref: master
   image_source: git
   backend_image: edge-platform-backend:0.2.0
@@ -66,22 +68,22 @@ Push app changes to GitHub before deploy when using `image_source: git`.
 ```bash
 edge-installer validate installation.yaml
 make plan                              # or edge-installer plan
-make up                                # or edge-installer apply
+make aws-up                            # or edge-installer apply
 make status-aws                        # or edge-installer status
 edge-installer upgrade installation.yaml
-make down                              # or edge-installer destroy --yes
+make aws-down                          # or edge-installer destroy --yes
 ```
 
-## What `apply` / `make up` does
+## What `apply` / `make aws-up` does
 
 1. Validates configuration and secrets
-2. Runs Terraform for **enabled services** (EC2, SG, EIP, VPN rules)
-3. Waits for SSH
+2. Runs Terraform for **enabled services** (EC2, SG, EIP, VPN rules; a second EC2 + SG + EIP for the WireGuard gateway with `services.vpn.placement: dedicated`)
+3. Waits for SSH (on the gateway too)
 4. Ansible `site.yml`:
    - **provision** — Docker, directories (shared)
    - **deploy** — each enabled service playbook
 5. For `cloud_app`: copy `deploy/compose/` to `/opt/edge-platform/compose`, render `.env`, clone the repo and build images (or pull from a registry), `docker compose up --wait` (the API runs migrations on start), optional first admin
-6. For `vpn`: install WireGuard (active when `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` is set)
+6. For `vpn` (runs before `cloud_app`): install WireGuard on the gateway (the app host, or the dedicated instance), generate its key, start `wg-quick@wg0` and the peer agent, and set `CONNECTIVITY_PROVIDER=wireguard` in the API's `.env`. A dedicated gateway also gets a site link (`wg-link`) from the API host. See [Device connectivity](fleet/connectivity.md).
 7. Health check (cloud_app only)
 
 ## Expected success output
@@ -105,7 +107,7 @@ Internet -> Traefik -> /api, /health -> Backend
                      -> /           -> Console
 PostgreSQL (and Redis, if enabled): internal Docker network only
 Artifacts: /opt/edge-platform/data/artifacts (filesystem storage)
-VPN (optional): UDP 51820 -> WireGuard on host
+VPN (optional): UDP 51820 -> WireGuard on the host, or on the dedicated gateway instance (placement: dedicated)
 ```
 
 ## Limitations

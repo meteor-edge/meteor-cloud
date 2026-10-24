@@ -8,6 +8,7 @@ never logged. The sleep function is injectable so tests run instantly.
 from __future__ import annotations
 
 import logging
+import random
 from collections.abc import Callable
 from typing import Any
 
@@ -42,6 +43,7 @@ def run_loop(
     sleep: Callable[[float], None],
     should_continue: Callable[[], bool],
     payload_factory: Callable[[], dict[str, Any]] | None = None,
+    jitter: Callable[[float, float], float] = random.uniform,
 ) -> None:
     """Run the heartbeat loop until ``should_continue`` returns False.
 
@@ -59,6 +61,8 @@ def run_loop(
             if _fatal(error):
                 logger.error("Heartbeat rejected (%s); credential is invalid.", error.code)
                 raise
-            logger.warning("Heartbeat failed (%s); retrying in %.0fs.", error.code, backoff)
-            sleep(backoff)
+            # Jitter spreads a fleet's retries after a shared outage.
+            delay = backoff * jitter(0.5, 1.0)
+            logger.warning("Heartbeat failed (%s); retrying in %.0fs.", error.code, delay)
+            sleep(delay)
             backoff = min(backoff * 2, _MAX_BACKOFF)

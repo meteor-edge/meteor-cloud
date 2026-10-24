@@ -1,17 +1,30 @@
 # Destroy an installation
 
-Removes AWS resources and local installer state for all enabled services.
+## This VM (`make up`)
 
-## Commands
+On the host you installed with `make up`:
+
+```bash
+make down                      # stop; PostgreSQL and artifacts stay in /opt/edge-platform
+make down ARGS=--destroy-data  # stop and delete /opt/edge-platform
+```
+
+`make down` does not delete AWS resources. Secrets remain in
+`~/.meteorcloud/secrets.env` and `deploy/ansible/inventory/selfhost/secrets.env`
+so a later `make up` can reuse them.
+
+## AWS (`make aws-up`)
+
+Removes AWS resources and local installer state for all enabled services.
 
 ```bash
 edge-installer destroy installation.yaml          # prompts for confirmation
 edge-installer destroy installation.yaml --yes
 
-make down                                         # same as destroy --yes
+make aws-down                                     # same as destroy --yes
 ```
 
-## What happens
+### What happens
 
 1. Ansible `destroy.yml` (when SSH works):
    - Stops WireGuard if `vpn` was enabled
@@ -19,7 +32,7 @@ make down                                         # same as destroy --yes
 2. `terraform destroy` — EC2, SG, EIP, VPN rules
 3. Deletes `.installer-state/<name>/installation.json`
 
-## Warnings
+### Warnings
 
 - **All data on the EC2 instance is lost** (PostgreSQL, artifacts, VPN config)
 - Elastic IP is released
@@ -27,7 +40,7 @@ make down                                         # same as destroy --yes
 
 Confirm installation name and region before proceeding.
 
-## Partial failure
+### Partial failure
 
 If destroy fails:
 
@@ -38,5 +51,6 @@ If destroy fails:
 
 ## Related
 
+- [Install quickstart](install-quickstart.md)
 - [AWS deployment](aws-deployment.md)
 - [Troubleshooting](troubleshooting.md)
