@@ -29,7 +29,9 @@ git push origin agent-v0.1.0
 CI packs agent + `src/device-plane/runtime` (no tests, no secrets) and creates
 the GitHub Release. Laptop / from a checkout: `cd src/device-plane/agent && ./installcli.sh`.
 
-Config directory: `~/.config/meteorcli` (or `/etc/meteorcli` as root).
+Config directory: `~/.config/meteorcli`, or `/etc/meteorcli` as root. With
+`meteorcli.service` installed, `sudo meteorcli …` also uses `/etc/meteorcli`, the
+directory the service reads.
 
 ## Commands
 
