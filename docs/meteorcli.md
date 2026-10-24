@@ -6,12 +6,22 @@ Package details and install script: [`src/device-plane/agent/README.md`](../src/
 
 ## Install
 
+**Today** the installer `pip install`s the agent directory. It also needs sibling
+`src/device-plane/runtime/` (systemd/docker/compose adapters). A device that
+only wants `meteorcli` still needs those two trees (or a clone of this repo).
+
 ```bash
 cd src/device-plane/agent
 ./installcli.sh          # current user (~/.local)
 sudo ./installcli.sh     # system-wide
 meteorcli --help
 ```
+
+**Target (not implemented):** a GitHub Release (`agent-v*`) with
+`meteorcli-<version>.tar.gz` (agent + `runtime` + `installcli.sh` only, no
+secrets) and `install-meteorcli.sh`, so devices never clone the cloud. Remaining
+work: pack script, remote install mode, CI on tag, console one-liner. See
+[Architecture → Device agent](architecture.md#device-agent-meteorcli).
 
 Config directory: `~/.config/meteorcli` (or `/etc/meteorcli` as root).
 

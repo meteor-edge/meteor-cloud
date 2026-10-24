@@ -16,7 +16,8 @@ There are **two ways** to enroll a device:
 **Supported device OS for fleets today:** Raspberry Pi OS (Bookworm). Other
 Debian-like systems work the same way.
 
-From this directory:
+From this directory (also requires sibling `../runtime`, included in the wheel
+via Hatch `force-include`):
 
 ```bash
 ./installcli.sh                    # current user (~/.local)
@@ -24,6 +25,11 @@ sudo ./installcli.sh               # system-wide
 sudo ./installcli.sh --with-service  # + enable meteorcli.service
 meteorcli --help
 ```
+
+A GitHub Release so devices can `curl` an installer **without cloning** the
+cloud repo is the intended distribution model. It is **not built yet** (no
+`make agent-dist`, no `agent-v*` workflow). See
+[Architecture → Device agent](../../../docs/architecture.md#device-agent-meteorcli).
 
 A user install puts the venv in `~/.local/share/meteorcli` and the command in
 `~/.local/bin`. A system install uses `/opt/meteorcli` and `/usr/local/bin`.

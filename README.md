@@ -157,6 +157,7 @@ The smallest install runs PostgreSQL, the API, the console, and a reverse proxy 
 ## Documentation
 
 Start with [Getting started](docs/getting-started.md), then the full index: [docs/README.md](docs/README.md).
+Contributors: [CONTRIBUTING.md](CONTRIBUTING.md). Coding agents: [AGENTS.md](AGENTS.md).
 
 | Doc | Topic |
 | --- | --- |
@@ -164,7 +165,7 @@ Start with [Getting started](docs/getting-started.md), then the full index: [doc
 | [Concepts](docs/concepts.md) | Three planes, orgs, devices |
 | [API overview](docs/api.md) | Control-plane HTTP map |
 | [meteorcli](docs/meteorcli.md) | Device CLI |
-| [Architecture](docs/architecture.md) | Providers, deploy paths |
+| [Architecture](docs/architecture.md) | Planes, contracts, git vs deploy vs artifacts |
 | [Install quickstart](docs/install-quickstart.md) | `make up` on a VM; `make aws-up` for a new EC2 |
 | [Deployment](docs/deployment.md) · [Kubernetes](docs/kubernetes.md) | Production install |
 

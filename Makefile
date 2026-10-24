@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports
 
 COMPOSE_DIR := deploy/compose
 ENV_FILE := $(COMPOSE_DIR)/.env
@@ -186,7 +186,13 @@ console-test: ## Run console tests
 agent-test: ## Run reference agent tests
 	cd $(AGENT_DIR) && python -m pytest -q
 
+check-plane-imports: ## Fail if planes import each other's private Python packages
+	python scripts/check_plane_imports.py
+	python -m pytest -q tests/architecture
+
 test: ## Run all tests
+	@echo "==> Plane import boundaries"
+	@$(MAKE) --no-print-directory check-plane-imports
 	@echo "==> Installer tests"
 	cd $(INSTALLER_DIR) && python -m pytest -q
 	@echo "==> Control-plane tests"

@@ -132,7 +132,9 @@ edge-installer validate --config config/examples/installation.yaml
 make test
 make backend-test
 make data-plane-test
+make agent-test
 make console-test
+make check-plane-imports
 ```
 
 Deployment checks (the same ones CI runs):

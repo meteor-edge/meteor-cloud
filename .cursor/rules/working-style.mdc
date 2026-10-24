@@ -5,6 +5,8 @@ alwaysApply: true
 
 # Working style
 
+Portable agent rules (any coding agent): [AGENTS.md](../../AGENTS.md).
+
 * State important assumptions.
 * Modify only files relevant to the task.
 * Keep code simple, human-readable, modular, and maintainable.

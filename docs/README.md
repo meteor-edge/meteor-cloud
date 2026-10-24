@@ -10,7 +10,8 @@ Learn and operate MeteorCloud — from first boot to production. Website: [meteo
 | **Production** on a VM you already have | `make up` on that host | [Install quickstart](install-quickstart.md) |
 | **Production**: create a new AWS EC2 | `make aws-up` from a laptop | [AWS deployment](aws-deployment.md) |
 | **Production**: existing Kubernetes cluster | Helm | [Kubernetes](kubernetes.md) |
-| Understand the three planes | — | [Concepts](concepts.md) |
+| Understand the three planes | — | [Concepts](concepts.md) · [Architecture](architecture.md) |
+| Contribute or run an AI agent | — | [CONTRIBUTING.md](../CONTRIBUTING.md) · [AGENTS.md](../AGENTS.md) |
 | Enroll a device with `meteorcli` | — | [Getting started → First device](getting-started.md#enroll-a-device) |
 
 `make dev` is Compose on localhost (hot reload, seed user). `make up` is Ansible + production Compose on the server (Traefik, generated secrets, optional WireGuard). Do not mix them.
