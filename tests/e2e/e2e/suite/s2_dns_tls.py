@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 
 from e2e.http import peer_certificate, request, resolve_ipv4
-from e2e.suite.framework import Blocked, check, expect, wait_for
+from e2e.suite.framework import NotSupported, check, expect, wait_for
 
 STAGE = "2 dns and tls"
 
 
 def _require_domain(ctx) -> str:
     if not ctx.cfg.has_public_dns:
-        raise Blocked("no public domain configured (E2E_DOMAIN with E2E_DNS_PROVIDER=route53|manual)")
+        raise NotSupported("no public domain configured (E2E_DOMAIN with E2E_DNS_PROVIDER=route53|manual)")
     return ctx.cfg.fqdn
 
 
