@@ -91,6 +91,28 @@ not import Mender (or other vendor) clients directly.
 wizard (release → devices/groups → review). You can also start a Deploy from a
 release row or from an empty device Software panel.
 
+## After you deploy
+
+The Deploy detail page shows three things per device, and they are separate:
+
+- **Install** — did the agent install the release? A Deploy is **Succeeded**
+  once every device reports the release in-sync. It stays Succeeded even if
+  the process stops later.
+- **Health** — is it running now? The agent checks on every heartbeat
+  (systemd unit active; container or every compose service running and
+  passing its Docker `HEALTHCHECK`). `Unknown` while a `HEALTHCHECK` is
+  still starting or before the first report.
+- **URL** — only when this Deploy created an endpoint. `ready` needs install
+  in-sync, health healthy and the WireGuard tunnel up.
+
+The legend sums these up, for example `8/10 installed · 7 healthy · 1 URL ready`.
+The page refreshes every 5 s while the Deploy runs and every 15 s after.
+
+**Retry failed** is for install failures only. If the software crashes after a
+successful install, the agent does not reinstall it: the device shows
+**Unhealthy** with a short error. Open the device page and use **View logs**
+(or the Logs window) to see why it stopped.
+
 ## Related
 
 - [Releases](releases.md)

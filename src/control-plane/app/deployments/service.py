@@ -39,6 +39,7 @@ from app.deployments.software_service import DeviceSoftwareService
 from app.devices.models import Device
 from app.devices.repository import DeviceRepository
 from app.devices.schemas import Page
+from app.endpoints.models import ApplicationEndpoint
 from app.identity.models import User
 from app.ports.deployment import DeploymentProvider
 from app.releases.kinds import ReleaseKind, workload_key_from_spec
@@ -227,15 +228,19 @@ class DeploymentService:
             workload_key = (
                 workload_key_from_spec(release.kind, release.spec) if release is not None else None
             )
+            endpoint_availability = {
+                endpoint.device_id: endpoint.availability
+                for endpoint in self.session.scalars(
+                    select(ApplicationEndpoint).where(ApplicationEndpoint.deployment_id == deployment.id)
+                )
+            }
             devices_payload = []
             for row in rows:
-                progress: int | None = None
-                if workload_key is not None:
-                    software_row = self.software_rows.get_by_workload(
-                        device_id=row.device_id, workload_key=workload_key
-                    )
-                    if software_row is not None:
-                        progress = software_row.progress_percent
+                software_row = (
+                    self.software_rows.get_by_workload(device_id=row.device_id, workload_key=workload_key)
+                    if workload_key is not None
+                    else None
+                )
                 devices_payload.append(
                     DeploymentDeviceResponse(
                         id=row.id,
@@ -243,7 +248,10 @@ class DeploymentService:
                         device_id=row.device_id,
                         device_name=names.get(row.device_id),
                         status=row.status,
-                        progress_percent=progress,
+                        progress_percent=software_row.progress_percent if software_row else None,
+                        health=software_row.health if software_row else None,
+                        reported_at=software_row.reported_at if software_row else None,
+                        endpoint_availability=endpoint_availability.get(row.device_id),
                         previous_desired_release_id=row.previous_desired_release_id,
                         last_error=row.last_error,
                         created_at=row.created_at,

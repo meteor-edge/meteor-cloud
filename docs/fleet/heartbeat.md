@@ -36,6 +36,13 @@ Optional body:
 }
 ```
 
+`software_report[].health` is the agent's runtime check, done on the device on
+every heartbeat (the cloud never probes the app): `healthy` means the systemd
+unit is active, or the container (every compose service) is running and its
+Docker `HEALTHCHECK`, if any, passes. `unknown` means a `HEALTHCHECK` is still
+starting. A workload that stops after install stays `in_sync` with
+`health: "unhealthy"` and a short `last_error`; the agent does not reinstall it.
+
 Response:
 
 ```json

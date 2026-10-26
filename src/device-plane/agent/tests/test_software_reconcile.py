@@ -10,6 +10,11 @@ from runtime.docker import ContainerHealth
 from edge_agent.software import reconcile_software
 
 
+def _artifacts(tmp_path: Path) -> Path:
+    # Applied state is stored next to the artifacts dir; keep it inside this test's tmp_path.
+    return tmp_path / "artifacts"
+
+
 def test_systemd_reconcile_sets_installed_when_healthy(tmp_path: Path) -> None:
     client = MagicMock()
     client.get_software.return_value = [
@@ -36,7 +41,7 @@ def test_systemd_reconcile_sets_installed_when_healthy(tmp_path: Path) -> None:
         patch("runtime.systemd.systemd_available", return_value=True),
         patch("runtime.systemd.SystemdAdapter", return_value=adapter),
     ):
-        reports = reconcile_software(client, "dev_token", tmp_path)
+        reports = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert len(reports) == 1
     assert reports[0]["sync_status"] == "in_sync"
@@ -71,8 +76,8 @@ def test_systemd_reconcile_skips_apply_when_release_unchanged(tmp_path: Path) ->
         patch("runtime.systemd.systemd_available", return_value=True),
         patch("runtime.systemd.SystemdAdapter", return_value=adapter),
     ):
-        first = reconcile_software(client, "dev_token", tmp_path)
-        second = reconcile_software(client, "dev_token", tmp_path)
+        first = reconcile_software(client, "dev_token", _artifacts(tmp_path))
+        second = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert first[0]["sync_status"] == "in_sync"
     assert second[0]["sync_status"] == "in_sync"
@@ -103,7 +108,7 @@ def test_systemd_health_fail_does_not_set_installed(tmp_path: Path) -> None:
         patch("runtime.systemd.systemd_available", return_value=True),
         patch("runtime.systemd.SystemdAdapter", return_value=adapter),
     ):
-        reports = reconcile_software(client, "dev_token", tmp_path)
+        reports = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert reports[0]["sync_status"] == "failed"
     assert reports[0]["health"] == "unhealthy"
@@ -122,7 +127,7 @@ def test_unknown_kind_reports_failed_without_raising(tmp_path: Path) -> None:
             "spec": {},
         }
     ]
-    reports = reconcile_software(client, "dev_token", tmp_path)
+    reports = reconcile_software(client, "dev_token", _artifacts(tmp_path))
     assert reports[0]["sync_status"] == "failed"
     assert "Unsupported" in (reports[0]["last_error"] or "")
 
@@ -147,7 +152,7 @@ def test_docker_reconcile_sets_installed_when_healthy(tmp_path: Path) -> None:
         patch("runtime.docker.docker_available", return_value=True),
         patch("runtime.docker.DockerAdapter", return_value=adapter),
     ):
-        reports = reconcile_software(client, "dev_token", tmp_path)
+        reports = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert reports[0]["sync_status"] == "in_sync"
     assert reports[0]["installed_release_id"] == "rel-2"
@@ -176,7 +181,7 @@ def test_compose_reconcile_sets_installed_when_healthy(tmp_path: Path) -> None:
         patch("runtime.compose.compose_available", return_value=True),
         patch("runtime.compose.ComposeAdapter", return_value=adapter),
     ):
-        reports = reconcile_software(client, "dev_token", tmp_path)
+        reports = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert reports[0]["sync_status"] == "in_sync"
     adapter.apply.assert_called_once()
@@ -218,9 +223,9 @@ def test_systemd_unit_down_after_install_reports_unhealthy_without_reapply(tmp_p
         patch("runtime.systemd.systemd_available", return_value=True),
         patch("runtime.systemd.SystemdAdapter", return_value=adapter),
     ):
-        first = reconcile_software(client, "dev_token", tmp_path)
+        first = reconcile_software(client, "dev_token", _artifacts(tmp_path))
         adapter.health_check.return_value = False  # the unit crashed after a good install
-        second = reconcile_software(client, "dev_token", tmp_path)
+        second = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert first[0]["health"] == "healthy"
     adapter.apply.assert_called_once()
@@ -241,9 +246,9 @@ def test_container_exit_after_install_reports_unhealthy_without_reapply(tmp_path
         patch("runtime.docker.docker_available", return_value=True),
         patch("runtime.docker.DockerAdapter", return_value=adapter),
     ):
-        reconcile_software(client, "dev_token", tmp_path)
+        reconcile_software(client, "dev_token", _artifacts(tmp_path))
         adapter.inspect_health.return_value = ContainerHealth("unhealthy", "is not running (exited, exit 1)")
-        second = reconcile_software(client, "dev_token", tmp_path)
+        second = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     adapter.apply.assert_called_once()
     assert second[0]["sync_status"] == "in_sync"
@@ -262,7 +267,7 @@ def test_container_healthcheck_starting_after_apply_is_in_sync_unknown(tmp_path:
         patch("runtime.docker.docker_available", return_value=True),
         patch("runtime.docker.DockerAdapter", return_value=adapter),
     ):
-        reports = reconcile_software(client, "dev_token", tmp_path)
+        reports = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert reports[0]["sync_status"] == "in_sync"
     assert reports[0]["health"] == "unknown"
@@ -279,7 +284,7 @@ def test_container_not_running_after_apply_is_failed(tmp_path: Path) -> None:
         patch("runtime.docker.docker_available", return_value=True),
         patch("runtime.docker.DockerAdapter", return_value=adapter),
     ):
-        reports = reconcile_software(client, "dev_token", tmp_path)
+        reports = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert reports[0]["sync_status"] == "failed"
     assert "installed_release_id" not in reports[0]
@@ -297,6 +302,6 @@ def test_last_error_is_kept_short(tmp_path: Path) -> None:
         patch("runtime.docker.docker_available", return_value=True),
         patch("runtime.docker.DockerAdapter", return_value=adapter),
     ):
-        reports = reconcile_software(client, "dev_token", tmp_path)
+        reports = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     assert len(reports[0]["last_error"]) <= 500

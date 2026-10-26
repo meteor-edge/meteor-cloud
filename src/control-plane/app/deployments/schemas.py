@@ -95,6 +95,11 @@ class DeploymentDeviceResponse(BaseModel):
     device_name: str | None = None
     status: str
     progress_percent: int | None = None
+    # Runtime health from the agent (healthy / unhealthy / unknown); separate from install status.
+    health: str | None = None
+    reported_at: datetime | None = None
+    # URL state, only when this Deploy created an endpoint for the device.
+    endpoint_availability: str | None = None
     previous_desired_release_id: uuid.UUID | None
     last_error: str | None
     created_at: datetime
