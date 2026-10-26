@@ -93,9 +93,11 @@ function renderPage() {
 }
 
 describe("DeviceDetailPage logs", () => {
-  it("does not open the Logs window (or reach the device) until the user asks", async () => {
+  it("opens logs from the Access tab only when the user asks", async () => {
     renderPage();
 
+    expect(screen.queryByRole("button", { name: "Open logs" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("tab", { name: "Access" }));
     const open = await screen.findByRole("button", { name: "Open logs" });
     expect(screen.queryByText("logs window")).not.toBeInTheDocument();
 

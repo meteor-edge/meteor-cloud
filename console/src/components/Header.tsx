@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
 import { BrandMark } from "@/components/BrandMark";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { useOrganizationContext } from "@/context/OrganizationContext";
 import { resolveDocsBaseUrl } from "@/lib/docsUrl";
@@ -23,6 +24,7 @@ export function Header() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <ThemeToggle />
           <Button variant="secondary" size="sm" asChild>
             <a href={resolveDocsBaseUrl()} target="_blank" rel="noreferrer">
               Docs

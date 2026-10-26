@@ -651,6 +651,7 @@ describe("Device detail", () => {
     });
 
     renderApp(["/organizations/org-1/devices/device-1"]);
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
     await user.click(await screen.findByRole("button", { name: /rotate credential/i }));
 
     const dialog = await screen.findByRole("dialog");
@@ -669,6 +670,7 @@ describe("Device detail", () => {
     });
 
     renderApp(["/organizations/org-1/devices/device-1"]);
+    await user.click(await screen.findByRole("tab", { name: "MQTT" }));
     expect(await screen.findByText("MQTT Connection")).toBeInTheDocument();
     expect(screen.getAllByText("aa:bb:cc:dd:ee:ff").length).toBeGreaterThan(0);
     expect(screen.getAllByText("devices/device-1/status").length).toBeGreaterThan(0);
@@ -694,6 +696,7 @@ describe("Device detail", () => {
     );
 
     renderApp(["/organizations/org-1/devices/device-1"]);
+    await user.click(await screen.findByRole("tab", { name: "MQTT" }));
     const button = await screen.findByRole("button", { name: /test connection/i });
     await user.click(button);
     expect(button).toBeDisabled();

@@ -29,6 +29,7 @@ import { StatusBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, type TabItem } from "@/components/ui/tabs";
 import {
   canManageDeployments,
   canManageEndpoints,
@@ -55,6 +56,8 @@ function metricText(metrics: Record<string, unknown> | null, key: string): strin
   return typeof value === "number" ? String(value) : String(value);
 }
 
+type DeviceTab = "overview" | "software" | "network" | "mqtt" | "access" | "settings";
+
 export function DeviceDetailPage() {
   const { organizationId = "", deviceId = "" } = useParams();
   const { token } = useAuth();
@@ -65,6 +68,7 @@ export function DeviceDetailPage() {
   const [rotatedToken, setRotatedToken] = useState<string | null>(null);
   const [pingResult, setPingResult] = useState<string | null>(null);
   const [pinging, setPinging] = useState(false);
+  const [activeTab, setActiveTab] = useState<DeviceTab>("overview");
   // Logs are listed on the device over SSH, so nothing is asked until the user opens them.
   const [logsOpen, setLogsOpen] = useState(false);
 
@@ -152,6 +156,14 @@ export function DeviceDetailPage() {
     "meteorcli mqtt-listen",
     `meteorcli mqtt-listen commands`,
   ].join("\n");
+  const tabs: TabItem<DeviceTab>[] = [
+    { id: "overview", label: "Overview" },
+    { id: "software", label: "Software" },
+    { id: "network", label: "Network" },
+    { id: "mqtt", label: "MQTT" },
+    ...(canShell || canLogs ? [{ id: "access" as const, label: "Access" }] : []),
+    ...(canManage ? [{ id: "settings" as const, label: "Settings" }] : []),
+  ];
 
   async function onSave() {
     setError(null);
@@ -251,7 +263,10 @@ export function DeviceDetailPage() {
         <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
       )}
 
-      <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+      <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} label="Device detail sections" />
+
+      {activeTab === "software" && (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
         <h2 className="text-lg font-semibold">Software</h2>
         <p className="text-sm text-muted-foreground">
           Desired vs installed releases on this device. Empty until a release is deployed.
@@ -267,15 +282,18 @@ export function DeviceDetailPage() {
               canLogs
                 ? () => {
                     setLogsOpen(true);
-                    document.getElementById("device-logs")?.scrollIntoView({ behavior: "smooth" });
+                    setActiveTab("access");
                   }
                 : undefined
             }
           />
         )}
-      </div>
+        </div>
+      )}
 
-      <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+      {activeTab === "network" && (
+        <>
+          <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
         <h2 className="text-lg font-semibold">Public URLs</h2>
         <p className="text-sm text-muted-foreground">
           Each application on this device can have its own hostname, including different ports such
@@ -289,22 +307,24 @@ export function DeviceDetailPage() {
             canManage={canEndpoints}
           />
         )}
-      </div>
+          </div>
 
-      {token && (
-        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
-          <h2 className="text-lg font-semibold">WireGuard network</h2>
-          <DeviceNetworkPanel
-            token={token}
-            organizationId={organizationId}
-            deviceId={deviceId}
-            canManage={canManage}
-            canShell={canShell}
-          />
-        </div>
+          {token && (
+            <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+              <h2 className="text-lg font-semibold">WireGuard network</h2>
+              <DeviceNetworkPanel
+                token={token}
+                organizationId={organizationId}
+                deviceId={deviceId}
+                canManage={canManage}
+                canShell={canShell}
+              />
+            </div>
+          )}
+        </>
       )}
 
-      {canShell && token && (
+      {activeTab === "access" && canShell && token && (
         <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
           <h2 className="text-lg font-semibold">Terminal</h2>
           <DeviceTerminal
@@ -316,7 +336,7 @@ export function DeviceDetailPage() {
         </div>
       )}
 
-      {canLogs && token && (
+      {activeTab === "access" && canLogs && token && (
         <div
           id="device-logs"
           className="scroll-mt-6 space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow"
@@ -347,7 +367,8 @@ export function DeviceDetailPage() {
         </div>
       )}
 
-      <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+      {activeTab === "mqtt" && (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
         <h2 className="text-lg font-semibold">MQTT Connection</h2>
         <DeviceMqttStatus device={device} />
         <div className="grid gap-4 sm:grid-cols-2">
@@ -390,9 +411,11 @@ export function DeviceDetailPage() {
             canPublish={canManage}
           />
         ) : null}
-      </div>
+        </div>
+      )}
 
-      <div className="grid gap-4 rounded-lg border border-border bg-card p-6 shadow-glow sm:grid-cols-2">
+      {activeTab === "overview" && (
+        <div className="grid gap-4 rounded-lg border border-border bg-card p-6 shadow-glow sm:grid-cols-2">
         <Detail label="CPU %" value={metricText(device.mqtt_metrics, "cpu_percent")} />
         <Detail label="Memory %" value={metricText(device.mqtt_metrics, "memory_percent")} />
         <Detail label="Disk %" value={metricText(device.mqtt_metrics, "disk_percent")} />
@@ -422,9 +445,10 @@ export function DeviceDetailPage() {
           value={device.registered_at ? formatDateTime(device.registered_at) : null}
         />
         <Detail label="Credential prefix" value={device.credential_prefix} />
-      </div>
+        </div>
+      )}
 
-      {canManage && (
+      {activeTab === "settings" && canManage && (
         <div className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-glow">
           <h2 className="text-lg font-semibold">Manage device</h2>
 

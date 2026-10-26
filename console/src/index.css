@@ -11,6 +11,11 @@
 
   body {
     @apply min-h-screen bg-background font-sans text-muted-foreground antialiased;
+    background-image:
+      radial-gradient(circle at 6% 0%, color-mix(in srgb, var(--meteor-cyan) 24%, transparent), transparent 30rem),
+      radial-gradient(circle at 100% 10%, color-mix(in srgb, var(--cosmic-blue) 26%, transparent), transparent 36rem),
+      radial-gradient(circle at 52% 100%, color-mix(in srgb, var(--sky-blue) 16%, transparent), transparent 32rem);
+    background-attachment: fixed;
   }
 
   h1,
@@ -22,6 +27,11 @@
 
   #root {
     min-height: 100vh;
+  }
+
+  :where(.bg-card, .bg-section, .bg-field, .bg-secondary) {
+    backdrop-filter: blur(18px) saturate(135%);
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
   }
 
   ::selection {

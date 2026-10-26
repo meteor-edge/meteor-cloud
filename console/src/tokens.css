@@ -29,29 +29,31 @@
   --aurora: #2ee6b8; /* success / live data */
 
   --gradient-meteor: linear-gradient(135deg, #02c5fe 0%, #007afd 55%, #003cfa 100%);
-  --glow: 0 0 40px color-mix(in srgb, var(--meteor-cyan) 15%, transparent);
+  --glow:
+    0 16px 44px color-mix(in srgb, #000 26%, transparent),
+    0 0 40px color-mix(in srgb, var(--meteor-cyan) 12%, transparent);
   --radius: 16px;
 
   /* Dark theme is the default. Cloud Blue fails AA for small text on panel
      and deep space, so links use Sky Blue there. Buttons stay Cloud Blue. */
   --background: var(--night-sky);
   --foreground: var(--cloud-white);
-  --section: var(--deep-space);
-  --card: var(--panel);
+  --section: color-mix(in srgb, var(--deep-space) 78%, transparent);
+  --card: color-mix(in srgb, var(--panel) 74%, transparent);
   --card-foreground: var(--cloud-white);
-  --muted: var(--deep-space);
+  --muted: color-mix(in srgb, var(--deep-space) 64%, transparent);
   --muted-foreground: var(--star-dust);
   --nav: var(--star-dust);
-  --border: var(--horizon);
-  --input: var(--horizon);
-  --field: var(--night-sky);
+  --border: color-mix(in srgb, #9db0d0 24%, transparent);
+  --input: color-mix(in srgb, #9db0d0 32%, transparent);
+  --field: color-mix(in srgb, var(--night-sky) 58%, transparent);
   --ring: var(--meteor-cyan);
   --primary: var(--cloud-blue);
   --primary-foreground: var(--paper);
-  --secondary: var(--panel);
+  --secondary: color-mix(in srgb, var(--panel) 62%, transparent);
   --secondary-foreground: var(--cloud-white);
-  --secondary-hover: var(--horizon);
-  --accent: var(--horizon);
+  --secondary-hover: color-mix(in srgb, var(--horizon) 66%, transparent);
+  --accent: color-mix(in srgb, var(--cosmic-blue) 52%, transparent);
   --accent-foreground: var(--cloud-white);
   --link: var(--sky-blue);
   --overlay: color-mix(in srgb, var(--night-sky) 72%, transparent);
@@ -60,29 +62,55 @@
 }
 
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
     color-scheme: light;
 
-    --background: var(--cloud-white);
+    --background: #edf5ff;
     --foreground: var(--midnight);
-    --section: var(--mist);
-    --card: var(--paper);
+    --section: color-mix(in srgb, #e7f1ff 78%, transparent);
+    --card: color-mix(in srgb, var(--paper) 72%, transparent);
     --card-foreground: var(--midnight);
-    --muted: var(--mist);
+    --muted: color-mix(in srgb, var(--mist) 70%, transparent);
     --muted-foreground: var(--slate);
     /* Slate on Mist is below AA, so chrome on Mist uses Midnight. */
     --nav: var(--midnight);
-    --border: var(--slate);
-    --input: var(--slate);
-    --field: var(--paper);
+    --border: color-mix(in srgb, var(--sky-blue) 22%, transparent);
+    --input: color-mix(in srgb, var(--slate) 42%, transparent);
+    --field: color-mix(in srgb, var(--paper) 58%, transparent);
     --ring: var(--cosmic-blue);
     --primary: var(--cloud-blue);
     --primary-foreground: var(--paper);
-    --secondary: var(--paper);
+    --secondary: color-mix(in srgb, var(--paper) 60%, transparent);
     --secondary-foreground: var(--midnight);
-    --secondary-hover: var(--mist);
-    --accent: var(--cosmic-blue);
+    --secondary-hover: color-mix(in srgb, var(--mist) 82%, transparent);
+    --accent: color-mix(in srgb, var(--sky-blue) 74%, transparent);
     --accent-foreground: var(--cloud-white);
     --link: var(--link-on-light);
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --background: #edf5ff;
+  --foreground: var(--midnight);
+  --section: color-mix(in srgb, #e7f1ff 78%, transparent);
+  --card: color-mix(in srgb, var(--paper) 72%, transparent);
+  --card-foreground: var(--midnight);
+  --muted: color-mix(in srgb, var(--mist) 70%, transparent);
+  --muted-foreground: var(--slate);
+  /* Slate on Mist is below AA, so chrome on Mist uses Midnight. */
+  --nav: var(--midnight);
+  --border: color-mix(in srgb, var(--sky-blue) 22%, transparent);
+  --input: color-mix(in srgb, var(--slate) 42%, transparent);
+  --field: color-mix(in srgb, var(--paper) 58%, transparent);
+  --ring: var(--cosmic-blue);
+  --primary: var(--cloud-blue);
+  --primary-foreground: var(--paper);
+  --secondary: color-mix(in srgb, var(--paper) 60%, transparent);
+  --secondary-foreground: var(--midnight);
+  --secondary-hover: color-mix(in srgb, var(--mist) 82%, transparent);
+  --accent: color-mix(in srgb, var(--sky-blue) 74%, transparent);
+  --accent-foreground: var(--cloud-white);
+  --link: var(--link-on-light);
 }
