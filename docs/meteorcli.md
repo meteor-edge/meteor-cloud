@@ -45,6 +45,7 @@ directory the service reads.
 | `run` | Foreground loop: heartbeats, MQTT, WireGuard (`--once` for a single pass). Stays in the terminal (Ctrl+C to stop). Refuses if `meteorcli.service` is already active so you do not run two agents |
 | `status` | Show non-secret local config, including systemd and WireGuard |
 | `mqtt-test` / `mqtt-listen` | MQTT diagnostics |
+| `logs` | List log sources (`--json`), or print one: `meteorcli logs systemd:nginx.service -f --grep error`. See [Device logs](fleet/logs.md) |
 
 Env overrides: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`, `METEORCLI_TOKEN`, `METEORCLI_CONFIG_DIR`.
 

@@ -1,4 +1,4 @@
-"""Browser SSH: session tickets and WebSocket PTY bridge."""
+"""Browser SSH and device logs: session tickets and the WebSocket bridge to ssh."""
 
 from __future__ import annotations
 
@@ -16,7 +16,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.exceptions import AppError
 from app.identity.dependencies import CurrentUser
 from app.shell.dependencies import ShellSvc
+from app.shell.logs import LogSessionCreateRequest, LogSourcesResponse
+from app.shell.models import SessionKind
 from app.shell.schemas import ShellSessionCreateResponse
+from app.shell.service import ShellService
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +62,60 @@ def create_shell_session(
     )
 
 
+@router.get(
+    "/api/v1/organizations/{organization_id}/devices/{device_id}/log-sources",
+    response_model=LogSourcesResponse,
+)
+def list_log_sources(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: ShellSvc,
+) -> LogSourcesResponse:
+    return service.log_sources(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.post(
+    "/api/v1/organizations/{organization_id}/devices/{device_id}/log-sessions",
+    response_model=ShellSessionCreateResponse,
+    status_code=201,
+)
+def create_log_session(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    payload: LogSessionCreateRequest,
+    current_user: CurrentUser,
+    service: ShellSvc,
+) -> ShellSessionCreateResponse:
+    return service.create_log_session(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+        request=payload,
+    )
+
+
 @router.websocket("/api/v1/shell-sessions/{session_id}/ws")
 async def shell_websocket(
     websocket: WebSocket,
     session_id: uuid.UUID,
     service: ShellSvc,
 ) -> None:
+    await _bridge(websocket, session_id, service, kind=SessionKind.SHELL.value)
+
+
+@router.websocket("/api/v1/log-sessions/{session_id}/ws")
+async def log_websocket(
+    websocket: WebSocket,
+    session_id: uuid.UUID,
+    service: ShellSvc,
+) -> None:
+    """Device log output as binary frames; text frames are status lines. Browser input is ignored."""
+    await _bridge(websocket, session_id, service, kind=SessionKind.LOGS.value)
+
+
+async def _bridge(websocket: WebSocket, session_id: uuid.UUID, service: ShellService, *, kind: str) -> None:
+    logs = kind == SessionKind.LOGS.value
     # ?ticket= is still accepted for older clients, but it ends up in access logs.
     ticket = websocket.query_params.get("ticket") or websocket.headers.get("x-shell-ticket")
     await websocket.accept()
@@ -86,7 +137,9 @@ async def shell_websocket(
     connection = None
     device_id = None
     try:
-        target = await asyncio.to_thread(locked, service.consume_ticket, session_id=session_id, ticket=ticket)
+        target = await asyncio.to_thread(
+            locked, service.consume_ticket, session_id=session_id, ticket=ticket, kind=kind
+        )
         consumed = True
         device_id = target.session.device_id
         connection = await asyncio.to_thread(
@@ -96,6 +149,7 @@ async def shell_websocket(
             username=target.username,
             host_key=target.host_key,
             certificate=target.certificate,
+            command=target.command,
         )
     except AppError as exc:
         if consumed:
@@ -107,7 +161,7 @@ async def shell_websocket(
         if consumed:
             locked(service.close_session, session_id)
         logger.exception("Failed to open device shell")
-        await websocket.send_text("error: could not open a shell to this device")
+        await websocket.send_text(f"error: could not open {'logs' if logs else 'a shell'} on this device")
         await websocket.close(code=1011)
         return
     if connection is None:
@@ -127,8 +181,8 @@ async def shell_websocket(
                 last_activity = time.monotonic()
                 await websocket.send_bytes(chunk)
             elif connection.closed:
-                # The shell exited (e.g. `exit`): end the session instead of waiting for the idle timeout.
-                return None
+                # The shell exited (e.g. `exit`) or the log command finished: end the session now.
+                return "\r\n[end of log]\r\n" if logs and not connection.failure else None
             else:
                 await asyncio.sleep(0.05)
 
@@ -141,7 +195,7 @@ async def shell_websocket(
             data = message.get("bytes")
             if data is None and message.get("text") is not None:
                 data = str(message["text"]).encode("utf-8")
-            if data:
+            if data and not logs:
                 last_activity = time.monotonic()
                 await asyncio.to_thread(connection.write, data)
 
@@ -151,7 +205,8 @@ async def shell_websocket(
         while True:
             await asyncio.sleep(0.5)
             now = time.monotonic()
-            if now - last_activity > idle:
+            # A followed log can stay quiet for a long time; only the overall limit applies.
+            if not logs and now - last_activity > idle:
                 return "\r\n[idle timeout]\r\n"
             if now - started > settings.shell_max_duration_seconds:
                 return "\r\n[session time limit reached]\r\n"
@@ -179,7 +234,7 @@ async def shell_websocket(
     except WebSocketDisconnect:
         pass
     except Exception:
-        logger.exception("Shell session %s ended with an error", session_id)
+        logger.exception("%s session %s ended with an error", kind, session_id)
     finally:
         for task in tasks:
             task.cancel()

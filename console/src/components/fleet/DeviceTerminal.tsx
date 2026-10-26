@@ -6,7 +6,7 @@ import { Loader2, Power, TerminalSquare } from "lucide-react";
 
 import { createShellSession } from "@/api/fleet";
 import { ApiError } from "@/api/http";
-import { resolveApiBaseUrl } from "@/lib/apiBase";
+import { websocketUrl } from "@/lib/apiBase";
 import { Button } from "@/components/ui/button";
 
 type DeviceTerminalProps = {
@@ -17,12 +17,6 @@ type DeviceTerminalProps = {
 };
 
 type Status = "idle" | "connecting" | "connected" | "closed";
-
-function websocketUrl(path: string): string {
-  const api = resolveApiBaseUrl();
-  const wsBase = api.replace(/^http/, "ws");
-  return `${wsBase}${path}`;
-}
 
 export function DeviceTerminal({
   token,

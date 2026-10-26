@@ -1,8 +1,9 @@
-"""Issue and consume browser SSH session tickets."""
+"""Issue and consume browser SSH and device log session tickets."""
 
 from __future__ import annotations
 
 import hmac
+import shlex
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -16,13 +17,26 @@ from app.connectivity.models import ConnectivityStatus
 from app.connectivity.service import ConnectivityService, ssh_principal
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
+from app.deployments.software_repository import DeviceSoftwareRepository
+from app.devices.models import Device
 from app.devices.repository import DeviceRepository
 from app.devices.tokens import generate_shell_ticket, hash_token
 from app.identity.models import User
 from app.ports.shell import DeviceShellProvider, ShellCertificate
-from app.shell.models import DeviceShellSession, ShellSessionStatus
+from app.shell.logs import (
+    LogSessionCreateRequest,
+    LogSource,
+    LogSourcesResponse,
+    deployed_keys,
+    log_command,
+    source_key,
+)
+from app.shell.models import DeviceShellSession, SessionKind, ShellSessionStatus
 from app.shell.schemas import ShellSessionCreateResponse
 from app.tenancy.models import OrganizationMembership
+
+# The permission that opens (and keeps open) each kind of session.
+_PERMISSION = {SessionKind.SHELL.value: "device.shell", SessionKind.LOGS.value: "device.logs"}
 
 
 def _new_ticket() -> tuple[str, str]:
@@ -54,6 +68,8 @@ class ShellTarget:
     username: str
     host_key: str | None
     certificate: ShellCertificate | None
+    # Log sessions: the read-only command to run instead of an interactive shell.
+    command: list[str] | None = None
 
 
 class ShellService:
@@ -81,27 +97,78 @@ class ShellService:
             raise NotFoundError("shell_disabled", "Browser SSH is disabled for this deployment.")
         return self.provider
 
-    def create_session(
-        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID
-    ) -> ShellSessionCreateResponse:
+    def _authorized_device(self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID, kind: str) -> Device:
         membership = self._require_membership(organization_id, actor.id)
         device = self.devices.get(organization_id=organization_id, device_id=device_id)
         if device is None:
             raise NotFoundError("device_not_found", "Device was not found.")
-        if not device.is_enabled:
-            raise ConflictError("device_disabled", "This device is disabled.")
         try:
-            self.authz.require(membership, "device.shell", device_group_id=device.device_group_id)
+            self.authz.require(membership, _PERMISSION[kind], device_group_id=device.device_group_id)
         except ForbiddenError:
             self.audit.record(
                 actor=actor,
                 organization_id=organization_id,
-                action="device.shell.denied",
+                action=f"{_PERMISSION[kind]}.denied",
                 resource_type="device",
                 resource_id=device_id,
                 metadata={"reason": "permission"},
             )
             raise
+        return device
+
+    def create_session(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID
+    ) -> ShellSessionCreateResponse:
+        return self._create(
+            actor=actor, organization_id=organization_id, device_id=device_id, kind=SessionKind.SHELL.value
+        )
+
+    def log_sources(self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID) -> LogSourcesResponse:
+        device = self._authorized_device(
+            actor=actor, organization_id=organization_id, device_id=device_id, kind=SessionKind.LOGS.value
+        )
+        workloads = DeviceSoftwareRepository(self.session).list_for_device(device_id=device.id)
+        return LogSourcesResponse(
+            sources=[LogSource.model_validate(item) for item in device.log_sources or []],
+            reported_at=device.log_sources_at,
+            deployed=deployed_keys(workloads),
+        )
+
+    def create_log_session(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+        request: LogSessionCreateRequest,
+    ) -> ShellSessionCreateResponse:
+        return self._create(
+            actor=actor,
+            organization_id=organization_id,
+            device_id=device_id,
+            kind=SessionKind.LOGS.value,
+            log_request=request,
+        )
+
+    def _create(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+        kind: str,
+        log_request: LogSessionCreateRequest | None = None,
+    ) -> ShellSessionCreateResponse:
+        device = self._authorized_device(actor=actor, organization_id=organization_id, device_id=device_id, kind=kind)
+        if not device.is_enabled:
+            raise ConflictError("device_disabled", "This device is disabled.")
+        params = None
+        if log_request is not None:
+            # Only a source the agent listed: the device would refuse anything else anyway.
+            reported = {source_key(item["kind"], item["name"]) for item in device.log_sources or []}
+            if source_key(log_request.kind, log_request.name) not in reported:
+                raise NotFoundError("log_source_not_found", "This device has not reported that log source.")
+            params = log_request.model_dump(mode="json")
         self._require_provider()
         peer = self.connectivity.require_reachable(device=device)
         now = datetime.now(UTC)
@@ -137,7 +204,7 @@ class ShellService:
             or 0
         )
         if open_count >= self.settings.shell_max_sessions_per_user:
-            raise ConflictError("shell_session_limit", "Too many open shell sessions.")
+            raise ConflictError("shell_session_limit", "Too many open shell and log sessions.")
         plaintext, ticket_hash = _new_ticket()
         row = DeviceShellSession(
             organization_id=organization_id,
@@ -145,8 +212,9 @@ class ShellService:
             actor_user_id=actor.id,
             ticket_hash=ticket_hash,
             status=ShellSessionStatus.PENDING.value,
-            ticket_expires_at=datetime.now(UTC)
-            + timedelta(seconds=self.settings.shell_ticket_ttl_seconds),
+            kind=kind,
+            params=params,
+            ticket_expires_at=datetime.now(UTC) + timedelta(seconds=self.settings.shell_ticket_ttl_seconds),
         )
         self.session.add(row)
         # The id is assigned at flush; the audit record needs it.
@@ -154,26 +222,33 @@ class ShellService:
         self.audit.record(
             actor=actor,
             organization_id=organization_id,
-            action="device.shell.start",
+            action=f"{_PERMISSION[kind]}.start",
             resource_type="device",
             resource_id=device_id,
-            metadata={"session_id": str(row.id), "wg_address": str(peer.wg_address)},
+            metadata={
+                "session_id": str(row.id),
+                "wg_address": str(peer.wg_address),
+                **({"log": params} if params else {}),
+            },
         )
         self.session.commit()
         self.session.refresh(row)
         return ShellSessionCreateResponse(
             session_id=row.id,
             ticket=plaintext,
-            websocket_path=f"/api/v1/shell-sessions/{row.id}/ws",
+            websocket_path=f"/api/v1/{'log' if kind == SessionKind.LOGS.value else 'shell'}-sessions/{row.id}/ws",
             expires_at=row.ticket_expires_at,
             device_id=device_id,
         )
 
-    def consume_ticket(self, *, session_id: uuid.UUID, ticket: str) -> ShellTarget:
-        """Validate a one-time ticket and return the device to open."""
+    def consume_ticket(self, *, session_id: uuid.UUID, ticket: str, kind: str = SessionKind.SHELL.value) -> ShellTarget:
+        """Validate a one-time ticket and return the device to open.
+
+        ``kind`` is the websocket's: a log ticket never opens a shell, nor the reverse.
+        """
         self._require_provider()
         row = self.session.get(DeviceShellSession, session_id, with_for_update=True)
-        if row is None:
+        if row is None or row.kind != kind:
             raise UnauthorizedError("invalid_shell_ticket", "Shell session was not found.")
         if row.status != ShellSessionStatus.PENDING.value:
             raise UnauthorizedError("invalid_shell_ticket", "This shell ticket was already used.")
@@ -196,9 +271,11 @@ class ShellService:
             raise UnauthorizedError("invalid_shell_ticket", "The user who opened this session no longer exists.")
         membership = self.authz.get_active_membership(user_id=row.actor_user_id, organization_id=row.organization_id)
         if membership is None or not self.authz.check(
-            membership, "device.shell", device_group_id=device.device_group_id
+            membership, _PERMISSION[row.kind], device_group_id=device.device_group_id
         ):
-            raise ForbiddenError("insufficient_permission", "You no longer have shell access to this device.")
+            what = "log" if row.kind == SessionKind.LOGS.value else "shell"
+            raise ForbiddenError("insufficient_permission", f"You no longer have {what} access to this device.")
+        command = log_command(row.params or {}) if row.kind == SessionKind.LOGS.value else None
         peer = self.connectivity.require_reachable(device=device)
         host = self.connectivity.wg_host(peer)
         certificate = None
@@ -206,7 +283,9 @@ class ShellService:
             actor = self.session.get(User, row.actor_user_id)
             certificate = ShellCertificate(
                 principal=ssh_principal(device.id),
-                key_id=f"shell:{row.id}:{actor.email if actor else row.actor_user_id}",
+                key_id=f"{row.kind}:{row.id}:{actor.email if actor else row.actor_user_id}",
+                # The certificate itself only runs this command: it cannot open a shell.
+                force_command=shlex.join(command) if command else None,
             )
         elif self.settings.shell_gateway_key_retired:
             raise ConflictError(
@@ -224,6 +303,7 @@ class ShellService:
             username=self.connectivity.ssh_user_for(peer),
             host_key=peer.ssh_host_key,
             certificate=certificate,
+            command=command,
         )
 
     def session_still_allowed(self, session_id: uuid.UUID) -> bool:
@@ -242,7 +322,7 @@ class ShellService:
                 user_id=row.actor_user_id, organization_id=row.organization_id
             )
             return membership is not None and self.authz.check(
-                membership, "device.shell", device_group_id=device.device_group_id
+                membership, _PERMISSION[row.kind], device_group_id=device.device_group_id
             )
         finally:
             # End the read transaction so the pooled connection is not held between checks.
@@ -259,7 +339,7 @@ class ShellService:
         self.audit.record(
             actor=actor,
             organization_id=row.organization_id,
-            action="device.shell.end",
+            action=f"{_PERMISSION[row.kind]}.end",
             resource_type="device",
             resource_id=row.device_id,
             metadata={"session_id": str(row.id)},

@@ -71,6 +71,7 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("endpoint", "update", "Update endpoints", "Change or disable public application endpoints."),
     PermissionDef("endpoint", "delete", "Delete endpoints", "Remove public application endpoints."),
     PermissionDef("device", "shell", "Open device terminal", "Open a browser SSH session to a device."),
+    PermissionDef("device", "logs", "View device logs", "Read service, container and system logs on a device."),
     PermissionDef("enrollment_key", "read", "View enrollment API keys", "List enrollment API keys."),
     PermissionDef("enrollment_key", "manage", "Manage enrollment API keys", "Create and revoke enrollment API keys."),
     PermissionDef("mqtt", "test", "Use MQTT test tools", "Publish and listen in the organization MQTT test UI."),
@@ -108,6 +109,7 @@ _DEVELOPER = _VIEWER | frozenset(
         "endpoint.update",
         "endpoint.delete",
         "mqtt.test",
+        "device.logs",
     }
 )
 _OPERATOR = _VIEWER | frozenset(
@@ -117,6 +119,7 @@ _OPERATOR = _VIEWER | frozenset(
         "device.update",
         "device.reboot",
         # device.shell is owner/admin only: a root-capable shell on the device.
+        "device.logs",
         "deployment.create",
         "deployment.cancel",
         "endpoint.create",

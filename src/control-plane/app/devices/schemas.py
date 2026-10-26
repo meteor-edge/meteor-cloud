@@ -335,6 +335,8 @@ class AgentHeartbeatRequest(BaseModel):
     capabilities: dict[str, Any] = Field(default_factory=dict)
     # Installed / sync status for known workloads; unknown keys are ignored.
     software_report: list[dict[str, Any]] = Field(default_factory=list)
+    # Log sources the agent lists (meteorcli-logs); omitted by agents without the helper.
+    log_sources: list[dict[str, Any]] | None = Field(default=None, max_length=1000)
 
 
 class AgentHeartbeatResponse(BaseModel):

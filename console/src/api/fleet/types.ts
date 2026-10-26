@@ -196,6 +196,33 @@ export type ShellSession = {
   device_id: string;
 };
 
+export type LogSourceKind = "journal" | "systemd" | "docker" | "file";
+
+export type LogSource = {
+  kind: LogSourceKind;
+  name: string;
+  state?: string | null;
+  project?: string | null;
+  size?: number | null;
+};
+
+export type LogSources = {
+  sources: LogSource[];
+  /** null when the agent never reported (too old, or the meteorcli-logs helper is missing). */
+  reported_at: string | null;
+  /** Keys of MeteorCloud workloads: "systemd:<unit>", "docker:<name>", "compose:<project>". */
+  deployed: string[];
+};
+
+export type LogSessionRequest = {
+  kind: LogSourceKind;
+  name: string;
+  lines: number;
+  since: "15m" | "1h" | "6h" | "24h" | "7d" | null;
+  grep: string | null;
+  follow: boolean;
+};
+
 export type ReleaseSummary = {
   id: string;
   name: string;

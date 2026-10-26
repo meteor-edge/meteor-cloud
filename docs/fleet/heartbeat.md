@@ -26,6 +26,12 @@ Optional body:
       "installed_version": "1.2.0",
       "health": "healthy"
     }
+  ],
+  "log_sources": [
+    { "kind": "journal", "name": "" },
+    { "kind": "systemd", "name": "nginx.service", "state": "active" },
+    { "kind": "docker", "name": "shop-web-1", "state": "running", "project": "shop" },
+    { "kind": "file", "name": "/var/log/nginx/access.log", "size": 52311 }
   ]
 }
 ```
@@ -55,7 +61,9 @@ Response:
 
 Each heartbeat updates the device's `last_seen_at` and may refresh a few
 inventory fields. `software_report` updates installed software for known
-workloads (unknown keys are ignored). The response includes current
+workloads (unknown keys are ignored). `log_sources` replaces the device's
+list for the [Logs window](logs.md); agents without the `meteorcli-logs`
+helper omit it, and the last list is kept. The response includes current
 `desired_software`. Agents can also poll `GET /api/v1/agent/software`.
 When a desired item has an `artifact_id`, the agent downloads it from
 `GET /api/v1/agent/artifacts/{id}/download` (only if that artifact is on current

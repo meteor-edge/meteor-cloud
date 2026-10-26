@@ -117,6 +117,7 @@ Stored as `resource` + `action` columns; id is derived.
 | `device.delete` | Delete devices | Remove devices. |
 | `device.reboot` | Reboot devices | Send reboot (and similar operate) commands. |
 | `device.shell` | Open device terminal | Open a browser SSH session over WireGuard. |
+| `device.logs` | View device logs | Read service, container and system logs over WireGuard (read-only). |
 | `endpoint.read` | View endpoints | List and open public application URLs. |
 | `endpoint.create` | Create endpoints | Register public application hostnames. |
 | `endpoint.update` | Update endpoints | Change or disable public application endpoints. |
@@ -171,7 +172,8 @@ System roles: `organization_id IS NULL`, `is_system = true`, immutable via API.
 | device.update | ✓ | ✓ | ✓ | | |
 | device.delete | ✓ | ✓ | | | |
 | device.reboot | ✓ | ✓ | ✓ | | |
-| device.shell | ✓ | ✓ | ✓ | | |
+| device.shell | ✓ | ✓ | | | |
+| device.logs | ✓ | ✓ | ✓ | ✓ | |
 | endpoint.read | ✓ | ✓ | ✓ | ✓ | ✓ |
 | endpoint.create | ✓ | ✓ | ✓ | ✓ | |
 | endpoint.update | ✓ | ✓ | ✓ | ✓ | |

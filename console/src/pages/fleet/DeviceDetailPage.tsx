@@ -18,6 +18,7 @@ import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
 import { DeviceEndpointsPanel } from "@/components/fleet/DeviceEndpointsPanel";
+import { DeviceLogs } from "@/components/fleet/DeviceLogs";
 import { DeviceMqttStatus } from "@/components/fleet/DeviceMqttStatus";
 import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
@@ -33,6 +34,7 @@ import {
   canManageEndpoints,
   canManageFleet,
   canOpenDeviceShell,
+  canViewDeviceLogs,
 } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
@@ -103,6 +105,9 @@ export function DeviceDetailPage() {
   const canShell = orgAccess
     ? orgAccess.permissions.includes("device.shell")
     : canOpenDeviceShell(orgQuery.data?.current_user_role);
+  const canLogs = orgAccess
+    ? orgAccess.permissions.includes("device.logs")
+    : canViewDeviceLogs(orgQuery.data?.current_user_role);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
@@ -292,6 +297,18 @@ export function DeviceDetailPage() {
         <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
           <h2 className="text-lg font-semibold">Terminal</h2>
           <DeviceTerminal
+            token={token}
+            organizationId={organizationId}
+            deviceId={deviceId}
+            deviceName={device.name}
+          />
+        </div>
+      )}
+
+      {canLogs && token && (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+          <h2 className="text-lg font-semibold">Logs</h2>
+          <DeviceLogs
             token={token}
             organizationId={organizationId}
             deviceId={deviceId}

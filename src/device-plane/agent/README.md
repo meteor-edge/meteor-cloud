@@ -47,7 +47,9 @@ and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`
 and passwordless sudo for that helper only, so the agent can create `wg0` without
 running the whole CLI as root. The helper only accepts meteorcli's own `wg0.conf`
 keys (no `PostUp`/`PreUp` hooks or other `wg-quick` options) and fixed `wg` calls
-on `wg0`, so the sudo rule does not grant root. When the
+on `wg0`, so the sudo rule does not grant root. It also installs
+`/usr/local/libexec/meteorcli-logs`, a read-only log helper for the console's Logs
+window and `meteorcli logs` (see [Device logs](../../../docs/fleet/logs.md)). When the
 control plane has WireGuard enabled, `run` registers this device’s **public**
 key and brings up a tunnel (private key stays on the device). See
 [Device connectivity](../../../docs/fleet/connectivity.md).

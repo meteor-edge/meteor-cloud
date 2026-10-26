@@ -1,0 +1,275 @@
+#!/usr/bin/python3 -I
+"""Root helper that lists and prints this device's logs, read-only.
+
+installcli.sh installs this root-owned and grants passwordless sudo for this file
+only, so the device user can read the journal, Docker and /var/log without being in
+the adm, systemd-journal or docker groups (docker alone is root-equivalent). The
+control plane runs it over SSH for the console's Logs window, and `meteorcli logs`
+wraps it on the device. Every source must be one `list` reports right now; nothing
+from the caller reaches a shell, and file paths are limited to a fixed allowlist.
+
+  meteorcli-logs list
+  meteorcli-logs show journal|systemd UNIT|docker CONTAINER|file PATH
+                 [--lines N] [--since 15m|1h|24h|7d] [--grep TEXT] [--follow]
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import glob
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import threading
+from collections import deque
+
+# sudo usually sets secure_path, but do not rely on it for the tools run as root.
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+LOG_ROOT = "/var/log/"
+FILE_GLOBS = (
+    "/var/log/nginx/*.log",
+    "/var/log/syslog",
+    "/var/log/messages",
+    "/var/log/kern.log",
+)
+KINDS = frozenset({"journal", "systemd", "docker", "file"})
+MAX_SOURCES = 300
+MAX_LINES = 10000
+MAX_GREP = 200
+# With --grep, the last N matches are searched for in this many recent lines.
+GREP_SCAN_LINES = 50000
+UNIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:\\-]{0,199}\.service$")
+CONTAINER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+SINCE = re.compile(r"^([1-9][0-9]{0,4})([mhd])$")
+SINCE_UNITS = {"m": ("min", 60), "h": ("h", 3600), "d": ("d", 86400)}
+
+
+def fail(message: str) -> None:
+    print(f"meteorcli-logs: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def _lines_of(args: list[str]) -> list[str]:
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return result.stdout.splitlines() if result.returncode == 0 else []
+
+
+def systemd_units() -> list[dict]:
+    units = []
+    for line in _lines_of(
+        ["systemctl", "list-units", "--type=service", "--all", "--plain", "--no-legend", "--no-pager"]
+    ):
+        parts = line.split(None, 4)
+        # UNIT LOAD ACTIVE SUB DESCRIPTION; units that are not installed show LOAD=not-found.
+        if len(parts) < 4 or parts[1] != "loaded" or not UNIT.match(parts[0]):
+            continue
+        units.append({"kind": "systemd", "name": parts[0], "state": parts[2]})
+    return units
+
+
+def docker_containers() -> list[dict]:
+    if not os.path.exists("/var/run/docker.sock"):
+        return []
+    containers = []
+    fmt = '{{.Names}}\t{{.State}}\t{{.Label "com.docker.compose.project"}}'
+    for line in _lines_of(["docker", "ps", "--all", "--format", fmt]):
+        name, _, rest = line.partition("\t")
+        state, _, project = rest.partition("\t")
+        if not CONTAINER.match(name):
+            continue
+        item = {"kind": "docker", "name": name, "state": state}
+        if project and CONTAINER.match(project):
+            item["project"] = project
+        containers.append(item)
+    return containers
+
+
+def log_files() -> list[dict]:
+    files = []
+    for pattern in FILE_GLOBS:
+        for path in sorted(glob.glob(pattern)):
+            if safe_file(path):
+                files.append({"kind": "file", "name": path, "size": os.stat(path).st_size})
+    return files
+
+
+def safe_file(path: str) -> bool:
+    """A regular file under /var/log that a fixed glob matches, never through a symlink."""
+    if not any(fnmatch.fnmatchcase(path, pattern) for pattern in FILE_GLOBS):
+        return False
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) and os.path.realpath(path) == path and path.startswith(LOG_ROOT)
+
+
+def list_sources() -> list[dict]:
+    sources: list[dict] = []
+    if os.path.isdir("/run/systemd/system"):
+        sources.append({"kind": "journal", "name": ""})
+        sources += systemd_units()
+    sources += docker_containers()
+    sources += log_files()
+    return sources[:MAX_SOURCES]
+
+
+def parse_show(argv: list[str]) -> dict:
+    if not argv or argv[0] not in KINDS:
+        fail("unknown source kind")
+    opts: dict = {"kind": argv[0], "name": "", "lines": 200, "since": None, "grep": None, "follow": False}
+    rest = argv[1:]
+    if opts["kind"] != "journal":
+        if not rest or rest[0].startswith("-"):
+            fail("missing source name")
+        opts["name"], rest = rest[0], rest[1:]
+    while rest:
+        flag, rest = rest[0], rest[1:]
+        if flag == "--follow":
+            opts["follow"] = True
+            continue
+        if flag not in ("--lines", "--since", "--grep") or not rest:
+            fail(f"unsupported option {flag}")
+        value, rest = rest[0], rest[1:]
+        if flag == "--lines":
+            if not value.isdigit() or not 0 < int(value) <= MAX_LINES:
+                fail(f"--lines must be 1..{MAX_LINES}")
+            opts["lines"] = int(value)
+        elif flag == "--since":
+            if not SINCE.match(value):
+                fail("--since must look like 15m, 1h or 7d")
+            opts["since"] = value
+        else:
+            if not value or len(value) > MAX_GREP or any(ord(ch) < 32 for ch in value):
+                fail(f"--grep must be 1..{MAX_GREP} printable characters")
+            opts["grep"] = value
+    return opts
+
+
+def require_listed(opts: dict) -> None:
+    kind, name = opts["kind"], opts["name"]
+    if kind == "journal":
+        if not os.path.isdir("/run/systemd/system"):
+            fail("this device has no systemd journal")
+        return
+    if kind == "file":
+        if not safe_file(name):
+            fail("not an allowed log file")
+        return
+    pattern = UNIT if kind == "systemd" else CONTAINER
+    if not pattern.match(name):
+        fail(f"invalid {kind} name")
+    found = systemd_units() if kind == "systemd" else docker_containers()
+    if not any(item["name"] == name for item in found):
+        fail(f"{kind} source not found: {name}")
+
+
+def command(opts: dict, *, lines: int, follow: bool) -> list[str]:
+    """Fixed argv for one source. ``lines`` may be 0 (follow only new lines)."""
+    kind, name, since = opts["kind"], opts["name"], opts["since"]
+    if kind in ("journal", "systemd"):
+        args = ["journalctl", "--no-pager", "--quiet", "--output=short-iso", f"--lines={lines}"]
+        if kind == "systemd":
+            args.append(f"--unit={name}")
+        if since:
+            amount, unit = SINCE.match(since).groups()
+            args.append(f"--since=-{amount}{SINCE_UNITS[unit][0]}")
+        return [*args, "--follow"] if follow else args
+    if kind == "docker":
+        args = ["docker", "logs", "--timestamps", "--tail", str(lines)]
+        if since:
+            amount, unit = SINCE.match(since).groups()
+            args += ["--since", f"{int(amount) * SINCE_UNITS[unit][1]}s"]
+        if follow:
+            args.append("--follow")
+        return [*args, "--", name]
+    # tail cannot filter by time; --since does not apply to files.
+    return ["tail", "-n", str(lines), *(["-F"] if follow else []), "--", name]
+
+
+def stop_on_hangup(process: subprocess.Popen) -> None:
+    """Followed logs can stay quiet for hours: end as soon as the SSH session (stdin) closes.
+
+    Only when stdin is a pipe or socket (SSH, sudo); a terminal ends with Ctrl+C.
+    """
+    try:
+        mode = os.fstat(0).st_mode
+    except OSError:
+        return
+    if not (stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode)):
+        return
+
+    def watch() -> None:
+        try:
+            while os.read(0, 4096):
+                pass
+        except OSError:
+            pass
+        process.terminate()
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
+def stream(args: list[str], *, needle: str | None, keep: int | None = None) -> int:
+    """Copy the tool's output to stdout, keeping lines that contain ``needle``.
+
+    With ``keep``, print only the last ``keep`` matching lines once the tool exits.
+    """
+    process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if "--follow" in args or "-F" in args:
+        stop_on_hangup(process)
+    tail: deque[bytes] = deque(maxlen=keep or 1)
+    out = sys.stdout.buffer
+    lowered = needle.lower().encode("utf-8") if needle else None
+    try:
+        for line in process.stdout:
+            if lowered is not None and lowered not in line.lower():
+                continue
+            if keep:
+                tail.append(line)
+                continue
+            out.write(line)
+            out.flush()
+        if keep:
+            out.writelines(tail)
+            out.flush()
+    except BrokenPipeError:
+        process.terminate()
+    return process.wait()
+
+
+def show(opts: dict) -> int:
+    require_listed(opts)
+    if not opts["grep"]:
+        return stream(command(opts, lines=opts["lines"], follow=opts["follow"]), needle=None)
+    # Last N matches from recent history, then (with --follow) new matching lines.
+    code = stream(command(opts, lines=GREP_SCAN_LINES, follow=False), needle=opts["grep"], keep=opts["lines"])
+    if not opts["follow"]:
+        return code
+    return stream(command(opts, lines=0, follow=True), needle=opts["grep"])
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        fail("must run as root (via sudo)")
+    os.environ["PATH"] = SAFE_PATH
+    if argv == ["list"]:
+        print(json.dumps(list_sources()))
+        return 0
+    if argv and argv[0] == "show":
+        return show(parse_show(argv[1:]))
+    fail("unsupported command")
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None

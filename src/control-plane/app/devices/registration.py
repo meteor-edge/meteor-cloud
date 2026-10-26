@@ -239,6 +239,11 @@ class RegistrationService:
             device.os_version = payload.os_version
         if payload.kernel_version is not None:
             device.kernel_version = payload.kernel_version
+        if payload.log_sources is not None:
+            from app.shell.logs import clean_log_sources
+
+            device.log_sources = clean_log_sources(payload.log_sources)
+            device.log_sources_at = now
         self.devices.update(device)
 
         software = DeviceSoftwareService(self.session)

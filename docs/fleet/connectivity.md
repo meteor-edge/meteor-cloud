@@ -136,7 +136,7 @@ the same line. Prefer `meteorcli.service` in the background; a second
 `meteorcli run` is refused while that unit is active.
 
 `sshd` must be running for browser SSH. Do not forward port 22 on the home
-router.
+router. The device page's Logs window uses the same path; see [Device logs](logs.md).
 
 ## WireGuard network on the device page
 

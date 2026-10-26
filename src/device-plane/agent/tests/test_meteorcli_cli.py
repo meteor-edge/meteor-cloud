@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -811,3 +812,48 @@ def test_run_proceeds_when_this_process_is_the_service(tmp_path, monkeypatch) ->
     code = meteorcli.main(["--config-dir", str(config_dir), "run"])
     assert code == 0
     assert ran == ["loop"]
+
+
+def test_logs_lists_sources_as_json(monkeypatch, capsys) -> None:
+    from edge_agent import logs
+
+    monkeypatch.setattr(logs, "helper_installed", lambda: True)
+    monkeypatch.setattr(logs, "list_log_sources", lambda: [{"kind": "journal", "name": ""}])
+    assert meteorcli.main(["logs", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == [{"kind": "journal", "name": ""}]
+
+
+def test_logs_runs_helper_with_source_and_options(monkeypatch) -> None:
+    import subprocess
+
+    from edge_agent import logs
+
+    monkeypatch.setattr(logs, "helper_installed", lambda: True)
+    monkeypatch.setattr(logs.os, "geteuid", lambda: 1000)
+    seen: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **_k: seen.append(argv) or subprocess.CompletedProcess(argv, 0))
+    code = meteorcli.main(["logs", "systemd:nginx.service", "-n", "50", "--grep", "err", "-f"])
+    assert code == 0
+    assert seen == [
+        [
+            "sudo",
+            "-n",
+            logs.LOGS_HELPER,
+            "show",
+            "systemd",
+            "nginx.service",
+            "--lines",
+            "50",
+            "--grep",
+            "err",
+            "--follow",
+        ]
+    ]
+
+
+def test_logs_without_helper_explains_install(monkeypatch, capsys) -> None:
+    from edge_agent import logs
+
+    monkeypatch.setattr(logs, "helper_installed", lambda: False)
+    assert meteorcli.main(["logs"]) == 1
+    assert "installcli.sh" in capsys.readouterr().err

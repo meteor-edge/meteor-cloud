@@ -122,41 +122,39 @@ uninstall() {
     echo "Removed ${PREFIX}"
   fi
   if [[ "${EUID}" -eq 0 ]]; then
-    rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg
+    rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg \
+      /etc/sudoers.d/meteorcli-logs /usr/local/libexec/meteorcli-logs
     echo "Left /etc/meteorcli in place (device credentials)."
   else
     echo "Left ${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli in place (device credentials)."
   fi
 }
 
-install_wireguard_sudoers() {
-  # Creating wg0 needs CAP_NET_ADMIN. meteorcli run stays unprivileged and
-  # calls `sudo -n meteorcli-wg` for those steps only. The helper is root-owned
-  # and never passes the user's config (or its PostUp hooks) to wg-quick, so
-  # this rule does not amount to passwordless root.
-  local dest=/etc/sudoers.d/meteorcli-wireguard
-  local helper=/usr/local/libexec/meteorcli-wg
+install_root_helper() {
+  # Install packaging/<name> root-owned as /usr/local/libexec/<name>, and let the
+  # device user (when not root) run that one file with passwordless sudo.
+  local name="$1" dest="$2" purpose="$3"
+  local helper="/usr/local/libexec/${name}"
   local user="${SUDO_USER:-}"
   local python_bin tmp
-  [[ "${EUID}" -eq 0 ]] || return 0
-  if [[ -z "${user}" || "${user}" == root ]]; then
-    return 0
-  fi
   # A fixed, root-owned interpreter: one from $PATH (a venv, ~/.local/bin) would run as root.
   python_bin=/usr/bin/python3
   if [[ ! -x "${python_bin}" || "$(stat -Lc '%u' "${python_bin}")" != 0 ]] \
     || (( 8#$(stat -Lc '%a' "${python_bin}") & 8#022 )); then
-    echo "warning: ${python_bin} is missing or not root-only; skipping the wg0 helper." >&2
+    echo "warning: ${python_bin} is missing or not root-only; skipping ${helper}." >&2
     return 0
   fi
   install -d -o root -g root -m 0755 "$(dirname "${helper}")"
   tmp="$(mktemp)"
-  { echo "#!${python_bin} -I"; tail -n +2 "${SCRIPT_DIR}/packaging/meteorcli-wg"; } > "${tmp}"
+  { echo "#!${python_bin} -I"; tail -n +2 "${SCRIPT_DIR}/packaging/${name}"; } > "${tmp}"
   install -o root -g root -m 0755 "${tmp}" "${helper}"
   rm -f "${tmp}"
+  if [[ -z "${user}" || "${user}" == root ]]; then
+    return 0
+  fi
   tmp="$(mktemp)"
   cat > "${tmp}" <<EOF
-# meteorcli: bring up wg0 without \`sudo meteorcli\` (this helper only; see ${helper})
+# meteorcli: ${purpose} (this helper only; see ${helper})
 Defaults:${user} !requiretty
 ${user} ALL=(root) NOPASSWD: ${helper}
 EOF
@@ -166,8 +164,21 @@ EOF
     echo "Passwordless sudo for ${user}: ${helper}"
   else
     rm -f "${tmp}"
-    echo "warning: could not install ${dest}; meteorcli run as ${user} cannot create wg0." >&2
+    echo "warning: could not install ${dest}; ${user} cannot run ${helper}." >&2
   fi
+}
+
+install_root_helpers() {
+  [[ "${EUID}" -eq 0 ]] || return 0
+  # Creating wg0 needs CAP_NET_ADMIN. meteorcli run stays unprivileged and
+  # calls `sudo -n meteorcli-wg` for those steps only. The helper is root-owned
+  # and never passes the user's config (or its PostUp hooks) to wg-quick, so
+  # this rule does not amount to passwordless root.
+  install_root_helper meteorcli-wg /etc/sudoers.d/meteorcli-wireguard \
+    'bring up wg0 without `sudo meteorcli`'
+  # Read-only logs (journal, Docker, /var/log) for the console's Logs window and
+  # `meteorcli logs`, without putting the user in the root-equivalent docker group.
+  install_root_helper meteorcli-logs /etc/sudoers.d/meteorcli-logs 'read device logs'
 }
 
 # meteorcli.service always uses /etc/meteorcli. If the operator enrolled as a
@@ -287,7 +298,7 @@ install_meteorcli() {
   if [[ "${WITH_SERVICE}" -eq 1 ]]; then
     install_service
   fi
-  install_wireguard_sudoers
+  install_root_helpers
   if [[ "${EUID}" -eq 0 ]]; then
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
@@ -297,7 +308,7 @@ install_meteorcli() {
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: sudo ./installcli.sh installs the meteorcli-wg helper so run can bring up wg0 without root."
+    echo "Tip: sudo ./installcli.sh installs the meteorcli-wg and meteorcli-logs helpers (wg0 and logs without root)."
     echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
   fi
 }

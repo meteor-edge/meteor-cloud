@@ -11,6 +11,7 @@ Subcommands
   mqtt-test    Publish one TLS MQTT message (default: devices/{id}/status).
   mqtt-listen  Print inbound commands (default: devices/{id}/commands).
   status       Show persisted (non-secret) configuration.
+  logs         List or print device logs (journal, systemd, Docker, /var/log).
 
 Secrets are never printed by any command except when the user explicitly
 passes them on the command line.
@@ -32,6 +33,7 @@ from edge_agent.config import AgentConfig, load_config, save_config
 from edge_agent.credentials import read_device_token, read_registration_token_file
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
+from edge_agent.logs import LogSourceCache, add_log_sources
 from edge_agent.registration import register
 from edge_agent.service import duplicate_run_message, inspect_service
 from edge_agent.software import reconcile_software
@@ -594,6 +596,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         else None
     )
 
+    log_sources = LogSourceCache()
+
     def _payload() -> dict:
         sync_connectivity(client, device_token, paths.config_path.parent, state=wg_state)
         logger.info("%s", describe_tunnel(paths.config_path.parent).summary())
@@ -603,6 +607,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             except Exception:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {"capabilities": collect_capabilities()}
+        add_log_sources(payload, log_sources)
         reports = reconcile_software(client, device_token, artifacts_dir)
         if reports:
             payload["software_report"] = reports
@@ -676,6 +681,47 @@ def _cmd_status(args: argparse.Namespace) -> int:
     if pending is not None:
         print(f"Pending claim:  {pending['request_id']} (run '{PROG} claim')")
     return 0 if config and config.device_id else 1
+
+
+def _source_spec(item: dict) -> str:
+    return item["kind"] if item["kind"] == "journal" else f"{item['kind']}:{item['name']}"
+
+
+def _cmd_logs(args: argparse.Namespace) -> int:
+    import subprocess
+
+    from edge_agent.logs import LOGS_HELPER, helper_command, helper_installed, list_log_sources
+
+    if not helper_installed():
+        print(f"error: {LOGS_HELPER} is not installed. Re-run: sudo ./installcli.sh", file=sys.stderr)
+        return 1
+    if args.source is None:
+        sources = list_log_sources()
+        if sources is None:
+            print(
+                f"error: {LOGS_HELPER} list failed (passwordless sudo for it is set up by installcli.sh).",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(sources, indent=2))
+            return 0
+        for item in sources:
+            detail = " ".join(str(item[key]) for key in ("state", "project") if key in item)
+            print(f"{_source_spec(item):<60} {detail}".rstrip())
+        return 0
+    kind, _, name = args.source.partition(":")
+    argv = helper_command("show", kind, *([name] if name else []), "--lines", str(args.lines))
+    if args.since:
+        argv += ["--since", args.since]
+    if args.grep:
+        argv += ["--grep", args.grep]
+    if args.follow:
+        argv.append("--follow")
+    try:
+        return subprocess.run(argv, check=False).returncode
+    except KeyboardInterrupt:  # pragma: no cover - interactive only
+        return 130
 
 
 def _mqtt_config_or_fail(paths, config):
@@ -793,7 +839,7 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} register --token reg_XXXX\n"
             f"  {PROG} run\n"
             f"  {PROG} mqtt-test\n"
-            f"  {PROG} mqtt-test devices/DEVICE_ID/status '{{\"status\":\"online\"}}'\n"
+            f'  {PROG} mqtt-test devices/DEVICE_ID/status \'{{"status":"online"}}\'\n'
             f"  {PROG} mqtt-listen\n"
             f"  {PROG} mqtt-listen commands\n"
             f"  {PROG} status\n"
@@ -1053,6 +1099,23 @@ def build_parser() -> argparse.ArgumentParser:
         description="Show persisted configuration. Never prints credentials.",
     )
     status_parser.set_defaults(func=_cmd_status)
+
+    logs_parser = subparsers.add_parser(
+        "logs",
+        help="List or print this device's logs (journal, systemd, Docker, /var/log).",
+        description=(
+            "Without SOURCE, list the log sources the console's Logs window offers. "
+            "SOURCE is journal, systemd:UNIT, docker:CONTAINER or file:PATH. "
+            "Uses the root-owned meteorcli-logs helper from installcli.sh."
+        ),
+    )
+    logs_parser.add_argument("source", nargs="?", help="journal, systemd:UNIT, docker:CONTAINER or file:PATH.")
+    logs_parser.add_argument("--json", action="store_true", help="List sources as JSON.")
+    logs_parser.add_argument("-n", "--lines", type=int, default=200, help="Last N lines (default 200).")
+    logs_parser.add_argument("--since", help="Only newer lines: 15m, 1h, 7d (not for files).")
+    logs_parser.add_argument("--grep", help="Only lines containing this text (case-insensitive).")
+    logs_parser.add_argument("-f", "--follow", action="store_true", help="Keep printing new lines.")
+    logs_parser.set_defaults(func=_cmd_logs)
 
     return parser
 
