@@ -160,6 +160,15 @@ def peer_certificate(host: str, port: int = 443, *, ca_file: str = "", timeout: 
     }
 
 
+def split_at_marker(buffer: bytes, marker: bytes) -> tuple[bytes | None, bytes]:
+    """If ``marker`` is in ``buffer``, return (bytes through marker, remainder)."""
+    index = buffer.find(marker)
+    if index < 0:
+        return None, buffer
+    end = index + len(marker)
+    return buffer[:end], buffer[end:]
+
+
 # -- WebSocket (RFC 6455 client, enough for the browser terminal) -----------------------
 
 class WebSocketClosed(Exception):
@@ -197,6 +206,7 @@ class WebSocket:
         expected = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest())
         if expected not in header:
             raise ConnectionError("WebSocket handshake: bad Sec-WebSocket-Accept")
+        self._unread = b""
 
     def _read(self, size: int) -> bytes:
         while len(self._buffer) < size:
@@ -246,18 +256,25 @@ class WebSocket:
                 return data
 
     def read_until(self, marker: bytes, timeout: float) -> bytes:
+        """Return bytes through ``marker``. Leftover in the same frame is kept for the next call."""
         deadline = time.monotonic() + timeout
-        seen = b""
-        while marker not in seen:
+        seen = self._unread
+        self._unread = b""
+        while True:
+            found, rest = split_at_marker(seen, marker)
+            if found is not None:
+                self._unread = rest
+                return found
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                self._unread = seen
                 raise TimeoutError(f"marker not seen in {timeout:.0f}s")
             self.sock.settimeout(remaining)
             try:
                 seen += self.recv()
             except TimeoutError:
+                self._unread = seen
                 raise TimeoutError(f"marker not seen in {timeout:.0f}s") from None
-        return seen
 
     def close(self) -> None:
         try:
