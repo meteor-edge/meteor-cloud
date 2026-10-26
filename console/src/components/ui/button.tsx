@@ -9,12 +9,12 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "border border-transparent text-[19px] font-bold leading-none text-primary-foreground [background-clip:padding-box,border-box] [background-image:linear-gradient(var(--primary),var(--primary)),var(--gradient-meteor)] [background-origin:border-box] hover:[background-image:linear-gradient(var(--cosmic-blue),var(--cosmic-blue)),var(--gradient-meteor)]",
+          "border border-transparent text-sm font-semibold leading-none text-primary-foreground [background-clip:padding-box,border-box] [background-image:linear-gradient(var(--primary),var(--primary)),var(--gradient-meteor)] [background-origin:border-box] hover:[background-image:linear-gradient(var(--cosmic-blue),var(--cosmic-blue)),var(--gradient-meteor)]",
         secondary:
-          "border border-border bg-secondary text-sm font-medium text-secondary-foreground hover:bg-secondary-hover",
+          "border border-border bg-secondary text-sm font-semibold text-secondary-foreground hover:bg-secondary-hover",
         outline:
-          "border border-border bg-transparent text-sm font-medium text-foreground hover:bg-secondary",
-        ghost: "text-sm font-medium hover:bg-secondary hover:text-foreground",
+          "border border-border bg-transparent text-sm font-semibold text-foreground hover:bg-secondary",
+        ghost: "text-sm font-semibold hover:bg-secondary hover:text-foreground",
       },
       size: {
         default: "h-10 px-4 py-2",
