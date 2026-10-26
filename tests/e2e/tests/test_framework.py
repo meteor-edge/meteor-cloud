@@ -40,6 +40,37 @@ def test_blocked_not_supported_and_errors() -> None:
     assert results["z"].status == FAIL and "abcdefghijkl" not in results["z"].detail
 
 
+def test_not_supported_dependency_cascades() -> None:
+    def unsupported(ctx):
+        raise NotSupported("no domain")
+
+    results = run([
+        Check("dns", "s", "dns", unsupported),
+        Check("tls", "s", "tls", lambda ctx: None, needs=("dns",)),
+        Check("app", "s", "app", lambda ctx: None, needs=("tls",)),
+    ])
+    assert results["dns"].status == NOT_SUPPORTED
+    assert results["tls"].status == NOT_SUPPORTED and "dns=not_supported" in results["tls"].detail
+    assert results["app"].status == NOT_SUPPORTED and "tls=not_supported" in results["app"].detail
+
+
+def test_fail_still_blocks_even_if_another_need_is_unsupported() -> None:
+    def unsupported(ctx):
+        raise NotSupported("no domain")
+
+    def broken(ctx):
+        raise Fail("boom")
+
+    results = run([
+        Check("ok", "s", "ok", lambda ctx: None),
+        Check("dns", "s", "dns", unsupported),
+        Check("broken", "s", "broken", broken),
+        Check("mix", "s", "mix", lambda ctx: None, needs=("ok", "dns", "broken")),
+    ])
+    assert results["mix"].status == BLOCKED
+    assert "broken=fail" in results["mix"].detail
+
+
 def test_when_filters_and_expect() -> None:
     results = run([Check("w", "s", "w", lambda ctx: expect(False, "x"), when=lambda ctx: False)])
     assert results == {}

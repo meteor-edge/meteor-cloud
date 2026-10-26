@@ -25,8 +25,9 @@ meteorcloud-testenv up
 | `down` | `terraform destroy` of this environment's state only (asks for the name, or `--yes`) |
 
 `up` and `test` take `--only "<stage or check id>"` (repeatable) and
-`--destroy-on-failure`. Exit codes: `0` all required checks passed, `1` a check
-failed or was blocked, `2` configuration or prerequisites, `3` infrastructure.
+`--destroy-on-failure`. Exit codes: `0` all required checks passed
+(`not_supported` is allowed), `1` a check failed or was blocked, `2`
+configuration or prerequisites, `3` infrastructure.
 
 ## Quick start (AWS)
 
@@ -65,10 +66,11 @@ app URL. Running `test` afterwards re-registers the devices for its own run.
 
 ## What is tested
 
-Every result is `pass`, `fail`, `blocked` (a prerequisite is missing, or a check
-it depends on did not pass) or `not_supported` (the product has no such
-feature). Only a run with no `fail` and no `blocked` passes; a skipped required
-check is never reported as a success.
+Every result is `pass`, `fail`, `blocked` (a required check failed or a
+prerequisite was missing) or `not_supported` (the product has no such feature,
+or this run did not configure it — for example no public domain). Only `fail`
+and `blocked` fail the run. If every unmet dependency is `not_supported`, the
+dependent check is `not_supported` too.
 
 | Stage | Checks |
 | --- | --- |
@@ -100,8 +102,9 @@ no static AWS keys reach the host.
 `E2E_DNS_PROVIDER=manual`: create the three A records yourself; `up` and
 `status` print them with the right IPs. `none` (or no
 domain): everything else still runs; DNS, TLS and public-app checks are
-`blocked` and the run fails. A running proxy is never taken as proof that a
-public endpoint works.
+`not_supported` and the run can pass. A running proxy is never taken as proof
+that a public endpoint works. Set `E2E_DOMAIN` and `E2E_DNS_ZONE_ID` in GitHub
+Actions when you want those checks required.
 
 ## On-prem
 

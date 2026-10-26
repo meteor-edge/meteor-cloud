@@ -8,7 +8,7 @@ name: Full-stack E2E
 #
 # Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
 # Variables: E2E_DNS_ZONE_ID, E2E_DOMAIN (Route53 zone), optional AWS_REGION, E2E_ACME_EMAIL.
-# Without the DNS variables the public-domain checks are BLOCKED and the run fails.
+# Without the DNS variables the public-domain checks are not_supported; the rest can pass.
 on:
   workflow_dispatch:
     inputs:

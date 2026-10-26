@@ -15,7 +15,7 @@ FAIL = "fail"
 BLOCKED = "blocked"
 NOT_SUPPORTED = "not_supported"
 STATUSES = (PASS, FAIL, BLOCKED, NOT_SUPPORTED)
-# Statuses that make the run fail. A skipped required check is never a success.
+# Statuses that make the run fail. not_supported does not.
 FAILING = (FAIL, BLOCKED)
 
 

@@ -248,7 +248,7 @@ def check_prerequisites(cfg: Config) -> tuple[list[str], list[str]]:
                         errors.append(problem)
     if not cfg.has_public_dns:
         warnings.append(
-            "no public domain (E2E_DOMAIN/E2E_DNS_PROVIDER): DNS, HTTPS and public app tests will be BLOCKED"
+            "no public domain (E2E_DOMAIN/E2E_DNS_PROVIDER): DNS, HTTPS and public app tests will be not_supported"
         )
     if cfg.device_count < 2:
         warnings.append("one device: second-device and device-isolation tests will be BLOCKED")

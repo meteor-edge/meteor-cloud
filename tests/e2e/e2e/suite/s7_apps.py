@@ -7,7 +7,7 @@ import json
 
 from e2e.config import E2E_DIR
 from e2e.http import peer_certificate, request, tcp_open
-from e2e.suite.framework import Blocked, Fail, check, expect, wait_for
+from e2e.suite.framework import Fail, NotSupported, check, expect, wait_for
 from e2e.suite.s3_artifacts import upload_artifact
 
 STAGE = "7 application delivery"
@@ -81,7 +81,7 @@ def endpoint_row(ctx, hostname: str) -> dict | None:
 
 def require_public(ctx) -> None:
     if not ctx.cfg.has_public_dns:
-        raise Blocked("no public domain: public app URLs cannot be verified")
+        raise NotSupported("no public domain: public app URLs cannot be verified")
 
 
 @check("app.image_artifact", STAGE, "Test app image is built and uploaded as a docker artifact",

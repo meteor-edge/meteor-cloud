@@ -1,8 +1,10 @@
 """Check registry and runner.
 
 Each check returns evidence or raises: Fail (assertion), Blocked (a prerequisite
-outside the check is missing) or NotSupported (the product has no such feature).
-A check whose dependency did not pass is BLOCKED, never skipped as a success.
+outside the check is missing) or NotSupported (the product has no such feature,
+or this run did not configure it). A check whose dependency failed or was
+blocked is BLOCKED. If every unmet dependency is not_supported, the check is
+not_supported too (it was not in scope for this run).
 """
 
 from __future__ import annotations
@@ -96,7 +98,14 @@ class Runner:
         missing = [n for n in item.needs if self.report.status_of(n) != PASS]
         if missing:
             reasons = ", ".join(f"{n}={self.report.status_of(n) or 'not run'}" for n in missing)
-            result = Result(item.id, item.stage, item.title, BLOCKED, f"needs {reasons}")
+            # not_supported is a chosen skip (no domain, no API). Cascade it.
+            # fail/blocked/not-run still block: something required did not succeed.
+            status = (
+                NOT_SUPPORTED
+                if all(self.report.status_of(n) == NOT_SUPPORTED for n in missing)
+                else BLOCKED
+            )
+            result = Result(item.id, item.stage, item.title, status, f"needs {reasons}")
             self._print(result)
             return result
         print(f"  ..       {item.id}  {item.title}", flush=True)
