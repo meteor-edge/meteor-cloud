@@ -260,6 +260,8 @@ export function DeviceDetailPage() {
             organizationId={organizationId}
             deviceId={deviceId}
             canDeploy={canDeploy}
+            deviceOnline={device.status === "online"}
+            logsAvailable={canLogs}
           />
         )}
       </div>
@@ -306,7 +308,10 @@ export function DeviceDetailPage() {
       )}
 
       {canLogs && token && (
-        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+        <div
+          id="device-logs"
+          className="scroll-mt-6 space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow"
+        >
           <h2 className="text-lg font-semibold">Logs</h2>
           <DeviceLogs
             token={token}

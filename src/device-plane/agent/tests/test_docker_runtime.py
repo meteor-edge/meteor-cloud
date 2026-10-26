@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from runtime.compose import ComposeAdapter, ComposeError, compose_available
-from runtime.docker import DockerAdapter, DockerError, docker_available
+from runtime.docker import INSPECT_HEALTH_TEMPLATE, DockerAdapter, DockerError, docker_available
 
 
 def test_docker_apply_pull_runs_container(tmp_path: Path) -> None:
@@ -102,7 +102,12 @@ def test_compose_apply_zip(tmp_path: Path) -> None:
         seen.append(list(args))
         result = MagicMock()
         result.returncode = 0
-        result.stdout = "cid\n"
+        if args[1] == "inspect":
+            result.stdout = "true|running|0|\n"
+        elif "ps" in args:
+            result.stdout = "zipproj-a-1 a\n"
+        else:
+            result.stdout = ""
         result.stderr = ""
         return result
 
@@ -131,3 +136,95 @@ def test_docker_available_false_without_binary(monkeypatch: pytest.MonkeyPatch) 
 def test_compose_available_false_without_docker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("runtime.compose.shutil.which", lambda _name: None)
     assert compose_available() is False
+
+
+def _inspect_runner(states: dict[str, str | None], *, ps: str = "", calls: list | None = None):
+    """Fake docker CLI: ``states`` maps container -> inspect output (None = missing)."""
+
+    def runner(args, *, check=True):
+        del check
+        if calls is not None:
+            calls.append(list(args))
+        result = MagicMock()
+        result.stderr = ""
+        if args[1] == "inspect":
+            state = states.get(args[-1])
+            result.returncode = 1 if state is None else 0
+            result.stdout = state or ""
+        else:  # docker compose -p NAME ps ...
+            result.returncode = 0
+            result.stdout = ps
+        return result
+
+    return runner
+
+
+@pytest.mark.parametrize(
+    ("inspect", "status", "problem"),
+    [
+        ("true|running|0|", "healthy", None),
+        ("true|running|0|healthy", "healthy", None),
+        ("true|running|0|unhealthy", "unhealthy", "HEALTHCHECK failed"),
+        ("true|running|0|starting", "unknown", "HEALTHCHECK starting"),
+        ("false|exited|1|", "unhealthy", "is not running (exited, exit 1)"),
+        (None, "unhealthy", "not found"),
+    ],
+)
+def test_docker_inspect_health(inspect: str | None, status: str, problem: str | None) -> None:
+    calls: list[list[str]] = []
+    adapter = DockerAdapter(runner=_inspect_runner({"web": inspect}, calls=calls))
+    health = adapter.inspect_health(container_name="web")
+    assert (health.status, health.problem) == (status, problem)
+    assert adapter.health_check(container_name="web") is (status == "healthy")
+    assert calls[0] == ["docker", "inspect", "-f", INSPECT_HEALTH_TEMPLATE, "web"]
+
+
+def test_inspect_template_reads_state_only() -> None:
+    assert "Env" not in INSPECT_HEALTH_TEMPLATE
+    assert "Config" not in INSPECT_HEALTH_TEMPLATE
+    assert "Label" not in INSPECT_HEALTH_TEMPLATE
+    assert "Log" not in INSPECT_HEALTH_TEMPLATE
+
+
+@pytest.mark.parametrize("name", ["", "  ", "a/b", ".hidden"])
+def test_docker_health_validates_name(name: str) -> None:
+    with pytest.raises(DockerError):
+        DockerAdapter(runner=_inspect_runner({})).inspect_health(container_name=name)
+
+
+def test_compose_all_services_running_is_healthy(tmp_path: Path) -> None:
+    runner = _inspect_runner(
+        {"shop-web-1": "true|running|0|healthy", "shop-db-1": "true|running|0|"},
+        ps="shop-web-1 web\nshop-db-1 db\n",
+    )
+    health = ComposeAdapter(runner=runner, work_root=tmp_path).inspect_health(project_name="shop")
+    assert health.status == "healthy"
+
+
+def test_compose_one_service_down_is_unhealthy(tmp_path: Path) -> None:
+    runner = _inspect_runner(
+        {"shop-web-1": "false|exited|137|", "shop-sidecar-1": "true|running|0|"},
+        ps="shop-sidecar-1 sidecar\nshop-web-1 web\n",
+    )
+    health = ComposeAdapter(runner=runner, work_root=tmp_path).inspect_health(project_name="shop")
+    assert health.status == "unhealthy"
+    assert health.reason("compose") == "compose service web is not running (exited, exit 137)"
+
+
+def test_compose_healthcheck_failure_is_unhealthy(tmp_path: Path) -> None:
+    runner = _inspect_runner({"shop-web-1": "true|running|0|unhealthy"}, ps="shop-web-1 web\n")
+    health = ComposeAdapter(runner=runner, work_root=tmp_path).inspect_health(project_name="shop")
+    assert health.reason("compose") == "compose service web HEALTHCHECK failed"
+
+
+def test_compose_without_services_is_unhealthy(tmp_path: Path) -> None:
+    adapter = ComposeAdapter(runner=_inspect_runner({}, ps=""), work_root=tmp_path)
+    health = adapter.inspect_health(project_name="shop")
+    assert health.status == "unhealthy"
+    assert health.reason("compose") == "compose project shop has no services"
+    assert adapter.health_check(project_name="shop") is False
+
+
+def test_compose_health_validates_project_name(tmp_path: Path) -> None:
+    with pytest.raises(ComposeError):
+        ComposeAdapter(runner=_inspect_runner({}), work_root=tmp_path).inspect_health(project_name="../x")

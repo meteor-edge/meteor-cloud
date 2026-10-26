@@ -12,6 +12,14 @@ import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 
+from runtime.docker import (
+    HEALTHY,
+    UNHEALTHY,
+    UNKNOWN,
+    ContainerHealth,
+    inspect_container_health,
+)
+
 logger = logging.getLogger("edge_agent.runtime.compose")
 
 
@@ -50,6 +58,15 @@ def _default_runner(args: Sequence[str], *, check: bool = True) -> subprocess.Co
     )
 
 
+def validate_project_name(project_name: str) -> str:
+    name = project_name.strip()
+    if not name:
+        raise ComposeError("project_name must not be blank")
+    if "/" in name or name.startswith("."):
+        raise ComposeError(f"Invalid project_name: {name}")
+    return name
+
+
 class ComposeAdapter:
     """Bring up a Compose project from a YAML file or zip bundle."""
 
@@ -64,11 +81,7 @@ class ComposeAdapter:
         artifact: Path,
         env: dict[str, str] | None = None,
     ) -> None:
-        name = project_name.strip()
-        if not name:
-            raise ComposeError("project_name must not be blank")
-        if "/" in name or name.startswith("."):
-            raise ComposeError(f"Invalid project_name: {name}")
+        name = validate_project_name(project_name)
         if not artifact.is_file():
             raise ComposeError(f"Compose artifact not found: {artifact}")
 
@@ -89,15 +102,35 @@ class ComposeAdapter:
         self._run(args)
         logger.info("Started compose project %s from %s", name, compose_file)
 
+    def inspect_health(self, *, project_name: str) -> ContainerHealth:
+        """Every service container running (and passing its HEALTHCHECK, if any).
+
+        ``reason("compose")`` names the first bad service: ``compose service web is not running``.
+        """
+        name = validate_project_name(project_name)
+        try:
+            result = self._runner(
+                ["docker", "compose", "-p", name, "ps", "-a", "--format", "{{.Name}} {{.Service}}"],
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ContainerHealth(UNHEALTHY, f"project {name} could not be listed")
+        rows = [line.split() for line in (result.stdout or "").splitlines() if line.strip()]
+        if result.returncode != 0 or not rows:
+            return ContainerHealth(UNHEALTHY, f"project {name} has no services")
+        starting = None
+        for row in rows:
+            container, service = row[0], row[1] if len(row) > 1 else row[0]
+            health = inspect_container_health(self._runner, container)
+            if health.status == UNHEALTHY:
+                return ContainerHealth(UNHEALTHY, f"service {service} {health.problem}")
+            if health.status == UNKNOWN and starting is None:
+                starting = ContainerHealth(UNKNOWN, f"service {service} {health.problem}")
+        return starting or ContainerHealth(HEALTHY)
+
     def health_check(self, *, project_name: str) -> bool:
-        """True when the project has at least one running service."""
-        result = self._runner(
-            ["docker", "compose", "-p", project_name.strip(), "ps", "-q", "--status", "running"],
-            check=False,
-        )
-        if result.returncode != 0:
-            return False
-        return bool((result.stdout or "").strip())
+        """True only when every service is running and healthy."""
+        return self.inspect_health(project_name=project_name).healthy
 
     def recover(self, *, project_name: str) -> None:
         self._run(["docker", "compose", "-p", project_name.strip(), "restart"])

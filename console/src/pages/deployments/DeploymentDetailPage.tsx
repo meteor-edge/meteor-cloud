@@ -11,6 +11,7 @@ import {
 import { getOrganization } from "@/api/organizations";
 import { ApiError } from "@/api/http";
 import { useAuth } from "@/auth/AuthContext";
+import { AvailabilityBadge, HealthBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { canManageDeployments, canRollbackDeployments } from "@/lib/permissions";
 
@@ -44,8 +45,9 @@ export function DeploymentDetailPage() {
     queryKey: ["deployment", organizationId, deploymentId, token],
     queryFn: () => getDeployment(token!, organizationId, deploymentId),
     enabled: Boolean(token && organizationId && deploymentId),
-    refetchInterval: (query) =>
-      query.state.data?.status === "in_progress" ? 5000 : false,
+    // Health and URLs keep changing after install finishes, so keep polling (slower).
+    refetchInterval: (query) => (query.state.data?.status === "in_progress" ? 5000 : 15000),
+    refetchOnWindowFocus: true,
   });
 
   const canManage = canManageDeployments(orgQuery.data?.current_user_role);
@@ -55,6 +57,10 @@ export function DeploymentDetailPage() {
     ? `${deployment.release.name} ${deployment.release.version}`
     : deployment?.release_id;
   const failedCount = deployment?.counts.failed ?? 0;
+  const rows = deployment?.devices ?? [];
+  const healthyCount = rows.filter((row) => row.health === "healthy").length;
+  const urlCount = rows.filter((row) => row.endpoint_availability !== null).length;
+  const urlReadyCount = rows.filter((row) => row.endpoint_availability === "ready").length;
 
   async function onCancel() {
     if (!token || !deployment || !window.confirm("Cancel this deployment?")) {
@@ -133,9 +139,7 @@ export function DeploymentDetailPage() {
             </h1>
             <p className="mt-2 text-muted-foreground">
               {releaseLabel}
-              {deployment
-                ? ` · ${STATUS_LABELS[deployment.status] ?? deployment.status}`
-                : ""}
+              {deployment ? ` · ${STATUS_LABELS[deployment.status] ?? deployment.status}` : ""}
               {deployment?.rollback_of_deployment_id ? " · rollback" : ""}
             </p>
           </div>
@@ -181,33 +185,31 @@ export function DeploymentDetailPage() {
 
       {deployment && (
         <p className="text-sm text-muted-foreground">
-          {deployment.counts.succeeded}/{deployment.counts.total} succeeded
+          {deployment.counts.succeeded}/{deployment.counts.total} installed · {healthyCount} healthy
+          {urlCount > 0 ? ` · ${urlReadyCount} URL ready` : ""}
           {deployment.counts.pending > 0 ? ` · ${deployment.counts.pending} pending` : ""}
           {deployment.counts.queued > 0 ? ` · ${deployment.counts.queued} queued` : ""}
-          {deployment.counts.updating > 0
-            ? ` · ${deployment.counts.updating} updating`
-            : ""}
+          {deployment.counts.updating > 0 ? ` · ${deployment.counts.updating} updating` : ""}
           {deployment.counts.failed > 0 ? ` · ${deployment.counts.failed} failed` : ""}
-          {deployment.counts.cancelled > 0
-            ? ` · ${deployment.counts.cancelled} cancelled`
-            : ""}
+          {deployment.counts.cancelled > 0 ? ` · ${deployment.counts.cancelled} cancelled` : ""}
           {deployment.counts.skipped > 0 ? ` · ${deployment.counts.skipped} skipped` : ""}
         </p>
       )}
 
       <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full min-w-[640px] text-left text-sm">
+        <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="border-b border-border bg-muted/40 text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">Device</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Progress</th>
+              <th className="px-4 py-3 font-medium">Install</th>
+              <th className="px-4 py-3 font-medium">Health</th>
+              <th className="px-4 py-3 font-medium">URL</th>
               <th className="px-4 py-3 font-medium">Error</th>
               <th className="px-4 py-3 font-medium">Updated</th>
             </tr>
           </thead>
           <tbody>
-            {(deployment?.devices ?? []).map((row) => (
+            {rows.map((row) => (
               <tr key={row.id} className="border-b border-border last:border-0">
                 <td className="px-4 py-3">
                   <Link
@@ -217,11 +219,21 @@ export function DeploymentDetailPage() {
                     {row.device_name || row.device_id}
                   </Link>
                 </td>
-                <td className="px-4 py-3">{STATUS_LABELS[row.status] ?? row.status}</td>
-                <td className="px-4 py-3 text-muted-foreground">
+                <td className="px-4 py-3">
+                  {STATUS_LABELS[row.status] ?? row.status}
                   {row.status === "updating" && row.progress_percent != null
-                    ? `${row.progress_percent}%`
-                    : "—"}
+                    ? ` (${row.progress_percent}%)`
+                    : ""}
+                </td>
+                <td className="px-4 py-3">
+                  {row.health ? <HealthBadge status={row.health} /> : "—"}
+                </td>
+                <td className="px-4 py-3">
+                  {row.endpoint_availability ? (
+                    <AvailabilityBadge status={row.endpoint_availability} />
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">{row.last_error || "—"}</td>
                 <td className="px-4 py-3 text-muted-foreground">
@@ -231,7 +243,7 @@ export function DeploymentDetailPage() {
             ))}
             {deployment && (deployment.devices?.length ?? 0) === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                   No devices on this deployment.
                 </td>
               </tr>

@@ -92,6 +92,11 @@ export type DeploymentDevice = {
   device_name: string | null;
   status: string;
   progress_percent: number | null;
+  /** Runtime health the agent reports (healthy / unhealthy / unknown); null before any report. */
+  health: string | null;
+  reported_at: string | null;
+  /** URL state, only when this Deploy created an endpoint for the device. */
+  endpoint_availability: string | null;
   previous_desired_release_id: string | null;
   last_error: string | null;
   created_at: string;

@@ -11,11 +11,66 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger("edge_agent.runtime.docker")
 
 _LOADED_IMAGE_RE = re.compile(r"Loaded image(?: ID)?:?\s*(.+)", re.IGNORECASE)
+
+# Only these state fields are read: never Config.Env, labels or logs (they can hold secrets).
+INSPECT_HEALTH_TEMPLATE = (
+    "{{.State.Running}}|{{.State.Status}}|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}"
+)
+
+HEALTHY = "healthy"
+UNHEALTHY = "unhealthy"
+UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class ContainerHealth:
+    """``status`` is healthy, unhealthy or unknown; ``problem`` says why it is not healthy."""
+
+    status: str
+    problem: str | None = None
+
+    @property
+    def healthy(self) -> bool:
+        return self.status == HEALTHY
+
+    def reason(self, subject: str) -> str | None:
+        """e.g. ``container web is not running (exited, exit 1)``."""
+        return f"{subject} {self.problem}" if self.problem else None
+
+
+def inspect_container_health(runner, container_name: str) -> ContainerHealth:
+    """Running state plus Docker HEALTHCHECK (when the image defines one), from one ``docker inspect``."""
+    try:
+        result = runner(["docker", "inspect", "-f", INSPECT_HEALTH_TEMPLATE, container_name], check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ContainerHealth(UNHEALTHY, "could not be inspected")
+    if result.returncode != 0:
+        return ContainerHealth(UNHEALTHY, "not found")
+    running, status, exit_code, health = ((result.stdout or "").strip().split("|") + ["", "", "", ""])[:4]
+    if running.lower() != "true":
+        detail = ", ".join(part for part in (status, f"exit {exit_code}" if exit_code else "") if part)
+        return ContainerHealth(UNHEALTHY, "is not running" + (f" ({detail})" if detail else ""))
+    if health == "unhealthy":
+        return ContainerHealth(UNHEALTHY, "HEALTHCHECK failed")
+    if health == "starting":
+        # Coming up: neither healthy nor failed yet, so the URL does not flap.
+        return ContainerHealth(UNKNOWN, "HEALTHCHECK starting")
+    return ContainerHealth(HEALTHY)
+
+
+def validate_container_name(container_name: str) -> str:
+    name = container_name.strip()
+    if not name:
+        raise DockerError("container_name must not be blank")
+    if "/" in name or name.startswith("."):
+        raise DockerError(f"Invalid container_name: {name}")
+    return name
 
 
 class DockerError(Exception):
@@ -58,11 +113,7 @@ class DockerAdapter:
         restart: str | None = "unless-stopped",
         command: str | None = None,
     ) -> None:
-        name = container_name.strip()
-        if not name:
-            raise DockerError("container_name must not be blank")
-        if "/" in name or name.startswith("."):
-            raise DockerError(f"Invalid container_name: {name}")
+        name = validate_container_name(container_name)
 
         resolved_image = (image or "").strip() or None
         if tarball is not None:
@@ -100,21 +151,12 @@ class DockerAdapter:
                 return match.group(1).strip()
         raise DockerError("docker load succeeded but no image name was reported.")
 
+    def inspect_health(self, *, container_name: str) -> ContainerHealth:
+        return inspect_container_health(self._runner, validate_container_name(container_name))
+
     def health_check(self, *, container_name: str) -> bool:
-        """True when the named container is running."""
-        result = self._runner(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                "{{.State.Running}}",
-                container_name.strip(),
-            ],
-            check=False,
-        )
-        if result.returncode != 0:
-            return False
-        return (result.stdout or "").strip().lower() == "true"
+        """True only when the container is running and its HEALTHCHECK (if any) passes."""
+        return self.inspect_health(container_name=container_name).healthy
 
     def recover(self, *, container_name: str) -> None:
         self._run(["docker", "restart", container_name.strip()])

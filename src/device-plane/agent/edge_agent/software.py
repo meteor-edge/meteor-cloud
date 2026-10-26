@@ -80,7 +80,11 @@ def _already_applied(state: dict[str, Any], item: dict[str, Any]) -> bool:
 
 
 def _health_only(item: dict[str, Any], *, compose_work: Path) -> dict[str, Any] | None:
-    """Return an in_sync/failed report when health can be checked without apply."""
+    """Report runtime health of an already-applied workload without re-applying it.
+
+    A stopped unit or container is reported as in_sync + unhealthy, never re-installed.
+    None only when the runtime itself is missing (a full apply then fails with a clear error).
+    """
     kind = item.get("kind")
     spec = item.get("spec") or {}
     try:
@@ -90,27 +94,26 @@ def _health_only(item: dict[str, Any], *, compose_work: Path) -> dict[str, Any] 
             if not systemd_available():
                 return None
             unit_name = str(spec.get("unit_name") or item["workload_key"])
-            start = bool(spec.get("start", True))
-            if not start:
+            if not bool(spec.get("start", True)):
                 return _in_sync(item, healthy=True)
-            healthy = SystemdAdapter().health_check(unit_name=unit_name)
-            return _in_sync(item, healthy=healthy) if healthy else None
+            active = SystemdAdapter().health_check(unit_name=unit_name)
+            return _in_sync(item, healthy=active, error=None if active else f"systemd unit {unit_name} is not active")
         if kind == "docker":
             from runtime.docker import DockerAdapter, docker_available
 
             if not docker_available():
                 return None
             container_name = str(spec.get("container_name") or item["workload_key"])
-            healthy = DockerAdapter().health_check(container_name=container_name)
-            return _in_sync(item, healthy=True) if healthy else None
+            health = DockerAdapter().inspect_health(container_name=container_name)
+            return _in_sync_from(item, health, subject=f"container {container_name}")
         if kind == "docker_compose":
             from runtime.compose import ComposeAdapter, compose_available
 
             if not compose_available():
                 return None
             project_name = str(spec.get("project_name") or item["workload_key"])
-            healthy = ComposeAdapter(work_root=compose_work).health_check(project_name=project_name)
-            return _in_sync(item, healthy=True) if healthy else None
+            health = ComposeAdapter(work_root=compose_work).inspect_health(project_name=project_name)
+            return _in_sync_from(item, health, subject="compose")
     except Exception:  # noqa: BLE001 — fall through to full apply
         logger.debug("Health-only check failed for %s; will re-apply", item.get("workload_key"))
     return None
@@ -196,26 +199,41 @@ def _ensure_artifact(
     return dest
 
 
+# last_error is shown in the console; the API accepts up to 2000 characters.
+MAX_ERROR_CHARS = 500
+
+
+def _short(message: str | None) -> str | None:
+    return message[:MAX_ERROR_CHARS] if message else None
+
+
 def _failed(workload_key: str, message: str) -> dict[str, Any]:
     return {
         "workload_key": workload_key,
         "sync_status": "failed",
         "progress_percent": 0,
         "health": "unhealthy",
-        "last_error": message,
+        "last_error": _short(message),
     }
 
 
-def _in_sync(item: dict[str, Any], *, healthy: bool) -> dict[str, Any]:
+def _in_sync(item: dict[str, Any], *, healthy: bool | None, error: str | None = None) -> dict[str, Any]:
+    """Installed. ``healthy`` None means not known yet (e.g. a HEALTHCHECK still starting)."""
     return {
         "workload_key": item["workload_key"],
         "installed_release_id": item.get("release_id"),
         "installed_version": item.get("release_version"),
         "sync_status": "in_sync",
         "progress_percent": 100,
-        "health": "healthy" if healthy else "unknown",
-        "last_error": None,
+        "health": "unknown" if healthy is None else "healthy" if healthy else "unhealthy",
+        "last_error": _short(error),
     }
+
+
+def _in_sync_from(item: dict[str, Any], health: Any, *, subject: str) -> dict[str, Any]:
+    """``_in_sync`` from a runtime ContainerHealth; ``subject`` prefixes its problem."""
+    healthy = None if health.status == "unknown" else health.healthy
+    return _in_sync(item, healthy=healthy, error=health.reason(subject))
 
 
 def _apply_systemd(item: dict[str, Any], unit_file: Path) -> dict[str, Any]:
@@ -232,8 +250,7 @@ def _apply_systemd(item: dict[str, Any], unit_file: Path) -> dict[str, Any]:
         adapter.apply(unit_name=unit_name, unit_file=unit_file, start=start)
         if start and not adapter.health_check(unit_name=unit_name):
             return _failed(item["workload_key"], f"Unit {unit_name} is not active after apply.")
-        healthy = True if not start else adapter.health_check(unit_name=unit_name)
-        return _in_sync(item, healthy=healthy)
+        return _in_sync(item, healthy=True)
     except SystemdError as exc:
         return _failed(item["workload_key"], exc.message)
 
@@ -257,12 +274,11 @@ def _apply_docker(item: dict[str, Any], tarball: Path | None) -> dict[str, Any]:
             restart=spec.get("restart", "unless-stopped"),
             command=spec.get("command"),
         )
-        if not adapter.health_check(container_name=container_name):
-            return _failed(
-                item["workload_key"],
-                f"Container {container_name} is not running after apply.",
-            )
-        return _in_sync(item, healthy=True)
+        health = adapter.inspect_health(container_name=container_name)
+        # Not up after install: the install failed. A HEALTHCHECK still starting is fine (unknown).
+        if health.status == "unhealthy":
+            return _failed(item["workload_key"], f"{health.reason(f'container {container_name}')} after apply.")
+        return _in_sync_from(item, health, subject=f"container {container_name}")
     except DockerError as exc:
         return _failed(item["workload_key"], exc.message)
 
@@ -285,12 +301,10 @@ def _apply_compose(item: dict[str, Any], artifact: Path, work_root: Path) -> dic
             artifact=artifact,
             env=dict(spec.get("env") or {}),
         )
-        if not adapter.health_check(project_name=project_name):
-            return _failed(
-                item["workload_key"],
-                f"Compose project {project_name} has no running services after apply.",
-            )
-        return _in_sync(item, healthy=True)
+        health = adapter.inspect_health(project_name=project_name)
+        if health.status == "unhealthy":
+            return _failed(item["workload_key"], f"{health.reason('compose')} after apply.")
+        return _in_sync_from(item, health, subject="compose")
     except ComposeError as exc:
         return _failed(item["workload_key"], exc.message)
 
