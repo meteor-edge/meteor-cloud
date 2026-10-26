@@ -9,12 +9,12 @@ export function OrganizationListPage() {
 
   return (
     <section className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
+      <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-3xl font-semibold tracking-tight">Organizations</h1>
           <p className="mt-2 text-muted-foreground">Organizations available to your account.</p>
         </div>
-        <Button asChild>
+        <Button className="w-full sm:w-auto" asChild>
           <Link to="/organizations/new">Create organization</Link>
         </Button>
       </div>
@@ -36,8 +36,8 @@ export function OrganizationListPage() {
             key={organization.id}
             className="rounded-lg border border-border bg-card p-5 shadow-glow"
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
+              <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
                 <Link
                   to={`/organizations/${organization.id}`}
                   className="text-lg font-semibold text-foreground hover:text-link"
@@ -53,7 +53,7 @@ export function OrganizationListPage() {
                   <p className="mt-2 text-sm text-muted-foreground">{organization.description}</p>
                 )}
               </div>
-              <Button variant="secondary" asChild>
+              <Button className="w-full sm:w-auto" variant="secondary" asChild>
                 <Link
                   to={`/organizations/${organization.id}`}
                   onClick={() => selectOrganization(organization.id)}

@@ -11,6 +11,7 @@
 
   body {
     @apply min-h-screen bg-background font-sans text-muted-foreground antialiased;
+    overflow-x: hidden;
     background-image:
       radial-gradient(circle at 6% 0%, color-mix(in srgb, var(--meteor-cyan) 24%, transparent), transparent 30rem),
       radial-gradient(circle at 100% 10%, color-mix(in srgb, var(--cosmic-blue) 26%, transparent), transparent 36rem),

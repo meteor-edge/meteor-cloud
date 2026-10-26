@@ -12,18 +12,19 @@ export function Header() {
   const { selectedOrganization } = useOrganizationContext();
 
   return (
-    <header className="border-b border-border bg-section px-6 py-4 backdrop-blur">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <BrandMark className="md:hidden" />
-          <div>
-            <p className="text-sm text-nav">Self-hosted Linux edge control plane</p>
+    <header className="border-b border-border bg-section px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+          <BrandMark className="sm:hidden" showName={false} />
+          <BrandMark className="hidden sm:inline-flex md:hidden" />
+          <div className="min-w-0">
+            <p className="truncate text-xs text-nav sm:text-sm">Self-hosted Linux edge control plane</p>
             <h2 className="text-xl font-semibold tracking-tight text-foreground">
               {isAuthenticated ? "Organizations" : "Foundation"}
             </h2>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-3">
           <ThemeToggle />
           <Button variant="secondary" size="sm" asChild>
             <a href={resolveDocsBaseUrl()} target="_blank" rel="noreferrer">
@@ -32,16 +33,16 @@ export function Header() {
           </Button>
           {isAuthenticated && selectedOrganization && (
             <span
-              className="inline-flex items-center gap-2 rounded-md border border-input bg-field px-3 py-1.5 text-sm font-medium text-foreground"
+              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md border border-input bg-field px-3 py-1.5 text-sm font-medium text-foreground"
               aria-label="Selected organization"
             >
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">Org</span>
-              {selectedOrganization.name}
+              <span className="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">Org</span>
+              <span className="truncate">{selectedOrganization.name}</span>
             </span>
           )}
           {isAuthenticated ? (
             <>
-              <span className="text-sm text-nav">{user?.email}</span>
+              <span className="hidden text-sm text-nav lg:inline">{user?.email}</span>
               <Button variant="secondary" size="sm" onClick={logout}>
                 Log out
               </Button>

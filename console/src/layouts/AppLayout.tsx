@@ -9,15 +9,15 @@ export function AppLayout() {
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <div className="flex min-h-screen flex-1 flex-col">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 px-6 py-8">
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8">
           <Outlet />
         </main>
-        <footer className="border-t border-border px-6 py-4 text-sm text-muted-foreground">
-          <div className="flex items-center justify-between gap-4">
+        <footer className="border-t border-border px-4 py-4 text-sm text-muted-foreground sm:px-6">
+          <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center sm:gap-4">
             <span>MeteorCloud · operator console</span>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <a
                 href={resolveDocsBaseUrl()}
                 target="_blank"
