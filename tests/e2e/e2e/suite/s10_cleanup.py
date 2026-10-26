@@ -10,6 +10,36 @@ from e2e.suite.s7_apps import CONTAINER, payload_matches, public_body
 
 STAGE = "10 cleanup"
 
+# Paths that actually remove a workload. Cancel/rollback of a Deploy is not undeploy.
+_REMOVAL_WORDS = ("undeploy", "uninstall")
+
+
+def collect_http_routes(routes) -> list[list]:
+    """``path`` + methods for HTTP routes. FastAPI include/Mount objects have no ``path``."""
+    found: list[list] = []
+    for route in routes:
+        path = getattr(route, "path", None)
+        methods = sorted(getattr(route, "methods", None) or [])
+        if isinstance(path, str) and path:
+            found.append([path, methods])
+        nested = getattr(route, "routes", None)
+        if nested:
+            found.extend(collect_http_routes(nested))
+    return found
+
+
+def workload_removal_ops(routes: list) -> list[str]:
+    """DELETE .../software or an undeploy/uninstall path. Deploy cancel is not removal."""
+    found: list[str] = []
+    for path, methods in routes:
+        lowered = str(path).lower()
+        methods = list(methods or [])
+        if any(word in lowered for word in _REMOVAL_WORDS):
+            found.extend(f"{method} {path}" for method in methods)
+        elif "DELETE" in methods and "/software" in lowered:
+            found.append(f"DELETE {path}")
+    return found
+
 
 def routed_hostnames(ctx) -> set[str]:
     """Hostnames in Traefik's dynamic configuration, read from the API container (not public)."""
@@ -50,14 +80,25 @@ def endpoint_delete(ctx):
 @check("app.undeploy", STAGE, "Removing a deployed workload from a device", needs=("app.deploy_v1",))
 def undeploy(ctx):
     # The API's own route table (works whether or not /openapi.json is enabled in production).
+    # Include/Mount objects have no ``path``; walk nested routers.
     routes = ctx.backend_python(
         "import json\n"
         "from app.main import app\n"
-        "print(json.dumps([[r.path, sorted(getattr(r, 'methods', None) or [])] for r in app.routes]))\n"
+        "\n"
+        "def walk(routes):\n"
+        "    found = []\n"
+        "    for r in routes:\n"
+        "        path = getattr(r, 'path', None)\n"
+        "        methods = sorted(getattr(r, 'methods', None) or [])\n"
+        "        if isinstance(path, str) and path:\n"
+        "            found.append([path, methods])\n"
+        "        child = getattr(r, 'routes', None)\n"
+        "        if child:\n"
+        "            found.extend(walk(child))\n"
+        "    return found\n"
+        "print(json.dumps(walk(app.routes)))\n"
     )
-    removal = [f"{method} {path}" for path, methods in routes for method in methods
-               if (method == "DELETE" and ("/software" in path or "/deployments" in path))
-               or any(word in path for word in ("undeploy", "uninstall"))]
+    removal = workload_removal_ops(routes)
     running = ctx.sh(ctx.device(0), f"docker inspect -f '{{{{.State.Running}}}}' {CONTAINER}", check=False).stdout
     if not removal:
         raise NotSupported("the API has no operation that removes a workload from a device "
