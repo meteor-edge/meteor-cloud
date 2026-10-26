@@ -92,6 +92,11 @@ export type DeploymentDevice = {
   device_name: string | null;
   status: string;
   progress_percent: number | null;
+  /** Runtime health the agent reports (healthy / unhealthy / unknown); null before any report. */
+  health: string | null;
+  reported_at: string | null;
+  /** URL state, only when this Deploy created an endpoint for the device. */
+  endpoint_availability: string | null;
   previous_desired_release_id: string | null;
   last_error: string | null;
   created_at: string;
@@ -194,6 +199,37 @@ export type ShellSession = {
   websocket_path: string;
   expires_at: string;
   device_id: string;
+};
+
+export type LogSourceKind = "journal" | "systemd" | "docker" | "file";
+
+export type LogSource = {
+  kind: LogSourceKind;
+  name: string;
+  state?: string | null;
+  project?: string | null;
+  size?: number | null;
+};
+
+export type LogSources = {
+  sources: LogSource[];
+  /** Keys of MeteorCloud workloads: "systemd:<unit>", "docker:<name>", "compose:<project>". */
+  deployed: string[];
+  /** When the device last listed its sources (listings are reused for about 30 s). */
+  listed_at: string | null;
+  /** Only deployed workloads are shown; system logs need terminal access. */
+  restricted: boolean;
+};
+
+export type LogSessionRequest = {
+  kind: LogSourceKind;
+  name: string;
+  /** Compose project of a docker container; the device checks the container belongs to it. */
+  project: string | null;
+  lines: number;
+  since: "15m" | "1h" | "6h" | "24h" | "7d" | null;
+  grep: string | null;
+  follow: boolean;
 };
 
 export type ReleaseSummary = {

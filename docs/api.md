@@ -62,6 +62,7 @@ Prefix: `/api/v1/organizations/{organization_id}`
 | Devices | `/devices`, `/devices/{device_id}`, enable/disable, MQTT revoke |
 | Connectivity | `/devices/{device_id}/connectivity`, `.../connectivity/revoke` |
 | Browser SSH | `POST .../devices/{device_id}/shell-sessions` then WebSocket `/api/v1/shell-sessions/{id}/ws?ticket=` |
+| Device logs | `GET .../devices/{device_id}/log-sources`, `POST .../devices/{device_id}/log-sessions` then WebSocket `/api/v1/log-sessions/{id}/ws` ([Device logs](fleet/logs.md)) |
 | Endpoints | `/endpoints`, `/endpoints/{id}` |
 | MQTT test | `/mqtt/events` (SSE), `/mqtt/publish` |
 | Audit | `/audit-events` |

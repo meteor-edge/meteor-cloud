@@ -53,7 +53,9 @@ Optional on Deploy create (exactly one target device):
 "endpoint": { "hostname": "shop.meteor-edge.com", "port": 80 } // custom address
 ```
 
-The URL is not marked `ready` until that workload is in-sync and healthy.
+The URL is not marked `ready` until that workload is in-sync and healthy. If
+the process stops after install, the Deploy stays Succeeded but the URL is no
+longer `ready` (Traefik stops routing it) until the agent reports it healthy again.
 
 ## Reverse proxy
 

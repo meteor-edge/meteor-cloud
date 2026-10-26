@@ -44,12 +44,14 @@ def sign_public_key(
     key_id: str,
     principal: str,
     ttl_seconds: int,
+    force_command: str | None = None,
     runner: Runner = run_keygen,
 ) -> Path:
     """Sign ``public_key`` (a .pub file); returns the ``-cert.pub`` path next to it.
 
     Valid from a minute ago (clock skew) for ``ttl_seconds``; only a PTY is allowed:
-    no agent, port or X11 forwarding.
+    no agent, port or X11 forwarding. With ``force_command`` the device runs only
+    that command, without a PTY.
     """
     if not ca_file:
         raise ValidationAppError("shell_certificate_failed", "The SSH certificate authority is not configured.")
@@ -67,8 +69,7 @@ def sign_public_key(
             f"-1m:+{int(ttl_seconds)}s",
             "-O",
             "clear",
-            "-O",
-            "permit-pty",
+            *(["-O", f"force-command={force_command}"] if force_command else ["-O", "permit-pty"]),
             str(public_key),
         ]
     )

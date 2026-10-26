@@ -56,6 +56,11 @@ export function canOpenDeviceShell(role: string | undefined): boolean {
   return role === "owner" || role === "admin";
 }
 
+/** Read device logs (device.logs): everyone but viewers. */
+export function canViewDeviceLogs(role: string | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "operator" || role === "developer";
+}
+
 /** Rollback a finished Deploy (owner/admin only). */
 export function canRollbackDeployments(role: string | undefined): boolean {
   return role === "owner" || role === "admin";

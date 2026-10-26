@@ -45,3 +45,33 @@ export function AvailabilityBadge({ status }: { status: string }) {
     </span>
   );
 }
+
+const HEALTH_STYLES: Record<string, string> = {
+  healthy: "bg-aurora text-midnight",
+  unhealthy: "bg-ember text-midnight",
+  unknown: "bg-muted text-muted-foreground",
+  stale: "bg-horizon text-star-dust",
+};
+
+const HEALTH_LABELS: Record<string, string> = {
+  healthy: "Healthy",
+  unhealthy: "Unhealthy",
+  unknown: "Unknown",
+  stale: "Stale",
+};
+
+/** Runtime health of a workload. ``stale``: the device is offline, so the last report may be old. */
+export function HealthBadge({ status, stale = false }: { status: string | null; stale?: boolean }) {
+  const key = stale ? "stale" : (status ?? "unknown");
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+        HEALTH_STYLES[key] ?? HEALTH_STYLES.unknown,
+      )}
+      title={stale && status ? `Last reported: ${HEALTH_LABELS[status] ?? status}` : undefined}
+    >
+      {HEALTH_LABELS[key] ?? key}
+    </span>
+  );
+}

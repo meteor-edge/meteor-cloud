@@ -40,6 +40,35 @@ _SSH_HOST_KEY_TYPES = frozenset({"ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"
 
 
 @dataclass
+class TunnelStatus:
+    """Local WireGuard view for logs and ``meteorcli status``. Never includes the private key."""
+
+    available: bool
+    configured: bool
+    up: bool
+    address: str = ""
+    endpoint: str = ""
+    handshake_age_seconds: int | None = None
+
+    def summary(self) -> str:
+        if not self.available:
+            return "WireGuard tools not installed"
+        if not self.configured:
+            return "WireGuard not configured"
+        if not self.up:
+            suffix = f" ({self.address})" if self.address else ""
+            return f"WireGuard wg0 down{suffix}"
+        parts = ["WireGuard wg0 up"]
+        if self.address:
+            parts.append(self.address)
+        if self.handshake_age_seconds is None:
+            parts.append("waiting for handshake")
+        else:
+            parts.append(f"handshake {self.handshake_age_seconds}s ago")
+        return ", ".join(parts)
+
+
+@dataclass
 class ConnectivityState:
     """When to call the registration API next. Lives for one `run` loop; restarts register at once."""
 
@@ -359,14 +388,64 @@ def local_ssh_host_key(paths: Sequence[Path] = SSH_HOST_KEY_PATHS) -> str | None
 
 def _peer_from_config(conf: Path) -> tuple[str, str]:
     """(server public key, endpoint) from the [Peer] section of the local wg0.conf."""
-    public_key = endpoint = ""
-    for line in conf.read_text(encoding="utf-8").splitlines():
-        name, _, value = line.partition("=")
-        if name.strip() == "PublicKey":
-            public_key = value.strip()
-        elif name.strip() == "Endpoint":
-            endpoint = value.strip()
+    _, public_key, endpoint = _interface_from_config(conf)
     return public_key, endpoint
+
+
+def _interface_from_config(conf: Path) -> tuple[str, str, str]:
+    """(address, server public key, endpoint) from wg0.conf. Ignores PrivateKey."""
+    address = public_key = endpoint = ""
+    try:
+        lines = conf.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return address, public_key, endpoint
+    for line in lines:
+        name, _, value = line.partition("=")
+        key = name.strip()
+        if key == "Address":
+            address = value.strip()
+        elif key == "PublicKey":
+            public_key = value.strip()
+        elif key == "Endpoint":
+            endpoint = value.strip()
+    return address, public_key, endpoint
+
+
+def describe_tunnel(
+    config_dir: Path,
+    *,
+    runner: Runner = _default_runner,
+    now: Callable[[], float] = time.time,
+) -> TunnelStatus:
+    """Whether wg0 is up and how recent the last handshake is. Safe to log."""
+    if not wireguard_available():
+        return TunnelStatus(available=False, configured=False, up=False)
+    conf = wireguard_dir(config_dir) / "wg0.conf"
+    if not conf.is_file():
+        return TunnelStatus(available=True, configured=False, up=False)
+    address, peer_key, endpoint = _interface_from_config(conf)
+    try:
+        runner(["wg", "show", "wg0"])
+    except (subprocess.CalledProcessError, FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
+        return TunnelStatus(
+            available=True, configured=True, up=False, address=address, endpoint=endpoint
+        )
+    handshake_age: int | None = None
+    if peer_key:
+        try:
+            raw = _peer_value(runner, "wg0", "latest-handshakes", peer_key)
+        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
+            raw = ""
+        if raw.isdigit() and int(raw) > 0:
+            handshake_age = max(0, int(now()) - int(raw))
+    return TunnelStatus(
+        available=True,
+        configured=True,
+        up=True,
+        address=address,
+        endpoint=endpoint,
+        handshake_age_seconds=handshake_age,
+    )
 
 
 def keep_tunnel_up(directory: Path, *, runner: Runner = _default_runner) -> None:

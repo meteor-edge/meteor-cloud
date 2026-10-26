@@ -7,6 +7,7 @@ taken from the client.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -17,6 +18,8 @@ class ShellCertificate:
 
     principal: str
     key_id: str
+    # Log sessions: the device runs only this command, and no PTY is allowed.
+    force_command: str | None = None
 
 
 class DeviceShellConnection(Protocol):
@@ -53,10 +56,12 @@ class DeviceShellProvider(Protocol):
         username: str,
         host_key: str | None = None,
         certificate: ShellCertificate | None = None,
+        command: Sequence[str] | None = None,
     ) -> DeviceShellConnection:
         """Connect to ``host:port``. Implementations must refuse non-private hosts.
 
         ``host_key`` is the device's pinned SSH host key; a different key must be rejected.
         ``certificate``: authenticate with a per-session certificate for that principal.
+        ``command``: run this argv without a PTY instead of an interactive shell.
         """
         ...

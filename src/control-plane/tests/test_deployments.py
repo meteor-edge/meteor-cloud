@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.authorization.service import AuthzService
@@ -405,3 +406,95 @@ def test_deploy_records_provider_native(client: TestClient, db_session: Session)
     body = created.json()
     assert body["provider"] == "native"
     assert body["provider_ref"] == body["id"]
+
+
+def _report(client: TestClient, reg: dict, release: dict, *, health: str, last_error: str | None = None) -> None:
+    item = {
+        "workload_key": "camera-agent.service",
+        "installed_release_id": release["id"],
+        "installed_version": release["version"],
+        "health": health,
+        "sync_status": "in_sync",
+        "progress_percent": 100,
+        "last_error": last_error,
+    }
+    response = client.post(
+        "/api/v1/agent/heartbeat",
+        headers={"Authorization": f"Bearer {reg['device_token']}"},
+        json={"software_report": [item]},
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_deploy_detail_shows_runtime_health(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="edge-health", mac="aa:bb:cc:dd:ee:41")
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={"release_id": release["id"], "target": {"device_ids": [reg["device_id"]]}},
+    ).json()
+    detail_url = f"/api/v1/organizations/{org.id}/deployments/{created['id']}"
+
+    _report(client, reg, release, health="healthy")
+    row = client.get(detail_url, headers=headers).json()["devices"][0]
+    assert row["status"] == "succeeded"
+    assert row["health"] == "healthy"
+    assert row["reported_at"] is not None
+    assert row["endpoint_availability"] is None  # this Deploy created no URL
+
+    # The unit dies after a good install: install stays succeeded, health says unhealthy.
+    _report(client, reg, release, health="unhealthy", last_error="systemd unit camera-agent.service is not active")
+    body = client.get(detail_url, headers=headers).json()
+    assert body["status"] == "completed"
+    assert body["counts"]["succeeded"] == 1
+    assert body["devices"][0]["status"] == "succeeded"
+    assert body["devices"][0]["health"] == "unhealthy"
+    assert body["devices"][0]["last_error"] == "systemd unit camera-agent.service is not active"
+
+
+def test_deploy_detail_shows_endpoint_availability(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="edge-url", mac="aa:bb:cc:dd:ee:42")
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={
+            "release_id": release["id"],
+            "target": {"device_ids": [reg["device_id"]]},
+            "endpoint": {"hostname": "camera-health.meteor-edge.com", "port": 80},
+        },
+    )
+    assert created.status_code == 201, created.text
+    detail = client.get(f"/api/v1/organizations/{org.id}/deployments/{created.json()['id']}", headers=headers)
+    row = detail.json()["devices"][0]
+    assert row["endpoint_availability"] == "unknown"
+    assert row["health"] == "unknown"
+
+
+def test_deploy_detail_loads_software_rows_in_one_query(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    device_ids = [
+        _register_device(client, token, name=f"edge-batch-{n}", mac=f"aa:bb:cc:dd:ee:5{n}")["device_id"]
+        for n in range(3)
+    ]
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={"release_id": release["id"], "target": {"device_ids": device_ids}},
+    ).json()
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args) -> None:
+        statements.append(statement)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        detail = client.get(f"/api/v1/organizations/{org.id}/deployments/{created['id']}", headers=headers)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert detail.status_code == 200
+    assert len(detail.json()["devices"]) == 3
+    software_selects = [sql for sql in statements if sql.startswith("SELECT") and "FROM device_software" in sql]
+    assert len(software_selects) == 1

@@ -11,7 +11,7 @@ meteorcloud-testenv up
   terraform   control plane EC2 (+ dedicated WireGuard gateway), N device EC2s,
               DNS <env>.<domain> and *.<env>.<domain>, Traefik DNS-01 role
   ansible     site.yml (cloud_app + vpn) and device.yml, run twice (2nd: changed=0)
-  suite       55 checks in 10 stages -> report.json + summary.txt
+  suite       61 checks in 11 stages -> report.json + summary.txt
 ```
 
 | Command | What it does |
@@ -81,6 +81,7 @@ dependent check is `not_supported` too.
 | 5 wireguard | Address + handshake; route via `wg0`; handshake reported by the gateway agent; counters grow; API container reaches the device; gateway restart recovers; wrong server key gets no tunnel; device cannot open connections to the gateway |
 | 6 browser ssh | Shell ticket -> WebSocket -> command runs on the device; reused and wrong tickets rejected |
 | 7 application delivery | Test app built and uploaded as a `docker` artifact; release v1 deployed with an endpoint; container runs; upstream over WireGuard; endpoint `ready`; public HTTPS with the wildcard certificate; app port closed on the device's public address |
+| 7b device logs | The device lists its log sources on demand (the deployed container marked deployed); a journal search finds a line written on the device; a followed log streams a new line and stops when the session closes; the container's log opens; the log certificate forces the helper command; the helper refuses a source it does not list |
 | 8 update | v2 replaces v1; the same public URL serves v2 |
 | 9 fleet and tenancy | Device 2 onboards; second hostname routes to device 2 and the first still to device 1, with no proxy file changes; devices cannot reach each other; another organization cannot read, shell into, publish or revoke this organization's resources; revoking device 2 removes its peer and route |
 | 10 cleanup | Deleting the endpoint removes the route; workload removal (no product API today: `not_supported`) |

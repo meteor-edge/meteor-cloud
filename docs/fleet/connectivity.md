@@ -130,10 +130,13 @@ fails, it retries with exponential backoff and jitter (30 s doubling up to 30 mi
 On every heartbeat, without calling the API, it brings `wg0` back up from the
 local `wg0.conf` and looks up the gateway's DNS name again when handshakes stop.
 So a device recovers on its own after a reboot, a lost uplink, a gateway IP
-change, or a control-plane outage.
+change, or a control-plane outage. `meteorcli run` logs tunnel status each
+heartbeat (`WireGuard wg0 up, …, handshake Ns ago`); `meteorcli status` shows
+the same line. Prefer `meteorcli.service` in the background; a second
+`meteorcli run` is refused while that unit is active.
 
 `sshd` must be running for browser SSH. Do not forward port 22 on the home
-router.
+router. The device page's Logs window uses the same path; see [Device logs](logs.md).
 
 ## WireGuard network on the device page
 

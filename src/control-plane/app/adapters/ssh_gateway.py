@@ -10,6 +10,7 @@ import ipaddress
 import os
 import re
 import select
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -139,6 +140,7 @@ class SshGatewayProvider:
         username: str,
         host_key: str | None = None,
         certificate: ShellCertificate | None = None,
+        command: Sequence[str] | None = None,
     ) -> SshGatewayConnection:
         if not host or host.startswith("-"):
             raise ValidationAppError("invalid_shell_host", "Refusing SSH to an invalid host.")
@@ -159,7 +161,8 @@ class SshGatewayProvider:
             )
         args: list[str] = [
             "ssh",
-            "-tt",
+            # A log command gets no PTY: its output is passed through unchanged.
+            "-T" if command else "-tt",
             "-o",
             "BatchMode=yes",
             "-o",
@@ -199,6 +202,9 @@ class SshGatewayProvider:
             args.extend(self._extra_args)
             # "--" ends option parsing: the destination is never read as an ssh option.
             args.extend(["--", f"{username}@{host}"])
+            if command:
+                # The remote shell parses this one string: quote every argument.
+                args.append(shlex.join(command))
             return SshGatewayConnection(self._runner(args), known_hosts=known_hosts, key_dir=key_dir)
         except Exception:
             if known_hosts:
@@ -216,6 +222,7 @@ class SshGatewayProvider:
             key_id=certificate.key_id,
             principal=certificate.principal,
             ttl_seconds=self._cert_ttl_seconds,
+            force_command=certificate.force_command,
             runner=self._keygen,
         )
         return key, cert
@@ -238,9 +245,10 @@ def _write_known_hosts(host: str, port: int, host_key: str) -> str:
 class EchoShellConnection:
     """In-process echo PTY for tests. Never used in production."""
 
-    def __init__(self) -> None:
-        self._buffer = bytearray(b"MeteorCloud shell ready.\r\n")
-        self._closed = False
+    def __init__(self, *, banner: str = "MeteorCloud shell ready.\r\n", closed: bool = False) -> None:
+        self._buffer = bytearray(banner.encode("utf-8"))
+        # A log command (closed=True) ends once its output is read.
+        self._closed = closed
 
     def read(self, n: int = 4096) -> bytes:
         if not self._buffer:
@@ -276,6 +284,9 @@ class EchoShellProvider:
         username: str,
         host_key: str | None = None,
         certificate: ShellCertificate | None = None,
+        command: Sequence[str] | None = None,
     ) -> EchoShellConnection:
         del host, port, username, host_key, certificate
+        if command:
+            return EchoShellConnection(banner=f"$ {shlex.join(command)}\r\n", closed=True)
         return EchoShellConnection()

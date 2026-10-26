@@ -42,9 +42,10 @@ directory the service reads.
 | `register` | Enroll with a registration token |
 | `request-token` | Device-initiated enroll; poll for approval |
 | `claim` | Fetch device token after a later approval |
-| `run` | Heartbeats + MQTT loop (`--once` for a single pass). Run as the device user; WireGuard uses passwordless sudo for the `meteorcli-wg` helper only |
-| `status` | Show non-secret local config |
+| `run` | Foreground loop: heartbeats, MQTT, WireGuard (`--once` for a single pass). Stays in the terminal (Ctrl+C to stop). Refuses if `meteorcli.service` is already active so you do not run two agents |
+| `status` | Show non-secret local config, including systemd and WireGuard |
 | `mqtt-test` / `mqtt-listen` | MQTT diagnostics |
+| `logs` | List log sources (`--json`), or print one: `meteorcli logs systemd:nginx.service -f --grep error`. See [Device logs](fleet/logs.md) |
 
 Env overrides: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`, `METEORCLI_TOKEN`, `METEORCLI_CONFIG_DIR`.
 
@@ -74,12 +75,17 @@ meteorcli request-token --name edge-01   # waits up to ~5 minutes (--wait)
 meteorcli claim
 ```
 
-Then:
+Then start the agent. Prefer the systemd unit on a fleet device; use `meteorcli run` only in the foreground:
 
 ```bash
-meteorcli run
-meteorcli run --once
+sudo systemctl enable --now meteorcli   # background; logs: journalctl -u meteorcli -f
+meteorcli status
+# or, if the service is not installed:
+meteorcli run                           # foreground; Ctrl+C to stop
+meteorcli run --once                    # one heartbeat (allowed even if the service is running)
 ```
+
+`meteorcli run` is not a daemon. If `meteorcli.service` is already active, it exits instead of starting a second copy. Stop the unit first (`sudo systemctl stop meteorcli`) when you need a foreground session.
 
 ## Related
 

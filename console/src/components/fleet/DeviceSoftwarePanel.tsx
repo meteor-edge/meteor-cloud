@@ -2,7 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { listDeviceSoftware, type DeviceSoftware } from "@/api/fleet";
+import { HealthBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { formatRelativeTime } from "@/lib/utils";
 
 const SYNC_LABELS: Record<string, string> = {
   in_sync: "In sync",
@@ -10,12 +12,6 @@ const SYNC_LABELS: Record<string, string> = {
   updating: "Updating",
   failed: "Failed",
   cancelled: "Cancelled",
-};
-
-const HEALTH_LABELS: Record<string, string> = {
-  healthy: "Healthy",
-  unhealthy: "Unhealthy",
-  unknown: "Unknown",
 };
 
 function releaseLabel(item: DeviceSoftware["desired_release"]): string {
@@ -30,6 +26,10 @@ type DeviceSoftwarePanelProps = {
   organizationId: string;
   deviceId: string;
   canDeploy?: boolean;
+  /** When false, health is shown as stale: the last report may no longer be true. */
+  deviceOnline?: boolean;
+  /** When set, unhealthy rows get a "View logs" link that opens the Logs section (id="device-logs"). */
+  onViewLogs?: () => void;
 };
 
 export function DeviceSoftwarePanel({
@@ -37,6 +37,8 @@ export function DeviceSoftwarePanel({
   organizationId,
   deviceId,
   canDeploy = false,
+  deviceOnline = true,
+  onViewLogs,
 }: DeviceSoftwarePanelProps) {
   const softwareQuery = useQuery({
     queryKey: ["device-software", organizationId, deviceId, token],
@@ -102,12 +104,31 @@ export function DeviceSoftwarePanel({
               </td>
               <td className="px-4 py-3">
                 {SYNC_LABELS[row.sync_status] ?? row.sync_status}
-                {row.sync_status === "updating"
-                  ? ` (${row.progress_percent}%)`
-                  : ""}
+                {row.sync_status === "updating" ? ` (${row.progress_percent}%)` : ""}
               </td>
-              <td className="px-4 py-3">{HEALTH_LABELS[row.health] ?? row.health}</td>
-              <td className="px-4 py-3 text-muted-foreground">{row.last_error || "—"}</td>
+              <td className="px-4 py-3">
+                <HealthBadge status={row.health} stale={!deviceOnline} />
+                {row.reported_at && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    reported {formatRelativeTime(row.reported_at)}
+                  </p>
+                )}
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {row.last_error || "—"}
+                {onViewLogs && (row.health === "unhealthy" || row.last_error) && (
+                  <a
+                    href="#device-logs"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onViewLogs();
+                    }}
+                    className="ml-2 whitespace-nowrap text-link hover:underline"
+                  >
+                    View logs
+                  </a>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

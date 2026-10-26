@@ -7,10 +7,11 @@ Subcommands
   register   Register this device with a registration token (path 1).
   request-token  Ask the API for a device token; wait briefly for admin approval.
   claim          Collect the device token after a later approval.
-  run        Heartbeats, MQTT, and apply desired software (systemd/docker/compose).
+  run        Foreground heartbeats, MQTT, WireGuard (refuses if meteorcli.service is already active).
   mqtt-test    Publish one TLS MQTT message (default: devices/{id}/status).
   mqtt-listen  Print inbound commands (default: devices/{id}/commands).
   status       Show persisted (non-secret) configuration.
+  logs         List or print device logs (journal, systemd, Docker, /var/log).
 
 Secrets are never printed by any command except when the user explicitly
 passes them on the command line.
@@ -33,6 +34,7 @@ from edge_agent.credentials import read_device_token, read_registration_token_fi
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
 from edge_agent.registration import register
+from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_under_systemd, service_state
 from edge_agent.software import reconcile_software
 from meteorcli import __version__
 from meteorcli.config import (
@@ -196,7 +198,7 @@ def _cmd_register(args: argparse.Namespace) -> int:
     print(f"Heartbeat:      every {result.heartbeat_interval_seconds}s")
     print(f"Credential:     stored at {paths.token_path}")
     print()
-    print(f"Next: start sending heartbeats with '{PROG} run'.")
+    _print_run_next_step()
     chown_config_dir(paths.config_path.parent)
     return 0
 
@@ -271,12 +273,26 @@ def _poll_interval(polled: dict | None, fallback: int) -> int:
     return max(MIN_POLL_INTERVAL_SECONDS, suggested, 1)
 
 
+def _print_run_next_step() -> None:
+    state = service_state()
+    if state == "active":
+        print(f"Heartbeats are already running as {UNIT}.")
+        print("Follow logs with: journalctl -u meteorcli -f")
+        return
+    if state != NOT_INSTALLED:
+        print("Next: sudo systemctl start meteorcli    (background)")
+        print(f"  or: {PROG} run                       (foreground, Ctrl+C to stop)")
+        return
+    print(f"Next: {PROG} run    (foreground; Ctrl+C to stop)")
+    print("      Install a background service with: sudo ./installcli.sh --with-service")
+
+
 def _print_claimed(paths: CliPaths, polled: dict) -> None:
     print(f"Registered device {polled['device_id']}")
     print(f"Name:           {polled.get('name')}")
     print(f"Credential:     stored at {paths.token_path}")
     print()
-    print(f"Next: start sending heartbeats with '{PROG} run'.")
+    _print_run_next_step()
 
 
 def _print_pending_hint(request_id: str) -> None:
@@ -563,7 +579,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     artifacts_dir = paths.config_path.parent / "artifacts"
 
     from edge_agent.mqtt_sync import MqttSupervisor
-    from edge_agent.wireguard import ConnectivityState, sync_connectivity
+    from edge_agent.wireguard import ConnectivityState, describe_tunnel, sync_connectivity
+
+    if not args.once:
+        clash = duplicate_run_message(service_state())
+        if clash:
+            print(clash, file=sys.stderr)
+            return 1
 
     # One schedule per run loop; --once registers every time.
     wg_state = None if args.once else ConnectivityState()
@@ -573,8 +595,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         else None
     )
 
+    last_tunnel = {"summary": ""}
+
     def _payload() -> dict:
         sync_connectivity(client, device_token, paths.config_path.parent, state=wg_state)
+        # Log the tunnel only when it changes; `meteorcli status` shows it on demand.
+        tunnel = describe_tunnel(paths.config_path.parent).summary()
+        if tunnel != last_tunnel["summary"]:
+            logger.info("%s", tunnel)
+            last_tunnel["summary"] = tunnel
         if mqtt is not None:
             try:
                 mqtt.sync(client, device_token)
@@ -593,10 +622,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"error: heartbeat failed: {error.message}", file=sys.stderr)
             return 1
         print(f"Heartbeat ok; status: {response.get('status', 'unknown')}")
+        print(describe_tunnel(paths.config_path.parent).summary())
         return 0
 
     interval = args.interval or config.heartbeat_interval_seconds
-    logger.info("Starting heartbeat loop every %ss", interval)
+    if running_under_systemd():
+        logger.info("Running as %s", UNIT)
+    else:
+        logger.info("Running in the foreground (Ctrl+C to stop). This is not a background daemon.")
+        if service_state() not in (NOT_INSTALLED, "active"):
+            logger.info("Background: sudo systemctl enable --now meteorcli")
+    logger.info("Heartbeat every %ss", interval)
     try:
         # MQTT starts (and later restarts with refreshed settings) from _payload on each heartbeat.
         run_loop(
@@ -634,14 +670,59 @@ def _cmd_status(args: argparse.Namespace) -> int:
     print(f"Name:           {config.name if config and config.name else '—'}")
     print(f"Heartbeat:      every {config.heartbeat_interval_seconds if config else 60}s")
     print(f"Credential:     {'present' if has_credential else 'MISSING'}")
+    state = service_state()
+    print(f"Service:        {UNIT} is {state}")
     from edge_agent.mqtt_config import read_mqtt_config
+    from edge_agent.wireguard import describe_tunnel
 
     mqtt_ok = read_mqtt_config(paths.config_path.parent) is not None
     print(f"MQTT:           {'configured' if mqtt_ok else 'not configured'}")
+    print(f"WireGuard:      {describe_tunnel(paths.config_path.parent).summary()}")
     pending = _load_pending_claim(paths)
     if pending is not None:
         print(f"Pending claim:  {pending['request_id']} (run '{PROG} claim')")
     return 0 if config and config.device_id else 1
+
+
+def _source_spec(item: dict) -> str:
+    return item["kind"] if item["kind"] == "journal" else f"{item['kind']}:{item['name']}"
+
+
+def _cmd_logs(args: argparse.Namespace) -> int:
+    import subprocess
+
+    from edge_agent.logs import LOGS_HELPER, helper_command, helper_installed, list_log_sources
+
+    if not helper_installed():
+        print(f"error: {LOGS_HELPER} is not installed. Re-run: sudo ./installcli.sh", file=sys.stderr)
+        return 1
+    if args.source is None:
+        sources = list_log_sources()
+        if sources is None:
+            print(
+                f"error: {LOGS_HELPER} list failed (passwordless sudo for it is set up by installcli.sh).",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(sources, indent=2))
+            return 0
+        for item in sources:
+            detail = " ".join(str(item[key]) for key in ("state", "project") if key in item)
+            print(f"{_source_spec(item):<60} {detail}".rstrip())
+        return 0
+    kind, _, name = args.source.partition(":")
+    argv = helper_command("show", kind, *([name] if name else []), "--lines", str(args.lines))
+    if args.since:
+        argv += ["--since", args.since]
+    if args.grep:
+        argv += ["--grep", args.grep]
+    if args.follow:
+        argv.append("--follow")
+    try:
+        return subprocess.run(argv, check=False).returncode
+    except KeyboardInterrupt:  # pragma: no cover - interactive only
+        return 130
 
 
 def _mqtt_config_or_fail(paths, config):
@@ -759,7 +840,7 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} register --token reg_XXXX\n"
             f"  {PROG} run\n"
             f"  {PROG} mqtt-test\n"
-            f"  {PROG} mqtt-test devices/DEVICE_ID/status '{{\"status\":\"online\"}}'\n"
+            f'  {PROG} mqtt-test devices/DEVICE_ID/status \'{{"status":"online"}}\'\n'
             f"  {PROG} mqtt-listen\n"
             f"  {PROG} mqtt-listen commands\n"
             f"  {PROG} status\n"
@@ -948,7 +1029,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser(
         "run",
         help="Send heartbeats to the control plane.",
-        description="Send periodic heartbeats so the device reports as online.",
+        description=(
+            "Foreground loop: heartbeats, MQTT, and WireGuard. Stays in this terminal "
+            "(Ctrl+C to stop). If meteorcli.service is already active, this command "
+            "exits so you do not run two agents. --once still runs one pass."
+        ),
     )
     run_parser.add_argument("--once", action="store_true", help="Send a single heartbeat and exit.")
     run_parser.add_argument(
@@ -1015,6 +1100,23 @@ def build_parser() -> argparse.ArgumentParser:
         description="Show persisted configuration. Never prints credentials.",
     )
     status_parser.set_defaults(func=_cmd_status)
+
+    logs_parser = subparsers.add_parser(
+        "logs",
+        help="List or print this device's logs (journal, systemd, Docker, /var/log).",
+        description=(
+            "Without SOURCE, list the log sources the console's Logs window offers. "
+            "SOURCE is journal, systemd:UNIT, docker:CONTAINER or file:PATH. "
+            "Uses the root-owned meteorcli-logs helper from installcli.sh."
+        ),
+    )
+    logs_parser.add_argument("source", nargs="?", help="journal, systemd:UNIT, docker:CONTAINER or file:PATH.")
+    logs_parser.add_argument("--json", action="store_true", help="List sources as JSON.")
+    logs_parser.add_argument("-n", "--lines", type=int, default=200, help="Last N lines (default 200).")
+    logs_parser.add_argument("--since", help="Only newer lines: 15m, 1h, 7d (not for files).")
+    logs_parser.add_argument("--grep", help="Only lines containing this text (case-insensitive).")
+    logs_parser.add_argument("-f", "--follow", action="store_true", help="Keep printing new lines.")
+    logs_parser.set_defaults(func=_cmd_logs)
 
     return parser
 

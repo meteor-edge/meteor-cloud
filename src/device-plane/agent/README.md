@@ -47,7 +47,9 @@ and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`
 and passwordless sudo for that helper only, so the agent can create `wg0` without
 running the whole CLI as root. The helper only accepts meteorcli's own `wg0.conf`
 keys (no `PostUp`/`PreUp` hooks or other `wg-quick` options) and fixed `wg` calls
-on `wg0`, so the sudo rule does not grant root. When the
+on `wg0`, so the sudo rule does not grant root. It also installs
+`/usr/local/libexec/meteorcli-logs`, a read-only log helper for the console's Logs
+window and `meteorcli logs` (see [Device logs](../../../docs/fleet/logs.md)). When the
 control plane has WireGuard enabled, `run` registers this device’s **public**
 key and brings up a tunnel (private key stays on the device). See
 [Device connectivity](../../../docs/fleet/connectivity.md).
@@ -82,8 +84,8 @@ meteorcli --version
 | `register`       | Enroll with a one-time registration token (admin-initiated).         |
 | `request-token`  | Request a device token to connect this machine to the API.           |
 | `claim`          | Collect the device token after a later approval.                     |
-| `run`            | Heartbeats, MQTT, download desired artifacts, apply systemd units. |
-| `status`         | Show persisted, non-secret configuration.                            |
+| `run`            | Foreground heartbeats, MQTT, WireGuard (refuses if `meteorcli.service` is already active). |
+| `status`         | Show persisted, non-secret configuration, systemd, and WireGuard.    |
 
 Environment variables: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`,
 `METEORCLI_TOKEN`, `METEORCLI_CONFIG_DIR` (default: `~/.config/meteorcli`, or
@@ -148,10 +150,20 @@ Use `meteorcli run` after the token is stored.
 
 ## Send heartbeats
 
+`meteorcli run` is a foreground loop (heartbeats, MQTT, WireGuard). It stays in
+the terminal until Ctrl+C. It is not a background daemon.
+
 ```bash
-meteorcli run
-meteorcli run --once
+sudo systemctl enable --now meteorcli   # background; requires --with-service
+journalctl -u meteorcli -f
+meteorcli status
+meteorcli run                           # foreground; refused if the service is already active
+meteorcli run --once                    # one pass (allowed even if the service is running)
 ```
+
+If `meteorcli.service` is already running, a second `meteorcli run` would
+duplicate the agent. Stop it first (`sudo systemctl stop meteorcli`) when you
+need a foreground session.
 
 ## Testing
 

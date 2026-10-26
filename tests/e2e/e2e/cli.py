@@ -181,6 +181,7 @@ def run_suite(cfg: Config, state: State, secrets: dict[str, str], *, only: set[s
         s5_wireguard,
         s6_shell,
         s7_apps,
+        s7b_logs,
         s8_update,
         s9_fleet,
         s10_cleanup,

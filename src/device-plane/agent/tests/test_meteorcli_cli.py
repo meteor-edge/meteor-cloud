@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -702,3 +703,137 @@ def test_mqtt_listen_subscribes_to_commands_topic(tmp_path, monkeypatch, capsys)
     assert code == 0
     assert listened[1][3] == "devices/device-1/commands"
     assert "devices/device-1/commands" in capsys.readouterr().out
+
+
+def _enroll(tmp_path, monkeypatch):
+    from edge_agent.config import AgentConfig, AgentPaths, save_config
+    from edge_agent.credentials import write_device_token
+
+    config_dir = tmp_path / "meteorcli"
+    paths = AgentPaths(config_path=config_dir / "config.json", token_path=config_dir / "device-token")
+    save_config(
+        paths,
+        AgentConfig(
+            server_url="http://localhost:8000",
+            device_id="device-1",
+            organization_id="org-1",
+            name="edge-01",
+            heartbeat_interval_seconds=60,
+        ),
+    )
+    write_device_token(paths.token_path, "dev_secret-value")
+    client = FakeClient()
+    monkeypatch.setattr(meteorcli, "EdgeClient", lambda server_url, **_: client)
+    return config_dir, client
+
+
+def test_status_shows_service_and_wireguard(tmp_path, monkeypatch, capsys) -> None:
+    from edge_agent.wireguard import TunnelStatus
+
+    config_dir, _client = _enroll(tmp_path, monkeypatch)
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
+    monkeypatch.setattr(
+        "edge_agent.wireguard.describe_tunnel",
+        lambda _dir: TunnelStatus(
+            available=True,
+            configured=True,
+            up=True,
+            address="10.8.0.12/32",
+            handshake_age_seconds=8,
+        ),
+    )
+    code = meteorcli.main(["--config-dir", str(config_dir), "status"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Service:        meteorcli.service is active" in out
+    assert "WireGuard:      WireGuard wg0 up, 10.8.0.12/32, handshake 8s ago" in out
+
+
+def test_run_refuses_when_service_already_active(tmp_path, monkeypatch, capsys) -> None:
+    config_dir, _client = _enroll(tmp_path, monkeypatch)
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
+    ran = []
+    monkeypatch.setattr(meteorcli, "run_loop", lambda *_a, **_k: ran.append("loop"))
+    code = meteorcli.main(["--config-dir", str(config_dir), "run"])
+    assert code == 1
+    assert ran == []
+    err = capsys.readouterr().err
+    assert "meteorcli.service is already running" in err
+    assert "journalctl -u meteorcli -f" in err
+
+
+def test_run_once_allowed_when_service_active(tmp_path, monkeypatch, capsys) -> None:
+    from edge_agent.wireguard import TunnelStatus
+
+    config_dir, _client = _enroll(tmp_path, monkeypatch)
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
+    monkeypatch.setattr("edge_agent.wireguard.sync_connectivity", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "edge_agent.wireguard.describe_tunnel",
+        lambda _dir: TunnelStatus(available=True, configured=False, up=False),
+    )
+    monkeypatch.setattr(meteorcli, "reconcile_software", lambda *_a, **_k: [])
+    monkeypatch.setattr(meteorcli, "collect_capabilities", lambda: {})
+    code = meteorcli.main(["--config-dir", str(config_dir), "run", "--once"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "status: online" in out
+    assert "WireGuard not configured" in out
+
+
+def test_run_proceeds_when_this_process_is_the_service(tmp_path, monkeypatch) -> None:
+    config_dir, _client = _enroll(tmp_path, monkeypatch)
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
+    monkeypatch.setenv("INVOCATION_ID", "abc123")
+    ran: list[str] = []
+    monkeypatch.setattr(meteorcli, "run_loop", lambda *_a, **_k: ran.append("loop"))
+    monkeypatch.setattr("edge_agent.mqtt_sync.MqttSupervisor", lambda *_a, **_k: None)
+    code = meteorcli.main(["--config-dir", str(config_dir), "run"])
+    assert code == 0
+    assert ran == ["loop"]
+
+
+def test_logs_lists_sources_as_json(monkeypatch, capsys) -> None:
+    from edge_agent import logs
+
+    monkeypatch.setattr(logs, "helper_installed", lambda: True)
+    monkeypatch.setattr(logs, "list_log_sources", lambda: [{"kind": "journal", "name": ""}])
+    assert meteorcli.main(["logs", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == [{"kind": "journal", "name": ""}]
+
+
+def test_logs_runs_helper_with_source_and_options(monkeypatch) -> None:
+    import subprocess
+
+    from edge_agent import logs
+
+    monkeypatch.setattr(logs, "helper_installed", lambda: True)
+    monkeypatch.setattr(logs.os, "geteuid", lambda: 1000)
+    seen: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **_k: seen.append(argv) or subprocess.CompletedProcess(argv, 0))
+    code = meteorcli.main(["logs", "systemd:nginx.service", "-n", "50", "--grep", "err", "-f"])
+    assert code == 0
+    assert seen == [
+        [
+            "sudo",
+            "-n",
+            logs.LOGS_HELPER,
+            "show",
+            "systemd",
+            "nginx.service",
+            "--lines",
+            "50",
+            "--grep",
+            "err",
+            "--follow",
+        ]
+    ]
+
+
+def test_logs_without_helper_explains_install(monkeypatch, capsys) -> None:
+    from edge_agent import logs
+
+    monkeypatch.setattr(logs, "helper_installed", lambda: False)
+    assert meteorcli.main(["logs"]) == 1
+    assert "installcli.sh" in capsys.readouterr().err

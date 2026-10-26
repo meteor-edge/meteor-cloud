@@ -99,6 +99,29 @@ export function createShellSession(
   });
 }
 
+export function getLogSources(
+  token: string,
+  organizationId: string,
+  deviceId: string,
+): Promise<import("@/api/fleet/types").LogSources> {
+  return apiRequest(`/api/v1/organizations/${organizationId}/devices/${deviceId}/log-sources`, {
+    token,
+  });
+}
+
+export function createLogSession(
+  token: string,
+  organizationId: string,
+  deviceId: string,
+  request: import("@/api/fleet/types").LogSessionRequest,
+): Promise<import("@/api/fleet/types").ShellSession> {
+  return apiRequest(`/api/v1/organizations/${organizationId}/devices/${deviceId}/log-sessions`, {
+    method: "POST",
+    token,
+    body: request,
+  });
+}
+
 export type HostnameCheck = {
   hostname: string;
   available: boolean;

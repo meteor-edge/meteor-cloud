@@ -30,6 +30,15 @@ Optional body:
 }
 ```
 
+`software_report[].health` is the agent's runtime check, done on the device on
+every heartbeat (the cloud never probes the app): `healthy` means the systemd
+unit is active, or the container (every compose service) is running and its
+Docker `HEALTHCHECK`, if any, passes. `unknown` means a `HEALTHCHECK` is still
+starting. A workload that stops after install stays `in_sync` with
+`health: "unhealthy"` and a short `last_error`; the agent does not reinstall it.
+A container or compose project that no longer exists (e.g. after `docker rm`)
+is re-applied instead.
+
 Response:
 
 ```json
@@ -85,9 +94,16 @@ heartbeat does not immediately flip a device offline.
 ## Reference agent
 
 ```bash
-meteorcli run          # loop using the advertised interval
+sudo systemctl enable --now meteorcli   # background (installcli.sh --with-service)
+journalctl -u meteorcli -f
+meteorcli run          # foreground loop; Ctrl+C to stop
 meteorcli run --once   # single heartbeat
 ```
+
+`meteorcli run` stays in the terminal and logs each heartbeat plus WireGuard
+status. It is not a background daemon. If `meteorcli.service` is already
+running, `meteorcli run` exits so heartbeats, MQTT, and WireGuard are not
+duplicated (`--once` is still allowed).
 
 The loop uses bounded exponential backoff on transient failures and stops if the
 credential is rejected so the device can be re-registered.

@@ -10,3 +10,8 @@ export function resolveApiBaseUrl(): string {
   }
   return configured.replace(/\/$/, "");
 }
+
+/** WebSocket URL for a control-plane path (ws:// or wss:// to match the API origin). */
+export function websocketUrl(path: string): string {
+  return `${resolveApiBaseUrl().replace(/^http/, "ws")}${path}`;
+}
