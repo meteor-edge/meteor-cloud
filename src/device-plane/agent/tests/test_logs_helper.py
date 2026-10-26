@@ -113,6 +113,17 @@ def test_symlinked_log_file_is_refused(tmp_path: Path, monkeypatch: pytest.Monke
     assert not helper.safe_file(str(tmp_path / "other.txt"))
 
 
+def test_file_in_a_subdirectory_is_not_listed_or_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "sub").mkdir()
+    nested = tmp_path / "sub" / "x.log"
+    nested.write_text("x")
+    monkeypatch.setattr(helper, "FILE_GLOBS", (str(tmp_path / "*.log"),))
+    monkeypatch.setattr(helper, "LOG_ROOT", str(tmp_path) + "/")
+    assert helper.log_files() == []
+    with pytest.raises(SystemExit):
+        helper.require_listed({"kind": "file", "name": str(nested)})
+
+
 def _opts(kind: str, name: str = "", **extra):
     return {"kind": kind, "name": name, "lines": 200, "since": None, "grep": None, "follow": False, **extra}
 

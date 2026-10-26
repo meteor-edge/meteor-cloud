@@ -229,6 +229,20 @@ def test_compose_one_service_down_is_unhealthy(tmp_path: Path) -> None:
     assert health.problem == "compose service web is not running (exited, exit 137)"
 
 
+def test_compose_finished_one_shot_service_is_ignored(tmp_path: Path) -> None:
+    ps = _ps(
+        {"Service": "web", "State": "running", "Health": "", "ExitCode": 0},
+        {"Service": "migrate", "State": "exited", "Health": "", "ExitCode": 0},
+    )
+    adapter = ComposeAdapter(runner=_inspect_runner({}, ps=ps), work_root=tmp_path)
+    assert adapter.inspect_health(project_name="shop").status == "healthy"
+    only_done = _ps({"Service": "migrate", "State": "exited", "Health": "", "ExitCode": 0})
+    health = ComposeAdapter(runner=_inspect_runner({}, ps=only_done), work_root=tmp_path).inspect_health(
+        project_name="shop"
+    )
+    assert (health.status, health.problem) == ("unhealthy", "compose project shop has no running services")
+
+
 def test_compose_healthcheck_failure_is_unhealthy(tmp_path: Path) -> None:
     runner = _inspect_runner({}, ps=_ps({"Service": "web", "State": "running", "Health": "unhealthy"}))
     health = ComposeAdapter(runner=runner, work_root=tmp_path).inspect_health(project_name="shop")

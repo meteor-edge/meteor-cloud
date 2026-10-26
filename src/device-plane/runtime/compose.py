@@ -121,15 +121,21 @@ class ComposeAdapter:
         if not services:
             return ContainerHealth(MISSING, f"compose project {name} has no services")
         starting = None
+        running = 0
         for service in services:
             subject = f"compose service {service.get('Service') or service.get('Name')}"
+            if service.get("State") == "exited" and service.get("ExitCode") == 0:
+                continue  # a one-shot job (migration, init) that finished
             if service.get("State") != "running":
                 detail = f"{service.get('State')}, exit {service.get('ExitCode')}"
                 return ContainerHealth(UNHEALTHY, f"{subject} is not running ({detail})")
+            running += 1
             if service.get("Health") == "unhealthy":
                 return ContainerHealth(UNHEALTHY, f"{subject} HEALTHCHECK failed")
             if service.get("Health") == "starting" and starting is None:
                 starting = ContainerHealth(UNKNOWN, f"{subject} HEALTHCHECK starting")
+        if not running:
+            return ContainerHealth(UNHEALTHY, f"compose project {name} has no running services")
         return starting or ContainerHealth(HEALTHY)
 
     def recover(self, *, project_name: str) -> None:

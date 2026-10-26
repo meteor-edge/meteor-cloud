@@ -449,6 +449,7 @@ def test_deploy_detail_shows_runtime_health(client: TestClient, db_session: Sess
     assert body["counts"]["succeeded"] == 1
     assert body["devices"][0]["status"] == "succeeded"
     assert body["devices"][0]["health"] == "unhealthy"
+    assert body["devices"][0]["last_error"] == "systemd unit camera-agent.service is not active"
 
 
 def test_deploy_detail_shows_endpoint_availability(client: TestClient, db_session: Session) -> None:

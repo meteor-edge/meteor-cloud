@@ -56,6 +56,8 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  // Bumped by every stop (and unmount), so a session that resolves late is dropped.
+  const generationRef = useRef(0);
 
   // A read-only terminal: it keeps container colors, scrollback and scrolling for us.
   useEffect(() => {
@@ -81,20 +83,24 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
     termRef.current = term;
     return () => {
       observer.disconnect();
+      generationRef.current += 1;
       socketRef.current?.close();
       term.dispose();
     };
   }, []);
 
   const stop = useCallback(() => {
+    generationRef.current += 1;
     const socket = socketRef.current;
     socketRef.current = null;
     socket?.close();
+    setStatus("ended");
   }, []);
 
   const start = useCallback(
     async (source: LogSource) => {
       stop();
+      const generation = generationRef.current;
       termRef.current?.reset();
       setError(null);
       setNote(null);
@@ -108,14 +114,25 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
           grep: grep.trim() || null,
           follow,
         });
+        if (generation !== generationRef.current) {
+          return;
+        }
         const socket = new WebSocket(websocketUrl(session.websocket_path));
+        // Only the current socket may touch the terminal or the status.
+        const current = () => socketRef.current === socket;
         socket.binaryType = "arraybuffer";
         socket.onopen = () => {
+          if (!current()) {
+            return;
+          }
           // The ticket goes in the first frame, not the URL, so it never reaches access logs.
           socket.send(JSON.stringify({ type: "auth", ticket: session.ticket }));
           setStatus("streaming");
         };
         socket.onmessage = (event) => {
+          if (!current()) {
+            return;
+          }
           if (typeof event.data === "string") {
             // Text frames are status lines from the control plane, not log output.
             const message = event.data.trim();
@@ -128,15 +145,23 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
           }
           termRef.current?.write(new Uint8Array(event.data as ArrayBuffer));
         };
-        socket.onerror = () => setError("The connection to the device failed.");
-        socket.onclose = () => {
-          if (socketRef.current === socket) {
-            socketRef.current = null;
+        socket.onerror = () => {
+          if (current()) {
+            setError("The connection to the device failed.");
           }
+        };
+        socket.onclose = () => {
+          if (!current()) {
+            return;
+          }
+          socketRef.current = null;
           setStatus("ended");
         };
         socketRef.current = socket;
       } catch (err) {
+        if (generation !== generationRef.current) {
+          return;
+        }
         setError(err instanceof ApiError ? err.message : "Could not open the device's logs.");
         setStatus("idle");
       }

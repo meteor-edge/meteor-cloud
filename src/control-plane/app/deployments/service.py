@@ -253,7 +253,12 @@ class DeploymentService:
                         reported_at=software_row.reported_at if software_row else None,
                         endpoint_availability=endpoint_availability.get(row.device_id),
                         previous_desired_release_id=row.previous_desired_release_id,
-                        last_error=row.last_error,
+                        # A crash after install is reported on the software row, not this one.
+                        last_error=(
+                            software_row.last_error
+                            if software_row and software_row.health == "unhealthy" and software_row.last_error
+                            else row.last_error
+                        ),
                         created_at=row.created_at,
                         updated_at=row.updated_at,
                     )

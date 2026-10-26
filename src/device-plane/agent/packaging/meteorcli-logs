@@ -159,7 +159,8 @@ def require_listed(opts: dict) -> None:
             fail("this device has no systemd journal")
         return
     if kind == "file":
-        if not safe_file(name):
+        # Same set as `list` (glob's * stops at "/", fnmatch's does not).
+        if not any(item["name"] == name for item in log_files()):
             fail("not an allowed log file")
         return
     pattern = UNIT if kind == "systemd" else CONTAINER
