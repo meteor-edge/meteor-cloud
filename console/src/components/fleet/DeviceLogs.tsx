@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, Download, Loader2, RefreshCw, ScrollText, Search, Square } from "lucide-react";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import { Download, Loader2, RefreshCw, ScrollText, Search, Square } from "lucide-react";
 
 import { createLogSession, getLogSources } from "@/api/fleet";
 import type { LogSessionRequest, LogSource } from "@/api/fleet/types";
@@ -8,8 +11,7 @@ import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { websocketUrl } from "@/lib/apiBase";
-import { appendLines, buildMatcher, groupSources, sourceKey, sourceLabel } from "@/lib/logSources";
-import { formatDateTime } from "@/lib/utils";
+import { groupSources, sourceKey, sourceLabel } from "@/lib/logSources";
 
 type DeviceLogsProps = {
   token: string;
@@ -21,8 +23,6 @@ type DeviceLogsProps = {
 type Status = "idle" | "connecting" | "streaming" | "ended";
 type Since = LogSessionRequest["since"];
 
-const LINE_HEIGHT = 18;
-const OVERSCAN = 20;
 const LINE_OPTIONS = [100, 500, 2000, 5000];
 const SINCE_OPTIONS: { value: Since; label: string }[] = [
   { value: null, label: "Any time" },
@@ -32,35 +32,14 @@ const SINCE_OPTIONS: { value: Since; label: string }[] = [
   { value: "24h", label: "Last 24 hours" },
   { value: "7d", label: "Last 7 days" },
 ];
-function Highlighted({ line, matcher }: { line: string; matcher: RegExp | null }) {
-  if (!matcher) {
-    return <>{line}</>;
-  }
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  // matchAll starts at matcher.lastIndex, which filtering with .test() leaves moved.
-  for (const match of line.matchAll(new RegExp(matcher.source, matcher.flags))) {
-    if (!match[0]) {
-      break;
-    }
-    const start = match.index ?? 0;
-    parts.push(line.slice(last, start));
-    parts.push(
-      <mark key={start} className="rounded-sm bg-yellow-400/80 text-black">
-        {match[0]}
-      </mark>,
-    );
-    last = start + match[0].length;
-  }
-  parts.push(line.slice(last));
-  return <>{parts}</>;
-}
 
 export function DeviceLogs({ token, organizationId, deviceId, deviceName }: DeviceLogsProps) {
+  // Listed on the device over SSH when asked, so only on open and on Refresh.
   const sourcesQuery = useQuery({
     queryKey: ["log-sources", organizationId, deviceId, token],
     queryFn: () => getLogSources(token, organizationId, deviceId),
-    refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 
   const [selected, setSelected] = useState<LogSource | null>(null);
@@ -70,39 +49,42 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
   const [follow, setFollow] = useState(true);
   const [grepDraft, setGrepDraft] = useState("");
   const [grep, setGrep] = useState("");
-  const [filter, setFilter] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [, setVersion] = useState(0);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewHeight, setViewHeight] = useState(448);
 
-  const bufferRef = useRef<string[]>([]);
-  const partialRef = useRef("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<Terminal | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const viewRef = useRef<HTMLDivElement | null>(null);
-  const frameRef = useRef<number | null>(null);
 
-  const scheduleRender = useCallback(() => {
-    if (frameRef.current !== null) {
+  // A read-only terminal: it keeps container colors, scrollback and scrolling for us.
+  useEffect(() => {
+    if (!containerRef.current) {
       return;
     }
-    frameRef.current = requestAnimationFrame(() => {
-      frameRef.current = null;
-      setVersion((v) => v + 1);
+    const term = new Terminal({
+      convertEol: true,
+      disableStdin: true,
+      cursorStyle: "bar",
+      cursorInactiveStyle: "none",
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
+      fontSize: 12,
+      scrollback: 20_000,
+      theme: { background: "#000000", foreground: "#e5e5e5", selectionBackground: "#3f3f46" },
     });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(containerRef.current);
+    fit.fit();
+    const observer = new ResizeObserver(() => fit.fit());
+    observer.observe(containerRef.current);
+    termRef.current = term;
+    return () => {
+      observer.disconnect();
+      socketRef.current?.close();
+      term.dispose();
+    };
   }, []);
-
-  const append = useCallback(
-    (text: string) => {
-      partialRef.current = appendLines(bufferRef.current, partialRef.current, text);
-      // At most one render per frame, however fast lines arrive.
-      scheduleRender();
-    },
-    [scheduleRender],
-  );
 
   const stop = useCallback(() => {
     const socket = socketRef.current;
@@ -113,13 +95,10 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
   const start = useCallback(
     async (source: LogSource) => {
       stop();
-      bufferRef.current = [];
-      partialRef.current = "";
+      termRef.current?.reset();
       setError(null);
       setNote(null);
-      setAutoScroll(true);
       setStatus("connecting");
-      setVersion((v) => v + 1);
       try {
         const session = await createLogSession(token, organizationId, deviceId, {
           kind: source.kind,
@@ -130,7 +109,6 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
           follow,
         });
         const socket = new WebSocket(websocketUrl(session.websocket_path));
-        const decoder = new TextDecoder();
         socket.binaryType = "arraybuffer";
         socket.onopen = () => {
           // The ticket goes in the first frame, not the URL, so it never reaches access logs.
@@ -148,13 +126,10 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
             }
             return;
           }
-          append(decoder.decode(new Uint8Array(event.data as ArrayBuffer), { stream: true }));
+          termRef.current?.write(new Uint8Array(event.data as ArrayBuffer));
         };
         socket.onerror = () => setError("The connection to the device failed.");
         socket.onclose = () => {
-          if (partialRef.current) {
-            append("\n");
-          }
           if (socketRef.current === socket) {
             socketRef.current = null;
           }
@@ -166,7 +141,7 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
         setStatus("idle");
       }
     },
-    [append, deviceId, follow, grep, lines, organizationId, since, stop, token],
+    [deviceId, follow, grep, lines, organizationId, since, stop, token],
   );
 
   // Changing the source or a device-side option starts a new session.
@@ -177,64 +152,18 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, lines, since, follow, grep]);
 
-  useEffect(
-    () => () => {
-      stop();
-      if (frameRef.current !== null) {
-        cancelAnimationFrame(frameRef.current);
-      }
-    },
-    [stop],
-  );
-
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) {
-      return;
-    }
-    const observer = new ResizeObserver(() => setViewHeight(view.clientHeight || 448));
-    observer.observe(view);
-    return () => observer.disconnect();
-  }, []);
-
-  const matcher = useMemo(() => buildMatcher(filter), [filter]);
-  const buffer = bufferRef.current;
-  const visible = matcher
-    ? buffer.filter((line) => {
-        matcher.lastIndex = 0;
-        return matcher.test(line);
-      })
-    : buffer;
-
-  // Keep the newest line in view while following; scrolling up pauses that.
-  useEffect(() => {
-    const view = viewRef.current;
-    if (view && autoScroll) {
-      view.scrollTop = view.scrollHeight;
-    }
-  });
-
-  function onScroll() {
-    const view = viewRef.current;
-    if (!view) {
-      return;
-    }
-    setScrollTop(view.scrollTop);
-    const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < LINE_HEIGHT * 2;
-    setAutoScroll(atBottom);
-  }
-
-  function jumpToLatest() {
-    setAutoScroll(true);
-    const view = viewRef.current;
-    if (view) {
-      view.scrollTop = view.scrollHeight;
-    }
-  }
-
   function download() {
-    const blob = new Blob([visible.join("\n") + "\n"], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
+    const buffer = termRef.current?.buffer.active;
+    if (!buffer) {
+      return;
+    }
+    const text = Array.from(
+      { length: buffer.length },
+      (_, i) => buffer.getLine(i)?.translateToString(true) ?? "",
+    )
+      .join("\n")
+      .trimEnd();
+    const url = URL.createObjectURL(new Blob([text + "\n"], { type: "text/plain" }));
     const link = document.createElement("a");
     const name = selected ? sourceKey(selected).replace(/[^A-Za-z0-9._-]+/g, "_") : "logs";
     link.href = url;
@@ -242,10 +171,6 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
     link.click();
     URL.revokeObjectURL(url);
   }
-
-  const first = Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - OVERSCAN);
-  const count = Math.ceil(viewHeight / LINE_HEIGHT) + OVERSCAN * 2;
-  const windowed = visible.slice(first, first + count);
 
   const data = sourcesQuery.data;
   const needle = sourceFilter.trim().toLowerCase();
@@ -259,28 +184,33 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
   return (
     <div className="grid gap-4 lg:grid-cols-[16rem_1fr]">
       <div className="space-y-2">
-        <Input
-          value={sourceFilter}
-          onChange={(event) => setSourceFilter(event.target.value)}
-          placeholder="Find a service, container, file…"
-          aria-label="Find a log source"
-        />
+        <div className="flex gap-1">
+          <Input
+            value={sourceFilter}
+            onChange={(event) => setSourceFilter(event.target.value)}
+            placeholder="Find a service, container, file…"
+            aria-label="Find a log source"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void sourcesQuery.refetch()}
+            disabled={sourcesQuery.isFetching}
+            aria-label="Refresh sources"
+            title="Refresh sources"
+          >
+            <RefreshCw className={`h-4 w-4 ${sourcesQuery.isFetching ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
         <div className="max-h-[28rem] space-y-3 overflow-y-auto rounded-md border border-border p-2">
           {sourcesQuery.isLoading && (
-            <p className="text-xs text-muted-foreground">Loading sources…</p>
+            <p className="text-xs text-muted-foreground">Asking the device for its logs…</p>
           )}
           {sourcesQuery.isError && (
             <p className="text-xs text-red-500">
               {sourcesQuery.error instanceof ApiError
                 ? sourcesQuery.error.message
                 : "Could not load log sources."}
-            </p>
-          )}
-          {data && !data.reported_at && (
-            <p className="text-xs text-muted-foreground">
-              This device has not reported any log sources. Update meteorcli and re-run{" "}
-              <code>sudo ./installcli.sh</code> so it installs the <code>meteorcli-logs</code>{" "}
-              helper.
             </p>
           )}
           {groups.map((group) => (
@@ -326,11 +256,6 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
             </div>
           ))}
         </div>
-        {data?.reported_at && (
-          <p className="text-[11px] text-muted-foreground">
-            Sources reported {formatDateTime(data.reported_at)}
-          </p>
-        )}
       </div>
 
       <div className="min-w-0 space-y-2">
@@ -377,22 +302,15 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
             <Input
               value={grepDraft}
               onChange={(event) => setGrepDraft(event.target.value)}
-              placeholder="Search on device"
-              aria-label="Search on device"
+              placeholder="Search"
+              aria-label="Search"
               maxLength={200}
               className="h-8 w-44 text-xs"
             />
-            <Button type="submit" size="sm" variant="outline" aria-label="Search on device">
+            <Button type="submit" size="sm" variant="outline" aria-label="Run search">
               <Search className="h-3.5 w-3.5" />
             </Button>
           </form>
-          <Input
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter shown lines (text or /regex/)"
-            aria-label="Filter lines"
-            className="h-8 w-56 text-xs"
-          />
           <div className="ml-auto flex items-center gap-1">
             {status === "streaming" || status === "connecting" ? (
               <Button type="button" size="sm" variant="outline" onClick={stop}>
@@ -413,7 +331,7 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
               type="button"
               size="sm"
               variant="outline"
-              disabled={!visible.length}
+              disabled={!selected}
               onClick={download}
             >
               <Download className="mr-1 h-3.5 w-3.5" /> Download
@@ -449,32 +367,12 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
                       : "not connected"}
               </span>
             </div>
-            <span className="shrink-0 text-zinc-500">
-              {matcher ? `${visible.length} of ${buffer.length}` : buffer.length} lines
-              {grep.trim() ? ` · matching “${grep.trim()}”` : ""}
-            </span>
+            {grep.trim() && (
+              <span className="shrink-0 text-zinc-500">matching “{grep.trim()}”</span>
+            )}
           </div>
           <div className="relative h-[28rem]">
-            <div
-              ref={viewRef}
-              onScroll={onScroll}
-              className="absolute inset-0 overflow-auto p-2 font-mono text-xs text-zinc-200"
-              data-testid="log-view"
-            >
-              <div style={{ height: visible.length * LINE_HEIGHT, position: "relative" }}>
-                <div style={{ position: "absolute", top: first * LINE_HEIGHT, left: 0, right: 0 }}>
-                  {windowed.map((line, index) => (
-                    <div
-                      key={first + index}
-                      className="whitespace-pre"
-                      style={{ height: LINE_HEIGHT, lineHeight: `${LINE_HEIGHT}px` }}
-                    >
-                      <Highlighted line={line} matcher={matcher} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <div ref={containerRef} className="absolute inset-0 p-2" data-testid="log-view" />
 
             {!selected && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/85 text-center">
@@ -490,15 +388,6 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
               <div className="absolute right-3 top-3 flex items-center gap-1 text-xs text-zinc-400">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Connecting…
               </div>
-            )}
-            {!autoScroll && visible.length > 0 && (
-              <button
-                type="button"
-                onClick={jumpToLatest}
-                className="absolute bottom-3 right-5 flex items-center gap-1 rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-100 shadow hover:bg-zinc-700"
-              >
-                <ArrowDown className="h-3.5 w-3.5" /> Jump to latest
-              </button>
             )}
           </div>
         </div>

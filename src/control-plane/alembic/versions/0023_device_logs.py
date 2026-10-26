@@ -1,8 +1,8 @@
-"""device.logs permission, agent-reported log sources, and log sessions.
+"""device.logs permission and log sessions.
 
-Devices store the log sources their agent reports. Log sessions reuse the shell
-session table (tickets, per-user limits, closing on revoke): ``kind`` is
-``shell`` or ``logs`` and ``params`` holds the validated log source and options.
+Log sessions reuse the shell session table (tickets, per-user limits, closing on
+revoke): ``kind`` is ``shell`` or ``logs`` and ``params`` holds the validated log
+source and options.
 device.logs is read-only, so operators and developers get it too (device.shell
 stays owner/admin only).
 
@@ -30,8 +30,6 @@ ROLES = ("owner", "admin", "operator", "developer")
 
 
 def upgrade() -> None:
-    op.add_column("devices", sa.Column("log_sources", postgresql.JSONB(astext_type=sa.Text()), nullable=True))
-    op.add_column("devices", sa.Column("log_sources_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column(
         "device_shell_sessions",
         sa.Column("kind", sa.String(length=16), nullable=False, server_default="shell"),
@@ -79,5 +77,3 @@ def downgrade() -> None:
     )
     op.drop_column("device_shell_sessions", "params")
     op.drop_column("device_shell_sessions", "kind")
-    op.drop_column("devices", "log_sources_at")
-    op.drop_column("devices", "log_sources")

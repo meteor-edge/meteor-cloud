@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import shlex
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
-from app.connectivity.models import ConnectivityStatus
+from app.connectivity.models import ConnectivityStatus, DeviceConnectivity
 from app.connectivity.service import ConnectivityService, ssh_principal
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
@@ -24,16 +25,19 @@ from app.devices.tokens import generate_shell_ticket, hash_token
 from app.identity.models import User
 from app.ports.shell import DeviceShellProvider, ShellCertificate
 from app.shell.logs import (
+    LIST_COMMAND,
     LogSessionCreateRequest,
-    LogSource,
     LogSourcesResponse,
     deployed_keys,
     log_command,
-    source_key,
+    parse_log_sources,
 )
 from app.shell.models import DeviceShellSession, SessionKind, ShellSessionStatus
 from app.shell.schemas import ShellSessionCreateResponse
 from app.tenancy.models import OrganizationMembership
+
+# Listing log sources is one short command; give up on a device that does not answer.
+LIST_TIMEOUT_SECONDS = 20.0
 
 # The permission that opens (and keeps open) each kind of session.
 _PERMISSION = {SessionKind.SHELL.value: "device.shell", SessionKind.LOGS.value: "device.logs"}
@@ -124,15 +128,58 @@ class ShellService:
         )
 
     def log_sources(self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID) -> LogSourcesResponse:
+        """Ask the device now (``meteorcli-logs list`` over SSH) which log sources it has."""
         device = self._authorized_device(
             actor=actor, organization_id=organization_id, device_id=device_id, kind=SessionKind.LOGS.value
         )
-        workloads = DeviceSoftwareRepository(self.session).list_for_device(device_id=device.id)
-        return LogSourcesResponse(
-            sources=[LogSource.model_validate(item) for item in device.log_sources or []],
-            reported_at=device.log_sources_at,
-            deployed=deployed_keys(workloads),
+        if not device.is_enabled:
+            raise ConflictError("device_disabled", "This device is disabled.")
+        provider = self._require_provider()
+        peer = self.connectivity.require_reachable(device=device)
+        connection = provider.connect(
+            host=self.connectivity.wg_host(peer),
+            port=self.settings.shell_ssh_port,
+            username=self.connectivity.ssh_user_for(peer),
+            host_key=peer.ssh_host_key,
+            certificate=self._certificate(device, peer, key_id=f"logs:list:{actor.email}", command=LIST_COMMAND),
+            command=LIST_COMMAND,
         )
+        output = bytearray()
+        try:
+            deadline = time.monotonic() + LIST_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                output += connection.read()
+                if connection.closed:
+                    output += connection.read()
+                    break
+        finally:
+            failure = connection.failure
+            connection.close()
+        sources = parse_log_sources(bytes(output))
+        if sources is None:
+            raise ConflictError(
+                "log_sources_unavailable",
+                failure or "The device did not list its logs. Is the agent's log helper installed?",
+            )
+        workloads = DeviceSoftwareRepository(self.session).list_for_device(device_id=device.id)
+        return LogSourcesResponse(sources=sources, deployed=deployed_keys(workloads))
+
+    def _certificate(
+        self, device: Device, peer: DeviceConnectivity, *, key_id: str, command: list[str] | None
+    ) -> ShellCertificate | None:
+        """Per-session certificate; with ``command`` the device runs only that command, without a PTY."""
+        if self.connectivity.uses_certificates(peer):
+            return ShellCertificate(
+                principal=ssh_principal(device.id),
+                key_id=key_id,
+                force_command=shlex.join(command) if command else None,
+            )
+        if self.settings.shell_gateway_key_retired:
+            raise ConflictError(
+                "shell_certificate_required",
+                "This device does not trust the SSH certificate authority yet. Update its agent, then retry.",
+            )
+        return None
 
     def create_log_session(
         self,
@@ -162,13 +209,7 @@ class ShellService:
         device = self._authorized_device(actor=actor, organization_id=organization_id, device_id=device_id, kind=kind)
         if not device.is_enabled:
             raise ConflictError("device_disabled", "This device is disabled.")
-        params = None
-        if log_request is not None:
-            # Only a source the agent listed: the device would refuse anything else anyway.
-            reported = {source_key(item["kind"], item["name"]) for item in device.log_sources or []}
-            if source_key(log_request.kind, log_request.name) not in reported:
-                raise NotFoundError("log_source_not_found", "This device has not reported that log source.")
-            params = log_request.model_dump(mode="json")
+        params = log_request.model_dump(mode="json") if log_request is not None else None
         self._require_provider()
         peer = self.connectivity.require_reachable(device=device)
         now = datetime.now(UTC)
@@ -278,20 +319,14 @@ class ShellService:
         command = log_command(row.params or {}) if row.kind == SessionKind.LOGS.value else None
         peer = self.connectivity.require_reachable(device=device)
         host = self.connectivity.wg_host(peer)
-        certificate = None
-        if self.connectivity.uses_certificates(peer):
-            actor = self.session.get(User, row.actor_user_id)
-            certificate = ShellCertificate(
-                principal=ssh_principal(device.id),
-                key_id=f"{row.kind}:{row.id}:{actor.email if actor else row.actor_user_id}",
-                # The certificate itself only runs this command: it cannot open a shell.
-                force_command=shlex.join(command) if command else None,
-            )
-        elif self.settings.shell_gateway_key_retired:
-            raise ConflictError(
-                "shell_certificate_required",
-                "This device does not trust the SSH certificate authority yet. Update its agent, then retry.",
-            )
+        actor = self.session.get(User, row.actor_user_id)
+        # For a log session the certificate itself only runs the command: it cannot open a shell.
+        certificate = self._certificate(
+            device,
+            peer,
+            key_id=f"{row.kind}:{row.id}:{actor.email if actor else row.actor_user_id}",
+            command=command,
+        )
         row.status = ShellSessionStatus.OPEN.value
         row.opened_at = datetime.now(UTC)
         row.closed_at = None

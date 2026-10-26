@@ -21,7 +21,6 @@ from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.config import AgentConfig, AgentPaths, load_config
 from edge_agent.credentials import read_device_token, read_registration_token_file
 from edge_agent.heartbeat import run_loop, send_heartbeat
-from edge_agent.logs import LogSourceCache, add_log_sources
 from edge_agent.registration import register
 from edge_agent.software import reconcile_software
 
@@ -101,8 +100,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
         else None
     )
 
-    log_sources = LogSourceCache()
-
     def _payload() -> dict:
         sync_connectivity(client, device_token, paths.config_path.parent, state=wg_state)
         if mqtt is not None:
@@ -111,7 +108,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
             except Exception:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {"capabilities": collect_capabilities()}
-        add_log_sources(payload, log_sources)
         reports = reconcile_software(client, device_token, artifacts_dir)
         if reports:
             payload["software_report"] = reports

@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DeviceLogs } from "@/components/fleet/DeviceLogs";
-import { MAX_BUFFER_LINES, appendLines, buildMatcher, groupSources } from "@/lib/logSources";
+import { groupSources } from "@/lib/logSources";
 
 vi.mock("@/api/fleet", async () => {
   const actual = await vi.importActual<typeof import("@/api/fleet")>("@/api/fleet");
@@ -61,26 +61,6 @@ describe("log source helpers", () => {
       ["System", [""]],
     ]);
   });
-
-  it("keeps partial lines, strips colors and caps the buffer", () => {
-    const buffer: string[] = [];
-    let rest = appendLines(buffer, "", "one\r\ntw");
-    rest = appendLines(buffer, rest, "o \x1b[31mred\x1b[0m\nthree");
-    expect(buffer).toEqual(["one", "two red"]);
-    expect(rest).toBe("three");
-    const big = Array.from({ length: MAX_BUFFER_LINES + 5 }, (_, i) => `l${i}`).join("\n") + "\n";
-    const capped: string[] = [];
-    appendLines(capped, "", big);
-    expect(capped.length).toBe(MAX_BUFFER_LINES);
-    expect(capped[0]).toBe("l5");
-  });
-
-  it("filters by text or /regex/ and ignores bad patterns", () => {
-    expect(buildMatcher("")).toBeNull();
-    expect(buildMatcher("a.b")?.test("axb")).toBe(false);
-    expect(buildMatcher("/err(or)?/")?.test("ERR")).toBe(true);
-    expect(buildMatcher("/[/")).toBeNull();
-  });
 });
 
 describe("DeviceLogs", () => {
@@ -93,7 +73,6 @@ describe("DeviceLogs", () => {
         { kind: "journal", name: "" },
         { kind: "systemd", name: "nginx.service", state: "active" },
       ],
-      reported_at: "2026-10-26T10:00:00Z",
       deployed: [],
     });
     vi.mocked(createLogSession).mockResolvedValue({
@@ -126,20 +105,30 @@ describe("DeviceLogs", () => {
     expect(socket.sent[0]).toBe(JSON.stringify({ type: "auth", ticket: "sh_secret" }));
 
     act(() => {
-      socket.onmessage?.({
-        data: new TextEncoder().encode("GET / 200\nGET /x 500 error\n").buffer,
-      });
+      socket.onmessage?.({ data: "[end of log]" });
+      socket.onclose?.();
     });
-    await waitFor(() => expect(screen.getByText("GET / 200")).toBeInTheDocument());
+    expect(await screen.findByText("end of log")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Filter lines"), { target: { value: "error" } });
-    await waitFor(() => expect(screen.queryByText("GET / 200")).not.toBeInTheDocument());
-    expect(screen.getByText("error").tagName).toBe("MARK");
+    // A device-side search opens a new session with grep.
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "error" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run search" }));
+    await waitFor(() =>
+      expect(createLogSession).toHaveBeenLastCalledWith(
+        "t",
+        "org-1",
+        "dev-1",
+        expect.objectContaining({ grep: "error" }),
+      ),
+    );
   });
 
-  it("explains how to enable logs when the agent never reported sources", async () => {
-    vi.mocked(getLogSources).mockResolvedValue({ sources: [], reported_at: null, deployed: [] });
+  it("shows why the device could not list its logs", async () => {
+    const { ApiError } = await import("@/api/http");
+    vi.mocked(getLogSources).mockRejectedValue(
+      new ApiError(409, "log_sources_unavailable", "The device did not list its logs."),
+    );
     renderLogs();
-    expect(await screen.findByText(/has not reported any log sources/)).toBeInTheDocument();
+    expect(await screen.findByText("The device did not list its logs.")).toBeInTheDocument();
   });
 });

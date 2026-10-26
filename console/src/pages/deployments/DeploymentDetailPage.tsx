@@ -45,8 +45,8 @@ export function DeploymentDetailPage() {
     queryKey: ["deployment", organizationId, deploymentId, token],
     queryFn: () => getDeployment(token!, organizationId, deploymentId),
     enabled: Boolean(token && organizationId && deploymentId),
-    // Health and URLs keep changing after install finishes, so keep polling (slower).
-    refetchInterval: (query) => (query.state.data?.status === "in_progress" ? 5000 : 15000),
+    // Health and URLs keep changing after install finishes, so keep polling at about the heartbeat rate.
+    refetchInterval: (query) => (query.state.data?.status === "in_progress" ? 5000 : 30000),
     refetchOnWindowFocus: true,
   });
 

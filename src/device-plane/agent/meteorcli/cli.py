@@ -33,9 +33,8 @@ from edge_agent.config import AgentConfig, load_config, save_config
 from edge_agent.credentials import read_device_token, read_registration_token_file
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
-from edge_agent.logs import LogSourceCache, add_log_sources
 from edge_agent.registration import register
-from edge_agent.service import duplicate_run_message, inspect_service
+from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_under_systemd, service_state
 from edge_agent.software import reconcile_software
 from meteorcli import __version__
 from meteorcli.config import (
@@ -275,12 +274,12 @@ def _poll_interval(polled: dict | None, fallback: int) -> int:
 
 
 def _print_run_next_step() -> None:
-    status = inspect_service()
-    if status.active:
-        print(f"Heartbeats are already running as {status.line()}.")
+    state = service_state()
+    if state == "active":
+        print(f"Heartbeats are already running as {UNIT}.")
         print("Follow logs with: journalctl -u meteorcli -f")
         return
-    if status.installed:
+    if state != NOT_INSTALLED:
         print("Next: sudo systemctl start meteorcli    (background)")
         print(f"  or: {PROG} run                       (foreground, Ctrl+C to stop)")
         return
@@ -583,7 +582,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     from edge_agent.wireguard import ConnectivityState, describe_tunnel, sync_connectivity
 
     if not args.once:
-        clash = duplicate_run_message(inspect_service())
+        clash = duplicate_run_message(service_state())
         if clash:
             print(clash, file=sys.stderr)
             return 1
@@ -596,18 +595,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
         else None
     )
 
-    log_sources = LogSourceCache()
+    last_tunnel = {"summary": ""}
 
     def _payload() -> dict:
         sync_connectivity(client, device_token, paths.config_path.parent, state=wg_state)
-        logger.info("%s", describe_tunnel(paths.config_path.parent).summary())
+        # Log the tunnel only when it changes; `meteorcli status` shows it on demand.
+        tunnel = describe_tunnel(paths.config_path.parent).summary()
+        if tunnel != last_tunnel["summary"]:
+            logger.info("%s", tunnel)
+            last_tunnel["summary"] = tunnel
         if mqtt is not None:
             try:
                 mqtt.sync(client, device_token)
             except Exception:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {"capabilities": collect_capabilities()}
-        add_log_sources(payload, log_sources)
         reports = reconcile_software(client, device_token, artifacts_dir)
         if reports:
             payload["software_report"] = reports
@@ -624,13 +626,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 0
 
     interval = args.interval or config.heartbeat_interval_seconds
-    service = inspect_service()
-    if service.this_process:
-        logger.info("Running as %s", service.line())
+    if running_under_systemd():
+        logger.info("Running as %s", UNIT)
     else:
         logger.info("Running in the foreground (Ctrl+C to stop). This is not a background daemon.")
-        logger.info("%s", service.line())
-        if service.installed and not service.active:
+        if service_state() not in (NOT_INSTALLED, "active"):
             logger.info("Background: sudo systemctl enable --now meteorcli")
     logger.info("Heartbeat every %ss", interval)
     try:
@@ -670,7 +670,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
     print(f"Name:           {config.name if config and config.name else '—'}")
     print(f"Heartbeat:      every {config.heartbeat_interval_seconds if config else 60}s")
     print(f"Credential:     {'present' if has_credential else 'MISSING'}")
-    print(f"Service:        {inspect_service().line()}")
+    state = service_state()
+    print(f"Service:        {UNIT} is {state}")
     from edge_agent.mqtt_config import read_mqtt_config
     from edge_agent.wireguard import describe_tunnel
 

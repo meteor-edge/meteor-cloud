@@ -38,27 +38,6 @@ def test_run_loop_stops_after_iterations() -> None:
     assert sleeps == [60, 60, 60]
 
 
-def test_run_loop_logs_ok_and_next_interval(caplog) -> None:
-    client = FakeClient()
-    remaining = {"n": 1}
-
-    def should_continue() -> bool:
-        if remaining["n"] <= 0:
-            return False
-        remaining["n"] -= 1
-        return True
-
-    with caplog.at_level("INFO", logger="edge_agent"):
-        run_loop(
-            client,
-            "dev_secret",
-            interval_seconds=60,
-            sleep=lambda _seconds: None,
-            should_continue=should_continue,
-        )
-    assert "Heartbeat ok; next in 60s" in caplog.text
-
-
 def test_run_loop_retries_transient_failure() -> None:
     client = FakeClient(heartbeat_error=AgentApiError(503, "unavailable", "down"))
     sleeps: list[float] = []

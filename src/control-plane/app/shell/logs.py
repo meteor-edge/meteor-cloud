@@ -1,42 +1,30 @@
-"""Device log sources and the read-only log command run over SSH.
+"""Device log sources and the read-only log commands run over SSH.
 
-The agent reports sources (``meteorcli-logs list`` on the device); the console
-picks one and the control plane builds the command from validated fields only.
-The device-side helper checks everything again before it prints anything.
+The console asks for the sources when the Logs window opens (``meteorcli-logs list``
+on the device), picks one, and the control plane builds the ``show`` command from
+these fields. The device-side helper is the security boundary: it checks the name
+against what it lists right now and enforces its own limits, so only basic shape
+checks are repeated here.
 """
 
 from __future__ import annotations
 
-import re
-from datetime import datetime
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 # Root-owned helper installed by the agent's installcli.sh, behind a sudo rule for the device user.
 LOGS_HELPER = "/usr/local/libexec/meteorcli-logs"
-MAX_SOURCES = 300
-MAX_LINES = 5000
+LIST_COMMAND = ["sudo", "-n", LOGS_HELPER, "list"]
+MAX_LINES = 10000
 MAX_GREP = 200
-SINCE_VALUES = ("15m", "1h", "6h", "24h", "7d")
 
 LogKind = Literal["journal", "systemd", "docker", "file"]
 
-_NAMES = {
-    "systemd": re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:\\-]{0,199}\.service$"),
-    "docker": re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"),
-    "file": re.compile(r"^/var/log/[A-Za-z0-9._/-]{1,200}$"),
-}
 
-
-def _check_name(kind: str, name: str) -> str:
-    if kind == "journal":
-        if name:
-            raise ValueError("journal has no name")
-        return name
-    if not _NAMES[kind].match(name) or "/../" in name or name.endswith("/.."):
-        raise ValueError(f"invalid {kind} name")
-    return name
+def _printable(value: str) -> bool:
+    return not any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
 
 
 class LogSource(BaseModel):
@@ -46,28 +34,26 @@ class LogSource(BaseModel):
     project: str | None = Field(default=None, max_length=64)
     size: int | None = Field(default=None, ge=0)
 
-    @model_validator(mode="after")
-    def _valid_name(self) -> LogSource:
-        _check_name(self.kind, self.name)
-        return self
 
-
-def clean_log_sources(raw: list[Any]) -> list[dict[str, Any]]:
-    """Keep the well-formed sources an agent reported (others are dropped, not fatal)."""
-    sources: list[dict[str, Any]] = []
-    for item in raw[:MAX_SOURCES]:
+def parse_log_sources(output: bytes) -> list[LogSource] | None:
+    """Sources from ``meteorcli-logs list`` output; None when it is not a JSON list."""
+    try:
+        raw = json.loads(output.decode("utf-8", "replace"))
+    except ValueError:
+        return None
+    if not isinstance(raw, list):
+        return None
+    sources: list[LogSource] = []
+    for item in raw:
         try:
-            sources.append(LogSource.model_validate(item).model_dump(exclude_none=True))
+            sources.append(LogSource.model_validate(item))
         except ValidationError:
             continue
     return sources
 
 
 class LogSourcesResponse(BaseModel):
-    """``reported_at`` is None when the agent never reported (too old, or no helper)."""
-
     sources: list[LogSource]
-    reported_at: datetime | None
     deployed: list[str] = Field(
         default_factory=list,
         description="Source keys (kind:name) of workloads deployed by MeteorCloud.",
@@ -84,21 +70,21 @@ class LogSessionCreateRequest(BaseModel):
 
     @field_validator("grep")
     @classmethod
-    def _printable(cls, value: str | None) -> str | None:
+    def _printable_grep(cls, value: str | None) -> str | None:
         if value is None or value == "":
             return None
-        if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        if not _printable(value):
             raise ValueError("grep must be printable text")
         return value
 
     @model_validator(mode="after")
     def _valid_name(self) -> LogSessionCreateRequest:
-        _check_name(self.kind, self.name)
+        if self.kind == "journal":
+            if self.name:
+                raise ValueError("journal has no name")
+        elif not self.name or self.name.startswith("-") or not _printable(self.name):
+            raise ValueError(f"invalid {self.kind} name")
         return self
-
-
-def source_key(kind: str, name: str) -> str:
-    return kind if kind == "journal" else f"{kind}:{name}"
 
 
 def log_command(params: dict[str, Any]) -> list[str]:

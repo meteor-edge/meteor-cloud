@@ -213,8 +213,6 @@ export type LogSource = {
 
 export type LogSources = {
   sources: LogSource[];
-  /** null when the agent never reported (too old, or the meteorcli-logs helper is missing). */
-  reported_at: string | null;
   /** Keys of MeteorCloud workloads: "systemd:<unit>", "docker:<name>", "compose:<project>". */
   deployed: string[];
 };

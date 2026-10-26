@@ -83,7 +83,8 @@ def _health_only(item: dict[str, Any], *, compose_work: Path) -> dict[str, Any] 
     """Report runtime health of an already-applied workload without re-applying it.
 
     A stopped unit or container is reported as in_sync + unhealthy, never re-installed.
-    None only when the runtime itself is missing (a full apply then fails with a clear error).
+    None (so the caller re-applies) when the runtime is missing, or the container or
+    compose project no longer exists (e.g. after ``docker rm``).
     """
     kind = item.get("kind")
     spec = item.get("spec") or {}
@@ -104,16 +105,14 @@ def _health_only(item: dict[str, Any], *, compose_work: Path) -> dict[str, Any] 
             if not docker_available():
                 return None
             container_name = str(spec.get("container_name") or item["workload_key"])
-            health = DockerAdapter().inspect_health(container_name=container_name)
-            return _in_sync_from(item, health, subject=f"container {container_name}")
+            return _in_sync_from(item, DockerAdapter().inspect_health(container_name=container_name))
         if kind == "docker_compose":
             from runtime.compose import ComposeAdapter, compose_available
 
             if not compose_available():
                 return None
             project_name = str(spec.get("project_name") or item["workload_key"])
-            health = ComposeAdapter(work_root=compose_work).inspect_health(project_name=project_name)
-            return _in_sync_from(item, health, subject="compose")
+            return _in_sync_from(item, ComposeAdapter(work_root=compose_work).inspect_health(project_name=project_name))
     except Exception:  # noqa: BLE001 — fall through to full apply
         logger.debug("Health-only check failed for %s; will re-apply", item.get("workload_key"))
     return None
@@ -230,10 +229,12 @@ def _in_sync(item: dict[str, Any], *, healthy: bool | None, error: str | None = 
     }
 
 
-def _in_sync_from(item: dict[str, Any], health: Any, *, subject: str) -> dict[str, Any]:
-    """``_in_sync`` from a runtime ContainerHealth; ``subject`` prefixes its problem."""
+def _in_sync_from(item: dict[str, Any], health: Any) -> dict[str, Any] | None:
+    """``_in_sync`` from a runtime ContainerHealth; None when the workload is missing (re-apply)."""
+    if health.status == "missing":
+        return None
     healthy = None if health.status == "unknown" else health.healthy
-    return _in_sync(item, healthy=healthy, error=health.reason(subject))
+    return _in_sync(item, healthy=healthy, error=health.problem)
 
 
 def _apply_systemd(item: dict[str, Any], unit_file: Path) -> dict[str, Any]:
@@ -276,9 +277,9 @@ def _apply_docker(item: dict[str, Any], tarball: Path | None) -> dict[str, Any]:
         )
         health = adapter.inspect_health(container_name=container_name)
         # Not up after install: the install failed. A HEALTHCHECK still starting is fine (unknown).
-        if health.status == "unhealthy":
-            return _failed(item["workload_key"], f"{health.reason(f'container {container_name}')} after apply.")
-        return _in_sync_from(item, health, subject=f"container {container_name}")
+        if health.status in ("unhealthy", "missing"):
+            return _failed(item["workload_key"], f"{health.problem} after apply.")
+        return _in_sync_from(item, health)
     except DockerError as exc:
         return _failed(item["workload_key"], exc.message)
 
@@ -302,9 +303,9 @@ def _apply_compose(item: dict[str, Any], artifact: Path, work_root: Path) -> dic
             env=dict(spec.get("env") or {}),
         )
         health = adapter.inspect_health(project_name=project_name)
-        if health.status == "unhealthy":
-            return _failed(item["workload_key"], f"{health.reason('compose')} after apply.")
-        return _in_sync_from(item, health, subject="compose")
+        if health.status in ("unhealthy", "missing"):
+            return _failed(item["workload_key"], f"{health.problem} after apply.")
+        return _in_sync_from(item, health)
     except ComposeError as exc:
         return _failed(item["workload_key"], exc.message)
 

@@ -728,15 +728,10 @@ def _enroll(tmp_path, monkeypatch):
 
 
 def test_status_shows_service_and_wireguard(tmp_path, monkeypatch, capsys) -> None:
-    from edge_agent.service import ServiceStatus
     from edge_agent.wireguard import TunnelStatus
 
     config_dir, _client = _enroll(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        meteorcli,
-        "inspect_service",
-        lambda: ServiceStatus(installed=True, active=True, this_process=False, main_pid=42),
-    )
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
     monkeypatch.setattr(
         "edge_agent.wireguard.describe_tunnel",
         lambda _dir: TunnelStatus(
@@ -750,39 +745,29 @@ def test_status_shows_service_and_wireguard(tmp_path, monkeypatch, capsys) -> No
     code = meteorcli.main(["--config-dir", str(config_dir), "status"])
     assert code == 0
     out = capsys.readouterr().out
-    assert "Service:        meteorcli.service is active (pid 42)" in out
+    assert "Service:        meteorcli.service is active" in out
     assert "WireGuard:      WireGuard wg0 up, 10.8.0.12/32, handshake 8s ago" in out
 
 
 def test_run_refuses_when_service_already_active(tmp_path, monkeypatch, capsys) -> None:
-    from edge_agent.service import ServiceStatus
-
     config_dir, _client = _enroll(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        meteorcli,
-        "inspect_service",
-        lambda: ServiceStatus(installed=True, active=True, this_process=False, main_pid=42),
-    )
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
     ran = []
     monkeypatch.setattr(meteorcli, "run_loop", lambda *_a, **_k: ran.append("loop"))
     code = meteorcli.main(["--config-dir", str(config_dir), "run"])
     assert code == 1
     assert ran == []
     err = capsys.readouterr().err
-    assert "already running (pid 42)" in err
+    assert "meteorcli.service is already running" in err
     assert "journalctl -u meteorcli -f" in err
 
 
 def test_run_once_allowed_when_service_active(tmp_path, monkeypatch, capsys) -> None:
-    from edge_agent.service import ServiceStatus
     from edge_agent.wireguard import TunnelStatus
 
     config_dir, _client = _enroll(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        meteorcli,
-        "inspect_service",
-        lambda: ServiceStatus(installed=True, active=True, this_process=False, main_pid=42),
-    )
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
     monkeypatch.setattr("edge_agent.wireguard.sync_connectivity", lambda *_a, **_k: None)
     monkeypatch.setattr(
         "edge_agent.wireguard.describe_tunnel",
@@ -798,14 +783,9 @@ def test_run_once_allowed_when_service_active(tmp_path, monkeypatch, capsys) -> 
 
 
 def test_run_proceeds_when_this_process_is_the_service(tmp_path, monkeypatch) -> None:
-    from edge_agent.service import ServiceStatus
-
     config_dir, _client = _enroll(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        meteorcli,
-        "inspect_service",
-        lambda: ServiceStatus(installed=True, active=True, this_process=True, main_pid=7),
-    )
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
+    monkeypatch.setenv("INVOCATION_ID", "abc123")
     ran: list[str] = []
     monkeypatch.setattr(meteorcli, "run_loop", lambda *_a, **_k: ran.append("loop"))
     monkeypatch.setattr("edge_agent.mqtt_sync.MqttSupervisor", lambda *_a, **_k: None)

@@ -264,14 +264,6 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
 
-    # Agent-reported log sources for the Logs window (journal, systemd, docker, file).
-    # Not in metadata: users edit that, and these decide what the device is asked to print.
-    log_sources: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
-    log_sources_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
     mqtt_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     mqtt_status_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

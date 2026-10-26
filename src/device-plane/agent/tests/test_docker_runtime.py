@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -102,10 +103,8 @@ def test_compose_apply_zip(tmp_path: Path) -> None:
         seen.append(list(args))
         result = MagicMock()
         result.returncode = 0
-        if args[1] == "inspect":
-            result.stdout = "true|running|0|\n"
-        elif "ps" in args:
-            result.stdout = "zipproj-a-1 a\n"
+        if "ps" in args:
+            result.stdout = '{"Name":"zipproj-a-1","Service":"a","State":"running","Health":"","ExitCode":0}\n'
         else:
             result.stdout = ""
         result.stderr = ""
@@ -114,7 +113,7 @@ def test_compose_apply_zip(tmp_path: Path) -> None:
     adapter = ComposeAdapter(runner=runner, work_root=work)
     adapter.apply(project_name="zipproj", artifact=zpath)
     assert (work / "zipproj" / "docker-compose.yml").is_file()
-    assert adapter.health_check(project_name="zipproj") is True
+    assert adapter.inspect_health(project_name="zipproj").healthy
 
 
 def test_compose_zip_missing_file(tmp_path: Path) -> None:
@@ -151,7 +150,7 @@ def _inspect_runner(states: dict[str, str | None], *, ps: str = "", calls: list 
             state = states.get(args[-1])
             result.returncode = 1 if state is None else 0
             result.stdout = state or ""
-        else:  # docker compose -p NAME ps ...
+        else:  # docker compose -p NAME ps -a --format json
             result.returncode = 0
             result.stdout = ps
         return result
@@ -159,15 +158,20 @@ def _inspect_runner(states: dict[str, str | None], *, ps: str = "", calls: list 
     return runner
 
 
+def _ps(*services: dict) -> str:
+    """``docker compose ps --format json`` output, one object per line (Compose >= 2.21)."""
+    return "\n".join(json.dumps(service) for service in services) + "\n"
+
+
 @pytest.mark.parametrize(
     ("inspect", "status", "problem"),
     [
         ("true|running|0|", "healthy", None),
         ("true|running|0|healthy", "healthy", None),
-        ("true|running|0|unhealthy", "unhealthy", "HEALTHCHECK failed"),
-        ("true|running|0|starting", "unknown", "HEALTHCHECK starting"),
-        ("false|exited|1|", "unhealthy", "is not running (exited, exit 1)"),
-        (None, "unhealthy", "not found"),
+        ("true|running|0|unhealthy", "unhealthy", "container web HEALTHCHECK failed"),
+        ("true|running|0|starting", "unknown", "container web HEALTHCHECK starting"),
+        ("false|exited|1|", "unhealthy", "container web is not running (exited, exit 1)"),
+        (None, "missing", "container web not found"),
     ],
 )
 def test_docker_inspect_health(inspect: str | None, status: str, problem: str | None) -> None:
@@ -175,8 +179,7 @@ def test_docker_inspect_health(inspect: str | None, status: str, problem: str | 
     adapter = DockerAdapter(runner=_inspect_runner({"web": inspect}, calls=calls))
     health = adapter.inspect_health(container_name="web")
     assert (health.status, health.problem) == (status, problem)
-    assert adapter.health_check(container_name="web") is (status == "healthy")
-    assert calls[0] == ["docker", "inspect", "-f", INSPECT_HEALTH_TEMPLATE, "web"]
+    assert calls == [["docker", "inspect", "-f", INSPECT_HEALTH_TEMPLATE, "web"]]
 
 
 def test_inspect_template_reads_state_only() -> None:
@@ -192,37 +195,51 @@ def test_docker_health_validates_name(name: str) -> None:
         DockerAdapter(runner=_inspect_runner({})).inspect_health(container_name=name)
 
 
-def test_compose_all_services_running_is_healthy(tmp_path: Path) -> None:
+def test_compose_all_services_running_is_healthy_in_one_call(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
     runner = _inspect_runner(
-        {"shop-web-1": "true|running|0|healthy", "shop-db-1": "true|running|0|"},
-        ps="shop-web-1 web\nshop-db-1 db\n",
+        {},
+        ps=_ps(
+            {"Service": "web", "State": "running", "Health": "healthy", "ExitCode": 0},
+            {"Service": "db", "State": "running", "Health": "", "ExitCode": 0},
+        ),
+        calls=calls,
     )
     health = ComposeAdapter(runner=runner, work_root=tmp_path).inspect_health(project_name="shop")
+    assert health.status == "healthy"
+    assert calls == [["docker", "compose", "-p", "shop", "ps", "-a", "--format", "json"]]
+
+
+def test_compose_ps_json_array_from_older_compose(tmp_path: Path) -> None:
+    ps = json.dumps([{"Service": "web", "State": "running", "Health": "", "ExitCode": 0}])
+    health = ComposeAdapter(runner=_inspect_runner({}, ps=ps), work_root=tmp_path).inspect_health(project_name="shop")
     assert health.status == "healthy"
 
 
 def test_compose_one_service_down_is_unhealthy(tmp_path: Path) -> None:
     runner = _inspect_runner(
-        {"shop-web-1": "false|exited|137|", "shop-sidecar-1": "true|running|0|"},
-        ps="shop-sidecar-1 sidecar\nshop-web-1 web\n",
+        {},
+        ps=_ps(
+            {"Service": "sidecar", "State": "running", "Health": "", "ExitCode": 0},
+            {"Service": "web", "State": "exited", "Health": "", "ExitCode": 137},
+        ),
     )
     health = ComposeAdapter(runner=runner, work_root=tmp_path).inspect_health(project_name="shop")
     assert health.status == "unhealthy"
-    assert health.reason("compose") == "compose service web is not running (exited, exit 137)"
+    assert health.problem == "compose service web is not running (exited, exit 137)"
 
 
 def test_compose_healthcheck_failure_is_unhealthy(tmp_path: Path) -> None:
-    runner = _inspect_runner({"shop-web-1": "true|running|0|unhealthy"}, ps="shop-web-1 web\n")
+    runner = _inspect_runner({}, ps=_ps({"Service": "web", "State": "running", "Health": "unhealthy"}))
     health = ComposeAdapter(runner=runner, work_root=tmp_path).inspect_health(project_name="shop")
-    assert health.reason("compose") == "compose service web HEALTHCHECK failed"
+    assert health.problem == "compose service web HEALTHCHECK failed"
 
 
-def test_compose_without_services_is_unhealthy(tmp_path: Path) -> None:
+def test_compose_without_services_is_missing(tmp_path: Path) -> None:
     adapter = ComposeAdapter(runner=_inspect_runner({}, ps=""), work_root=tmp_path)
     health = adapter.inspect_health(project_name="shop")
-    assert health.status == "unhealthy"
-    assert health.reason("compose") == "compose project shop has no services"
-    assert adapter.health_check(project_name="shop") is False
+    assert health.status == "missing"
+    assert health.problem == "compose project shop has no services"
 
 
 def test_compose_health_validates_project_name(tmp_path: Path) -> None:

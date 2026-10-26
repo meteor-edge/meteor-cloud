@@ -1,4 +1,4 @@
-"""Stage 7b: device logs (reported sources -> log session -> helper over SSH/WireGuard)."""
+"""Stage 7b: device logs (sources listed on demand -> log session -> helper over SSH/WireGuard)."""
 
 from __future__ import annotations
 
@@ -47,17 +47,15 @@ def _journal_marker(ctx, label: str) -> str:
     return marker
 
 
-@check("logs.sources_reported", STAGE, "The agent reports log sources, including the deployed container",
-       needs=("app.container_running",))
+@check("logs.sources_reported", STAGE, "The device lists its log sources, including the deployed container",
+       needs=("app.container_running", "wg.control_plane_reaches_device"))
 def sources_reported(ctx):
-    def reported():
+    def listed():
         body = ctx.admin().call("GET", _sources_path(ctx))
         names = {(s["kind"], s["name"]) for s in body["sources"]}
-        return body if body["reported_at"] and ("docker", CONTAINER) in names else None
+        return body if ("docker", CONTAINER) in names else None
 
-    # The agent re-lists sources every 5 minutes; restart it to list now.
-    ctx.sh(ctx.device(0), "systemctl restart meteorcli")
-    body = wait_for(reported, timeout=180, interval=10, what=f"log sources with docker:{CONTAINER}")
+    body = wait_for(listed, timeout=60, interval=10, what=f"log sources with docker:{CONTAINER}")
     expect(f"docker:{CONTAINER}" in body["deployed"], f"{CONTAINER} is not marked deployed: {body['deployed']}")
     kinds = sorted({s["kind"] for s in body["sources"]})
     expect("journal" in kinds and "systemd" in kinds, f"journal/systemd sources missing: {kinds}")
@@ -123,10 +121,13 @@ def certificate_forced(ctx):
     return {"sshd": line.splitlines()[-1][-240:]}
 
 
-@check("logs.unreported_source_refused", STAGE, "A log session for a source the device did not report is refused",
+@check("logs.unlisted_source_refused", STAGE, "The device's helper refuses a source it does not list",
        needs=("logs.sources_reported",))
-def unreported(ctx):
-    info = ctx.data["devices"][0]
-    body = ctx.admin().call("POST", ctx.org_path(f"/devices/{info['id']}/log-sessions"),
-                            json_body={"kind": "docker", "name": f"not-there-{ctx.run_id}"}, expect=(404,))
-    return {"error": body.get("error", {}).get("code")}
+def unlisted(ctx):
+    _session, ws = _open(ctx, {"kind": "docker", "name": f"not-there-{ctx.run_id}", "follow": False})
+    try:
+        text = _read_all(ws).decode(errors="replace")
+    finally:
+        ws.close()
+    expect("source not found" in text, f"the helper did not refuse the source: {text[-400:]!r}")
+    return {"refused": True}

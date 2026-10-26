@@ -247,7 +247,8 @@ def test_container_exit_after_install_reports_unhealthy_without_reapply(tmp_path
         patch("runtime.docker.DockerAdapter", return_value=adapter),
     ):
         reconcile_software(client, "dev_token", _artifacts(tmp_path))
-        adapter.inspect_health.return_value = ContainerHealth("unhealthy", "is not running (exited, exit 1)")
+        stopped = ContainerHealth("unhealthy", "container app is not running (exited, exit 1)")
+        adapter.inspect_health.return_value = stopped
         second = reconcile_software(client, "dev_token", _artifacts(tmp_path))
 
     adapter.apply.assert_called_once()
@@ -256,11 +257,35 @@ def test_container_exit_after_install_reports_unhealthy_without_reapply(tmp_path
     assert second[0]["last_error"] == "container app is not running (exited, exit 1)"
 
 
+def test_removed_container_after_install_is_reapplied(tmp_path: Path) -> None:
+    client = MagicMock()
+    client.get_software.return_value = [DOCKER_ITEM]
+    adapter = MagicMock()
+    adapter.inspect_health.return_value = ContainerHealth("healthy")
+
+    with (
+        patch("edge_agent.software._report_updating"),
+        patch("runtime.docker.docker_available", return_value=True),
+        patch("runtime.docker.DockerAdapter", return_value=adapter),
+    ):
+        reconcile_software(client, "dev_token", _artifacts(tmp_path))
+        # `docker rm app`: the next check finds nothing, then the re-apply brings it back.
+        adapter.inspect_health.side_effect = [
+            ContainerHealth("missing", "container app not found"),
+            ContainerHealth("healthy"),
+        ]
+        second = reconcile_software(client, "dev_token", _artifacts(tmp_path))
+
+    assert adapter.apply.call_count == 2
+    assert second[0]["sync_status"] == "in_sync"
+    assert second[0]["health"] == "healthy"
+
+
 def test_container_healthcheck_starting_after_apply_is_in_sync_unknown(tmp_path: Path) -> None:
     client = MagicMock()
     client.get_software.return_value = [DOCKER_ITEM]
     adapter = MagicMock()
-    adapter.inspect_health.return_value = ContainerHealth("unknown", "HEALTHCHECK starting")
+    adapter.inspect_health.return_value = ContainerHealth("unknown", "container app HEALTHCHECK starting")
 
     with (
         patch("edge_agent.software._report_updating"),
@@ -277,7 +302,7 @@ def test_container_not_running_after_apply_is_failed(tmp_path: Path) -> None:
     client = MagicMock()
     client.get_software.return_value = [DOCKER_ITEM]
     adapter = MagicMock()
-    adapter.inspect_health.return_value = ContainerHealth("unhealthy", "is not running (exited, exit 2)")
+    adapter.inspect_health.return_value = ContainerHealth("unhealthy", "container app is not running (exited, exit 2)")
 
     with (
         patch("edge_agent.software._report_updating"),

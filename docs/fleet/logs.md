@@ -7,7 +7,7 @@ under `/var/log`, and the whole systemd journal. Nothing is stored in
 MeteorCloud; lines are read from the device when you open a source.
 
 ```text
-agent heartbeat ── log_sources ──▶ control plane ──▶ console source list
+console ── GET log-sources ──▶ ssh -T over WireGuard ──▶ sudo -n meteorcli-logs list
 console ── POST log-sessions ──▶ ticket ──▶ websocket ──▶ ssh -T over WireGuard
         ──▶ sudo -n meteorcli-logs show … ──▶ journalctl / docker logs / tail
 ```
@@ -32,8 +32,9 @@ not belong in the telemetry ingest path.
 
 ## Sources
 
-`meteorcli run` lists sources with `meteorcli-logs list` at start and every
-5 minutes, and sends them with its heartbeat. The console groups them:
+When the Logs window opens, the control plane runs `meteorcli-logs list` on the
+device over the same SSH path, so the list is always current. The console
+groups the sources:
 
 | Group | What |
 | --- | --- |
@@ -48,12 +49,11 @@ not belong in the telemetry ingest path.
 - **Lines / Since**: the last N lines (up to 5000), optionally only from the
   last 15 minutes to 7 days. `Since` does not apply to log files.
 - **Follow**: keep streaming new lines (`journalctl -f`, `docker logs -f`,
-  `tail -F`). Scrolling up pauses auto-scroll; **Jump to latest** resumes it.
-- **Search on device**: a case-insensitive text search done by the helper. It
-  finds the last N matching lines among the most recent 50,000, then (with
+  `tail -F`). The view is a read-only terminal (like the Terminal window), so
+  colors are kept and it keeps the last 20,000 lines.
+- **Search**: a case-insensitive text search done by the helper on the device.
+  It finds the last N matching lines among the most recent 50,000, then (with
   Follow) streams new matching lines.
-- **Filter shown lines**: filters and highlights the lines already in the
-  browser, as plain text or `/regex/`. The browser keeps the last 20,000 lines.
 - **Download** saves the lines shown.
 
 A log session counts toward `SHELL_MAX_SESSIONS_PER_USER` and ends at
@@ -64,9 +64,9 @@ audited (`device.logs.start`, `device.logs.end`, with the source).
 
 ## Security
 
-- The control plane only accepts a source the device reported. It builds the
-  helper's argv from validated fields (kind, name, line count, since, search
-  text) and quotes every argument. The browser never sends a command.
+- The control plane builds the helper's argv from validated fields (kind, name,
+  line count, since, search text) and quotes every argument. The browser never
+  sends a command.
 - With SSH certificates, a log session's certificate carries
   `force-command=<that command>` and no `permit-pty`, so it cannot open a shell.
 - On the device the helper checks everything again before it runs anything:
@@ -104,7 +104,7 @@ lines (`error: …`, `[end of log]`).
 
 | Symptom | Fix |
 | --- | --- |
-| "has not reported any log sources" | Re-run `sudo ./installcli.sh`, restart `meteorcli`, check `meteorcli logs` on the device |
+| `log_sources_unavailable` ("did not list its logs") | Re-run `sudo ./installcli.sh`, check `meteorcli logs` on the device |
 | `sudo: a password is required` in the log view | The SSH user is not the user `installcli.sh` set up the sudo rule for; re-run it with `sudo` as that user |
-| A container or unit is missing | It appears within 5 minutes of being created (the agent's next listing) |
-| `log_source_not_found` | The device stopped reporting that source (removed or renamed); pick it again from the list |
+| A container or unit is missing | Click **Refresh** on the source list; it is listed as soon as it exists |
+| `source not found` in the log view | The source was removed or renamed on the device; refresh the list and pick it again |

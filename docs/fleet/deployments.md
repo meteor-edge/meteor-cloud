@@ -106,10 +106,11 @@ The Deploy detail page shows three things per device, and they are separate:
   in-sync, health healthy and the WireGuard tunnel up.
 
 The legend sums these up, for example `8/10 installed · 7 healthy · 1 URL ready`.
-The page refreshes every 5 s while the Deploy runs and every 15 s after.
+The page refreshes every 5 s while the Deploy runs and every 30 s after.
 
 **Retry failed** is for install failures only. If the software crashes after a
-successful install, the agent does not reinstall it: the device shows
+successful install, the agent does not reinstall it (unless the container or
+compose project was removed entirely): the device shows
 **Unhealthy** with a short error. Open the device page and use **View logs**
 (or the Logs window) to see why it stopped.
 

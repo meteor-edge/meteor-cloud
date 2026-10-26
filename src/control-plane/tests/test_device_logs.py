@@ -1,7 +1,8 @@
-"""Device Logs window: reported sources, device.logs, log sessions over the SSH bridge."""
+"""Device Logs window: sources listed on demand, device.logs, log sessions over the SSH bridge."""
 
 from __future__ import annotations
 
+import json
 import shlex
 import shutil
 import subprocess
@@ -14,15 +15,15 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.ssh_gateway import SshGatewayProvider
+from app.adapters.ssh_gateway import EchoShellConnection, EchoShellProvider, SshGatewayProvider
 from app.audit.models import AuditEvent
 from app.authorization.catalog import SYSTEM_ROLES
 from app.ports.shell import ShellCertificate
-from app.shell.logs import LOGS_HELPER, LogSessionCreateRequest, clean_log_sources, log_command
+from app.shell.logs import LIST_COMMAND, LOGS_HELPER, LogSessionCreateRequest, log_command, parse_log_sources
 from app.shell.models import DeviceShellSession, SessionKind
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_user
-from tests.test_connectivity_endpoints import _device_headers, _report_handshake
+from tests.test_connectivity_endpoints import _report_handshake
 from tests.test_connectivity_hardening import WG_KEY_A, _FakeProcess, _register_wg
 from tests.test_deployments import _register_device, _setup_release
 
@@ -34,46 +35,52 @@ SOURCES = [
 ]
 
 
-def _logs_device(client: TestClient, db_session: Session, *, name: str, mac: str, sources=SOURCES):
+def _logs_device(client: TestClient, db_session: Session, *, name: str, mac: str):
     org, headers, token, _release = _setup_release(client, db_session)
     reg = _register_device(client, token, name=name, mac=mac)
     _register_wg(client, reg["device_token"], WG_KEY_A)
     _report_handshake(client, WG_KEY_A)
-    if sources is not None:
-        response = client.post(
-            "/api/v1/agent/heartbeat",
-            headers=_device_headers(reg["device_token"]),
-            json={"log_sources": sources},
-        )
-        assert response.status_code == 200, response.text
     return org, headers, reg
 
 
-def _reported(body: dict) -> list[dict]:
+def _listed(body: dict) -> list[dict]:
     return [{key: value for key, value in item.items() if value is not None} for item in body["sources"]]
+
+
+@pytest.fixture
+def device_lists(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """The echo provider answers ``meteorcli-logs list`` with SOURCES; records each command."""
+    commands: list[list[str]] = []
+    connect = EchoShellProvider.connect
+
+    def fake_connect(self, **kwargs):
+        commands.append(list(kwargs.get("command") or []))
+        if kwargs.get("command") == LIST_COMMAND:
+            return EchoShellConnection(banner=json.dumps([*SOURCES, {"kind": "shell", "name": "x"}]), closed=True)
+        return connect(self, **kwargs)
+
+    monkeypatch.setattr(EchoShellProvider, "connect", fake_connect)
+    return commands
 
 
 # --- Pure validation ------------------------------------------------------------------
 
 
-def test_reported_sources_are_cleaned() -> None:
-    raw = [
-        *SOURCES,
-        {"kind": "systemd", "name": "nginx.service;reboot"},
-        {"kind": "docker", "name": "--privileged"},
-        {"kind": "file", "name": "/etc/shadow"},
-        {"kind": "file", "name": "/var/log/../../etc/shadow"},
-        {"kind": "journal", "name": "x"},
-        {"kind": "shell", "name": "bash"},
-        "junk",
-    ]
-    assert clean_log_sources(raw) == SOURCES
+def test_listed_sources_are_parsed() -> None:
+    raw = json.dumps([*SOURCES, {"kind": "shell", "name": "bash"}, "junk"]).encode()
+    sources = parse_log_sources(raw)
+    assert sources is not None
+    assert [source.model_dump(exclude_none=True) for source in sources] == SOURCES
+    assert parse_log_sources(b"sudo: a password is required") is None
 
 
 @pytest.mark.parametrize(
     "payload",
     [
         {"kind": "systemd", "name": "-x.service"},
+        {"kind": "docker", "name": ""},
+        {"kind": "docker", "name": "a\nb"},
+        {"kind": "journal", "name": "x"},
         {"kind": "docker", "name": "web", "lines": 0},
         {"kind": "docker", "name": "web", "lines": 100000},
         {"kind": "docker", "name": "web", "since": "yesterday"},
@@ -170,15 +177,23 @@ def test_log_certificate_forces_the_command_and_has_no_pty(tmp_path: Path) -> No
 # --- API ------------------------------------------------------------------------------
 
 
-def test_heartbeat_stores_sources_and_api_lists_them(client: TestClient, db_session: Session) -> None:
+def test_api_lists_sources_from_the_device(
+    client: TestClient, db_session: Session, device_lists: list[list[str]]
+) -> None:
     org, headers, reg = _logs_device(client, db_session, name="pi-logs", mac="aa:bb:cc:dd:03:01")
     url = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/log-sources"
-    body = client.get(url, headers=headers).json()
-    assert _reported(body) == SOURCES
-    assert body["reported_at"] is not None
-    # A heartbeat without log_sources (older agent) leaves the last report alone.
-    client.post("/api/v1/agent/heartbeat", headers=_device_headers(reg["device_token"]), json={})
-    assert _reported(client.get(url, headers=headers).json()) == SOURCES
+    response = client.get(url, headers=headers)
+    assert response.status_code == 200, response.text
+    assert _listed(response.json()) == SOURCES
+    assert device_lists == [LIST_COMMAND]
+
+
+def test_device_without_helper_is_a_clear_error(client: TestClient, db_session: Session) -> None:
+    # The plain echo provider prints the command back, which is not a source list.
+    org, headers, reg = _logs_device(client, db_session, name="pi-nohelper", mac="aa:bb:cc:dd:03:05")
+    response = client.get(f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/log-sources", headers=headers)
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "log_sources_unavailable"
 
 
 def test_log_session_streams_the_helper_command(client: TestClient, db_session: Session) -> None:
@@ -210,17 +225,7 @@ def test_log_session_streams_the_helper_command(client: TestClient, db_session: 
     assert {"device.logs.start", "device.logs.end"} <= actions
 
 
-def test_log_session_refuses_unreported_sources(client: TestClient, db_session: Session) -> None:
-    org, headers, reg = _logs_device(client, db_session, name="pi-unrep", mac="aa:bb:cc:dd:03:03")
-    url = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/log-sessions"
-    response = client.post(url, headers=headers, json={"kind": "docker", "name": "other"})
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "log_source_not_found"
-    response = client.post(url, headers=headers, json={"kind": "file", "name": "/etc/shadow"})
-    assert response.status_code == 422
-
-
-def test_device_logs_permission(client: TestClient, db_session: Session) -> None:
+def test_device_logs_permission(client: TestClient, db_session: Session, device_lists: list[list[str]]) -> None:
     org, _headers, reg = _logs_device(client, db_session, name="pi-perm", mac="aa:bb:cc:dd:03:04")
     base = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}"
     add_member(db_session, org, create_user(db_session, email="viewer-logs@example.com"), OrganizationRole.VIEWER)

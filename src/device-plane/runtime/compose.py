@@ -5,6 +5,7 @@ Uses ``docker compose`` via subprocess. Callers inject ``runner`` in tests.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -12,13 +13,7 @@ import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from runtime.docker import (
-    HEALTHY,
-    UNHEALTHY,
-    UNKNOWN,
-    ContainerHealth,
-    inspect_container_health,
-)
+from runtime.docker import HEALTHY, MISSING, UNHEALTHY, UNKNOWN, ContainerHealth
 
 logger = logging.getLogger("edge_agent.runtime.compose")
 
@@ -67,6 +62,19 @@ def validate_project_name(project_name: str) -> str:
     return name
 
 
+def _parse_ps_json(stdout: str) -> list[dict]:
+    """``docker compose ps --format json``: a JSON array (older Compose) or one object per line."""
+    text = stdout.strip()
+    try:
+        if text.startswith("["):
+            rows = json.loads(text)
+        else:
+            rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+    except json.JSONDecodeError:
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
 class ComposeAdapter:
     """Bring up a Compose project from a YAML file or zip bundle."""
 
@@ -103,34 +111,26 @@ class ComposeAdapter:
         logger.info("Started compose project %s from %s", name, compose_file)
 
     def inspect_health(self, *, project_name: str) -> ContainerHealth:
-        """Every service container running (and passing its HEALTHCHECK, if any).
-
-        ``reason("compose")`` names the first bad service: ``compose service web is not running``.
-        """
+        """Every service container running (and passing its HEALTHCHECK, if any), from one ``ps``."""
         name = validate_project_name(project_name)
         try:
-            result = self._runner(
-                ["docker", "compose", "-p", name, "ps", "-a", "--format", "{{.Name}} {{.Service}}"],
-                check=False,
-            )
+            result = self._runner(["docker", "compose", "-p", name, "ps", "-a", "--format", "json"], check=False)
         except (OSError, subprocess.TimeoutExpired):
-            return ContainerHealth(UNHEALTHY, f"project {name} could not be listed")
-        rows = [line.split() for line in (result.stdout or "").splitlines() if line.strip()]
-        if result.returncode != 0 or not rows:
-            return ContainerHealth(UNHEALTHY, f"project {name} has no services")
+            return ContainerHealth(UNHEALTHY, f"compose project {name} could not be listed")
+        services = _parse_ps_json(result.stdout or "") if result.returncode == 0 else []
+        if not services:
+            return ContainerHealth(MISSING, f"compose project {name} has no services")
         starting = None
-        for row in rows:
-            container, service = row[0], row[1] if len(row) > 1 else row[0]
-            health = inspect_container_health(self._runner, container)
-            if health.status == UNHEALTHY:
-                return ContainerHealth(UNHEALTHY, f"service {service} {health.problem}")
-            if health.status == UNKNOWN and starting is None:
-                starting = ContainerHealth(UNKNOWN, f"service {service} {health.problem}")
+        for service in services:
+            subject = f"compose service {service.get('Service') or service.get('Name')}"
+            if service.get("State") != "running":
+                detail = f"{service.get('State')}, exit {service.get('ExitCode')}"
+                return ContainerHealth(UNHEALTHY, f"{subject} is not running ({detail})")
+            if service.get("Health") == "unhealthy":
+                return ContainerHealth(UNHEALTHY, f"{subject} HEALTHCHECK failed")
+            if service.get("Health") == "starting" and starting is None:
+                starting = ContainerHealth(UNKNOWN, f"{subject} HEALTHCHECK starting")
         return starting or ContainerHealth(HEALTHY)
-
-    def health_check(self, *, project_name: str) -> bool:
-        """True only when every service is running and healthy."""
-        return self.inspect_health(project_name=project_name).healthy
 
     def recover(self, *, project_name: str) -> None:
         self._run(["docker", "compose", "-p", project_name.strip(), "restart"])

@@ -26,11 +26,13 @@ INSPECT_HEALTH_TEMPLATE = (
 HEALTHY = "healthy"
 UNHEALTHY = "unhealthy"
 UNKNOWN = "unknown"
+# The workload is gone (e.g. `docker rm`): the agent re-applies it instead of reporting unhealthy.
+MISSING = "missing"
 
 
 @dataclass(frozen=True)
 class ContainerHealth:
-    """``status`` is healthy, unhealthy or unknown; ``problem`` says why it is not healthy."""
+    """``status`` is healthy, unhealthy, unknown or missing; ``problem`` says why it is not healthy."""
 
     status: str
     problem: str | None = None
@@ -39,28 +41,25 @@ class ContainerHealth:
     def healthy(self) -> bool:
         return self.status == HEALTHY
 
-    def reason(self, subject: str) -> str | None:
-        """e.g. ``container web is not running (exited, exit 1)``."""
-        return f"{subject} {self.problem}" if self.problem else None
-
 
 def inspect_container_health(runner, container_name: str) -> ContainerHealth:
     """Running state plus Docker HEALTHCHECK (when the image defines one), from one ``docker inspect``."""
+    subject = f"container {container_name}"
     try:
         result = runner(["docker", "inspect", "-f", INSPECT_HEALTH_TEMPLATE, container_name], check=False)
     except (OSError, subprocess.TimeoutExpired):
-        return ContainerHealth(UNHEALTHY, "could not be inspected")
+        return ContainerHealth(UNHEALTHY, f"{subject} could not be inspected")
     if result.returncode != 0:
-        return ContainerHealth(UNHEALTHY, "not found")
+        return ContainerHealth(MISSING, f"{subject} not found")
     running, status, exit_code, health = ((result.stdout or "").strip().split("|") + ["", "", "", ""])[:4]
     if running.lower() != "true":
         detail = ", ".join(part for part in (status, f"exit {exit_code}" if exit_code else "") if part)
-        return ContainerHealth(UNHEALTHY, "is not running" + (f" ({detail})" if detail else ""))
+        return ContainerHealth(UNHEALTHY, f"{subject} is not running" + (f" ({detail})" if detail else ""))
     if health == "unhealthy":
-        return ContainerHealth(UNHEALTHY, "HEALTHCHECK failed")
+        return ContainerHealth(UNHEALTHY, f"{subject} HEALTHCHECK failed")
     if health == "starting":
         # Coming up: neither healthy nor failed yet, so the URL does not flap.
-        return ContainerHealth(UNKNOWN, "HEALTHCHECK starting")
+        return ContainerHealth(UNKNOWN, f"{subject} HEALTHCHECK starting")
     return ContainerHealth(HEALTHY)
 
 
@@ -153,10 +152,6 @@ class DockerAdapter:
 
     def inspect_health(self, *, container_name: str) -> ContainerHealth:
         return inspect_container_health(self._runner, validate_container_name(container_name))
-
-    def health_check(self, *, container_name: str) -> bool:
-        """True only when the container is running and its HEALTHCHECK (if any) passes."""
-        return self.inspect_health(container_name=container_name).healthy
 
     def recover(self, *, container_name: str) -> None:
         self._run(["docker", "restart", container_name.strip()])
