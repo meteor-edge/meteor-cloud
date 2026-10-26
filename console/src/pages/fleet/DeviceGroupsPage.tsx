@@ -59,7 +59,7 @@ export function DeviceGroupsPage() {
   const groups = groupsQuery.data ?? [];
 
   return (
-    <section className="mx-auto max-w-4xl space-y-6">
+    <section className="mx-auto max-w-6xl space-y-6">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Device Groups</h1>
         <p className="mt-2 text-muted-foreground">

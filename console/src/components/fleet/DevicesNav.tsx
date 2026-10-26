@@ -11,15 +11,18 @@ export function DevicesNav({ organizationId }: { organizationId: string }) {
   ];
 
   return (
-    <nav className="flex flex-wrap gap-2 border-b border-border pb-3">
+    <nav
+      aria-label="Fleet sections"
+      className="grid w-full grid-cols-1 gap-1 rounded-lg border border-border bg-card p-1.5 shadow-glow sm:grid-cols-3"
+    >
       {tabs.map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}
           className={({ isActive }) =>
             cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground",
-              isActive && "bg-accent text-accent-foreground",
+              "fleet-tab",
+              isActive && "fleet-tab-active",
             )
           }
         >

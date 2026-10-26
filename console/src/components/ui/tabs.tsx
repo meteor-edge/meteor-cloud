@@ -18,11 +18,7 @@ export function Tabs<T extends string>({
   label: string;
 }) {
   return (
-    <div
-      role="tablist"
-      aria-label={label}
-      className="flex flex-wrap gap-2 border-b border-border pb-3"
-    >
+    <div role="tablist" aria-label={label} className="tab-list">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -31,8 +27,8 @@ export function Tabs<T extends string>({
           aria-selected={tab.id === active}
           onClick={() => onChange(tab.id)}
           className={cn(
-            "rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground",
-            tab.id === active && "bg-accent text-accent-foreground",
+            "tab-trigger",
+            tab.id === active && "tab-trigger-active",
           )}
         >
           {tab.label}

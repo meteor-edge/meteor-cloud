@@ -47,4 +47,35 @@
     background: var(--gradient-meteor);
     box-shadow: var(--glow);
   }
+
+  .tab-list {
+    @apply flex w-full items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1.5 shadow-glow;
+  }
+
+  .tab-trigger {
+    @apply inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-transparent px-4 text-sm font-medium text-muted-foreground transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+
+  .tab-trigger-active {
+    @apply border-border bg-accent text-accent-foreground shadow-sm;
+  }
+
+  .tab-trigger:hover:not([aria-selected="true"]),
+  .fleet-tab:hover:not(.fleet-tab-active) {
+    background: var(--tab-hover);
+    color: var(--foreground);
+  }
+
+  .tab-trigger-active:hover,
+  .fleet-tab-active:hover {
+    background: var(--accent);
+  }
+
+  .fleet-tab {
+    @apply inline-flex h-10 w-full items-center justify-center rounded-md border border-transparent px-4 text-sm font-medium text-muted-foreground transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+
+  .fleet-tab-active {
+    @apply border-border bg-accent text-accent-foreground shadow-sm;
+  }
 }

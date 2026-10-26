@@ -54,6 +54,7 @@
   --secondary-foreground: var(--cloud-white);
   --secondary-hover: color-mix(in srgb, var(--horizon) 66%, transparent);
   --accent: color-mix(in srgb, var(--cosmic-blue) 52%, transparent);
+  --tab-hover: color-mix(in srgb, var(--meteor-cyan) 13%, transparent);
   --accent-foreground: var(--cloud-white);
   --link: var(--sky-blue);
   --overlay: color-mix(in srgb, var(--night-sky) 72%, transparent);
@@ -84,6 +85,7 @@
     --secondary-foreground: var(--midnight);
     --secondary-hover: color-mix(in srgb, var(--mist) 82%, transparent);
     --accent: color-mix(in srgb, var(--sky-blue) 74%, transparent);
+    --tab-hover: color-mix(in srgb, var(--sky-blue) 12%, transparent);
     --accent-foreground: var(--cloud-white);
     --link: var(--link-on-light);
   }
@@ -111,6 +113,7 @@
   --secondary-foreground: var(--midnight);
   --secondary-hover: color-mix(in srgb, var(--mist) 82%, transparent);
   --accent: color-mix(in srgb, var(--sky-blue) 74%, transparent);
+  --tab-hover: color-mix(in srgb, var(--sky-blue) 12%, transparent);
   --accent-foreground: var(--cloud-white);
   --link: var(--link-on-light);
 }
