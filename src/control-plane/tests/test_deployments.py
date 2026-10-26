@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.authorization.service import AuthzService
@@ -469,3 +470,31 @@ def test_deploy_detail_shows_endpoint_availability(client: TestClient, db_sessio
     row = detail.json()["devices"][0]
     assert row["endpoint_availability"] == "unknown"
     assert row["health"] == "unknown"
+
+
+def test_deploy_detail_loads_software_rows_in_one_query(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    device_ids = [
+        _register_device(client, token, name=f"edge-batch-{n}", mac=f"aa:bb:cc:dd:ee:5{n}")["device_id"]
+        for n in range(3)
+    ]
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={"release_id": release["id"], "target": {"device_ids": device_ids}},
+    ).json()
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args) -> None:
+        statements.append(statement)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        detail = client.get(f"/api/v1/organizations/{org.id}/deployments/{created['id']}", headers=headers)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert detail.status_code == 200
+    assert len(detail.json()["devices"]) == 3
+    software_selects = [sql for sql in statements if sql.startswith("SELECT") and "FROM device_software" in sql]
+    assert len(software_selects) == 1

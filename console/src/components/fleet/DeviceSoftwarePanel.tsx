@@ -28,14 +28,9 @@ type DeviceSoftwarePanelProps = {
   canDeploy?: boolean;
   /** When false, health is shown as stale: the last report may no longer be true. */
   deviceOnline?: boolean;
-  /** Show a "View logs" jump to the Logs section on the same page (id="device-logs"). */
-  logsAvailable?: boolean;
+  /** When set, unhealthy rows get a "View logs" link that opens the Logs section (id="device-logs"). */
+  onViewLogs?: () => void;
 };
-
-function scrollToLogs(event: React.MouseEvent<HTMLAnchorElement>) {
-  event.preventDefault();
-  document.getElementById("device-logs")?.scrollIntoView({ behavior: "smooth" });
-}
 
 export function DeviceSoftwarePanel({
   token,
@@ -43,7 +38,7 @@ export function DeviceSoftwarePanel({
   deviceId,
   canDeploy = false,
   deviceOnline = true,
-  logsAvailable = false,
+  onViewLogs,
 }: DeviceSoftwarePanelProps) {
   const softwareQuery = useQuery({
     queryKey: ["device-software", organizationId, deviceId, token],
@@ -121,10 +116,13 @@ export function DeviceSoftwarePanel({
               </td>
               <td className="px-4 py-3 text-muted-foreground">
                 {row.last_error || "—"}
-                {logsAvailable && (row.health === "unhealthy" || row.last_error) && (
+                {onViewLogs && (row.health === "unhealthy" || row.last_error) && (
                   <a
                     href="#device-logs"
-                    onClick={scrollToLogs}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onViewLogs();
+                    }}
                     className="ml-2 whitespace-nowrap text-link hover:underline"
                   >
                     View logs

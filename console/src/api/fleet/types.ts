@@ -215,11 +215,17 @@ export type LogSources = {
   sources: LogSource[];
   /** Keys of MeteorCloud workloads: "systemd:<unit>", "docker:<name>", "compose:<project>". */
   deployed: string[];
+  /** When the device last listed its sources (listings are reused for about 30 s). */
+  listed_at: string | null;
+  /** Only deployed workloads are shown; system logs need terminal access. */
+  restricted: boolean;
 };
 
 export type LogSessionRequest = {
   kind: LogSourceKind;
   name: string;
+  /** Compose project of a docker container; the device checks the container belongs to it. */
+  project: string | null;
   lines: number;
   since: "15m" | "1h" | "6h" | "24h" | "7d" | null;
   grep: string | null;

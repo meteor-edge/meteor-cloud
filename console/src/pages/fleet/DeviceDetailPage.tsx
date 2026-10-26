@@ -65,6 +65,8 @@ export function DeviceDetailPage() {
   const [rotatedToken, setRotatedToken] = useState<string | null>(null);
   const [pingResult, setPingResult] = useState<string | null>(null);
   const [pinging, setPinging] = useState(false);
+  // Logs are listed on the device over SSH, so nothing is asked until the user opens them.
+  const [logsOpen, setLogsOpen] = useState(false);
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -261,7 +263,14 @@ export function DeviceDetailPage() {
             deviceId={deviceId}
             canDeploy={canDeploy}
             deviceOnline={device.status === "online"}
-            logsAvailable={canLogs}
+            onViewLogs={
+              canLogs
+                ? () => {
+                    setLogsOpen(true);
+                    document.getElementById("device-logs")?.scrollIntoView({ behavior: "smooth" });
+                  }
+                : undefined
+            }
           />
         )}
       </div>
@@ -312,13 +321,29 @@ export function DeviceDetailPage() {
           id="device-logs"
           className="scroll-mt-6 space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow"
         >
-          <h2 className="text-lg font-semibold">Logs</h2>
-          <DeviceLogs
-            token={token}
-            organizationId={organizationId}
-            deviceId={deviceId}
-            deviceName={device.name}
-          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold">Logs</h2>
+            {logsOpen && (
+              <Button variant="outline" size="sm" onClick={() => setLogsOpen(false)}>
+                Close logs
+              </Button>
+            )}
+          </div>
+          {logsOpen ? (
+            <DeviceLogs
+              token={token}
+              organizationId={organizationId}
+              deviceId={deviceId}
+              deviceName={device.name}
+            />
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                View and search service, container and system logs on this device.
+              </p>
+              <Button onClick={() => setLogsOpen(true)}>Open logs</Button>
+            </div>
+          )}
         </div>
       )}
 

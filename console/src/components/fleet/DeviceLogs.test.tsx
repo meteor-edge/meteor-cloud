@@ -74,6 +74,8 @@ describe("DeviceLogs", () => {
         { kind: "systemd", name: "nginx.service", state: "active" },
       ],
       deployed: [],
+      listed_at: new Date().toISOString(),
+      restricted: false,
     });
     vi.mocked(createLogSession).mockResolvedValue({
       session_id: "s-1",
@@ -89,6 +91,7 @@ describe("DeviceLogs", () => {
     expect(createLogSession).toHaveBeenCalledWith("t", "org-1", "dev-1", {
       kind: "systemd",
       name: "nginx.service",
+      project: null,
       lines: 500,
       since: null,
       grep: null,
@@ -119,6 +122,36 @@ describe("DeviceLogs", () => {
         "org-1",
         "dev-1",
         expect.objectContaining({ grep: "error" }),
+      ),
+    );
+  });
+
+  it("explains a restricted list and sends a container's compose project", async () => {
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.mocked(getLogSources).mockResolvedValue({
+      sources: [{ kind: "docker", name: "shop-web-1", state: "running", project: "shop" }],
+      deployed: ["compose:shop"],
+      listed_at: new Date().toISOString(),
+      restricted: true,
+    });
+    vi.mocked(createLogSession).mockResolvedValue({
+      session_id: "s-2",
+      ticket: "sh_other",
+      websocket_path: "/api/v1/log-sessions/s-2/ws",
+      expires_at: "2026-10-26T10:05:00Z",
+      device_id: "dev-1",
+    });
+    renderLogs();
+
+    expect(await screen.findByText(/System logs need terminal access/)).toBeInTheDocument();
+    expect(screen.getByText(/Listed just now/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /shop-web-1/ }));
+    await waitFor(() =>
+      expect(createLogSession).toHaveBeenLastCalledWith(
+        "t",
+        "org-1",
+        "dev-1",
+        expect.objectContaining({ kind: "docker", name: "shop-web-1", project: "shop" }),
       ),
     );
   });

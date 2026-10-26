@@ -117,7 +117,7 @@ Stored as `resource` + `action` columns; id is derived.
 | `device.delete` | Delete devices | Remove devices. |
 | `device.reboot` | Reboot devices | Send reboot (and similar operate) commands. |
 | `device.shell` | Open device terminal | Open a browser SSH session over WireGuard. |
-| `device.logs` | View device logs | Read service, container and system logs over WireGuard (read-only). |
+| `device.logs` | View device logs | Read logs over WireGuard (read-only). Without `device.shell`, only the logs of workloads MeteorCloud deployed; see [Device logs](../fleet/logs.md#who-sees-which-logs). |
 | `endpoint.read` | View endpoints | List and open public application URLs. |
 | `endpoint.create` | Create endpoints | Register public application hostnames. |
 | `endpoint.update` | Update endpoints | Change or disable public application endpoints. |

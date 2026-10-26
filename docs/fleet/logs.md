@@ -30,11 +30,37 @@ not belong in the telemetry ingest path.
   it; viewers do not. It is separate from `device.shell` (owner/admin only), so
   people can read logs without getting a shell.
 
+### Who sees which logs
+
+| Permissions | Sources |
+| --- | --- |
+| `device.logs` and `device.shell` | Everything below: journal, all services and containers, log files |
+| `device.logs` only (operator, developer) | Only workloads MeteorCloud deployed to the device: their systemd unit, container, or Compose project's containers |
+
+System logs (the journal, `/var/log`, other services and containers) can hold
+sudo command lines, login attempts and secrets that apps print, so they need
+`device.shell`. Anyone with a terminal can read them anyway. The control plane
+enforces this when it lists sources and again when it opens a session
+(`403 log_source_forbidden`, audited as `device.logs.denied`). For a Compose
+container it passes `--project`, and the helper checks that the container's
+Compose label matches before it reads anything.
+
 ## Sources
 
-When the Logs window opens, the control plane runs `meteorcli-logs list` on the
-device over the same SSH path, so the list is always current. The console
-groups the sources:
+Nothing reaches the device until someone clicks **Open logs** on the device
+page. The control plane then runs `meteorcli-logs list` on the device over the
+same SSH path. To keep it cheap:
+
+- A listing is reused for 30 seconds (per API process), so Refresh and reopening
+  the window do not reach the device again. The window shows "Listed … ago".
+- The database transaction ends before the SSH call, so a slow device never
+  holds a pooled database connection.
+- The device's answer is capped at 1 MB.
+- Each listing is audited (`device.logs.list`, with `cached`).
+- A user who may only read deployed workloads, on a device with none, never
+  reaches the device at all.
+
+The console groups the sources:
 
 | Group | What |
 | --- | --- |
@@ -95,7 +121,8 @@ meteorcli logs file:/var/log/nginx/access.log -f
 
 `POST log-sessions` takes `{"kind": "systemd", "name": "nginx.service",
 "lines": 500, "since": "1h", "grep": "error", "follow": true}` (`kind` is
-`journal`, `systemd`, `docker` or `file`; `journal` has no `name`) and returns
+`journal`, `systemd`, `docker` or `file`; `journal` has no `name`; a Compose
+container also sends its `"project"`) and returns
 a ticket like a shell session. Send `{"type": "auth", "ticket": "…"}` as the
 first websocket frame. Binary frames are log output; text frames are status
 lines (`error: …`, `[end of log]`).

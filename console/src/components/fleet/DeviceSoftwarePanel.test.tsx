@@ -18,7 +18,7 @@ import { listDeviceSoftware } from "@/api/fleet";
 
 const listMock = vi.mocked(listDeviceSoftware);
 
-function renderPanel(props: { deviceOnline?: boolean; logsAvailable?: boolean } = {}) {
+function renderPanel(props: { deviceOnline?: boolean; onViewLogs?: () => void } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
@@ -207,18 +207,14 @@ describe("DeviceSoftwarePanel", () => {
         last_error: "container app is not running (exited, exit 1)",
       }),
     ]);
-    const logs = document.createElement("div");
-    logs.id = "device-logs";
-    logs.scrollIntoView = vi.fn();
-    document.body.appendChild(logs);
-    renderPanel({ logsAvailable: true });
+    const onViewLogs = vi.fn();
+    renderPanel({ onViewLogs });
 
     const link = await screen.findByRole("link", { name: "View logs" });
     expect(link).toHaveAttribute("href", "#device-logs");
     fireEvent.click(link);
-    expect(logs.scrollIntoView).toHaveBeenCalled();
+    expect(onViewLogs).toHaveBeenCalledOnce();
     expect(screen.getByText("Unhealthy")).toBeInTheDocument();
-    logs.remove();
   });
 
   it("has no logs link when the user cannot view logs", async () => {

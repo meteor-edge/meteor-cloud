@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 from app.adapters.ssh_gateway import EchoShellConnection, EchoShellProvider, SshGatewayProvider
 from app.audit.models import AuditEvent
 from app.authorization.catalog import SYSTEM_ROLES
+from app.deployments.software_models import DeviceSoftware
 from app.ports.shell import ShellCertificate
+from app.shell import service as shell_service
 from app.shell.logs import LIST_COMMAND, LOGS_HELPER, LogSessionCreateRequest, log_command, parse_log_sources
 from app.shell.models import DeviceShellSession, SessionKind
 from app.tenancy.models import OrganizationRole
@@ -45,6 +47,28 @@ def _logs_device(client: TestClient, db_session: Session, *, name: str, mac: str
 
 def _listed(body: dict) -> list[dict]:
     return [{key: value for key, value in item.items() if value is not None} for item in body["sources"]]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_listings():
+    """Listings are cached per process; start every test without one."""
+    shell_service._listings.clear()
+    yield
+    shell_service._listings.clear()
+
+
+def _deploy(db_session: Session, org, device_id: str) -> None:
+    """MeteorCloud workloads on the device: nginx.service and the compose project ``shop``."""
+    for key, kind, spec in (
+        ("nginx.service", "systemd", {"unit_name": "nginx.service"}),
+        ("shop", "docker_compose", {"project_name": "shop"}),
+    ):
+        db_session.add(
+            DeviceSoftware(
+                organization_id=org.id, device_id=uuid.UUID(device_id), workload_key=key, kind=kind, desired_spec=spec
+            )
+        )
+    db_session.commit()
 
 
 @pytest.fixture
@@ -86,6 +110,8 @@ def test_listed_sources_are_parsed() -> None:
         {"kind": "docker", "name": "web", "since": "yesterday"},
         {"kind": "docker", "name": "web", "grep": "a\nb"},
         {"kind": "docker", "name": "web", "grep": "x" * 201},
+        {"kind": "systemd", "name": "nginx.service", "project": "shop"},
+        {"kind": "docker", "name": "web", "project": "-shop"},
     ],
 )
 def test_bad_log_requests_are_refused(payload: dict) -> None:
@@ -120,6 +146,8 @@ def test_log_command_is_fixed_argv() -> None:
     ]
     assert shlex.split(shlex.join(command)) == command
     assert log_command({"kind": "journal", "follow": False})[3:6] == ["show", "journal", "--lines"]
+    compose = log_command({"kind": "docker", "name": "shop-web-1", "project": "shop", "follow": False})
+    assert compose[3:8] == ["show", "docker", "shop-web-1", "--project", "shop"]
 
 
 def test_system_roles_get_device_logs_but_not_viewer() -> None:
@@ -184,8 +212,54 @@ def test_api_lists_sources_from_the_device(
     url = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/log-sources"
     response = client.get(url, headers=headers)
     assert response.status_code == 200, response.text
-    assert _listed(response.json()) == SOURCES
+    body = response.json()
+    assert _listed(body) == SOURCES
+    assert body["restricted"] is False
+    assert body["listed_at"] is not None
     assert device_lists == [LIST_COMMAND]
+
+
+def test_listing_is_cached_and_audited(client: TestClient, db_session: Session, device_lists: list[list[str]]) -> None:
+    org, headers, reg = _logs_device(client, db_session, name="pi-cache", mac="aa:bb:cc:dd:03:06")
+    url = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/log-sources"
+    first = client.get(url, headers=headers).json()
+    second = client.get(url, headers=headers).json()
+    # Refresh within the cache window does not reach the device again.
+    assert device_lists == [LIST_COMMAND]
+    assert second["listed_at"] == first["listed_at"]
+    events = db_session.scalars(
+        select(AuditEvent).where(AuditEvent.action == "device.logs.list", AuditEvent.resource_id == reg["device_id"])
+    ).all()
+    assert sorted(event.metadata_["cached"] for event in events) == [False, True]
+
+
+def test_listing_ends_the_db_transaction_before_ssh(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org, headers, reg = _logs_device(client, db_session, name="pi-tx", mac="aa:bb:cc:dd:03:07")
+    in_transaction: list[bool] = []
+
+    def fake_connect(self, **kwargs):
+        in_transaction.append(db_session.in_transaction())
+        return EchoShellConnection(banner=json.dumps(SOURCES), closed=True)
+
+    monkeypatch.setattr(EchoShellProvider, "connect", fake_connect)
+    response = client.get(f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/log-sources", headers=headers)
+    assert response.status_code == 200, response.text
+    assert in_transaction == [False]
+
+
+def test_oversized_listing_is_refused(client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    org, headers, reg = _logs_device(client, db_session, name="pi-big", mac="aa:bb:cc:dd:03:08")
+    monkeypatch.setattr(shell_service, "MAX_LIST_OUTPUT", 64)
+    monkeypatch.setattr(
+        EchoShellProvider,
+        "connect",
+        lambda self, **kwargs: EchoShellConnection(banner=json.dumps(SOURCES * 10), closed=True),
+    )
+    response = client.get(f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/log-sources", headers=headers)
+    assert response.status_code == 409
+    assert "too much" in response.json()["error"]["message"]
 
 
 def test_device_without_helper_is_a_clear_error(client: TestClient, db_session: Session) -> None:
@@ -227,6 +301,7 @@ def test_log_session_streams_the_helper_command(client: TestClient, db_session: 
 
 def test_device_logs_permission(client: TestClient, db_session: Session, device_lists: list[list[str]]) -> None:
     org, _headers, reg = _logs_device(client, db_session, name="pi-perm", mac="aa:bb:cc:dd:03:04")
+    _deploy(db_session, org, reg["device_id"])
     base = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}"
     add_member(db_session, org, create_user(db_session, email="viewer-logs@example.com"), OrganizationRole.VIEWER)
     add_member(db_session, org, create_user(db_session, email="op-logs@example.com"), OrganizationRole.OPERATOR)
@@ -236,6 +311,64 @@ def test_device_logs_permission(client: TestClient, db_session: Session, device_
     assert client.get(f"{base}/log-sources", headers=viewer).status_code == 403
     assert client.post(f"{base}/log-sessions", headers=viewer, json={"kind": "journal"}).status_code == 403
     assert client.get(f"{base}/log-sources", headers=operator).status_code == 200
-    assert client.post(f"{base}/log-sessions", headers=operator, json={"kind": "journal"}).status_code == 201
+    assert (
+        client.post(f"{base}/log-sessions", headers=operator, json={"kind": "systemd", "name": "nginx.service"})
+    ).status_code == 201
     # Logs access does not open the terminal.
     assert client.post(f"{base}/shell-sessions", headers=operator).status_code == 403
+
+
+def test_non_shell_users_only_read_deployed_workloads(
+    client: TestClient, db_session: Session, device_lists: list[list[str]]
+) -> None:
+    org, owner, reg = _logs_device(client, db_session, name="pi-least", mac="aa:bb:cc:dd:03:09")
+    _deploy(db_session, org, reg["device_id"])
+    add_member(db_session, org, create_user(db_session, email="dev-logs@example.com"), OrganizationRole.DEVELOPER)
+    developer = auth_header(client, "dev-logs@example.com")
+    base = f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}"
+
+    body = client.get(f"{base}/log-sources", headers=developer).json()
+    assert body["restricted"] is True
+    assert {(item["kind"], item["name"]) for item in body["sources"]} == {
+        ("systemd", "nginx.service"),
+        ("docker", "web"),
+    }
+    # The owner (terminal access) still sees everything.
+    assert client.get(f"{base}/log-sources", headers=owner).json()["restricted"] is False
+
+    for payload in (
+        {"kind": "journal"},
+        {"kind": "file", "name": "/var/log/nginx/access.log"},
+        {"kind": "systemd", "name": "ssh.service"},
+        {"kind": "docker", "name": "web"},  # without its compose project it is not a deployed source
+        {"kind": "docker", "name": "web", "project": "other"},
+    ):
+        response = client.post(f"{base}/log-sessions", headers=developer, json=payload)
+        assert response.status_code == 403, payload
+        assert response.json()["error"]["code"] == "log_source_forbidden"
+
+    created = client.post(
+        f"{base}/log-sessions", headers=developer, json={"kind": "docker", "name": "web", "project": "shop"}
+    )
+    assert created.status_code == 201, created.text
+    row = db_session.get(DeviceShellSession, uuid.UUID(created.json()["session_id"]))
+    assert log_command(row.params)[5:8] == ["web", "--project", "shop"]
+    denied = db_session.scalars(
+        select(AuditEvent).where(AuditEvent.action == "device.logs.denied", AuditEvent.resource_id == reg["device_id"])
+    ).all()
+    assert len(denied) == 5
+
+
+def test_non_shell_user_with_nothing_deployed_does_not_reach_the_device(
+    client: TestClient, db_session: Session, device_lists: list[list[str]]
+) -> None:
+    org, _owner, reg = _logs_device(client, db_session, name="pi-empty", mac="aa:bb:cc:dd:03:0a")
+    add_member(db_session, org, create_user(db_session, email="op-empty@example.com"), OrganizationRole.OPERATOR)
+    response = client.get(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/log-sources",
+        headers=auth_header(client, "op-empty@example.com"),
+    )
+    assert response.status_code == 200
+    assert response.json()["sources"] == []
+    assert response.json()["restricted"] is True
+    assert device_lists == []

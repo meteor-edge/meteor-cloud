@@ -69,6 +69,8 @@ def test_list_reports_journal_loaded_units_and_containers(fake_tools) -> None:
         ["journal", "--grep", "a\nb"],
         ["journal", "--grep", "x" * 201],
         ["journal", "--output", "json"],
+        ["systemd", "nginx.service", "--project", "shop"],
+        ["docker", "web", "--project", "-x"],
     ],
 )
 def test_bad_arguments_are_refused(argv: list[str]) -> None:
@@ -97,6 +99,16 @@ def test_listed_sources_are_accepted(fake_tools) -> None:
     helper.require_listed({"kind": "systemd", "name": "nginx.service"})
     helper.require_listed({"kind": "docker", "name": "web"})
     helper.require_listed({"kind": "journal", "name": ""})
+
+
+def test_project_must_match_the_container_label(fake_tools) -> None:
+    assert helper.parse_show(["docker", "web", "--project", "shop"])["project"] == "shop"
+    helper.require_listed({"kind": "docker", "name": "web", "project": "shop"})
+    with pytest.raises(SystemExit):
+        helper.require_listed({"kind": "docker", "name": "web", "project": "other"})
+    # db is not part of any compose project.
+    with pytest.raises(SystemExit):
+        helper.require_listed({"kind": "docker", "name": "db", "project": "shop"})
 
 
 def test_symlinked_log_file_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,6 +179,7 @@ def test_parse_show_reads_options() -> None:
     assert opts == {
         "kind": "docker",
         "name": "web",
+        "project": None,
         "lines": 500,
         "since": "7d",
         "grep": "Error",

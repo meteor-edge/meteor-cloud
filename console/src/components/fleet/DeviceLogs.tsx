@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { websocketUrl } from "@/lib/apiBase";
 import { groupSources, sourceKey, sourceLabel } from "@/lib/logSources";
+import { formatRelativeTime } from "@/lib/utils";
 
 type DeviceLogsProps = {
   token: string;
@@ -34,10 +35,12 @@ const SINCE_OPTIONS: { value: Since; label: string }[] = [
 ];
 
 export function DeviceLogs({ token, organizationId, deviceId, deviceName }: DeviceLogsProps) {
-  // Listed on the device over SSH when asked, so only on open and on Refresh.
+  // Listed on the device over SSH, so only when this window is opened and on Refresh.
+  // The token is left out of the key so a token refresh does not list again.
   const sourcesQuery = useQuery({
-    queryKey: ["log-sources", organizationId, deviceId, token],
+    queryKey: ["log-sources", organizationId, deviceId],
     queryFn: () => getLogSources(token, organizationId, deviceId),
+    staleTime: 30_000,
     refetchOnWindowFocus: false,
     retry: false,
   });
@@ -109,6 +112,7 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
         const session = await createLogSession(token, organizationId, deviceId, {
           kind: source.kind,
           name: source.name,
+          project: source.kind === "docker" ? (source.project ?? null) : null,
           lines,
           since,
           grep: grep.trim() || null,
@@ -231,6 +235,14 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
           {sourcesQuery.isLoading && (
             <p className="text-xs text-muted-foreground">Asking the device for its logs…</p>
           )}
+          {data?.restricted && (
+            <p className="text-xs text-muted-foreground">
+              Showing logs of software deployed by MeteorCloud. System logs need terminal access.
+            </p>
+          )}
+          {data && data.sources.length === 0 && (
+            <p className="text-xs text-muted-foreground">No logs to show on this device.</p>
+          )}
           {sourcesQuery.isError && (
             <p className="text-xs text-red-500">
               {sourcesQuery.error instanceof ApiError
@@ -281,6 +293,11 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
             </div>
           ))}
         </div>
+        {data?.listed_at && (
+          <p className="px-1 text-[11px] text-muted-foreground">
+            Listed {formatRelativeTime(data.listed_at)}
+          </p>
+        )}
       </div>
 
       <div className="min-w-0 space-y-2">

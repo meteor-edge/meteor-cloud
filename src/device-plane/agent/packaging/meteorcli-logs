@@ -9,8 +9,11 @@ wraps it on the device. Every source must be one `list` reports right now; nothi
 from the caller reaches a shell, and file paths are limited to a fixed allowlist.
 
   meteorcli-logs list
-  meteorcli-logs show journal|systemd UNIT|docker CONTAINER|file PATH
+  meteorcli-logs show journal|systemd UNIT|docker CONTAINER [--project NAME]|file PATH
                  [--lines N] [--since 15m|1h|24h|7d] [--grep TEXT] [--follow]
+
+--project makes a container count only if it belongs to that compose project, so the
+control plane can let users read a deployed project's containers and nothing else.
 """
 
 from __future__ import annotations
@@ -123,7 +126,15 @@ def list_sources() -> list[dict]:
 def parse_show(argv: list[str]) -> dict:
     if not argv or argv[0] not in KINDS:
         fail("unknown source kind")
-    opts: dict = {"kind": argv[0], "name": "", "lines": 200, "since": None, "grep": None, "follow": False}
+    opts: dict = {
+        "kind": argv[0],
+        "name": "",
+        "project": None,
+        "lines": 200,
+        "since": None,
+        "grep": None,
+        "follow": False,
+    }
     rest = argv[1:]
     if opts["kind"] != "journal":
         if not rest or rest[0].startswith("-"):
@@ -134,13 +145,17 @@ def parse_show(argv: list[str]) -> dict:
         if flag == "--follow":
             opts["follow"] = True
             continue
-        if flag not in ("--lines", "--since", "--grep") or not rest:
+        if flag not in ("--lines", "--since", "--grep", "--project") or not rest:
             fail(f"unsupported option {flag}")
         value, rest = rest[0], rest[1:]
         if flag == "--lines":
             if not value.isdigit() or not 0 < int(value) <= MAX_LINES:
                 fail(f"--lines must be 1..{MAX_LINES}")
             opts["lines"] = int(value)
+        elif flag == "--project":
+            if opts["kind"] != "docker" or not CONTAINER.match(value):
+                fail("--project needs a docker container and a compose project name")
+            opts["project"] = value
         elif flag == "--since":
             if not SINCE.match(value):
                 fail("--since must look like 15m, 1h or 7d")
@@ -167,8 +182,11 @@ def require_listed(opts: dict) -> None:
     if not pattern.match(name):
         fail(f"invalid {kind} name")
     found = systemd_units() if kind == "systemd" else docker_containers()
-    if not any(item["name"] == name for item in found):
+    item = next((item for item in found if item["name"] == name), None)
+    if item is None:
         fail(f"{kind} source not found: {name}")
+    if opts.get("project") is not None and item.get("project") != opts["project"]:
+        fail(f"container {name} is not part of compose project {opts['project']}")
 
 
 def command(opts: dict, *, lines: int, follow: bool) -> list[str]:

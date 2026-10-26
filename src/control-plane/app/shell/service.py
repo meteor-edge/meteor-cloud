@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hmac
 import shlex
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -27,8 +29,10 @@ from app.ports.shell import DeviceShellProvider, ShellCertificate
 from app.shell.logs import (
     LIST_COMMAND,
     LogSessionCreateRequest,
+    LogSource,
     LogSourcesResponse,
     deployed_keys,
+    is_deployed_source,
     log_command,
     parse_log_sources,
 )
@@ -38,9 +42,44 @@ from app.tenancy.models import OrganizationMembership
 
 # Listing log sources is one short command; give up on a device that does not answer.
 LIST_TIMEOUT_SECONDS = 20.0
+# The real list is at most 300 small entries; a device that sends more is cut off.
+MAX_LIST_OUTPUT = 1024 * 1024
+# A device is listed over SSH at most once per this many seconds (per API process);
+# Refresh and reopening the window within it reuse the last listing.
+LIST_CACHE_SECONDS = 30.0
+LIST_CACHE_MAX_DEVICES = 1000
 
 # The permission that opens (and keeps open) each kind of session.
 _PERMISSION = {SessionKind.SHELL.value: "device.shell", SessionKind.LOGS.value: "device.logs"}
+
+
+@dataclass(frozen=True)
+class _Listing:
+    sources: list[LogSource]
+    listed_at: datetime
+    expires: float
+
+
+_listings: OrderedDict[uuid.UUID, _Listing] = OrderedDict()
+_listings_lock = threading.Lock()
+
+
+def _cached_listing(device_id: uuid.UUID) -> _Listing | None:
+    with _listings_lock:
+        listing = _listings.get(device_id)
+        if listing is None or listing.expires <= time.monotonic():
+            return None
+        return listing
+
+
+def _remember_listing(device_id: uuid.UUID, sources: list[LogSource]) -> _Listing:
+    listing = _Listing(sources=sources, listed_at=datetime.now(UTC), expires=time.monotonic() + LIST_CACHE_SECONDS)
+    with _listings_lock:
+        _listings[device_id] = listing
+        _listings.move_to_end(device_id)
+        while len(_listings) > LIST_CACHE_MAX_DEVICES:
+            _listings.popitem(last=False)
+    return listing
 
 
 def _new_ticket() -> tuple[str, str]:
@@ -117,8 +156,15 @@ class ShellService:
                 resource_id=device_id,
                 metadata={"reason": "permission"},
             )
+            self.session.commit()
             raise
         return device
+
+    def _reads_all_logs(self, *, actor: User, organization_id: uuid.UUID, device: Device) -> bool:
+        """Terminal users can read any log anyway; everyone else only sees deployed workloads."""
+        membership = self._require_membership(organization_id, actor.id)
+        shell = _PERMISSION[SessionKind.SHELL.value]
+        return self.authz.check(membership, shell, device_group_id=device.device_group_id)
 
     def create_session(
         self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID
@@ -128,41 +174,86 @@ class ShellService:
         )
 
     def log_sources(self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID) -> LogSourcesResponse:
-        """Ask the device now (``meteorcli-logs list`` over SSH) which log sources it has."""
+        """Ask the device (``meteorcli-logs list`` over SSH) which log sources it has.
+
+        Listings are reused for LIST_CACHE_SECONDS, and the database transaction is
+        ended before the SSH call so a slow device never holds a pooled connection.
+        """
         device = self._authorized_device(
             actor=actor, organization_id=organization_id, device_id=device_id, kind=SessionKind.LOGS.value
         )
         if not device.is_enabled:
             raise ConflictError("device_disabled", "This device is disabled.")
-        provider = self._require_provider()
-        peer = self.connectivity.require_reachable(device=device)
-        connection = provider.connect(
-            host=self.connectivity.wg_host(peer),
-            port=self.settings.shell_ssh_port,
-            username=self.connectivity.ssh_user_for(peer),
-            host_key=peer.ssh_host_key,
-            certificate=self._certificate(device, peer, key_id=f"logs:list:{actor.email}", command=LIST_COMMAND),
-            command=LIST_COMMAND,
+        restricted = not self._reads_all_logs(actor=actor, organization_id=organization_id, device=device)
+        workloads = DeviceSoftwareRepository(self.session).list_for_device(device_id=device.id)
+        deployed = deployed_keys(workloads)
+        if restricted and not deployed:
+            # Nothing this user may read, so do not contact the device.
+            self.session.rollback()
+            return LogSourcesResponse(sources=[], deployed=[], restricted=True)
+        listing = _cached_listing(device.id)
+        connect_args: dict | None = None
+        if listing is None:
+            provider = self._require_provider()
+            peer = self.connectivity.require_reachable(device=device)
+            connect_args = {
+                "host": self.connectivity.wg_host(peer),
+                "port": self.settings.shell_ssh_port,
+                "username": self.connectivity.ssh_user_for(peer),
+                "host_key": peer.ssh_host_key,
+                "certificate": self._certificate(device, peer, key_id=f"logs:list:{actor.email}", command=LIST_COMMAND),
+                "command": LIST_COMMAND,
+            }
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.logs.list",
+            resource_type="device",
+            resource_id=device.id,
+            metadata={"cached": listing is not None},
         )
+        # Release the pooled connection before talking to the device.
+        self.session.commit()
+        if listing is None:
+            listing = _remember_listing(device_id, self._list_on_device(provider, connect_args))
+        sources = listing.sources
+        if restricted:
+            allowed = set(deployed)
+            sources = [
+                source
+                for source in sources
+                if is_deployed_source(kind=source.kind, name=source.name, project=source.project, deployed=allowed)
+            ]
+        return LogSourcesResponse(
+            sources=sources, deployed=deployed, listed_at=listing.listed_at, restricted=restricted
+        )
+
+    @staticmethod
+    def _list_on_device(provider: DeviceShellProvider, connect_args: dict) -> list[LogSource]:
+        connection = provider.connect(**connect_args)
         output = bytearray()
+        too_much = False
         try:
             deadline = time.monotonic() + LIST_TIMEOUT_SECONDS
-            while time.monotonic() < deadline:
+            while time.monotonic() < deadline and not too_much:
                 output += connection.read()
                 if connection.closed:
                     output += connection.read()
                     break
+                too_much = len(output) > MAX_LIST_OUTPUT
+            too_much = too_much or len(output) > MAX_LIST_OUTPUT
         finally:
             failure = connection.failure
             connection.close()
+        if too_much:
+            raise ConflictError("log_sources_unavailable", "The device sent too much data when listing its logs.")
         sources = parse_log_sources(bytes(output))
         if sources is None:
             raise ConflictError(
                 "log_sources_unavailable",
                 failure or "The device did not list its logs. Is the agent's log helper installed?",
             )
-        workloads = DeviceSoftwareRepository(self.session).list_for_device(device_id=device.id)
-        return LogSourcesResponse(sources=sources, deployed=deployed_keys(workloads))
+        return sources
 
     def _certificate(
         self, device: Device, peer: DeviceConnectivity, *, key_id: str, command: list[str] | None
@@ -209,6 +300,10 @@ class ShellService:
         device = self._authorized_device(actor=actor, organization_id=organization_id, device_id=device_id, kind=kind)
         if not device.is_enabled:
             raise ConflictError("device_disabled", "This device is disabled.")
+        if log_request is not None:
+            self._require_readable_source(
+                actor=actor, organization_id=organization_id, device=device, request=log_request
+            )
         params = log_request.model_dump(mode="json") if log_request is not None else None
         self._require_provider()
         peer = self.connectivity.require_reachable(device=device)
@@ -280,6 +375,28 @@ class ShellService:
             websocket_path=f"/api/v1/{'log' if kind == SessionKind.LOGS.value else 'shell'}-sessions/{row.id}/ws",
             expires_at=row.ticket_expires_at,
             device_id=device_id,
+        )
+
+    def _require_readable_source(
+        self, *, actor: User, organization_id: uuid.UUID, device: Device, request: LogSessionCreateRequest
+    ) -> None:
+        if self._reads_all_logs(actor=actor, organization_id=organization_id, device=device):
+            return
+        deployed = set(deployed_keys(DeviceSoftwareRepository(self.session).list_for_device(device_id=device.id)))
+        if is_deployed_source(kind=request.kind, name=request.name, project=request.project, deployed=deployed):
+            return
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.logs.denied",
+            resource_type="device",
+            resource_id=device.id,
+            metadata={"reason": "source", "kind": request.kind, "name": request.name},
+        )
+        self.session.commit()
+        raise ForbiddenError(
+            "log_source_forbidden",
+            "You can only read the logs of software deployed by MeteorCloud. System logs need terminal access.",
         )
 
     def consume_ticket(self, *, session_id: uuid.UUID, ticket: str, kind: str = SessionKind.SHELL.value) -> ShellTarget:

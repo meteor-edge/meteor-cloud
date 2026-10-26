@@ -234,13 +234,16 @@ class DeploymentService:
                     select(ApplicationEndpoint).where(ApplicationEndpoint.deployment_id == deployment.id)
                 )
             }
+            software_rows = (
+                self.software_rows.by_device_for_workload(
+                    device_ids=[row.device_id for row in rows], workload_key=workload_key
+                )
+                if workload_key is not None
+                else {}
+            )
             devices_payload = []
             for row in rows:
-                software_row = (
-                    self.software_rows.get_by_workload(device_id=row.device_id, workload_key=workload_key)
-                    if workload_key is not None
-                    else None
-                )
+                software_row = software_rows.get(row.device_id)
                 devices_payload.append(
                     DeploymentDeviceResponse(
                         id=row.id,
