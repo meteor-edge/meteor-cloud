@@ -16,6 +16,7 @@ from edge_agent.wireguard import (
     _elevate_wireguard,
     _try_chmod,
     apply_interface,
+    describe_tunnel,
     ensure_keypair,
     install_gateway_ssh_key,
     local_ssh_host_key,
@@ -506,3 +507,73 @@ def test_refresh_endpoint_follows_gateway_dns_change() -> None:
         runner=runner, resolve=failing, now=lambda: 10_000.0,
     )
     assert not any(call[:2] == ["wg", "set"] for call in calls)
+
+
+def _write_wg0(config_dir: Path) -> None:
+    (config_dir / "wireguard").mkdir(parents=True, exist_ok=True)
+    write_client_config(
+        config_dir / "wireguard",
+        private_key="DEVICEPRIVATE",
+        address="10.8.0.12/32",
+        server_public_key="SERVERPUBLIC",
+        server_endpoint="gw.example:51820",
+    )
+
+
+def test_describe_tunnel_tools_missing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("edge_agent.wireguard.wireguard_available", lambda: False)
+    status = describe_tunnel(tmp_path)
+    assert status.summary() == "WireGuard tools not installed"
+
+
+def test_describe_tunnel_not_configured(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("edge_agent.wireguard.wireguard_available", lambda: True)
+    assert describe_tunnel(tmp_path).summary() == "WireGuard not configured"
+
+
+def test_describe_tunnel_down(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("edge_agent.wireguard.wireguard_available", lambda: True)
+    _write_wg0(tmp_path)
+
+    def runner(args, **kwargs):
+        del kwargs
+        raise subprocess.CalledProcessError(1, list(args))
+
+    status = describe_tunnel(tmp_path, runner=runner)
+    assert "DEVICEPRIVATE" not in status.summary()
+    assert status.summary() == "WireGuard wg0 down (10.8.0.12/32)"
+
+
+def test_describe_tunnel_up_waiting_for_handshake(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("edge_agent.wireguard.wireguard_available", lambda: True)
+    _write_wg0(tmp_path)
+
+    def runner(args, **kwargs):
+        del kwargs
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "SERVERPUBLIC\t0\n" if args[-1] == "latest-handshakes" else ""
+        return result
+
+    status = describe_tunnel(tmp_path, runner=runner)
+    assert status.up is True
+    assert status.handshake_age_seconds is None
+    assert status.summary() == "WireGuard wg0 up, 10.8.0.12/32, waiting for handshake"
+    assert "DEVICEPRIVATE" not in status.summary()
+
+
+def test_describe_tunnel_up_with_handshake_age(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("edge_agent.wireguard.wireguard_available", lambda: True)
+    _write_wg0(tmp_path)
+
+    def runner(args, **kwargs):
+        del kwargs
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "SERVERPUBLIC\t1000\n" if args[-1] == "latest-handshakes" else ""
+        return result
+
+    status = describe_tunnel(tmp_path, runner=runner, now=lambda: 1012)
+    assert status.handshake_age_seconds == 12
+    assert status.summary() == "WireGuard wg0 up, 10.8.0.12/32, handshake 12s ago"
+    assert "DEVICEPRIVATE" not in status.summary()

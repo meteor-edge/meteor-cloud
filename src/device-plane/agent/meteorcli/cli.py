@@ -7,7 +7,7 @@ Subcommands
   register   Register this device with a registration token (path 1).
   request-token  Ask the API for a device token; wait briefly for admin approval.
   claim          Collect the device token after a later approval.
-  run        Heartbeats, MQTT, and apply desired software (systemd/docker/compose).
+  run        Foreground heartbeats, MQTT, WireGuard (refuses if meteorcli.service is already active).
   mqtt-test    Publish one TLS MQTT message (default: devices/{id}/status).
   mqtt-listen  Print inbound commands (default: devices/{id}/commands).
   status       Show persisted (non-secret) configuration.
@@ -33,6 +33,7 @@ from edge_agent.credentials import read_device_token, read_registration_token_fi
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
 from edge_agent.registration import register
+from edge_agent.service import duplicate_run_message, inspect_service
 from edge_agent.software import reconcile_software
 from meteorcli import __version__
 from meteorcli.config import (
@@ -196,7 +197,7 @@ def _cmd_register(args: argparse.Namespace) -> int:
     print(f"Heartbeat:      every {result.heartbeat_interval_seconds}s")
     print(f"Credential:     stored at {paths.token_path}")
     print()
-    print(f"Next: start sending heartbeats with '{PROG} run'.")
+    _print_run_next_step()
     chown_config_dir(paths.config_path.parent)
     return 0
 
@@ -271,12 +272,26 @@ def _poll_interval(polled: dict | None, fallback: int) -> int:
     return max(MIN_POLL_INTERVAL_SECONDS, suggested, 1)
 
 
+def _print_run_next_step() -> None:
+    status = inspect_service()
+    if status.active:
+        print(f"Heartbeats are already running as {status.line()}.")
+        print("Follow logs with: journalctl -u meteorcli -f")
+        return
+    if status.installed:
+        print("Next: sudo systemctl start meteorcli    (background)")
+        print(f"  or: {PROG} run                       (foreground, Ctrl+C to stop)")
+        return
+    print(f"Next: {PROG} run    (foreground; Ctrl+C to stop)")
+    print("      Install a background service with: sudo ./installcli.sh --with-service")
+
+
 def _print_claimed(paths: CliPaths, polled: dict) -> None:
     print(f"Registered device {polled['device_id']}")
     print(f"Name:           {polled.get('name')}")
     print(f"Credential:     stored at {paths.token_path}")
     print()
-    print(f"Next: start sending heartbeats with '{PROG} run'.")
+    _print_run_next_step()
 
 
 def _print_pending_hint(request_id: str) -> None:
@@ -563,7 +578,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     artifacts_dir = paths.config_path.parent / "artifacts"
 
     from edge_agent.mqtt_sync import MqttSupervisor
-    from edge_agent.wireguard import ConnectivityState, sync_connectivity
+    from edge_agent.wireguard import ConnectivityState, describe_tunnel, sync_connectivity
+
+    if not args.once:
+        clash = duplicate_run_message(inspect_service())
+        if clash:
+            print(clash, file=sys.stderr)
+            return 1
 
     # One schedule per run loop; --once registers every time.
     wg_state = None if args.once else ConnectivityState()
@@ -575,6 +596,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     def _payload() -> dict:
         sync_connectivity(client, device_token, paths.config_path.parent, state=wg_state)
+        logger.info("%s", describe_tunnel(paths.config_path.parent).summary())
         if mqtt is not None:
             try:
                 mqtt.sync(client, device_token)
@@ -593,10 +615,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"error: heartbeat failed: {error.message}", file=sys.stderr)
             return 1
         print(f"Heartbeat ok; status: {response.get('status', 'unknown')}")
+        print(describe_tunnel(paths.config_path.parent).summary())
         return 0
 
     interval = args.interval or config.heartbeat_interval_seconds
-    logger.info("Starting heartbeat loop every %ss", interval)
+    service = inspect_service()
+    if service.this_process:
+        logger.info("Running as %s", service.line())
+    else:
+        logger.info("Running in the foreground (Ctrl+C to stop). This is not a background daemon.")
+        logger.info("%s", service.line())
+        if service.installed and not service.active:
+            logger.info("Background: sudo systemctl enable --now meteorcli")
+    logger.info("Heartbeat every %ss", interval)
     try:
         # MQTT starts (and later restarts with refreshed settings) from _payload on each heartbeat.
         run_loop(
@@ -634,10 +665,13 @@ def _cmd_status(args: argparse.Namespace) -> int:
     print(f"Name:           {config.name if config and config.name else '—'}")
     print(f"Heartbeat:      every {config.heartbeat_interval_seconds if config else 60}s")
     print(f"Credential:     {'present' if has_credential else 'MISSING'}")
+    print(f"Service:        {inspect_service().line()}")
     from edge_agent.mqtt_config import read_mqtt_config
+    from edge_agent.wireguard import describe_tunnel
 
     mqtt_ok = read_mqtt_config(paths.config_path.parent) is not None
     print(f"MQTT:           {'configured' if mqtt_ok else 'not configured'}")
+    print(f"WireGuard:      {describe_tunnel(paths.config_path.parent).summary()}")
     pending = _load_pending_claim(paths)
     if pending is not None:
         print(f"Pending claim:  {pending['request_id']} (run '{PROG} claim')")
@@ -948,7 +982,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser(
         "run",
         help="Send heartbeats to the control plane.",
-        description="Send periodic heartbeats so the device reports as online.",
+        description=(
+            "Foreground loop: heartbeats, MQTT, and WireGuard. Stays in this terminal "
+            "(Ctrl+C to stop). If meteorcli.service is already active, this command "
+            "exits so you do not run two agents. --once still runs one pass."
+        ),
     )
     run_parser.add_argument("--once", action="store_true", help="Send a single heartbeat and exit.")
     run_parser.add_argument(

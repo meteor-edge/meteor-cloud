@@ -85,9 +85,16 @@ heartbeat does not immediately flip a device offline.
 ## Reference agent
 
 ```bash
-meteorcli run          # loop using the advertised interval
+sudo systemctl enable --now meteorcli   # background (installcli.sh --with-service)
+journalctl -u meteorcli -f
+meteorcli run          # foreground loop; Ctrl+C to stop
 meteorcli run --once   # single heartbeat
 ```
+
+`meteorcli run` stays in the terminal and logs each heartbeat plus WireGuard
+status. It is not a background daemon. If `meteorcli.service` is already
+running, `meteorcli run` exits so heartbeats, MQTT, and WireGuard are not
+duplicated (`--once` is still allowed).
 
 The loop uses bounded exponential backoff on transient failures and stops if the
 credential is rejected so the device can be re-registered.

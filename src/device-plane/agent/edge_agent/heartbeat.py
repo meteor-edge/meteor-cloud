@@ -56,6 +56,7 @@ def run_loop(
         try:
             send_heartbeat(client, device_token, payload)
             backoff = _INITIAL_BACKOFF
+            logger.info("Heartbeat ok; next in %ss", interval_seconds)
             sleep(interval_seconds)
         except AgentApiError as error:
             if _fatal(error):

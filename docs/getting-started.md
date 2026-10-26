@@ -50,7 +50,8 @@ Pick one path.
 curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
 # from a cloud checkout instead: cd src/device-plane/agent && ./installcli.sh
 meteorcli register --server http://localhost:8000 --token reg_... --name edge-01
-meteorcli run
+sudo systemctl enable --now meteorcli   # if installed with --with-service
+# or: meteorcli run                     # foreground; Ctrl+C to stop
 ```
 
 Details: [Registration tokens](fleet/registration-tokens.md), [Device registration](fleet/device-registration.md).
@@ -68,7 +69,8 @@ meteorcli request-token --name edge-01
 ```
 
 3. Approve the pending request in the console.
-4. If the CLI timed out waiting, run `meteorcli claim`, then `meteorcli run`.
+4. If the CLI timed out waiting, run `meteorcli claim`, then start the agent
+   (`sudo systemctl enable --now meteorcli` or `meteorcli run`).
 
 Details: [Enrollment API keys](fleet/enrollment-api-keys.md), [Device-initiated enrollment](fleet/device-request-enrollment.md), [meteorcli](meteorcli.md).
 

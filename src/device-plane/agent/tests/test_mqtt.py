@@ -372,6 +372,12 @@ def test_meteorcli_run_syncs_mqtt_each_heartbeat_and_stops_it(agent_paths, monke
     monkeypatch.setattr("meteorcli.cli.collect_capabilities", lambda: {})
     monkeypatch.setattr("meteorcli.cli.run_loop", two_beats)
     monkeypatch.setattr("meteorcli.cli.EdgeClient", lambda _url: object())
+    from edge_agent.service import ServiceStatus
+
+    monkeypatch.setattr(
+        "meteorcli.cli.inspect_service",
+        lambda: ServiceStatus(installed=False, active=False, this_process=False),
+    )
     args = argparse.Namespace(
         config_dir=str(agent_paths.config_path.parent),
         once=False,

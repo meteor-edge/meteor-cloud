@@ -82,8 +82,8 @@ meteorcli --version
 | `register`       | Enroll with a one-time registration token (admin-initiated).         |
 | `request-token`  | Request a device token to connect this machine to the API.           |
 | `claim`          | Collect the device token after a later approval.                     |
-| `run`            | Heartbeats, MQTT, download desired artifacts, apply systemd units. |
-| `status`         | Show persisted, non-secret configuration.                            |
+| `run`            | Foreground heartbeats, MQTT, WireGuard (refuses if `meteorcli.service` is already active). |
+| `status`         | Show persisted, non-secret configuration, systemd, and WireGuard.    |
 
 Environment variables: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`,
 `METEORCLI_TOKEN`, `METEORCLI_CONFIG_DIR` (default: `~/.config/meteorcli`, or
@@ -148,10 +148,20 @@ Use `meteorcli run` after the token is stored.
 
 ## Send heartbeats
 
+`meteorcli run` is a foreground loop (heartbeats, MQTT, WireGuard). It stays in
+the terminal until Ctrl+C. It is not a background daemon.
+
 ```bash
-meteorcli run
-meteorcli run --once
+sudo systemctl enable --now meteorcli   # background; requires --with-service
+journalctl -u meteorcli -f
+meteorcli status
+meteorcli run                           # foreground; refused if the service is already active
+meteorcli run --once                    # one pass (allowed even if the service is running)
 ```
+
+If `meteorcli.service` is already running, a second `meteorcli run` would
+duplicate the agent. Stop it first (`sudo systemctl stop meteorcli`) when you
+need a foreground session.
 
 ## Testing
 
