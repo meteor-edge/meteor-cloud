@@ -10,6 +10,7 @@ import {
   type Release,
 } from "@/api/fleet";
 import { ApiError } from "@/api/http";
+import { AppAddressPicker } from "@/components/fleet/AppAddressPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseYamlObject } from "@/lib/yaml";
@@ -46,12 +47,13 @@ export function DeployWizard({
   const [mode, setMode] = useState<"wizard" | "yaml">("wizard");
   const [step, setStep] = useState(1);
   const [releaseId, setReleaseId] = useState(initialReleaseId ?? "");
-  const [deviceIds, setDeviceIds] = useState<string[]>(
-    initialDeviceId ? [initialDeviceId] : [],
-  );
+  const [deviceIds, setDeviceIds] = useState<string[]>(initialDeviceId ? [initialDeviceId] : []);
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [batchSize, setBatchSize] = useState("");
+  const [publish, setPublish] = useState(false);
+  const [endpointHostname, setEndpointHostname] = useState<string | null>(null);
+  const [endpointPort, setEndpointPort] = useState("");
   const [yamlText, setYamlText] = useState(
     [
       "release_id: ",
@@ -115,9 +117,9 @@ export function DeployWizard({
   function buildPayload(): DeploymentCreatePayload {
     const size = batchSize.trim() ? Number(batchSize) : null;
     const rollout =
-      size && size > 0
-        ? { strategy: "batched", batch_size: size }
-        : { strategy: "immediate" };
+      size && size > 0 ? { strategy: "batched", batch_size: size } : { strategy: "immediate" };
+    const port = endpointPort.trim() ? Number(endpointPort) : null;
+    const singleDevice = deviceIds.length === 1 && groupIds.length === 0;
     return {
       release_id: releaseId,
       name: name.trim() || null,
@@ -126,6 +128,10 @@ export function DeployWizard({
         group_ids: groupIds,
       },
       rollout,
+      endpoint:
+        singleDevice && publish && endpointHostname && port
+          ? { hostname: endpointHostname, port, protocol: "http" }
+          : null,
     };
   }
 
@@ -151,6 +157,16 @@ export function DeployWizard({
       setError("Select at least one device or group.");
       return;
     }
+    if (publish && deviceIds.length === 1 && groupIds.length === 0) {
+      if (!endpointPort.trim()) {
+        setError("Enter the port the app listens on.");
+        return;
+      }
+      if (!endpointHostname) {
+        setError("Choose an available public address.");
+        return;
+      }
+    }
     await submitPayload(buildPayload());
   }
 
@@ -163,9 +179,7 @@ export function DeployWizard({
         release_id: String(raw.release_id ?? ""),
         name: raw.name == null ? null : String(raw.name),
         target: {
-          device_ids: Array.isArray(target.device_ids)
-            ? target.device_ids.map(String)
-            : [],
+          device_ids: Array.isArray(target.device_ids) ? target.device_ids.map(String) : [],
           group_ids: Array.isArray(target.group_ids) ? target.group_ids.map(String) : [],
           device_type_ids: Array.isArray(target.device_type_ids)
             ? target.device_type_ids.map(String)
@@ -173,10 +187,8 @@ export function DeployWizard({
         },
         rollout: {
           strategy: String(rolloutRaw.strategy ?? "immediate"),
-          batch_size:
-            rolloutRaw.batch_size == null ? null : Number(rolloutRaw.batch_size),
-          delay_seconds:
-            rolloutRaw.delay_seconds == null ? null : Number(rolloutRaw.delay_seconds),
+          batch_size: rolloutRaw.batch_size == null ? null : Number(rolloutRaw.batch_size),
+          delay_seconds: rolloutRaw.delay_seconds == null ? null : Number(rolloutRaw.delay_seconds),
         },
       };
       if (!payload.release_id) {
@@ -203,8 +215,7 @@ export function DeployWizard({
               Deploy release
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Choose a release and targets. Devices pick up desired software on the next
-              heartbeat.
+              Choose a release and targets. Devices pick up desired software on the next heartbeat.
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={onClose}>
@@ -274,8 +285,7 @@ export function DeployWizard({
                   <option value="">Select a release…</option>
                   {releases.map((release) => (
                     <option key={release.id} value={release.id}>
-                      {release.name} {release.version} (
-                      {KIND_LABELS[release.kind] ?? release.kind})
+                      {release.name} {release.version} ({KIND_LABELS[release.kind] ?? release.kind})
                     </option>
                   ))}
                 </select>
@@ -379,17 +389,50 @@ export function DeployWizard({
                     onChange={(event) => setBatchSize(event.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Leave empty to deploy to every target immediately. Set a number to
-                    activate that many devices at a time.
+                    Leave empty to deploy to every target immediately. Set a number to activate that
+                    many devices at a time.
                   </p>
                 </div>
+                {deviceIds.length === 1 && groupIds.length === 0 && (
+                  <div className="space-y-2 rounded-md border border-border p-3">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        checked={publish}
+                        onChange={(event) => setPublish(event.target.checked)}
+                      />
+                      Publish on the internet
+                    </label>
+                    {publish && (
+                      <>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          placeholder="Port the app listens on (80, 8080, …)"
+                          value={endpointPort}
+                          onChange={(event) => setEndpointPort(event.target.value)}
+                        />
+                        <AppAddressPicker
+                          token={token}
+                          organizationId={organizationId}
+                          deviceId={deviceIds[0]}
+                          appName={selectedRelease?.name ?? "app"}
+                          onChange={setEndpointHostname}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          The address goes live once the app is healthy on the device.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
                 {skippedDevices.length > 0 && (
                   <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
                     {skippedDevices.length} selected device
                     {skippedDevices.length === 1 ? "" : "s"} reported no{" "}
-                    {selectedRelease ? KIND_CAPABILITY[selectedRelease.kind] : "runtime"}{" "}
-                    support and will be skipped:{" "}
-                    {skippedDevices.map((d) => d.name).join(", ")}.
+                    {selectedRelease ? KIND_CAPABILITY[selectedRelease.kind] : "runtime"} support
+                    and will be skipped: {skippedDevices.map((d) => d.name).join(", ")}.
                   </p>
                 )}
                 {error && <p className="text-sm text-destructive">{error}</p>}

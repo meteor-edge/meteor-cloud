@@ -4,11 +4,17 @@ Learn and operate MeteorCloud — from first boot to production. Website: [meteo
 
 ## Start here
 
-| Step | Doc |
-| --- | --- |
-| 1. Run the stack locally | [Getting started](getting-started.md) |
-| 2. Understand the three planes | [Concepts](concepts.md) |
-| 3. Enroll a device with `meteorcli` | [Getting started → First device](getting-started.md#enroll-a-device) |
+| Goal | Command | Doc |
+| --- | --- | --- |
+| Test or develop on your **laptop** | `make dev` | [Getting started](getting-started.md) |
+| **Production** on a VM you already have | `make up` on that host | [Install quickstart](install-quickstart.md) |
+| **Production**: create a new AWS EC2 | `make aws-up` from a laptop | [AWS deployment](aws-deployment.md) |
+| **Production**: existing Kubernetes cluster | Helm | [Kubernetes](kubernetes.md) |
+| Understand the three planes | — | [Concepts](concepts.md) · [Architecture](architecture.md) |
+| Contribute or run an AI agent | — | [CONTRIBUTING.md](../CONTRIBUTING.md) · [AGENTS.md](../AGENTS.md) |
+| Enroll a device with `meteorcli` | — | [Getting started → First device](getting-started.md#enroll-a-device) |
+
+`make dev` is Compose on localhost (hot reload, seed user). `make up` is Ansible + production Compose on the server (Traefik, generated secrets, optional WireGuard). Do not mix them.
 
 ## Guides
 
@@ -26,6 +32,8 @@ How to use the product day to day.
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) |
+| Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
+| Public app URLs | [Endpoints](fleet/endpoints.md) |
 | Operator console | [Console](console.md) |
 
 ## Reference
@@ -43,16 +51,17 @@ Commands and APIs you look up while working.
 
 | Path | Doc |
 | --- | --- |
-| Local / contributor setup | [Development](development.md) |
-| Compose + Ansible (VM, EC2, on-prem) | [Deployment](deployment.md) |
+| Local testing / contributor setup (`make dev`) | [Getting started](getting-started.md) · [Development](development.md) |
+| Production on a VM (`make up`) | [Install quickstart](install-quickstart.md) · [Deployment](deployment.md) |
 | Kubernetes (existing cluster) | [Kubernetes](kubernetes.md) |
-| AWS EC2 quick install | [Install quickstart](install-quickstart.md) |
+| DNS records to create (domain, apps, WireGuard) | [DNS records](dns.md) |
 | `installation.yaml` | [Installer configuration](installer-configuration.md) |
 | Modular services (`cloud_app`, `vpn`) | [Services](services.md) |
-| AWS prerequisites & deploy | [Prerequisites](aws-prerequisites.md) · [AWS deployment](aws-deployment.md) |
+| Production: new AWS EC2 (`make aws-up`) | [Prerequisites](aws-prerequisites.md) · [AWS deployment](aws-deployment.md) |
 | Upgrades · destroy · logs | [Upgrades](upgrades.md) · [Destroy](destroy.md) · [Observability](observability.md) |
 | When something breaks | [Troubleshooting](troubleshooting.md) |
 | EC2 smoke test (CI) | [AWS CI](aws-ci.md) |
+| Full-stack E2E (one command, CI) | [E2E](e2e.md) |
 
 ## Related code docs
 

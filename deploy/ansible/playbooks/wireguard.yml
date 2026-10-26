@@ -1,0 +1,18 @@
+---
+# Set up and run only the WireGuard device gateway, on AWS or on-prem, wherever
+# the control plane runs. See README.md ("WireGuard gateway").
+#   ansible-playbook -i inventory/<name>/hosts.yml playbooks/wireguard.yml
+- name: Deploy WireGuard gateway
+  import_playbook: services/vpn.yml
+
+- name: Write control-plane settings for the gateway
+  hosts: vpn_gateway:platform
+  gather_facts: false
+  roles:
+    - meteorcloud
+  tasks:
+    - name: Write hand-off files
+      ansible.builtin.include_role:
+        name: vpn
+        tasks_from: handoff
+      when: inventory_hostname in vpn_gateway_hosts

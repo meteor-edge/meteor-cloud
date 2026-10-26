@@ -31,7 +31,7 @@ infrastructure/
 | Service | Terraform module | Ansible playbook | Description |
 |---------|------------------|------------------|-------------|
 | `cloud_app` | `aws/modules/cloud_app` | `deploy/ansible/playbooks/services/cloud_app.yml` | MeteorCloud via Docker Compose (Traefik, API, console, PostgreSQL; optional Redis, MQTT) |
-| `vpn` | `aws/modules/vpn` | `deploy/ansible/playbooks/services/vpn.yml` | WireGuard VPN on the same EC2 host |
+| `vpn` | `aws/modules/cloud_app` (`extra_ingress`) or `aws/modules/vpn_gateway` | `deploy/ansible/playbooks/services/vpn.yml` | WireGuard VPN on the same EC2 host or a dedicated gateway |
 
 Enable or disable services in `installation.yaml` under `services:`. The installer
 passes `enabled_services` to Terraform and Ansible. See [Modular services](../docs/services.md).
@@ -39,9 +39,9 @@ passes `enabled_services` to Terraform and Ansible. See [Modular services](../do
 ## How it is run
 
 ```bash
-make up      # edge-installer apply: Terraform + Ansible for enabled services
-make plan    # preview
-make down    # destroy
+make aws-up    # edge-installer apply: Terraform + Ansible for enabled services
+make plan      # preview
+make aws-down  # destroy
 ```
 
 The installer copies `terraform/aws` (with its modules and lock file) into

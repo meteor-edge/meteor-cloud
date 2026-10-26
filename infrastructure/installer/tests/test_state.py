@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from edge_installer.config.loader import load_configuration
+from edge_installer.deployment.dns import dns_records
 from edge_installer.deployment.inventory import write_inventory
 from edge_installer.exceptions import InstallationLockedError
 from edge_installer.providers.aws.outputs import TerraformOutputs
@@ -86,3 +87,40 @@ def test_inventory_generation(tmp_path: Path) -> None:
     assert "ansible_host=1.2.3.4" in content
     assert "ansible_user=ubuntu" in content
     assert content.startswith("[platform]\nedge ")
+
+
+def test_inventory_adds_dedicated_vpn_gateway(tmp_path: Path) -> None:
+    config = load_configuration(EXAMPLE)
+    assert config.aws is not None
+    config.aws.ssh_private_key_path = str(tmp_path / "key.pem")
+    outputs = TerraformOutputs(
+        public_ip="1.2.3.4",
+        region="eu-central-1",
+        vpn_gateway_public_ip="5.6.7.8",
+        vpn_gateway_private_ip="10.0.0.9",
+    )
+    inventory = tmp_path / "inventory.ini"
+    write_inventory(path=inventory, outputs=outputs, config=config)
+    content = inventory.read_text(encoding="utf-8")
+
+    assert "[vpn_gateway]\nvpn-gateway ansible_host=5.6.7.8 vpn_public_host=5.6.7.8 " in content
+    assert content.count("ansible_ssh_private_key_file=") == 2
+
+
+def test_inventory_and_dns_records_use_wg_name_with_a_domain(tmp_path: Path) -> None:
+    config = load_configuration(EXAMPLE)
+    assert config.aws is not None
+    config.aws.ssh_private_key_path = str(tmp_path / "key.pem")
+    config.platform.domain = "meteor-edge.com"
+    config.services.vpn.enabled = True
+    outputs = TerraformOutputs(public_ip="1.2.3.4", region="eu-central-1",
+                               vpn_gateway_public_ip="5.6.7.8", vpn_gateway_private_ip="10.0.0.9")
+    inventory = tmp_path / "inventory.ini"
+    write_inventory(path=inventory, outputs=outputs, config=config)
+
+    assert "vpn-gateway ansible_host=5.6.7.8 vpn_public_host=wg.meteor-edge.com " in inventory.read_text()
+    assert dns_records(config, outputs) == [
+        ("meteor-edge.com", "1.2.3.4", "console, API (/api), MQTT (TCP 8883)"),
+        ("*.meteor-edge.com", "1.2.3.4", "public app URLs"),
+        ("wg.meteor-edge.com", "5.6.7.8", "WireGuard: devices connect here (UDP 51820)"),
+    ]

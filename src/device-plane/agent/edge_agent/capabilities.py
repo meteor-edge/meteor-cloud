@@ -11,8 +11,12 @@ def collect_capabilities() -> dict[str, Any]:
     from runtime.docker import docker_available
     from runtime.systemd import systemd_available
 
+    from edge_agent.wireguard import sshd_available, wireguard_available
+
     return {
         "systemd": systemd_available(),
         "docker": docker_available(),
         "docker_compose": compose_available(),
+        "wireguard": wireguard_available(),
+        "ssh": sshd_available(),
     }

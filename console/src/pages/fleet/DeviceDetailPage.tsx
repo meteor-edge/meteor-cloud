@@ -13,17 +13,27 @@ import {
   setDeviceEnabled,
   updateDevice,
 } from "@/api/fleet";
+import { getMyAccess } from "@/api/access";
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
+import { DeviceEndpointsPanel } from "@/components/fleet/DeviceEndpointsPanel";
+import { DeviceMqttStatus } from "@/components/fleet/DeviceMqttStatus";
+import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
+import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { StatusBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { canManageDeployments, canManageFleet } from "@/lib/permissions";
+import {
+  canManageDeployments,
+  canManageEndpoints,
+  canManageFleet,
+  canOpenDeviceShell,
+} from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 function Detail({ label, value }: { label: string; value: string | null | undefined }) {
@@ -63,6 +73,14 @@ export function DeviceDetailPage() {
     queryKey: ["device", organizationId, deviceId, token],
     queryFn: () => getDevice(token!, organizationId, deviceId),
     enabled: Boolean(token && organizationId && deviceId),
+    // Keeps the MQTT status current, like the WireGuard panel.
+    refetchInterval: 15_000,
+  });
+  const accessQuery = useQuery({
+    queryKey: ["my-access", token],
+    queryFn: () => getMyAccess(token!),
+    enabled: Boolean(token),
+    retry: false,
   });
   const typesQuery = useQuery({
     queryKey: ["device-types", organizationId, token],
@@ -77,6 +95,14 @@ export function DeviceDetailPage() {
 
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
   const canDeploy = canManageDeployments(orgQuery.data?.current_user_role);
+  const canEndpoints = canManageEndpoints(orgQuery.data?.current_user_role);
+  // Effective permissions cover custom roles; the role check is the fallback.
+  const orgAccess = accessQuery.data?.organizations.find(
+    (entry) => entry.organization_id === organizationId,
+  );
+  const canShell = orgAccess
+    ? orgAccess.permissions.includes("device.shell")
+    : canOpenDeviceShell(orgQuery.data?.current_user_role);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
@@ -234,15 +260,49 @@ export function DeviceDetailPage() {
       </div>
 
       <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
-        <h2 className="text-lg font-semibold">MQTT Connection</h2>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Detail label="MQTT configured" value={device.mqtt_configured ? "yes" : "no"} />
-          <Detail label="Last MQTT status" value={device.mqtt_status ?? "unknown"} />
-          <Detail
-            label="Last status timestamp"
-            value={device.mqtt_status_at ? formatDateTime(device.mqtt_status_at) : "—"}
+        <h2 className="text-lg font-semibold">Public URLs</h2>
+        <p className="text-sm text-muted-foreground">
+          Each application on this device can have its own hostname, including different ports such
+          as 80 and 8080.
+        </p>
+        {token && (
+          <DeviceEndpointsPanel
+            token={token}
+            organizationId={organizationId}
+            deviceId={deviceId}
+            canManage={canEndpoints}
+          />
+        )}
+      </div>
+
+      {token && (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+          <h2 className="text-lg font-semibold">WireGuard network</h2>
+          <DeviceNetworkPanel
+            token={token}
+            organizationId={organizationId}
+            deviceId={deviceId}
+            canManage={canManage}
+            canShell={canShell}
           />
         </div>
+      )}
+
+      {canShell && token && (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+          <h2 className="text-lg font-semibold">Terminal</h2>
+          <DeviceTerminal
+            token={token}
+            organizationId={organizationId}
+            deviceId={deviceId}
+            deviceName={device.name}
+          />
+        </div>
+      )}
+
+      <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+        <h2 className="text-lg font-semibold">MQTT Connection</h2>
+        <DeviceMqttStatus device={device} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Detail label="Device ID" value={device.id} />
           <Detail

@@ -1,7 +1,48 @@
 ---
-- name: Deploy VPN tunnel (WireGuard)
+# WireGuard device gateway. Runs on the API host (`platform`), or on a dedicated
+# server (AWS, on-prem) when the inventory has a `vpn_gateway` group; managed API
+# hosts are then joined to it by a WireGuard site link. Runs before cloud_app:
+# the API reads the gateway's public key when it renders its .env.
+- name: Prepare dedicated WireGuard gateway host
+  hosts: vpn_gateway
+  become: true
+  roles:
+    - meteorcloud
+    - common
+    - role: firewall
+      when: firewall_enabled | bool
+
+- name: Create site-link keys on the API hosts
   hosts: platform
   become: true
   roles:
     - meteorcloud
-    - vpn
+  tasks:
+    - name: Create site-link key
+      ansible.builtin.include_role:
+        name: vpn
+        tasks_from: link_key
+      when: vpn_standalone | bool
+
+- name: Configure WireGuard gateway
+  hosts: vpn_gateway:platform
+  become: true
+  roles:
+    - meteorcloud
+  tasks:
+    - name: Configure gateway
+      ansible.builtin.include_role:
+        name: vpn
+      when: inventory_hostname in vpn_gateway_hosts
+
+- name: Connect the API hosts to the gateway
+  hosts: platform
+  become: true
+  roles:
+    - meteorcloud
+  tasks:
+    - name: Configure site link
+      ansible.builtin.include_role:
+        name: vpn
+        tasks_from: link
+      when: vpn_standalone | bool

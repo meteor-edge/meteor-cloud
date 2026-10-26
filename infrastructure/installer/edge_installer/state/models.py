@@ -19,6 +19,8 @@ class InstallationState(BaseModel):
     instance_id: str | None = None
     public_ip: str | None = None
     elastic_ip: str | None = None
+    vpn_gateway_instance_id: str | None = None
+    vpn_gateway_ip: str | None = None
     platform_url: str | None = None
     platform_version: str
     installed_components: list[str] = Field(default_factory=list)

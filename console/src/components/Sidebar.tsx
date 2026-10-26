@@ -5,6 +5,7 @@ import {
   Building2,
   ChevronDown,
   CircuitBoard,
+  Globe,
   HardDrive,
   House,
   Layers,
@@ -203,7 +204,7 @@ export function Sidebar() {
                 <NavSection
                   icon={Rocket}
                   label="Software"
-                  active={["releases", "deployments"].some(isPage)}
+                  active={["releases", "deployments", "endpoints"].some(isPage)}
                 >
                   <SubLink to={`${orgPath}/releases`} icon={Tag} active={isPage("releases")}>
                     Releases
@@ -214,6 +215,13 @@ export function Sidebar() {
                     active={isPage("deployments")}
                   >
                     Deployments
+                  </SubLink>
+                  <SubLink
+                    to={`${orgPath}/endpoints`}
+                    icon={Globe}
+                    active={isPage("endpoints")}
+                  >
+                    Endpoints
                   </SubLink>
                 </NavSection>
 

@@ -1,0 +1,24 @@
+---
+# Managed API host with a dedicated gateway: create this host's site-link key
+# so the gateway can add it as a static peer.
+- name: Install WireGuard requirements
+  ansible.builtin.include_tasks: packages.yml
+  vars:
+    vpn_sysctl:
+      # Docker publishes the API on the site-link address before wg-link is up at boot.
+      net.ipv4.ip_nonlocal_bind: 1
+
+- name: Generate a site-link private key once
+  ansible.builtin.shell:
+    cmd: umask 077 && wg genkey > /etc/wireguard/link.key
+    creates: /etc/wireguard/link.key
+
+- name: Derive the site-link public key
+  ansible.builtin.shell:
+    cmd: wg pubkey < /etc/wireguard/link.key
+  register: vpn_link_pubkey
+  changed_when: false
+
+- name: Remember the site-link public key
+  ansible.builtin.set_fact:
+    vpn_link_public_key: "{{ vpn_link_pubkey.stdout | trim }}"

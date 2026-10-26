@@ -78,8 +78,27 @@ def plan(
 def apply(
     config_arg: ConfigArgument = None,
     config: ConfigOption = None,
+    demo: Annotated[
+        bool | None,
+        typer.Option(
+            "--demo/--no-demo",
+            help="Seed Demo Organization for the administrator.",
+        ),
+    ] = None,
+    route53: Annotated[
+        bool,
+        typer.Option(
+            "--route53",
+            help="Find the domain's Route53 zone and create its A records (never overwrites).",
+        ),
+    ] = False,
 ) -> None:
-    commands.run_apply(config_path=_resolve_config(config_arg, config), console=console)
+    commands.run_apply(
+        config_path=_resolve_config(config_arg, config),
+        console=console,
+        demo=demo,
+        route53=route53,
+    )
 
 
 @app.command()

@@ -89,7 +89,8 @@ def test_audit_event_actor_set_null_when_user_deleted(db_session: Session) -> No
     assert refreshed.actor_user_id is None
 
 
-def test_audit_event_cascade_deleted_with_organization(db_session: Session) -> None:
+def test_audit_event_kept_when_organization_deleted(db_session: Session) -> None:
+    # Migration 0006 created the FK with ON DELETE SET NULL: the audit trail outlives the org.
     owner = create_user(db_session, email="owner-audit-org-cascade@example.com")
     org, _ = create_org_with_owner(db_session, owner)
 
@@ -105,5 +106,8 @@ def test_audit_event_cascade_deleted_with_organization(db_session: Session) -> N
 
     db_session.delete(org)
     db_session.commit()
+    db_session.expire_all()
 
-    assert db_session.get(AuditEvent, event_id) is None
+    kept = db_session.get(AuditEvent, event_id)
+    assert kept is not None
+    assert kept.organization_id is None

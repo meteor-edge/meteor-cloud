@@ -41,6 +41,7 @@ def test_build_ansible_extra_vars_includes_observability_defaults() -> None:
     assert extra["observability_enabled"] == "false"
     assert extra["observability_backend"] == "prometheus"
     assert extra["log_format"] == "console"
+    assert extra["demo_data"] == "true"
 
 
 def test_build_ansible_extra_vars_reflects_enabled_observability() -> None:
@@ -102,6 +103,7 @@ def test_build_ansible_extra_vars_omits_vpn_key_when_not_set(
     extra = build_ansible_extra_vars(config, _outputs())
 
     assert "vpn_server_private_key" not in extra
+    assert "connectivity_provider" not in extra
 
 
 def test_build_ansible_extra_vars_includes_vpn_key_when_set(
@@ -113,3 +115,47 @@ def test_build_ansible_extra_vars_includes_vpn_key_when_set(
     extra = build_ansible_extra_vars(config, _outputs())
 
     assert extra["vpn_server_private_key"] == "super-secret-key"
+    # Ansible derives these from the gateway host; extra-vars would override it.
+    assert "connectivity_provider" not in extra
+    assert "wireguard_server_endpoint" not in extra
+
+
+def test_build_ansible_extra_vars_dedicated_gateway_link_endpoint() -> None:
+    config = load_configuration(EXAMPLE)
+    outputs = _outputs(vpn_gateway_public_ip="5.6.7.8", vpn_gateway_private_ip="10.0.0.9")
+
+    extra = build_ansible_extra_vars(config, outputs)
+
+    assert extra["vpn_link_endpoint"] == "10.0.0.9:51820"
+    assert "vpn_link_endpoint" not in build_ansible_extra_vars(config, _outputs())
+
+def test_build_ansible_extra_vars_enables_bundled_mqtt() -> None:
+    config = load_configuration(EXAMPLE)
+    extra = build_ansible_extra_vars(config, _outputs())
+
+    assert extra["mqtt_enabled"] == "true"
+    assert extra["mqtt_broker"] == "bundled"
+    assert extra["mqtt_broker_port"] == "8883"
+    # Bundled keeps the role defaults (emqx in Compose, the platform host for devices).
+    assert "mqtt_broker_host" not in extra
+    assert "mqtt_public_host" not in extra
+
+
+def test_build_ansible_extra_vars_external_mqtt_uses_broker_host() -> None:
+    config = load_configuration(EXAMPLE)
+    config.services.mqtt.broker = "external"
+    config.services.mqtt.broker_host = "mqtt.example.net"
+    extra = build_ansible_extra_vars(config, _outputs())
+
+    assert extra["mqtt_broker"] == "external"
+    assert extra["mqtt_broker_host"] == "mqtt.example.net"
+    assert extra["mqtt_public_host"] == "mqtt.example.net"
+
+
+def test_build_ansible_extra_vars_disables_mqtt() -> None:
+    config = load_configuration(EXAMPLE)
+    config.services.mqtt.enabled = False
+    extra = build_ansible_extra_vars(config, _outputs())
+
+    assert extra["mqtt_enabled"] == "false"
+    assert "mqtt_broker" not in extra

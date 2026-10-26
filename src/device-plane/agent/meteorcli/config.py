@@ -10,6 +10,8 @@ from pathlib import Path
 from edge_agent.config import AgentConfig, AgentPaths, load_config, save_config
 
 SYSTEM_CONFIG_DIR = Path("/etc/meteorcli")
+# Installed by installcli.sh --with-service (and the device Ansible role); it reads SYSTEM_CONFIG_DIR.
+SERVICE_UNIT = Path("/etc/systemd/system/meteorcli.service")
 
 
 def _sudo_user() -> str | None:
@@ -38,10 +40,11 @@ def _user_home(username: str | None = None) -> Path:
 def default_config_dir() -> Path:
     """Per-user config dir, including when the command is run via sudo.
 
-    Only an interactive root login (no SUDO_USER) uses ``/etc/meteorcli``.
+    Root uses ``/etc/meteorcli`` when there is no SUDO_USER, or when meteorcli.service
+    is installed: ``sudo meteorcli register`` must enroll the identity the service runs.
     """
     sudo_user = _sudo_user()
-    if _is_root() and sudo_user is None:
+    if _is_root() and (sudo_user is None or SERVICE_UNIT.exists()):
         return SYSTEM_CONFIG_DIR
     if sudo_user:
         return _user_home(sudo_user) / ".config" / "meteorcli"

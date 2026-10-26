@@ -16,7 +16,18 @@ There are **two ways** to enroll a device:
 **Supported device OS for fleets today:** Raspberry Pi OS (Bookworm). Other
 Debian-like systems work the same way.
 
-From this directory:
+**On a device** (no cloud clone):
+
+```bash
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
+# system-wide + systemd:
+# curl -fsSL .../install-meteorcli.sh | sudo bash -s -- --with-service
+```
+
+Maintainers publish that file by tagging `agent-v<version>` (see [meteorcli](../../../docs/meteorcli.md)).
+
+From this directory (also requires sibling `../runtime`, included in the wheel
+via Hatch `force-include`):
 
 ```bash
 ./installcli.sh                    # current user (~/.local)
@@ -31,8 +42,15 @@ Re-run the script to upgrade. Uninstall with `./installcli.sh --uninstall`
 (credentials are kept; the systemd unit is removed when present).
 
 `meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
-and **docker_compose** releases. Root (or equivalent) is required for system
-unit installs.
+and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`).
+`sudo ./installcli.sh` installs a root-owned helper, `/usr/local/libexec/meteorcli-wg`,
+and passwordless sudo for that helper only, so the agent can create `wg0` without
+running the whole CLI as root. The helper only accepts meteorcli's own `wg0.conf`
+keys (no `PostUp`/`PreUp` hooks or other `wg-quick` options) and fixed `wg` calls
+on `wg0`, so the sudo rule does not grant root. When the
+control plane has WireGuard enabled, `run` registers this device’s **public**
+key and brings up a tunnel (private key stays on the device). See
+[Device connectivity](../../../docs/fleet/connectivity.md).
 
 Config and credentials go in `~/.config/meteorcli` for a normal user, or
 `/etc/meteorcli` when running as root / under `meteorcli.service`. Prefer

@@ -17,6 +17,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plane-imports:
+    name: Plane import boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install pytest
+        run: python -m pip install pytest
+      - name: Check plane imports
+        run: make check-plane-imports
+
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest
@@ -275,7 +288,19 @@ jobs:
       - name: Destroy with Ansible
         if: always()
         working-directory: deploy/ansible
-        run: ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml -e platform_destroy_data=true playbooks/destroy.yml
+        run: |
+          # Recreate inputs: this step runs even when deploy was skipped or
+          # failed before writing /tmp/inventory.ini and /tmp/vars.yml.
+          printf '[platform]\nlocalhost ansible_connection=local ansible_python_interpreter=%s\n' "$(command -v python3)" > /tmp/inventory.ini
+          cat > /tmp/vars.yml <<'EOF'
+          platform_root: /tmp/meteorcloud
+          image_source: registry
+          image_pull_policy: never
+          backend_image: meteorcloud/backend:ci
+          frontend_image: meteorcloud/console:ci
+          data_plane_image: meteorcloud/data-plane:ci
+          EOF
+          ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml -e platform_destroy_data=true playbooks/destroy.yml
 
   helm:
     name: Helm (lint + template)
@@ -301,6 +326,27 @@ jobs:
           terraform_wrapper: false
       - name: Terraform check
         run: make terraform-check
+
+  e2e-tooling:
+    name: Full-stack E2E tooling (unit tests, validate; no cloud)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: Install test tools
+        run: |
+          python -m pip install pytest
+          sudo apt-get install -y shellcheck
+      - name: E2E tooling checks
+        run: make e2e-check
 
   kubernetes:
     name: Kubernetes (k3d + Helm install + tests)

@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
 ENV_FILE := $(COMPOSE_DIR)/.env
@@ -14,7 +14,7 @@ INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := src/device-plane/agent
 INFRA_DIR := infrastructure
 ANSIBLE_DIR := deploy/ansible
-ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml
+ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml wireguard.yml device.yml
 CHART := deploy/kubernetes/helm/meteorcloud
 CONFIG ?= installation.yaml
 
@@ -120,15 +120,26 @@ stop-console: ## Stop the console Compose project
 stop-website: ## Website is not in this repo
 	@echo "The public website is not in this tree. From a meteor-ui clone: make stop-website"
 
-up: ## Deploy all enabled AWS services (Terraform + Ansible)
-	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
-	cd $(INSTALLER_DIR) && edge-installer apply $(abspath $(CONFIG))
+up: ## Install on this VM (PLATFORM_DOMAIN=example.com)
+	PLATFORM_DOMAIN="$(or $(PLATFORM_DOMAIN),$(DOMAIN))" $(ANSIBLE_DIR)/install-selfhost.sh $(ARGS)
 
-down: ## Destroy the installation
+install-selfhost: up
+
+down: ## Stop MeteorCloud on this VM (keeps data; ARGS=--destroy-data to wipe)
+	$(ANSIBLE_DIR)/install-selfhost.sh --down $(ARGS)
+
+aws-up: ## Create a new AWS EC2 and deploy (Terraform + Ansible). ARGS='--route53' creates the DNS records, '--demo' seeds Demo Organization.
+	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
+	./scripts/ensure-platform-secrets.sh --run --report -- \
+		sh -c 'cd "$(INSTALLER_DIR)" && exec edge-installer apply "$(abspath $(CONFIG))" $(ARGS)'
+
+aws-down: ## Destroy the AWS installation
 	cd $(INSTALLER_DIR) && edge-installer destroy $(abspath $(CONFIG)) --yes
 
 plan: ## Preview infrastructure changes for enabled services
-	cd $(INSTALLER_DIR) && edge-installer plan $(abspath $(CONFIG))
+	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
+	./scripts/ensure-platform-secrets.sh --run -- \
+		sh -c 'cd "$(INSTALLER_DIR)" && edge-installer plan "$(abspath $(CONFIG))"'
 
 status-aws: ## Show AWS installation status and health
 	cd $(INSTALLER_DIR) && edge-installer status $(abspath $(CONFIG))
@@ -178,7 +189,16 @@ console-test: ## Run console tests
 agent-test: ## Run reference agent tests
 	cd $(AGENT_DIR) && python -m pytest -q
 
+agent-dist: ## Pack meteorcli (agent + runtime) into dist/ for a GitHub Release
+	./scripts/agent-dist.sh
+
+check-plane-imports: ## Fail if planes import each other's private Python packages
+	python scripts/check_plane_imports.py
+	python -m pytest -q tests/architecture
+
 test: ## Run all tests
+	@echo "==> Plane import boundaries"
+	@$(MAKE) --no-print-directory check-plane-imports
 	@echo "==> Installer tests"
 	cd $(INSTALLER_DIR) && python -m pytest -q
 	@echo "==> Control-plane tests"
@@ -235,6 +255,26 @@ terraform-check: ## Validate Terraform formatting and syntax (no cloud credentia
 	cd $(INFRA_DIR)/terraform/aws && terraform init -backend=false -input=false
 	cd $(INFRA_DIR)/terraform/aws && terraform validate
 
+E2E_DIR := tests/e2e
+
+e2e-check: ## Full-stack E2E tooling checks (unit tests, Terraform validate, shellcheck; no credentials)
+	cd $(E2E_DIR) && python -m pytest -q tests
+	cd $(E2E_DIR)/terraform && terraform fmt -check -recursive
+	for root in aws onprem; do \
+		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate terraform init -backend=false -input=false >/dev/null \
+		&& TF_DATA_DIR=.terraform-validate terraform validate) || exit 1; done
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/testapp/serve.sh; \
+	else echo "shellcheck not installed; skipped"; fi
+
+e2e-up: ## Create a full-stack E2E environment and run the suite (tests/e2e/.env)
+	$(E2E_DIR)/meteorcloud-testenv up
+
+e2e-test: ## Re-run the E2E suite against the existing environment
+	$(E2E_DIR)/meteorcloud-testenv test
+
+e2e-down: ## Destroy the E2E environment (only its tracked resources)
+	$(E2E_DIR)/meteorcloud-testenv down
+
 ansible-check: ## Syntax-check every Ansible playbook
 	cd $(ANSIBLE_DIR) && for p in $(ANSIBLE_PLAYBOOKS); do \
 		ansible-playbook -i inventory/example/hosts.yml --syntax-check playbooks/$$p || exit 1; done
@@ -247,6 +287,8 @@ compose-config: ## Validate the Compose files and overlays
 	docker compose -f $(COMPOSE_DIR)/docker-compose.yml config --quiet
 	$(COMPOSE) config --quiet
 	docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml config --quiet
+	docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml \
+		-f $(COMPOSE_DIR)/docker-compose.vpn.yml config --quiet
 	GRAFANA_ADMIN_PASSWORD=check docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml \
 		-f $(COMPOSE_DIR)/docker-compose.observability.yml config --quiet
 

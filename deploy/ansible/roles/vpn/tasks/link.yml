@@ -1,0 +1,20 @@
+---
+# Managed API host with a dedicated gateway: tunnel to it. Routes the device
+# network (browser SSH, app endpoints) and serves the API to the gateway agent.
+- name: Render site-link configuration
+  ansible.builtin.template:
+    src: wg-link.conf.j2
+    dest: /etc/wireguard/wg-link.conf
+    owner: root
+    group: root
+    mode: "0600"
+  vars:
+    link_address: "{{ vpn_api_bind_address | trim }}"
+    link_private_key_line: PostUp = wg set %i private-key /etc/wireguard/link.key
+  notify: Restart site link
+
+- name: Enable and start the site link
+  ansible.builtin.systemd:
+    name: wg-quick@wg-link
+    enabled: true
+    state: started

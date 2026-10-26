@@ -17,11 +17,34 @@ data:
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   LOG_FORMAT: {{ .Values.config.logFormat | quote }}
   REGISTRATION_REQUIRE_HTTPS: {{ .Values.config.registrationRequireHttps | toString | quote }}
+  FORWARDED_ALLOW_IPS: {{ .Values.config.forwardedAllowIps | quote }}
   DATABASE_PROVIDER: postgresql
   TELEMETRY_PROVIDER: postgresql
   DEPLOYMENT_PROVIDER: native
   OTA_PROVIDER: none
   IDENTITY_PROVIDER: local
+  CONNECTIVITY_PROVIDER: {{ .Values.connectivity.provider | quote }}
+  {{- if eq .Values.connectivity.provider "wireguard" }}
+  {{- with .Values.connectivity.wireguard }}
+  WIREGUARD_SERVER_PUBLIC_KEY: {{ .serverPublicKey | quote }}
+  WIREGUARD_SERVER_ENDPOINT: {{ .serverEndpoint | quote }}
+  WIREGUARD_SERVER_ADDRESS: {{ .serverAddress | quote }}
+  WIREGUARD_CLIENT_CIDR: {{ .clientCidr | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with .Values.connectivity.shell }}
+  SHELL_PROVIDER: {{ .provider | quote }}
+  SHELL_SSH_USER: {{ .sshUser | quote }}
+  {{- if eq .provider "ssh_gateway" }}
+  SHELL_SSH_IDENTITY_FILE: /run/meteorcloud/shell/id_ed25519
+  {{- if .certificates }}
+  SHELL_SSH_CA_FILE: /run/meteorcloud/shell/ca
+  {{- end }}
+  SHELL_GATEWAY_KEY_RETIRED: {{ .gatewayKeyRetired | quote }}
+  {{- end }}
+  {{- end }}
+  APPS_BASE_DOMAIN: {{ .Values.connectivity.apps.baseDomain | quote }}
+  APPS_RESERVED_NAMES: {{ .Values.connectivity.apps.reservedNames | quote }}
   CACHE_PROVIDER: {{ .Values.cache.provider | quote }}
   OBJECT_STORAGE_PROVIDER: {{ .Values.objectStorage.provider | quote }}
   OBJECT_STORAGE_PATH: /data/artifacts

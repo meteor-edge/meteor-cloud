@@ -48,6 +48,17 @@ resource "aws_security_group" "platform" {
     }
   }
 
+  dynamic "ingress" {
+    for_each = var.extra_ingress
+    content {
+      description = ingress.value.description
+      from_port   = ingress.value.from_port
+      to_port     = ingress.value.to_port
+      protocol    = ingress.value.protocol
+      cidr_blocks = ingress.value.cidr_blocks
+    }
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -67,6 +78,15 @@ resource "aws_instance" "platform" {
   vpc_security_group_ids      = [aws_security_group.platform.id]
   availability_zone           = var.availability_zone != "" ? var.availability_zone : null
   associate_public_ip_address = !var.assign_elastic_ip
+  iam_instance_profile        = var.iam_instance_profile != "" ? var.iam_instance_profile : null
+
+  # IMDSv2 only. A hop limit of 2 lets containers (Traefik DNS-01) use the instance role;
+  # meteorcloud-imds-guard (platform_deployment role) blocks every container but Traefik.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = var.metadata_hop_limit
+  }
 
   root_block_device {
     volume_size = var.root_volume_size_gb
@@ -74,8 +94,15 @@ resource "aws_instance" "platform" {
   }
 
   tags = merge(var.tags, {
-    Name = var.installation_name
+    Name = var.instance_name != "" ? var.instance_name : var.installation_name
   })
+
+  # AWS reports true once the Elastic IP is attached, and a newer Ubuntu image appears every few
+  # weeks; without this either one replaces the instance (and its data) on the next apply.
+  # Set ami_id to move a host to a new image on purpose.
+  lifecycle {
+    ignore_changes = [associate_public_ip_address, ami]
+  }
 }
 
 resource "aws_eip" "platform" {

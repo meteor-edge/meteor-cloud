@@ -1,6 +1,7 @@
 {{- $fullname := include "meteorcloud.fullname" . }}
 {{- $secretName := include "meteorcloud.secretName" . }}
 {{- $filesystem := eq .Values.objectStorage.provider "filesystem" }}
+{{- $shell := eq .Values.connectivity.shell.provider "ssh_gateway" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -77,6 +78,21 @@ spec:
                 name: {{ $fullname }}
             - secretRef:
                 name: {{ $secretName }}
+          {{- if $shell }}
+          env:
+            - name: SHELL_GATEWAY_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.connectivity.shell.existingSecret }}
+                  key: id_ed25519.pub
+            {{- if .Values.connectivity.shell.certificates }}
+            - name: SHELL_SSH_CA_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.connectivity.shell.existingSecret }}
+                  key: ca.pub
+            {{- end }}
+          {{- end }}
           readinessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 10
@@ -103,6 +119,11 @@ spec:
               mountPath: /certs
               readOnly: true
             {{- end }}
+            {{- if $shell }}
+            - name: shell-key
+              mountPath: /run/meteorcloud/shell
+              readOnly: true
+            {{- end }}
       volumes:
         {{- if $filesystem }}
         - name: artifacts
@@ -116,6 +137,20 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+        {{- end }}
+        {{- if $shell }}
+        # Owned by root, readable by fsGroup only; ssh accepts it.
+        - name: shell-key
+          secret:
+            secretName: {{ .Values.connectivity.shell.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: id_ed25519
+                path: id_ed25519
+              {{- if .Values.connectivity.shell.certificates }}
+              - key: ca
+                path: ca
+              {{- end }}
         {{- end }}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:

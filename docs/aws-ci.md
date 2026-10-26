@@ -17,6 +17,10 @@ Actions -> Run workflow
 Pull-request CI (`.github/workflows/ci.yml`) never touches AWS. This workflow
 (`.github/workflows/aws-ci.yml`) is manual.
 
+For the full product check (WireGuard, devices, browser SSH, DNS + HTTPS, app
+delivery, tenancy) use the separate **Full-stack E2E** workflow
+([e2e.md](e2e.md)).
+
 ## Run it
 
 GitHub -> Actions -> **EC2 smoke test** -> **Run workflow**, and pick the branch.
@@ -36,7 +40,7 @@ Repository settings -> Secrets and variables -> Actions:
 
 The PostgreSQL password, JWT secret, and SSH key pair are generated per run; the
 key pair is deleted again at the end. The IAM user needs the same EC2 permissions
-as a normal `make up` ([aws-prerequisites.md](aws-prerequisites.md)).
+as a normal `make aws-up` ([aws-prerequisites.md](aws-prerequisites.md)).
 
 The repository must be cloneable from the EC2 host: the instance checks out
 `https://github.com/<owner>/<repo>.git` at the workflow's commit.
@@ -55,25 +59,25 @@ export EDGE_PLATFORM_JWT_SECRET="$(openssl rand -hex 32)"
 
 make installer-validate            # config + local tools
 make plan                          # terraform plan
-make up                            # terraform apply, then the Ansible playbooks
+make aws-up                        # terraform apply, then the Ansible playbooks
 python3 scripts/smoke_test.py "http://<public-ip>"
-make down                          # ansible destroy, then terraform destroy
+make aws-down                      # ansible destroy, then terraform destroy
 ```
 
 To run only one layer:
 
 ```bash
-# Terraform alone (state lives in .installer-state/<name>/terraform after make up)
+# Terraform alone (state lives in .installer-state/<name>/terraform after make aws-up)
 terraform -chdir=infrastructure/terraform/aws init -backend=false
 terraform -chdir=infrastructure/terraform/aws validate
 
-# Ansible alone, against any Ubuntu/Debian host (ansible-core 2.15+)
+# Ansible alone, against Ubuntu/Debian or RHEL/Rocky/Alma 9+ (ansible-core 2.15+)
 cd deploy/ansible
 ansible-playbook -i inventory/<name>/hosts.yml playbooks/site.yml
 ```
 
 ## Cost and cleanup
 
-Uses one `t3.small` for the length of the job. If the destroy step itself fails,
+Uses one EC2 instance (sized from the containers; git image builds use `t3.medium`) for the length of the job. If the destroy step itself fails,
 terminate leftover instances tagged `ManagedBy=edge-installer` with name
 `ci-<run id>`, and delete the `ci-<run id>` key pair.

@@ -101,6 +101,53 @@ variable "vpn_allowed_client_cidrs" {
   description = "CIDR blocks allowed to connect to WireGuard"
 }
 
+variable "mqtt_listen_port" {
+  type        = number
+  default     = 0
+  description = "TCP port of the bundled MQTT broker on the cloud_app instance; 0 opens nothing"
+}
+
+variable "mqtt_allowed_client_cidrs" {
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+  description = "CIDR blocks allowed to connect to the bundled MQTT broker"
+}
+
+variable "vpn_placement" {
+  type        = string
+  default     = "same_host"
+  description = "Where WireGuard runs: same_host (cloud_app instance) or dedicated (own instance)"
+
+  validation {
+    condition     = contains(["same_host", "dedicated"], var.vpn_placement)
+    error_message = "vpn_placement must be same_host or dedicated."
+  }
+}
+
+variable "vpn_instance_type" {
+  type        = string
+  default     = "t3.micro"
+  description = "EC2 instance type for a dedicated WireGuard gateway"
+}
+
+variable "vpn_root_volume_size_gb" {
+  type        = number
+  default     = 16
+  description = "Root EBS volume size in GB for a dedicated WireGuard gateway"
+}
+
+variable "platform_domain" {
+  type        = string
+  default     = ""
+  description = "Public hostname (e.g. fleet.example.com). With dns_zone_id, Terraform creates the A records."
+}
+
+variable "dns_zone_id" {
+  type        = string
+  default     = ""
+  description = "Route53 hosted zone id (Z…). Empty: do not create records."
+}
+
 variable "tags" {
   type        = map(string)
   default     = {}

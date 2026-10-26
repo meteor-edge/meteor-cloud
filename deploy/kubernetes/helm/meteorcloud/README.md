@@ -18,6 +18,18 @@ helm -n meteorcloud test meteorcloud
 | `mqtt.enabled`, `mqtt.broker` | off, or `bundled` EMQX / `external` | off |
 | `ingress.enabled`, `ingress.className` | any ingress controller | disabled; set `ingress.enabled: true` in an overlay |
 | `secrets.existingSecret` | your own Secret instead of the generated one | empty |
+| `networkPolicy.enabled` | only this release, the ingress namespace, and `networkPolicy.extraFrom` reach the API (needs a CNI that enforces it) | off |
+| `connectivity.provider` | `none`, `wireguard` (gateway on its own VM, see below) | `none` |
+
+Device WireGuard (browser SSH, app endpoints): the WireGuard server runs outside
+the cluster on an AWS or on-prem VM set up by
+[`deploy/ansible/playbooks/wireguard.yml`](../../../ansible/README.md#wireguard-gateway),
+which writes the `connectivity.*` values to `artifacts/wireguard-<gateway>/helm-values.yaml`.
+`connectivity.gatewayService` adds an internal load balancer the gateway agent polls;
+give the gateway the same `secrets.connectivityInternalToken`. Browser SSH
+(`connectivity.shell.provider: ssh_gateway`) needs a Secret with the gateway key
+(`connectivity.shell.existingSecret`) and a route from the pods to the device network.
+See [docs/kubernetes.md](../../../../docs/kubernetes.md#device-wireguard-gateway-vm).
 
 Every value is documented in [`values.yaml`](values.yaml). Environment overlays,
 all on this one chart:

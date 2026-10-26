@@ -122,9 +122,51 @@ uninstall() {
     echo "Removed ${PREFIX}"
   fi
   if [[ "${EUID}" -eq 0 ]]; then
+    rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg
     echo "Left /etc/meteorcli in place (device credentials)."
   else
     echo "Left ${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli in place (device credentials)."
+  fi
+}
+
+install_wireguard_sudoers() {
+  # Creating wg0 needs CAP_NET_ADMIN. meteorcli run stays unprivileged and
+  # calls `sudo -n meteorcli-wg` for those steps only. The helper is root-owned
+  # and never passes the user's config (or its PostUp hooks) to wg-quick, so
+  # this rule does not amount to passwordless root.
+  local dest=/etc/sudoers.d/meteorcli-wireguard
+  local helper=/usr/local/libexec/meteorcli-wg
+  local user="${SUDO_USER:-}"
+  local python_bin tmp
+  [[ "${EUID}" -eq 0 ]] || return 0
+  if [[ -z "${user}" || "${user}" == root ]]; then
+    return 0
+  fi
+  # A fixed, root-owned interpreter: one from $PATH (a venv, ~/.local/bin) would run as root.
+  python_bin=/usr/bin/python3
+  if [[ ! -x "${python_bin}" || "$(stat -Lc '%u' "${python_bin}")" != 0 ]] \
+    || (( 8#$(stat -Lc '%a' "${python_bin}") & 8#022 )); then
+    echo "warning: ${python_bin} is missing or not root-only; skipping the wg0 helper." >&2
+    return 0
+  fi
+  install -d -o root -g root -m 0755 "$(dirname "${helper}")"
+  tmp="$(mktemp)"
+  { echo "#!${python_bin} -I"; tail -n +2 "${SCRIPT_DIR}/packaging/meteorcli-wg"; } > "${tmp}"
+  install -o root -g root -m 0755 "${tmp}" "${helper}"
+  rm -f "${tmp}"
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<EOF
+# meteorcli: bring up wg0 without \`sudo meteorcli\` (this helper only; see ${helper})
+Defaults:${user} !requiretty
+${user} ALL=(root) NOPASSWD: ${helper}
+EOF
+  chmod 440 "${tmp}"
+  if visudo -cf "${tmp}" >/dev/null 2>&1; then
+    mv "${tmp}" "${dest}"
+    echo "Passwordless sudo for ${user}: ${helper}"
+  else
+    rm -f "${tmp}"
+    echo "warning: could not install ${dest}; meteorcli run as ${user} cannot create wg0." >&2
   fi
 }
 
@@ -245,16 +287,18 @@ install_meteorcli() {
   if [[ "${WITH_SERVICE}" -eq 1 ]]; then
     install_service
   fi
+  install_wireguard_sudoers
   if [[ "${EUID}" -eq 0 ]]; then
-    echo "Next: sudo meteorcli config --domain <host> --api-key key_..."
-    echo "      sudo meteorcli test"
-    echo "      sudo meteorcli register|request-token  (writes /etc/meteorcli for the service)"
-    echo "      sudo systemctl start meteorcli"
+    echo "Next: meteorcli config --domain <host> --api-key key_..."
+    echo "      meteorcli test"
+    echo "      meteorcli register|request-token, then meteorcli run"
+    echo "      (meteorcli.service uses /etc/meteorcli: sudo meteorcli register, then systemctl start meteorcli)"
   else
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: for meteorcli.service use sudo ./installcli.sh --with-service (migrates ~/.config/meteorcli)."
+    echo "Tip: sudo ./installcli.sh installs the meteorcli-wg helper so run can bring up wg0 without root."
+    echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
   fi
 }
 

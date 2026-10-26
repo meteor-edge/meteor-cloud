@@ -1,0 +1,28 @@
+# Helm values for the WireGuard gateway {{ vpn_gateway_host }}:
+#   helm upgrade --install meteorcloud deploy/kubernetes/helm/meteorcloud \
+#     -f values-production.yaml -f {{ vpn_handoff_dir }}/helm-values.yaml \
+#     --set-string secrets.connectivityInternalToken="$EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN"
+# The gateway polls {{ vpn_agent_control_plane_url | trim }}: expose the backend there
+# with an internal load balancer or a private ingress, never the public one.
+connectivity:
+  provider: wireguard
+  wireguard:
+    serverPublicKey: "{{ vpn_server_public_key }}"
+    serverEndpoint: "{{ vpn_gateway_endpoint | trim }}"
+    serverAddress: "{{ vpn_server_address }}"
+    clientCidr: "{{ vpn_network_cidr }}"
+  # Browser SSH from the API pods (they need a route to {{ vpn_network_cidr }}
+  # through this gateway). Create the meteorcloud-shell Secret first, see the
+  # chart's values.yaml (connectivity.shell); set provider: none to skip it.
+  shell:
+    provider: ssh_gateway
+    existingSecret: meteorcloud-shell
+  # Public app hostnames: optional Traefik proxy (docs/kubernetes.md). Its pods
+  # also need the route to {{ vpn_network_cidr }}.
+  # apps:
+  #   baseDomain: apps.example.com
+  #   proxy:
+  #     enabled: true
+  #     acme:
+  #       email: ops@example.com
+  #       existingSecret: meteorcloud-dns

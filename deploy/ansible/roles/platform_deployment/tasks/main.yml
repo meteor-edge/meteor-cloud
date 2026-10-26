@@ -3,10 +3,11 @@
   ansible.builtin.set_fact:
     platform_compose: >-
       docker compose -f docker-compose.yml -f docker-compose.prod.yml
+      {{ '-f docker-compose.vpn.yml' if connectivity_provider == 'wireguard' else '' }}
       {{ '-f docker-compose.observability.yml' if observability_enabled | bool else '' }}
 
 - name: Fetch application source for image builds
-  when: image_source == 'git'
+  when: image_source in ['git', 'archive']
   block:
     - name: Clone or update platform repository
       ansible.builtin.git:
@@ -14,7 +15,45 @@
         dest: "{{ platform_source_dir }}"
         version: "{{ git_ref }}"
         force: true
-      register: platform_source
+      register: platform_source_git
+      when: image_source == 'git'
+
+    - name: Copy the platform source archive
+      ansible.builtin.copy:
+        src: "{{ platform_source_archive }}"
+        dest: "{{ platform_root }}/source.tar.gz"
+        owner: root
+        group: root
+        mode: "0600"
+      register: platform_source_copy
+      when: image_source == 'archive'
+
+    # Replace the tree so files removed from the archive do not linger.
+    - name: Remove the previous source tree
+      ansible.builtin.file:
+        path: "{{ platform_source_dir }}"
+        state: absent
+      when: image_source == 'archive' and platform_source_copy is changed
+
+    - name: Create the source directory
+      ansible.builtin.file:
+        path: "{{ platform_source_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: image_source == 'archive'
+
+    - name: Unpack the platform source archive
+      ansible.builtin.unarchive:
+        src: "{{ platform_root }}/source.tar.gz"
+        dest: "{{ platform_source_dir }}"
+        remote_src: true
+      when: image_source == 'archive' and platform_source_copy is changed
+
+    - name: Record whether the source changed
+      ansible.builtin.set_fact:
+        platform_source: {changed: "{{ platform_source_git is changed or platform_source_copy is changed }}"}
 
     - name: Check for existing application images
       ansible.builtin.command:
@@ -27,7 +66,7 @@
       ansible.builtin.command:
         cmd: "{{ platform_compose }} build"
         chdir: "{{ platform_compose_dir }}"
-      when: platform_source.changed or platform_images.rc != 0
+      when: platform_source.changed | bool or platform_images.rc != 0
       changed_when: true
 
 - name: Pull container images
@@ -37,6 +76,59 @@
   register: platform_pull
   changed_when: false
   when: image_source == 'registry' and image_pull_policy != 'never'
+
+# POSTGRES_PASSWORD is applied only on first init. Re-runs that generated a new
+# secret (or reused ~/.meteorcloud/secrets.env against an older volume) leave
+# the role password unchanged and the API fails with "password authentication
+# failed". Start Postgres first and reset the role over the local trust socket.
+# Copy the helper into the container: `compose exec -T` does not keep stdin.
+- name: Install PostgreSQL password helper
+  when: postgres_provider == 'bundled'
+  ansible.builtin.copy:
+    src: align-postgres-password.sh
+    dest: "{{ platform_root }}/align-postgres-password.sh"
+    owner: "{{ platform_owner }}"
+    group: "{{ platform_owner }}"
+    mode: "0755"
+
+- name: Start bundled PostgreSQL
+  when: postgres_provider == 'bundled'
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} up -d --wait --wait-timeout {{ platform_postgres_start_timeout_seconds | default(60) }} postgres"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_postgres_up
+  changed_when: platform_postgres_up.stderr is search('Creat|Recreat|Start(ed|ing)')
+
+- name: Copy PostgreSQL password helper into the container
+  when: postgres_provider == 'bundled'
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} cp {{ platform_root }}/align-postgres-password.sh postgres:/tmp/align-postgres-password.sh"
+    chdir: "{{ platform_compose_dir }}"
+  changed_when: false
+
+- name: Check whether bundled PostgreSQL accepts the current password
+  when: postgres_provider == 'bundled'
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} exec -T postgres sh /tmp/align-postgres-password.sh check"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_postgres_auth
+  changed_when: false
+  failed_when: false
+
+- name: Align bundled PostgreSQL password with current secrets
+  when: postgres_provider == 'bundled' and platform_postgres_auth.rc != 0
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} exec -T postgres sh /tmp/align-postgres-password.sh align"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_postgres_align
+  changed_when: "'ALTER ROLE' in platform_postgres_align.stdout"
+
+- name: Confirm bundled PostgreSQL accepts the current password
+  when: postgres_provider == 'bundled' and platform_postgres_auth.rc != 0
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} exec -T postgres sh /tmp/align-postgres-password.sh check"
+    chdir: "{{ platform_compose_dir }}"
+  changed_when: false
 
 - name: Start platform stack
   ansible.builtin.command:
@@ -64,6 +156,59 @@
           {{ platform_up.stderr }}
           service logs:
           {{ platform_logs.stdout | default('') }}
+
+# The EC2 hop limit is 2 so Traefik (in Docker) can use the instance role for
+# DNS-01. Keep every other container away from the metadata service.
+- name: Install metadata service guard
+  ansible.builtin.copy:
+    src: meteorcloud-imds-guard.sh
+    dest: /usr/local/sbin/meteorcloud-imds-guard
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install metadata service guard units
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ item.content }}"
+  loop:
+    - name: meteorcloud-imds-guard.service
+      content: |
+        [Unit]
+        Description=Only Traefik may reach the EC2 metadata service
+        After=docker.service
+        Requires=docker.service
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/sbin/meteorcloud-imds-guard {{ compose_project_name }}
+    - name: meteorcloud-imds-guard.timer
+      content: |
+        [Unit]
+        Description=Follow Traefik's address for the metadata service guard
+
+        [Timer]
+        OnBootSec=10s
+        OnUnitActiveSec=15s
+
+        [Install]
+        WantedBy=timers.target
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Enable metadata service guard
+  ansible.builtin.systemd:
+    name: meteorcloud-imds-guard.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply metadata service guard now
+  ansible.builtin.command: /usr/local/sbin/meteorcloud-imds-guard {{ compose_project_name }}
+  changed_when: false
 
 # --remove-orphans keeps containers of services whose profile was switched off
 # (for example cache_provider redis -> memory), so remove those explicitly.
@@ -110,3 +255,11 @@
   register: platform_admin
   changed_when: "'Created administrator' in (platform_admin.stdout + platform_admin.stderr)"
   when: admin_email | length > 0 and admin_password | length > 0
+
+- name: Seed Demo Organization when configured
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} exec -T backend python -m app.cli create-demo"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_demo
+  changed_when: "'Created organization' in (platform_demo.stdout + platform_demo.stderr)"
+  when: (demo_data | default(false) | bool) and admin_email | length > 0

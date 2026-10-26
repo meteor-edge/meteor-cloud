@@ -7,6 +7,15 @@ import uuid
 from collections.abc import Generator
 
 os.environ["MQTT_ENABLED"] = "false"
+os.environ.setdefault("CONNECTIVITY_PROVIDER", "wireguard")
+os.environ.setdefault("SHELL_PROVIDER", "echo")
+os.environ.setdefault(
+    "WIREGUARD_SERVER_PUBLIC_KEY",
+    "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+)
+os.environ.setdefault("WIREGUARD_SERVER_ENDPOINT", "127.0.0.1:51820")
+os.environ.setdefault("APPS_BASE_DOMAIN", "meteor-edge.com")
+os.environ.setdefault("CONNECTIVITY_INTERNAL_TOKEN", "test-connectivity-internal")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +29,8 @@ from app.audit import models as _audit_models  # noqa: F401
 from app.authorization import models as _authorization_models  # noqa: F401
 from app.authorization.roles import get_system_role_id
 from app.authorization.seed import seed_authorization_catalog
+from app.connectivity import models as _connectivity_models  # noqa: F401
+from app.connectivity.dependencies import get_connectivity_rate_limiter
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Base
@@ -33,10 +44,12 @@ from app.devices.dependencies import (
     get_rate_limiter,
 )
 from app.devices.rate_limit import InMemoryRateLimiter
+from app.endpoints import models as _endpoint_models  # noqa: F401
 from app.identity import models as _identity_models  # noqa: F401
 from app.identity.models import User
 from app.main import create_app
 from app.releases import models as _release_models  # noqa: F401
+from app.shell import models as _shell_models  # noqa: F401
 from app.tenancy import models as _organization_models  # noqa: F401
 from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole
 from tests.db_guard import assert_safe_test_database_url, ensure_database_exists
@@ -106,6 +119,9 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
         limit=10_000, window_seconds=60
     )
     application.dependency_overrides[get_enroll_poll_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
+    application.dependency_overrides[get_connectivity_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
     with TestClient(application) as test_client:

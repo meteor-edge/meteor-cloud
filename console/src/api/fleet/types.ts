@@ -137,6 +137,63 @@ export type DeploymentCreatePayload = {
     batch_size?: number | null;
     delay_seconds?: number | null;
   };
+  endpoint?: {
+    hostname: string;
+    port: number;
+    protocol?: string;
+  } | null;
+};
+
+export type ApplicationEndpoint = {
+  id: string;
+  organization_id: string;
+  device_id: string;
+  deployment_id: string | null;
+  device_software_id: string | null;
+  workload_key: string | null;
+  hostname: string;
+  protocol: string;
+  port: number;
+  enabled: boolean;
+  availability: string;
+  public_url: string;
+  upstream_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DeviceConnectivity = {
+  device_id: string;
+  organization_id: string;
+  provider: string;
+  wg_public_key: string | null;
+  wg_address: string | null;
+  status: string;
+  last_handshake_at: string | null;
+  connected: boolean;
+  /** From recent evidence: the gateway's handshake, then the agent's check-in. */
+  state?: "connected" | "reconnecting" | "offline" | "pending" | "revoked";
+  agent_last_seen_at?: string | null;
+  ssh_host_key_fingerprint?: string | null;
+  /** "ca": short-lived certificates; "key": the shared gateway key. */
+  ssh_auth?: "ca" | "key";
+  last_ssh_ok_at?: string | null;
+  last_ssh_error?: string | null;
+  last_ssh_error_at?: string | null;
+  server_address: string;
+  ssh_user: string;
+  ssh_port: number;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ShellSession = {
+  session_id: string;
+  ticket: string;
+  websocket_path: string;
+  expires_at: string;
+  device_id: string;
 };
 
 export type ReleaseSummary = {

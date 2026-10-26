@@ -25,3 +25,23 @@ export function StatusBadge({ status }: { status: ConnectivityStatus }) {
     </span>
   );
 }
+
+const AVAILABILITY_STYLES: Record<string, string> = {
+  ready: "bg-aurora text-midnight",
+  unhealthy: "bg-ember text-midnight",
+  offline: "bg-horizon text-star-dust",
+  unknown: "bg-muted text-muted-foreground",
+};
+
+export function AvailabilityBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+        AVAILABILITY_STYLES[status] ?? AVAILABILITY_STYLES.unknown,
+      )}
+    >
+      {status}
+    </span>
+  );
+}

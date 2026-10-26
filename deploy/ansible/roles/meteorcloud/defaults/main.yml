@@ -30,9 +30,12 @@ registration_require_https: false
 docs_public_url: http://localhost:3000/docs
 
 # Images. image_source=git clones repository_url and builds on the host;
+# image_source=archive copies platform_source_archive (a controller .tar.gz of the
+# repository, e.g. `git archive`) and builds on the host (private repos, air-gapped);
 # image_source=registry pulls the image references below.
 image_source: git
-repository_url: https://github.com/shahabkamali/MeteorCloud.git
+platform_source_archive: ""
+repository_url: https://github.com/meteor-edge/meteor-cloud.git
 git_ref: master
 backend_image: edge-platform-backend:0.2.0
 data_plane_image: edge-platform-data-plane:0.2.0
@@ -87,11 +90,101 @@ grafana_admin_password: "{{ EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD | default(looku
 jwt_secret: "{{ EDGE_PLATFORM_JWT_SECRET | default(lookup('env', 'EDGE_PLATFORM_JWT_SECRET'), true) }}"
 admin_email: "{{ EDGE_PLATFORM_ADMIN_EMAIL | default(lookup('env', 'EDGE_PLATFORM_ADMIN_EMAIL'), true) }}"
 admin_password: "{{ EDGE_PLATFORM_ADMIN_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_ADMIN_PASSWORD'), true) }}"
+demo_data: false
 
 # Host firewall (UFW). Off by default: cloud security groups usually do this.
 firewall_enabled: false
 firewall_ssh_port: 22
 firewall_allowed_ssh_cidrs: ["0.0.0.0/0"]
+
+# Device WireGuard gateway (the `vpn` service, or playbooks/wireguard.yml).
+# Where wg0 runs is chosen by the inventory:
+#   - `platform` only: on the API host (co-located).
+#   - `vpn_gateway` + `platform`: on a dedicated server (AWS, on-prem); each API
+#     host is joined to it by an automatic WireGuard site link (vpn_link_subnet).
+#   - `vpn_gateway` only: the control plane runs elsewhere (another cloud,
+#     Kubernetes). Set vpn_control_plane_url and vpn_site_links / vpn_routed_cidrs.
+# connectivity_provider and wireguard_server_public_key are filled in from the
+# gateway on managed API hosts; they stay "none"/empty until it is set up.
+connectivity_provider: none
+wireguard_server_public_key: "{{ lookup('env', 'EDGE_PLATFORM_VPN_SERVER_PUBLIC_KEY') | default('', true) }}"
+# host:port devices dial. Empty: vpn_public_host of the gateway host (else ansible_host) and vpn_listen_port.
+wireguard_server_endpoint: ""
+# Server private key. Empty: generate one on the gateway once (/etc/wireguard/server.key, never leaves the host).
+vpn_server_private_key: "{{ lookup('env', 'EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY') | default('', true) }}"
+vpn_generate_server_key: true
+vpn_listen_port: 51820
+vpn_server_address: 10.8.0.1/16
+vpn_network_cidr: 10.8.0.0/16
+# Automatic site links to managed API hosts; must not overlap vpn_network_cidr.
+# API host N (order in the `platform` group) gets .N+2 and serves the API to the gateway there.
+vpn_link_subnet: 10.9.0.0/24
+# Address the API hosts dial for the site link. Empty: the device endpoint.
+# Set the gateway's private ip:port when both are in one VPC or LAN.
+vpn_link_endpoint: ""
+# Control plane hosted elsewhere (`vpn_gateway` only): private URL the gateway agent polls for
+# /internal/connectivity/* (e.g. an internal load balancer or http://10.0.1.5:8000). Traefik never
+# serves /internal publicly. Overrides the derived URL in the other modes.
+vpn_control_plane_url: ""
+# Site links for unmanaged control-plane hosts: [{name, public_key, address}] with an address
+# inside vpn_link_subnet. Generate the key on that host; playbooks/wireguard.yml writes its config.
+vpn_site_links: []
+# Private source networks routed to the gateway without a tunnel (e.g. the VPC or EKS pod CIDR).
+# They may open connections to devices and are NATed to the server address. AWS: disable the
+# gateway's source/dest check and route vpn_network_cidr to its ENI.
+vpn_routed_cidrs: []
+# Derived; do not set.
+vpn_standalone: "{{ groups['vpn_gateway'] | default([]) | length > 0 }}"
+vpn_managed_api_hosts: "{{ groups['platform'] | default([]) if vpn_standalone | bool else [] }}"
+vpn_gateway_hosts: "{{ groups['vpn_gateway'] if vpn_standalone | bool else groups['platform'] | default([]) }}"
+vpn_gateway_host: "{{ vpn_gateway_hosts | first if vpn_standalone | bool else inventory_hostname }}"
+vpn_gateway_endpoint: >-
+  {{ wireguard_server_endpoint
+     or (hostvars[vpn_gateway_host].vpn_public_host | default(hostvars[vpn_gateway_host].ansible_host | default(vpn_gateway_host)))
+        ~ ':' ~ vpn_listen_port }}
+vpn_link_prefix: "{{ vpn_link_subnet.split('/')[0].split('.')[:3] | join('.') }}"
+vpn_agent_control_plane_url: >-
+  {{ vpn_control_plane_url
+     or ('http://' ~ vpn_link_prefix ~ '.2:8000' if vpn_managed_api_hosts | length > 0 else 'http://127.0.0.1:8000') }}
+# Controller directory for playbooks/wireguard.yml's control-plane settings (gitignored).
+vpn_handoff_dir: "{{ playbook_dir }}/../artifacts/wireguard-{{ vpn_gateway_host }}"
+vpn_api_bind_address: >-
+  {{ (vpn_link_prefix ~ '.' ~ (vpn_managed_api_hosts.index(inventory_hostname) + 2))
+     if inventory_hostname in vpn_managed_api_hosts else '127.0.0.1' }}
+connectivity_internal_token: >-
+  {{ EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN
+     | default(lookup('env', 'EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN'), true)
+     | default(mqtt_internal_token, true) }}
+routing_internal_token: >-
+  {{ EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN
+     | default(lookup('env', 'EDGE_PLATFORM_ROUTING_INTERNAL_TOKEN'), true)
+     | default(connectivity_internal_token, true) }}
+apps_base_domain: "{{ platform_domain | default('meteor-edge.com', true) }}"
+# Browser SSH. On with WireGuard: Ansible creates the gateway SSH key on the API
+# host once (shell_ssh_dir), mounts it into the API, and devices install its public key.
+# The platform private key stays 0600 (OpenSSH rejects 0640). meteorcloud-ssh uses a
+# personal 0600 copy. Override with shell_provider: none to keep the tunnel only.
+shell_provider: "{{ 'ssh_gateway' if 'vpn' in enabled_services else 'none' }}"
+shell_ssh_dir: "{{ platform_root }}/shell"
+shell_ssh_identity_file: "{{ '/run/meteorcloud/shell/id_ed25519' if shell_provider == 'ssh_gateway' else '' }}"
+shell_gateway_public_key: ""
+# SSH user CA next to the gateway key: every browser or meteorcloud-ssh session gets a fresh
+# key and a certificate valid for one device for a couple of minutes. Agents that trust it
+# report ssh_auth=ca; the others keep using the shared key until shell_gateway_key_retired.
+shell_ssh_ca_enabled: true
+shell_ssh_ca_file: "{{ '/run/meteorcloud/shell/ca' if shell_provider == 'ssh_gateway' and shell_ssh_ca_enabled | bool else '' }}"
+shell_ssh_ca_public_key: ""
+# Phase 2, once every device shows "SSH auth: certificate": stop sending the shared key
+# (agents remove it from authorized_keys) and delete the operator copies.
+shell_gateway_key_retired: false
+# Extra login names that receive ~/.config/meteorcloud/shell/id_ed25519.
+# ansible_user, ubuntu, and debian are always included when those accounts exist.
+shell_ssh_operator_users: []
+# Region for Traefik's Route53 DNS-01 (wildcard app certificates). Credentials come from the
+# instance role (IMDSv2, hop limit 2) or, off AWS, a scoped IAM key from the controller env.
+traefik_aws_region: ""
+traefik_aws_access_key_id: "{{ lookup('env', 'EDGE_PLATFORM_TRAEFIK_AWS_ACCESS_KEY_ID') }}"
+traefik_aws_secret_access_key: "{{ lookup('env', 'EDGE_PLATFORM_TRAEFIK_AWS_SECRET_ACCESS_KEY') }}"
 
 # Services selected by edge-installer; standalone runs deploy the application only.
 enabled_services: [cloud_app]

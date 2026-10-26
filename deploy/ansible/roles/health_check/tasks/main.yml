@@ -22,3 +22,61 @@
   retries: 20
   delay: 5
   until: frontend_health.status == 200
+
+# Devices verify the broker against the CA the API hands out and the public host,
+# so check exactly that (a SAN without the public host fails here, not on devices).
+- name: Check the MQTT broker over TLS
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - s_client
+      - -connect
+      - "127.0.0.1:{{ mqtt_broker_port }}"
+      - -servername
+      - "{{ mqtt_public_host }}"
+      - -verify_hostname
+      - "{{ mqtt_public_host }}"
+      - -CAfile
+      - "{{ platform_certs_dir }}/ca.crt"
+      - -verify_return_error
+      - -brief
+    stdin: ""
+  register: mqtt_health
+  changed_when: false
+  retries: 20
+  delay: 5
+  until: mqtt_health.rc == 0
+  when: mqtt_enabled | bool and mqtt_broker == 'bundled'
+
+- name: Check the WireGuard interface is up
+  ansible.builtin.command: wg show wg0 listen-port
+  delegate_to: "{{ vpn_gateway_host }}"
+  register: wireguard_health
+  changed_when: false
+  failed_when: >-
+    wireguard_health.rc != 0
+    or (wireguard_health.stdout | trim) != (vpn_listen_port | string)
+  when: "'vpn' in enabled_services"
+
+
+# A checklist for whoever owns the DNS zone. Plain A records ("DNS only": no HTTP proxy).
+- name: Show the DNS records this installation needs
+  ansible.builtin.debug:
+    msg: "{{ dns_web + (dns_wireguard if 'vpn' in enabled_services else []) }}"
+  vars:
+    dns_ip: "{{ public_ipv4 | default(ansible_host) | default(inventory_hostname) }} (this server's public IP)"
+    dns_web:
+      - "DNS records MeteorCloud needs (A records, DNS only, TTL 60-300s):"
+      - "{{ platform_domain }}  ->  {{ dns_ip }}   console, API (/api), MQTT (TCP 8883)"
+      - "*.{{ apps_base_domain }}  ->  {{ dns_ip }}   public app URLs"
+    dns_wg_host: "{{ vpn_gateway_endpoint | trim | regex_replace(':[0-9]+$', '') }}"
+    dns_wg_ip: >-
+      {{ hostvars[vpn_gateway_host].public_ipv4
+         | default(hostvars[vpn_gateway_host].ansible_host)
+         | default(vpn_gateway_host) }} (WireGuard server's public IP)
+    dns_wireguard: "{{ [dns_wg_named] if dns_wg_host is not match('^[0-9.]+$') else [dns_wg_by_ip] }}"
+    dns_wg_named: "{{ dns_wg_host }}  ->  {{ dns_wg_ip }}   WireGuard: devices connect here (UDP {{ vpn_listen_port }})"
+    dns_wg_by_ip: >-
+      WireGuard: devices dial the IP {{ dns_wg_host }}. Better: create vpn.{{ platform_domain }} -> {{ dns_wg_ip }}
+      and set vpn_public_host: vpn.{{ platform_domain }} on that host, so devices follow an IP change.
+  when: platform_domain | length > 0

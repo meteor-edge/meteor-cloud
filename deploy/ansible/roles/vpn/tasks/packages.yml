@@ -1,0 +1,44 @@
+---
+# WireGuard userland, iptables for the PostUp rules, the kernel module, and
+# persistent kernel settings. Shared by the gateway and the API side of a site link.
+# ansible.builtin.package uses apt or dnf; these names exist on both families.
+- name: Install WireGuard requirements
+  ansible.builtin.package:
+    name:
+      - wireguard-tools
+      - iptables
+      - python3
+    state: present
+
+- name: Load the WireGuard kernel module at boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/wireguard.conf
+    content: "wireguard\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Load the WireGuard kernel module now
+  community.general.modprobe:
+    name: wireguard
+    state: present
+
+- name: Ensure WireGuard config directory exists
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Write kernel network settings
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-meteorcloud-wireguard.conf
+    content: "{{ vpn_sysctl.items() | map('join', ' = ') | join('\n') }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply kernel network settings
+
+- name: Apply kernel network settings before WireGuard starts
+  ansible.builtin.meta: flush_handlers

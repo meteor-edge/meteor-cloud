@@ -21,3 +21,8 @@ docker build -f infrastructure/docker/Dockerfile.console \
 ```
 
 Compose and Helm deploy the console next to the control plane. Point `VITE_API_BASE_URL` at the public API origin operators will use.
+
+## Fleet UI
+
+- **Endpoints** — public app addresses (suggested `app.device.org.<domain>` or a custom `name.<domain>`, checked for availability as you type). Create from a device page or optionally when deploying to a single device. See [Endpoints](fleet/endpoints.md).
+- **Device → Terminal** — browser SSH over WireGuard (`device.shell`). See [Connectivity](fleet/connectivity.md).

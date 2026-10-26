@@ -43,7 +43,18 @@ def test_sudo_config_uses_invoking_user_dir(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("meteorcli.config.os.geteuid", lambda: 0)
     monkeypatch.setenv("SUDO_USER", "pi")
     monkeypatch.setattr("meteorcli.config._user_home", lambda username=None: home)
+    monkeypatch.setattr("meteorcli.config.SERVICE_UNIT", tmp_path / "missing.service")
     assert default_config_dir() == home / ".config" / "meteorcli"
+
+
+def test_sudo_config_uses_service_dir_when_service_installed(monkeypatch, tmp_path) -> None:
+    # The service reads /etc/meteorcli; enrolling elsewhere left it "not registered".
+    unit = tmp_path / "meteorcli.service"
+    unit.write_text("[Unit]\n")
+    monkeypatch.setattr("meteorcli.config.os.geteuid", lambda: 0)
+    monkeypatch.setenv("SUDO_USER", "pi")
+    monkeypatch.setattr("meteorcli.config.SERVICE_UNIT", unit)
+    assert default_config_dir() == Path("/etc/meteorcli")
 
 
 def test_user_config_writes_without_root(tmp_path, monkeypatch, capsys) -> None:

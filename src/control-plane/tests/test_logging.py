@@ -10,7 +10,7 @@ import sys
 import pytest
 import structlog
 
-from app.core.logging import configure_logging
+from app.core.logging import RedactTicketFilter, configure_logging
 
 
 @pytest.fixture(autouse=True)
@@ -90,3 +90,18 @@ def test_configure_logging_quiets_noisy_loggers() -> None:
 
     assert logging.getLogger("uvicorn.access").level == logging.WARNING
     assert logging.getLogger("sqlalchemy.engine").level == logging.WARNING
+
+
+def test_shell_ticket_redacted_from_uvicorn_websocket_lines() -> None:
+    record = logging.LogRecord(
+        "uvicorn.error",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "WebSocket %s" [accepted]',
+        ("10.0.0.5:1234", "/api/v1/shell-sessions/abc/ws?ticket=sh_secret&x=1"),
+        None,
+    )
+    assert RedactTicketFilter().filter(record)
+    assert "sh_secret" not in record.getMessage()
+    assert "ticket=[redacted]&x=1" in record.getMessage()

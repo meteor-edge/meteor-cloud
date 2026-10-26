@@ -83,3 +83,23 @@ def test_health_success(monkeypatch) -> None:
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     assert client.health()["status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [TimeoutError("The read operation timed out"), ConnectionResetError(104, "reset")],
+)
+def test_read_timeouts_and_dropped_connections_are_network_errors(monkeypatch, error) -> None:
+    import http.client
+
+    client = EdgeClient("http://localhost:8000")
+    for raised in (error, http.client.RemoteDisconnected("Remote end closed connection")):
+
+        def fake_urlopen(request, timeout, _raised=raised):  # noqa: ARG001
+            raise _raised
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        with pytest.raises(AgentApiError) as excinfo:
+            client.heartbeat(device_token="dev_x", payload={})
+        assert excinfo.value.code == "network_error"
+        assert excinfo.value.status == 0

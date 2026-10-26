@@ -1,6 +1,16 @@
 # Upgrades
 
-Update enabled services on an existing installation without recreating EC2 (unless Terraform detects required infra changes).
+On a VM installed with `make up`:
+
+```bash
+cd meteor-cloud
+git pull
+make up
+```
+
+Inventory, secrets, and `PLATFORM_DOMAIN` (`~/.meteorcloud/install.env`) are reused.
+
+On AWS, update enabled services without recreating EC2 (unless Terraform detects required infra changes):
 
 ## Command
 

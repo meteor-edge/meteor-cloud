@@ -87,7 +87,26 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     artifacts_dir = paths.config_path.parent / "artifacts"
 
+    from edge_agent.wireguard import ConnectivityState, sync_connectivity
+
+    # One schedule per run loop; --once registers every time.
+    wg_state = None if args.once else ConnectivityState()
+
+    from edge_agent.mqtt_sync import MqttSupervisor
+
+    mqtt = (
+        MqttSupervisor(config.device_id, paths.config_path.parent, server_url=config.server_url)
+        if config.device_id and not args.once
+        else None
+    )
+
     def _payload() -> dict:
+        sync_connectivity(client, device_token, paths.config_path.parent, state=wg_state)
+        if mqtt is not None:
+            try:
+                mqtt.sync(client, device_token)
+            except Exception:
+                logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {"capabilities": collect_capabilities()}
         reports = reconcile_software(client, device_token, artifacts_dir)
         if reports:
@@ -104,20 +123,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 0
 
     logger.info("Starting heartbeat loop every %ss", config.heartbeat_interval_seconds)
-    mqtt_session = None
-    from edge_agent.mqtt import DeviceMqttSession
-    from edge_agent.mqtt_config import read_mqtt_config
-
     try:
-        try:
-            mqtt_config = read_mqtt_config(paths.config_path.parent)
-            if mqtt_config is not None and config.device_id:
-                mqtt_session = DeviceMqttSession(
-                    config.device_id, mqtt_config, server_url=config.server_url
-                )
-                mqtt_session.start()
-        except Exception:
-            logger.exception("MQTT failed to start; continuing with heartbeats")
+        # MQTT starts (and later restarts) from _payload on each heartbeat.
         run_loop(
             client,
             device_token,
@@ -131,8 +138,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:  # pragma: no cover - interactive only
         logger.info("Stopping heartbeat loop.")
     finally:
-        if mqtt_session is not None:
-            mqtt_session.stop()
+        if mqtt is not None:
+            mqtt.stop()
     return 0
 
 

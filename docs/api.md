@@ -60,6 +60,9 @@ Prefix: `/api/v1/organizations/{organization_id}`
 | Enrollment keys | `/enrollment-keys` (+ revoke) |
 | Enrollment requests | list / approve / reject under enrollment request routes |
 | Devices | `/devices`, `/devices/{device_id}`, enable/disable, MQTT revoke |
+| Connectivity | `/devices/{device_id}/connectivity`, `.../connectivity/revoke` |
+| Browser SSH | `POST .../devices/{device_id}/shell-sessions` then WebSocket `/api/v1/shell-sessions/{id}/ws?ticket=` |
+| Endpoints | `/endpoints`, `/endpoints/{id}` |
 | MQTT test | `/mqtt/events` (SSE), `/mqtt/publish` |
 | Audit | `/audit-events` |
 | Artifacts | `/artifacts` (separate router; upload, download, download-link) |
@@ -74,6 +77,7 @@ Prefix: `/api/v1/agent`
 | --- | --- | --- |
 | `POST` | `/register` | Registration token in body |
 | `POST` | `/heartbeat` | Device token |
+| `POST` | `/connectivity/wireguard` | Device token; public key only |
 | `GET`/`POST` | `/enroll/check` | Enrollment API key |
 | `POST` | `/enroll/request` | Enrollment API key |
 | `POST` | `/enroll/poll` | Claim secret |

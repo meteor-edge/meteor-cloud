@@ -48,6 +48,15 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
     if config.services.vpn.enabled and not config.services.cloud_app.enabled:
         errors.append("services.vpn requires services.cloud_app to be enabled")
 
+    # The API and the WireGuard gateway agent authenticate /internal/connectivity with it.
+    if config.services.vpn.enabled and not (
+        os.environ.get("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN")
+        or os.environ.get("EDGE_PLATFORM_MQTT_INTERNAL_TOKEN")
+    ):
+        errors.append(
+            "EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN is not set (required by services.vpn)"
+        )
+
     if config.services.cloud_app.enabled:
         if config.components.postgres.enabled:
             if not os.environ.get("EDGE_PLATFORM_POSTGRES_PASSWORD"):
@@ -68,6 +77,12 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
 
     if config.platform.domain and config.platform.public_url:
         errors.append("platform.domain and platform.public_url cannot both be set")
+
+    zone = (config.aws.dns_zone_id if config.aws else "") or ""
+    if zone.strip() and not (config.platform.domain or "").strip():
+        errors.append("aws.dns_zone_id requires platform.domain")
+    if (config.platform.domain or "").strip() and zone.strip() and config.aws is None:
+        errors.append("aws settings are required to create Route53 records")
 
     if config.observability.enabled and config.observability.backend == "cloudwatch":
         errors.append(

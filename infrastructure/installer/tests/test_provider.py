@@ -30,6 +30,12 @@ def test_terraform_variables_include_tags(tmp_path: Path) -> None:
     assert variables["installation_name"] == "production"
     assert variables["aws_region"] == "eu-central-1"
     assert variables["tags"]["ManagedBy"] == "edge-installer"
+    assert variables["vpn_placement"] == "same_host"
+    assert variables["vpn_instance_type"] == "t3.micro"
+    assert variables["instance_type"] == "t3.medium"
+    assert int(variables["root_volume_size_gb"]) >= 40
+    assert variables["platform_domain"] == ""
+    assert variables["dns_zone_id"] == ""
 
 
 def test_terraform_output_parsing() -> None:
@@ -76,3 +82,15 @@ def test_missing_output_raises_validation_error() -> None:
     with pytest.raises(ValidationError):
         TerraformOutputs.model_validate({"instance_id": "i-1"})
 
+
+
+def test_terraform_variables_open_mqtt_only_for_bundled_broker(tmp_path: Path) -> None:
+    config = load_configuration(EXAMPLE)
+    assert TerraformRunner(config, tmp_path).variables()["mqtt_listen_port"] == 8883
+
+    config.services.mqtt.broker = "external"
+    config.services.mqtt.broker_host = "mqtt.example.net"
+    assert TerraformRunner(config, tmp_path).variables()["mqtt_listen_port"] == 0
+
+    config.services.mqtt.enabled = False
+    assert TerraformRunner(config, tmp_path).variables()["mqtt_listen_port"] == 0

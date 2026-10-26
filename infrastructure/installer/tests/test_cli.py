@@ -27,6 +27,7 @@ def secrets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     key_path.write_text("fake-key", encoding="utf-8")
     monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "postgres-secret")
     monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "jwt-secret")
+    monkeypatch.setenv("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN", "connectivity-secret")
     return key_path
 
 

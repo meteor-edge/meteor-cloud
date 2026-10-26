@@ -1,0 +1,111 @@
+---
+- name: Install device packages
+  ansible.builtin.package:
+    name:
+      - python3
+      - python3-pip
+      - openssh-server
+      - wireguard-tools
+      - iptables
+    state: present
+
+- name: Install python3-venv
+  ansible.builtin.package:
+    name: python3-venv
+    state: present
+  when: ansible_pkg_mgr == 'apt'
+
+# meteorcli manages wg0 itself (wg-quick); devices never forward traffic.
+- name: Load the WireGuard kernel module at boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/wireguard.conf
+    content: "wireguard\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Load the WireGuard kernel module now
+  community.general.modprobe:
+    name: wireguard
+    state: present
+
+# Ubuntu 24.04+ uses ssh.socket; Debian uses ssh.service; RHEL uses sshd.service.
+- name: Find sshd unit
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /usr/lib/systemd/system/ssh.socket
+    - /usr/lib/systemd/system/sshd.service
+    - /usr/lib/systemd/system/ssh.service
+  register: device_sshd_units
+
+- name: Enable sshd for browser SSH over WireGuard
+  ansible.builtin.systemd_service:
+    name: "{{ (device_sshd_units.results | selectattr('stat.exists') | map(attribute='item') | first | basename) }}"
+    state: started
+    enabled: true
+
+- name: Create the meteorcli source directory
+  ansible.builtin.file:
+    path: "{{ device_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copy the meteorcli source archive
+  ansible.builtin.copy:
+    src: "{{ device_source_archive }}"
+    dest: "{{ device_install_dir }}.tar.gz"
+    owner: root
+    group: root
+    mode: "0644"
+  register: device_source_copy
+  when: device_source_archive | length > 0
+
+- name: Unpack the meteorcli source archive
+  ansible.builtin.unarchive:
+    src: "{{ device_install_dir }}.tar.gz"
+    dest: "{{ device_install_dir }}"
+    remote_src: true
+  when: device_source_archive | length > 0 and device_source_copy is changed
+
+- name: Copy the meteorcli source tree
+  ansible.builtin.copy:
+    src: "{{ device_source_dir }}"
+    dest: "{{ device_install_dir }}/"
+    owner: root
+    group: root
+    mode: preserve
+  register: device_source_tree
+  when: device_source_archive | length == 0
+
+- name: Check for an installed meteorcli
+  ansible.builtin.stat:
+    path: /usr/local/bin/meteorcli
+  register: device_cli
+
+# installcli.sh creates /opt/meteorcli (venv), /usr/local/bin/meteorcli and an enabled meteorcli.service.
+- name: Install meteorcli with its service
+  ansible.builtin.command:
+    cmd: ./installcli.sh --with-service
+    chdir: "{{ device_install_dir }}/agent"
+  when: not device_cli.stat.exists or device_source_copy is changed or device_source_tree is changed
+  changed_when: true
+  notify: Restart meteorcli
+
+- name: Check for device credentials
+  ansible.builtin.stat:
+    path: /etc/meteorcli/device-token
+  register: device_token
+
+- name: Record whether the device is registered
+  ansible.builtin.set_fact:
+    device_registered: "{{ device_token.stat.exists }}"
+
+- name: Run meteorcli once the device is registered
+  ansible.builtin.service:
+    name: meteorcli
+    state: started
+    enabled: true
+  when: device_registered | bool and device_start_agent | bool
