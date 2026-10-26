@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
 import { BrandMark } from "@/components/BrandMark";
+import { MobileNavigation } from "@/components/MobileNavigation";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { useOrganizationContext } from "@/context/OrganizationContext";
@@ -15,6 +16,7 @@ export function Header() {
     <header className="border-b border-border bg-section px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+          <MobileNavigation />
           <BrandMark className="sm:hidden" showName={false} />
           <BrandMark className="hidden sm:inline-flex md:hidden" />
           <div className="min-w-0">
