@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -70,6 +71,39 @@ def test_bad_values_are_refused(tmp_path: Path) -> None:
     ):
         with pytest.raises(SystemExit):
             helper.sanitize(bad)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("AllowedIPs = 10.8.0.1/32", "AllowedIPs = 0.0.0.0/0, ::/0"),
+        ("AllowedIPs = 10.8.0.1/32", "AllowedIPs = 192.168.1.0/24"),
+        ("AllowedIPs = 10.8.0.1/32", "AllowedIPs = 8.8.8.8/32"),
+        ("Address = 10.8.0.9/32", "Address = 10.8.0.9/16"),
+    ],
+)
+def test_tunnel_addresses_must_be_single_private_hosts(tmp_path: Path, old: str, new: str) -> None:
+    # Otherwise the caller could route the host's (or a LAN's) traffic into a peer it chose.
+    with pytest.raises(SystemExit):
+        helper.sanitize(_agent_config(tmp_path).replace(old, new))
+
+
+def test_hosts_on_a_local_network_are_refused(tmp_path: Path, monkeypatch) -> None:
+    routes = {
+        "10.8.0.9": '[{"dst":"10.8.0.9","gateway":"192.168.1.1","dev":"eth0"}]',
+        "10.8.0.1": '[{"dst":"10.8.0.1","gateway":"192.168.1.1","dev":"eth0"}]',
+        "192.168.1.1": '[{"dst":"192.168.1.1","dev":"eth0","prefsrc":"192.168.1.5"}]',
+    }
+
+    def fake_run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout=routes[args[-1]], stderr="")
+
+    monkeypatch.setattr(helper.subprocess, "run", fake_run)
+    conf = helper.sanitize(_agent_config(tmp_path))
+    assert helper.tunnel_hosts(conf) == ["10.8.0.9", "10.8.0.1"]
+    helper.refuse_local_hosts(helper.tunnel_hosts(conf))
+    with pytest.raises(SystemExit):
+        helper.refuse_local_hosts(["192.168.1.1"])
 
 
 def test_reads_only_regular_files_owned_by_the_caller(tmp_path: Path, monkeypatch) -> None:

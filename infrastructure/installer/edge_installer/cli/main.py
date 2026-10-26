@@ -82,14 +82,22 @@ def apply(
         bool | None,
         typer.Option(
             "--demo/--no-demo",
-            help="Demo Organization, and create Route53 records when a domain is set.",
+            help="Seed Demo Organization for the administrator.",
         ),
     ] = None,
+    route53: Annotated[
+        bool,
+        typer.Option(
+            "--route53",
+            help="Find the domain's Route53 zone and create its A records (never overwrites).",
+        ),
+    ] = False,
 ) -> None:
     commands.run_apply(
         config_path=_resolve_config(config_arg, config),
         console=console,
         demo=demo,
+        route53=route53,
     )
 
 

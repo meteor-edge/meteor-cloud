@@ -32,6 +32,7 @@ def _run(
     psql.write_text(
         "#!/bin/sh\n"
         f'printf "%s\\n" "$*" >> "{log}"\n'
+        f'[ -t 0 ] || cat >> "{log}"\n'
         f'printf "%s\\n" "PGPASSWORD=${{PGPASSWORD-}}" >> "{log}"\n'
         f"exit {psql_rc}\n",
         encoding="utf-8",
@@ -52,11 +53,14 @@ def _run(
     )
 
 
-def test_align_escapes_quotes_and_uses_local_socket(tmp_path: Path) -> None:
+def test_align_keeps_the_password_out_of_argv_and_uses_local_socket(tmp_path: Path) -> None:
     proc = _run(tmp_path, "align", password="o'reilly")
     assert proc.returncode == 0, proc.stderr
     logged = (tmp_path / "psql.log").read_text(encoding="utf-8")
-    assert "ALTER ROLE \"edge_platform\" PASSWORD 'o''reilly'" in logged
+    # psql quotes :'pw' itself; the value comes from POSTGRES_PASSWORD, not the command line.
+    assert "\\getenv pw POSTGRES_PASSWORD" in logged
+    assert "ALTER ROLE :\"role\" PASSWORD :'pw';" in logged
+    assert "o'reilly" not in logged
     assert "-h " not in logged
     assert "PGPASSWORD=" in logged.splitlines()[-1]
     assert logged.splitlines()[-1] == "PGPASSWORD="

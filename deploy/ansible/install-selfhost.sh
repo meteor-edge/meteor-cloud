@@ -6,6 +6,7 @@
 #
 #   make up PLATFORM_DOMAIN=fleet.example.com
 #   make up ARGS='--no-vpn --mqtt=off --storage=filesystem --no-demo'
+#   make up ARGS=--route53    # also create the A records in Route53 (never overwrites)
 #   make down
 #   make down ARGS=--destroy-data
 #
@@ -27,6 +28,7 @@ VPN=1
 MQTT=bundled
 STORAGE=minio
 DEMO=1
+ROUTE53=0
 DOWN=0
 DESTROY_DATA=0
 ASK_VPN=1
@@ -41,6 +43,7 @@ usage() {
   echo "  --mqtt=off|bundled|external"
   echo "  --storage=filesystem|s3|minio"
   echo "  --demo | --no-demo"
+  echo "  --route53            create A records in Route53 (AWS CLI; never overwrites)"
   echo "  --down | --destroy-data"
   exit 2
 }
@@ -59,6 +62,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --demo) DEMO=1; ASK_DEMO=0 ;;
     --no-demo) DEMO=0; ASK_DEMO=0 ;;
+    --route53) ROUTE53=1 ;;
     --down) DOWN=1 ;;
     --destroy-data) DOWN=1; DESTROY_DATA=1 ;;
     -h|--help) usage ;;
@@ -463,10 +467,16 @@ if [[ "${MQTT}" == external ]]; then
 fi
 
 print_dns_guide "${DOMAIN}" "${PUBLIC_IP:-<this server public IP>}"
-if [[ "${DEMO}" -eq 1 && -n "${PUBLIC_IP}" ]] && command -v aws >/dev/null 2>&1; then
+if [[ "${ROUTE53}" -eq 1 ]]; then
+  if [[ -z "${PUBLIC_IP}" ]]; then
+    echo "error: --route53 needs this server's public IP, which could not be detected." >&2
+    exit 1
+  fi
   echo "Creating Route53 records for ${DOMAIN} -> ${PUBLIC_IP}"
+  route53_args=(--domain "${DOMAIN}" --ip "${PUBLIC_IP}")
+  if [[ "${VPN}" -eq 0 ]]; then route53_args+=(--no-wireguard); fi
   if ! PYTHONPATH="${REPO}/infrastructure/installer${PYTHONPATH:+:${PYTHONPATH}}" \
-    python3 -m edge_installer.deployment.route53 --domain "${DOMAIN}" --ip "${PUBLIC_IP}"; then
+    python3 -m edge_installer.deployment.route53 "${route53_args[@]}"; then
     echo "Route53 create failed. Create the printed records yourself, or fix AWS credentials." >&2
     if is_tty; then
       ask_yn "Continue without Route53" Y || exit 1

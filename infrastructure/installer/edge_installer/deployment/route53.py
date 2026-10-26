@@ -1,8 +1,13 @@
-"""Resolve a Route53 zone from a domain and optionally upsert A records (make up)."""
+"""Resolve a Route53 zone from a domain and create its A records (make up --route53).
+
+Records are only created, never overwritten: a name that already points somewhere
+else is an error, so a typo or the zone apex cannot replace live DNS.
+"""
 
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import logging
 import re
@@ -51,6 +56,8 @@ def list_hosted_zones(*, profile: str | None = None) -> list[tuple[str, str]]:
     payload = json.loads(result.stdout)
     zones: list[tuple[str, str]] = []
     for item in payload.get("HostedZones", []):
+        if (item.get("Config") or {}).get("PrivateZone"):
+            continue
         zone_id = str(item.get("Id", "")).removeprefix("/hostedzone/")
         name = str(item.get("Name", ""))
         if zone_id and name:
@@ -71,7 +78,43 @@ def persist_domain(path, domain: str, zone_id: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def upsert_a_records(
+def _aws(command: list[str], profile: str | None) -> str:
+    if profile:
+        command = [*command, "--profile", profile]
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "aws route53 failed")
+    return result.stdout
+
+
+def existing_records(
+    zone_id: str, names: list[str], *, profile: str | None = None
+) -> dict[str, tuple[str, list[str]]]:
+    """name -> (type, values) for the given names that already exist in the zone."""
+    found: dict[str, tuple[str, list[str]]] = {}
+    for name in names:
+        payload = json.loads(
+            _aws(
+                [
+                    "aws", "route53", "list-resource-record-sets",
+                    "--hosted-zone-id", zone_id,
+                    "--start-record-name", name,
+                    "--max-items", "5",
+                    "--output", "json",
+                ],
+                profile,
+            )
+        )
+        for item in payload.get("ResourceRecordSets", []):
+            # Route53 escapes "*" as \052 and returns names with a trailing dot.
+            item_name = item.get("Name", "").replace("\\052", "*").rstrip(".")
+            if item_name == name and item.get("Type") in ("A", "AAAA", "CNAME"):
+                values = [record.get("Value", "") for record in item.get("ResourceRecords", [])]
+                found[name] = (item["Type"], values)
+    return found
+
+
+def create_a_records(
     *,
     domain: str,
     zone_id: str,
@@ -79,42 +122,57 @@ def upsert_a_records(
     wireguard: bool,
     profile: str | None = None,
 ) -> list[str]:
+    """Create the A records that are missing. Refuse names that already point elsewhere."""
     names = [domain, f"*.{domain}"]
     if wireguard:
         names.append(f"wg.{domain}")
-    changes = [
-        {
-            "Action": "UPSERT",
-            "ResourceRecordSet": {
-                "Name": name,
-                "Type": "A",
-                "TTL": 60,
-                "ResourceRecords": [{"Value": ip}],
-            },
-        }
-        for name in names
+    existing = existing_records(zone_id, names, profile=profile)
+    conflicts = [
+        f"{name} ({kind} {', '.join(values)})"
+        for name, (kind, values) in existing.items()
+        if (kind, values) != ("A", [ip])
     ]
-    command = [
-        "aws",
-        "route53",
-        "change-resource-record-sets",
-        "--hosted-zone-id",
-        zone_id,
-        "--change-batch",
-        json.dumps({"Changes": changes}),
-    ]
-    if profile:
-        command.extend(["--profile", profile])
-    result = subprocess.run(command, check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "Route53 change failed")
+    if conflicts:
+        raise RuntimeError(
+            "refusing to replace existing records: " + "; ".join(conflicts)
+            + ". Remove them or point them at this server yourself."
+        )
+    missing = [name for name in names if name not in existing]
+    if missing:
+        changes = [
+            {
+                "Action": "CREATE",
+                "ResourceRecordSet": {
+                    "Name": name,
+                    "Type": "A",
+                    "TTL": 60,
+                    "ResourceRecords": [{"Value": ip}],
+                },
+            }
+            for name in missing
+        ]
+        _aws(
+            [
+                "aws", "route53", "change-resource-record-sets",
+                "--hosted-zone-id", zone_id,
+                "--change-batch", json.dumps({"Changes": changes}),
+            ],
+            profile,
+        )
     return names
+
+
+def _ipv4(value: str) -> str:
+    try:
+        return str(ipaddress.IPv4Address(value))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not an IPv4 address: {value}") from exc
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Create Route53 A records for a MeteorCloud domain.")
     parser.add_argument("--domain", required=True)
-    parser.add_argument("--ip", required=True)
+    parser.add_argument("--ip", required=True, type=_ipv4)
     parser.add_argument("--profile", default="")
     parser.add_argument("--no-wireguard", action="store_true")
     args = parser.parse_args(argv)
@@ -129,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             names = ", ".join(name.rstrip(".") for _, name in zones) or "(none)"
             print(f"error: no Route53 zone contains {domain}. Hosted zones: {names}", file=sys.stderr)
             return 1
-        names = upsert_a_records(
+        names = create_a_records(
             domain=domain,
             zone_id=zone_id,
             ip=args.ip,

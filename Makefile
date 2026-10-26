@@ -128,7 +128,7 @@ install-selfhost: up
 down: ## Stop MeteorCloud on this VM (keeps data; ARGS=--destroy-data to wipe)
 	$(ANSIBLE_DIR)/install-selfhost.sh --down $(ARGS)
 
-aws-up: ## Create a new AWS EC2 and deploy (Terraform + Ansible). ARGS='--demo' creates Route53 DNS.
+aws-up: ## Create a new AWS EC2 and deploy (Terraform + Ansible). ARGS='--route53' creates the DNS records, '--demo' seeds Demo Organization.
 	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)
 	./scripts/ensure-platform-secrets.sh --run --report -- \
 		sh -c 'cd "$(INSTALLER_DIR)" && exec edge-installer apply "$(abspath $(CONFIG))" $(ARGS)'

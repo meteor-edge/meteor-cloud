@@ -80,7 +80,8 @@ resource "aws_instance" "platform" {
   associate_public_ip_address = !var.assign_elastic_ip
   iam_instance_profile        = var.iam_instance_profile != "" ? var.iam_instance_profile : null
 
-  # IMDSv2 only. A hop limit of 2 lets containers (Traefik DNS-01) use the instance role.
+  # IMDSv2 only. A hop limit of 2 lets containers (Traefik DNS-01) use the instance role;
+  # meteorcloud-imds-guard (platform_deployment role) blocks every container but Traefik.
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"

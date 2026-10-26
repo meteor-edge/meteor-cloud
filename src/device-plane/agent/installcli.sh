@@ -142,7 +142,13 @@ install_wireguard_sudoers() {
   if [[ -z "${user}" || "${user}" == root ]]; then
     return 0
   fi
-  python_bin="$(command -v python3 || echo /usr/bin/python3)"
+  # A fixed, root-owned interpreter: one from $PATH (a venv, ~/.local/bin) would run as root.
+  python_bin=/usr/bin/python3
+  if [[ ! -x "${python_bin}" || "$(stat -Lc '%u' "${python_bin}")" != 0 ]] \
+    || (( 8#$(stat -Lc '%a' "${python_bin}") & 8#022 )); then
+    echo "warning: ${python_bin} is missing or not root-only; skipping the wg0 helper." >&2
+    return 0
+  fi
   install -d -o root -g root -m 0755 "$(dirname "${helper}")"
   tmp="$(mktemp)"
   { echo "#!${python_bin} -I"; tail -n +2 "${SCRIPT_DIR}/packaging/meteorcli-wg"; } > "${tmp}"
@@ -291,7 +297,7 @@ install_meteorcli() {
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: sudo ./installcli.sh adds passwordless sudo for wg/wg-quick so run does not need root."
+    echo "Tip: sudo ./installcli.sh installs the meteorcli-wg helper so run can bring up wg0 without root."
     echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
   fi
 }

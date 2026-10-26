@@ -133,7 +133,7 @@ services:
 Details: [Modular services](services.md)
 
 **Domain and DNS.** Set `platform.domain` (e.g. `fleet.example.com`) for HTTPS,
-then create the A records once you know the server's IP (`make aws-up ARGS='--demo'` creates them in Route53 when the domain is in this account; otherwise it prints them
+then create the A records once you know the server's IP (`make aws-up ARGS='--route53'` creates them in Route53 when the domain is in this account; otherwise it prints them
 at the end; plain DNS, no proxy):
 
 | Service | Record | For |
@@ -148,8 +148,8 @@ Details: [DNS records](dns.md).
 
 `make aws-up` generates `EDGE_PLATFORM_POSTGRES_PASSWORD`,
 `EDGE_PLATFORM_JWT_SECRET`, and `EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN` if
-they are unset, prints them when it finishes, and writes
-`~/.meteorcloud/secrets.env` (mode 0600). Re-runs reuse that file. Export a
+they are unset and writes them to `~/.meteorcloud/secrets.env` (mode 0600).
+When it finishes it prints the admin login and that path, not the secrets. Re-runs reuse that file. Export a
 value first to keep your own. If an existing Postgres volume was initialised
 with a different password, Ansible updates the role to match (data stays).
 
@@ -159,19 +159,20 @@ Optional: `EDGE_PLATFORM_ADMIN_EMAIL`, `EDGE_PLATFORM_ADMIN_PASSWORD`,
 ### Deploy
 
 ```bash
-make aws-up ARGS='--demo'
+make aws-up ARGS='--demo --route53'
 ```
 
 On a terminal it asks for the **domain** (you can change the default). `--demo`
-creates *Demo Organization* and, if that name sits in a Route53 zone in this
-AWS account, the A records (`<domain>`, `*.<domain>`, `wg.<domain>`).
+creates *Demo Organization*. `--route53` finds the public Route53 zone that
+contains the domain, saves `platform.domain` and `aws.dns_zone_id` to
+`installation.yaml`, and Terraform creates the A records (`<domain>`,
+`*.<domain>`, `wg.<domain>`). It fails rather than replace records that exist.
 
-Without `--demo`, set `platform.domain` and `aws.dns_zone_id` in
-`installation.yaml` to create the same records.
+Or set `platform.domain` and `aws.dns_zone_id` in `installation.yaml` yourself.
 
 | Make | Installer | Action |
 |------|-----------|--------|
-| `make aws-up` | `edge-installer apply` | Create EC2 and deploy. `ARGS='--demo'` asks for a domain and creates Route53 records |
+| `make aws-up` | `edge-installer apply` | Create EC2 and deploy. `ARGS='--route53'` creates the Route53 records, `--demo` seeds Demo Organization |
 | `make plan` | `edge-installer plan` | Preview Terraform |
 | `make status-aws` | `edge-installer status` | Status + health |
 | `make aws-down` | `edge-installer destroy --yes` | Tear down AWS |

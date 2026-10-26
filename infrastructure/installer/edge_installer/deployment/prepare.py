@@ -1,4 +1,7 @@
-"""Ask for the domain and, for --demo, pick the Route53 zone so apply can create records."""
+"""Ask for the domain and, for --route53, pick the hosted zone so Terraform creates the records.
+
+--demo only seeds Demo Organization; DNS is changed only when --route53 is given.
+"""
 
 from __future__ import annotations
 
@@ -33,6 +36,7 @@ def prepare_apply(
     config_path: Path,
     console: Console,
     demo: bool | None,
+    route53: bool = False,
 ) -> None:
     if demo is True:
         config.installation.demo = True
@@ -49,11 +53,10 @@ def prepare_apply(
         raise ConfigurationError(f"Invalid domain: {domain}", stage="validation")
     config.platform.domain = domain or None
 
-    if not config.installation.demo or config.aws is None:
+    if not route53 or config.aws is None:
         return
     if not domain:
-        console.print("No domain: demo organization only. Console will be http://<public-ip>.")
-        return
+        raise ConfigurationError("--route53 needs a domain (platform.domain).", stage="validation")
 
     zone_id = (
         os.environ.get("EDGE_PLATFORM_DNS_ZONE_ID", "").strip()
@@ -64,18 +67,20 @@ def prepare_apply(
             zones = list_hosted_zones(profile=config.aws.profile)
         except RuntimeError as exc:
             raise ConfigurationError(
-                f"--demo needs Route53 ({exc}). Set aws.dns_zone_id or install the AWS CLI.",
+                f"--route53 needs the AWS CLI ({exc}). Set aws.dns_zone_id instead.",
                 stage="validation",
             ) from exc
         zone_id = zone_id_for_domain(domain, zones) or ""
         if not zone_id:
             names = ", ".join(name.rstrip(".") for _, name in zones) or "(none)"
             raise ConfigurationError(
-                f"No Route53 hosted zone contains {domain}. Zones: {names}",
+                f"No public Route53 hosted zone contains {domain}. Zones: {names}",
                 stage="validation",
             )
     config.aws.dns_zone_id = zone_id
+    # Saved so the next plain `apply` keeps the records instead of destroying them.
     persist_domain(config_path, domain, zone_id)
     console.print(
-        f"Demo DNS: Route53 {zone_id} will get {domain}, *.{domain}, wg.{domain}"
+        f"Route53 {zone_id} will get {domain}, *.{domain}, wg.{domain} "
+        f"(saved platform.domain and aws.dns_zone_id to {config_path})"
     )

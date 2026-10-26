@@ -71,3 +71,25 @@ def test_exported_env_wins(tmp_path: Path) -> None:
     assert "EDGE_PLATFORM_POSTGRES_PASSWORD=from-env" in text
     assert "EDGE_PLATFORM_JWT_SECRET=jwt-from-env" in text
     assert "EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN=conn-from-env" in text
+
+
+def test_saved_file_is_parsed_not_executed(tmp_path: Path) -> None:
+    marker = tmp_path / "ran"
+    (tmp_path / "secrets.env").write_text(
+        f"EDGE_PLATFORM_JWT_SECRET=kept\ntouch {marker}\n", encoding="utf-8"
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+    assert "EDGE_PLATFORM_JWT_SECRET=kept" in (tmp_path / "secrets.env").read_text(encoding="utf-8")
+
+
+def test_report_prints_the_login_but_not_the_other_secrets(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env.update({"METEORCLOUD_HOME": str(tmp_path), "EDGE_PLATFORM_JWT_SECRET": "jwt-should-not-print"})
+    result = subprocess.run(
+        [str(SCRIPT), "--report"], check=False, capture_output=True, text=True, env=env, cwd=REPO
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Login:" in result.stdout
+    assert "jwt-should-not-print" not in result.stdout

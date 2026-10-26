@@ -25,7 +25,7 @@ make -C ../.. aws-up      # or: edge-installer apply ../../installation.yaml
 | `edge-installer init` | Create sample `installation.yaml` |
 | `edge-installer validate [config]` | Check config, secrets, tools, AWS creds |
 | `edge-installer plan [config]` | Terraform plan (no changes) |
-| `edge-installer apply [config]` | Terraform + Ansible + health check. `--demo` asks for a domain and creates Route53 records |
+| `edge-installer apply [config]` | Terraform + Ansible + health check. `--route53` finds the domain's Route53 zone and creates the A records; `--demo` seeds Demo Organization |
 | `edge-installer status [config]` | State, infrastructure, health |
 | `edge-installer upgrade [config]` | Update enabled services on existing host |
 | `edge-installer destroy [config]` | Tear down AWS + local state |

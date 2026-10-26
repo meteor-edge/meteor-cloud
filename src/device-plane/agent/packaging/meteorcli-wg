@@ -4,8 +4,10 @@
 installcli.sh installs this root-owned and grants passwordless sudo for this file
 only. It never hands the caller's config to wg-quick: it parses it, keeps only the
 keys meteorcli writes (no PreUp/PostUp/PreDown/PostDown, Table, SaveConfig, DNS...),
-writes a root-owned copy, and brings wg0 up from that. Other commands are fixed
-`wg` invocations on wg0 with validated arguments.
+writes a root-owned copy, and brings wg0 up from that. Address and AllowedIPs must
+be single private hosts that are not on a local network, so the caller cannot route
+the host's traffic (or a LAN neighbour) into a tunnel it chose. Other commands are
+fixed `wg` invocations on wg0 with validated arguments.
 
   meteorcli-wg up <wg0.conf>        meteorcli-wg down
   meteorcli-wg show [latest-handshakes|endpoints]
@@ -17,6 +19,7 @@ from __future__ import annotations
 import base64
 import binascii
 import ipaddress
+import json
 import os
 import stat
 import subprocess
@@ -24,6 +27,8 @@ import sys
 
 INTERFACE = "wg0"
 RUN_DIR = "/run/meteorcli-wg"
+# sudo usually sets secure_path, but do not rely on it for the tools run as root.
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CONF = os.path.join(RUN_DIR, INTERFACE + ".conf")
 WG = "wg"
 WG_QUICK = "wg-quick"
@@ -63,16 +68,43 @@ def endpoint(value: str) -> str:
     return value
 
 
-def networks(value: str) -> str:
+def hosts(value: str) -> str:
+    """Tunnel addresses: one private host each (/32 or /128), never a network or default route."""
     items = [item.strip() for item in value.split(",") if item.strip()]
     if not items:
         fail("empty address list")
     for item in items:
         try:
-            ipaddress.ip_interface(item)
+            network = ipaddress.ip_interface(item).network
         except ValueError:
             fail("invalid address")
+        if network.num_addresses != 1 or not network.network_address.is_private:
+            fail("address must be a single private host")
     return ", ".join(items)
+
+
+def tunnel_hosts(conf: str) -> list[str]:
+    found = []
+    for line in conf.splitlines():
+        key, _, value = line.partition(" = ")
+        if key in ("Address", "AllowedIPs"):
+            found += [item.split("/", 1)[0] for item in value.split(", ")]
+    return found
+
+
+def refuse_local_hosts(addresses: list[str]) -> None:
+    """A host reachable without a gateway is on a local network: taking it over hijacks that link."""
+    for address in addresses:
+        result = subprocess.run(
+            ["ip", "-j", "route", "get", address], capture_output=True, text=True, check=False
+        )
+        try:
+            route = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError:
+            route = []
+        for entry in route:
+            if entry.get("dev") != INTERFACE and "gateway" not in entry:
+                fail(f"{address} is on the local network ({entry.get('dev')})")
 
 
 def keepalive(value: str) -> str:
@@ -82,11 +114,11 @@ def keepalive(value: str) -> str:
 
 
 VALIDATORS = {
-    "address": networks,
+    "address": hosts,
     "privatekey": wg_key,
     "publickey": wg_key,
     "endpoint": endpoint,
-    "allowedips": networks,
+    "allowedips": hosts,
     "persistentkeepalive": keepalive,
 }
 CANONICAL = {
@@ -159,13 +191,17 @@ def run(args: list[str], *, check: bool = True) -> int:
 def main(argv: list[str]) -> int:
     if os.geteuid() != 0:
         fail("must run as root (via sudo)")
+    os.environ["PATH"] = SAFE_PATH
     if not argv:
         fail("missing command")
     command, rest = argv[0], argv[1:]
     if command == "up" and len(rest) == 1:
-        write_root_conf(sanitize(read_caller_file(rest[0])))
+        conf = sanitize(read_caller_file(rest[0]))
         if os.path.exists(f"/sys/class/net/{INTERFACE}"):
             run([WG_QUICK, "down", CONF], check=False)
+        # After the old wg0 is gone, so its own addresses do not look local.
+        refuse_local_hosts(tunnel_hosts(conf))
+        write_root_conf(conf)
         return run([WG_QUICK, "up", CONF])
     if command == "down" and not rest:
         if not os.path.exists(f"/sys/class/net/{INTERFACE}"):

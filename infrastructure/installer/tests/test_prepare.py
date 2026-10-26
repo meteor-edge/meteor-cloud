@@ -1,4 +1,4 @@
-"""prepare_apply: domain + demo DNS zone."""
+"""prepare_apply: domain, and the Route53 zone only for --route53."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ EXAMPLE = (
 )
 
 
-def test_demo_resolves_zone_and_writes_yaml(tmp_path: Path, monkeypatch) -> None:
+def test_route53_resolves_zone_and_writes_yaml(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("PLATFORM_DOMAIN", raising=False)
     monkeypatch.delenv("EDGE_PLATFORM_DNS_ZONE_ID", raising=False)
     monkeypatch.setenv("METEORCLOUD_NONINTERACTIVE", "1")
@@ -35,16 +35,15 @@ def test_demo_resolves_zone_and_writes_yaml(tmp_path: Path, monkeypatch) -> None
         "edge_installer.deployment.prepare.list_hosted_zones",
         return_value=[("ZIO", "meteor-edge.io.")],
     ):
-        prepare_apply(config, config_path=path, console=Console(), demo=True)
+        prepare_apply(config, config_path=path, console=Console(), demo=None, route53=True)
 
-    assert config.installation.demo is True
     assert config.platform.domain == "demo.meteor-edge.io"
     assert config.aws.dns_zone_id == "ZIO"
     assert "domain: demo.meteor-edge.io" in path.read_text(encoding="utf-8")
     assert "dns_zone_id: ZIO" in path.read_text(encoding="utf-8")
 
 
-def test_no_demo_does_not_lookup_zone(tmp_path: Path, monkeypatch) -> None:
+def test_demo_alone_does_not_touch_dns(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("METEORCLOUD_NONINTERACTIVE", "1")
     monkeypatch.setenv("PLATFORM_DOMAIN", "demo.meteor-edge.io")
     content = EXAMPLE.read_text(encoding="utf-8").replace("~/.ssh/edge-platform.pem", str(tmp_path / "key.pem"))
@@ -54,8 +53,8 @@ def test_no_demo_does_not_lookup_zone(tmp_path: Path, monkeypatch) -> None:
     config = load_configuration(path)
 
     with patch("edge_installer.deployment.prepare.list_hosted_zones") as lookup:
-        prepare_apply(config, config_path=path, console=Console(), demo=False)
+        prepare_apply(config, config_path=path, console=Console(), demo=True)
 
     lookup.assert_not_called()
-    assert config.installation.demo is False
+    assert config.installation.demo is True
     assert config.aws.dns_zone_id == ""

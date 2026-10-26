@@ -18,7 +18,9 @@ config:
   registrationRequireHttps: true
   # Proxies whose X-Forwarded-Proto/For the API trusts (uvicorn FORWARDED_ALLOW_IPS).
   # The ingress terminates TLS, so without this every request looks like plain HTTP
-  # and device registration fails with https_required. The API Service is not public.
+  # and device registration fails with https_required. "*" also trusts any other pod
+  # that can reach the API (it could fake https or its IP for rate limits): set the
+  # ingress controller's pod CIDR here, or enable networkPolicy below.
   forwardedAllowIps: "*"
   # Extra non-secret environment variables for the API, e.g. rate limits:
   #   DEVICE_OFFLINE_THRESHOLD_SECONDS: "150"
@@ -274,6 +276,18 @@ serviceAccount:
 # Routes /api and /health to the API and everything else to the console.
 # /internal and /metrics are never routed. Needs an ingress controller in the
 # cluster (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
+# Lets only this release's pods and the ingress controller's namespace reach the
+# API, so a forwardedAllowIps of "*" cannot be abused from elsewhere in the cluster.
+# Off by default: it needs a CNI that enforces NetworkPolicy and the right selector.
+networkPolicy:
+  enabled: false
+  ingressNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: ingress-nginx
+  # More allowed peers, e.g. the WireGuard gateway VM when connectivity.gatewayService is on:
+  #   - ipBlock: { cidr: 10.0.12.34/32 }
+  extraFrom: []
+
 ingress:
   enabled: false
   className: ""

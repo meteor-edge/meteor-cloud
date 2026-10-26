@@ -157,6 +157,59 @@
           service logs:
           {{ platform_logs.stdout | default('') }}
 
+# The EC2 hop limit is 2 so Traefik (in Docker) can use the instance role for
+# DNS-01. Keep every other container away from the metadata service.
+- name: Install metadata service guard
+  ansible.builtin.copy:
+    src: meteorcloud-imds-guard.sh
+    dest: /usr/local/sbin/meteorcloud-imds-guard
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install metadata service guard units
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ item.content }}"
+  loop:
+    - name: meteorcloud-imds-guard.service
+      content: |
+        [Unit]
+        Description=Only Traefik may reach the EC2 metadata service
+        After=docker.service
+        Requires=docker.service
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/sbin/meteorcloud-imds-guard {{ compose_project_name }}
+    - name: meteorcloud-imds-guard.timer
+      content: |
+        [Unit]
+        Description=Follow Traefik's address for the metadata service guard
+
+        [Timer]
+        OnBootSec=10s
+        OnUnitActiveSec=15s
+
+        [Install]
+        WantedBy=timers.target
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Enable metadata service guard
+  ansible.builtin.systemd:
+    name: meteorcloud-imds-guard.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply metadata service guard now
+  ansible.builtin.command: /usr/local/sbin/meteorcloud-imds-guard {{ compose_project_name }}
+  changed_when: false
+
 # --remove-orphans keeps containers of services whose profile was switched off
 # (for example cache_provider redis -> memory), so remove those explicitly.
 - name: List services enabled by the current profiles

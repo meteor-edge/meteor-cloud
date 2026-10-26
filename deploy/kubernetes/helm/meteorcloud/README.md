@@ -18,6 +18,7 @@ helm -n meteorcloud test meteorcloud
 | `mqtt.enabled`, `mqtt.broker` | off, or `bundled` EMQX / `external` | off |
 | `ingress.enabled`, `ingress.className` | any ingress controller | disabled; set `ingress.enabled: true` in an overlay |
 | `secrets.existingSecret` | your own Secret instead of the generated one | empty |
+| `networkPolicy.enabled` | only this release, the ingress namespace, and `networkPolicy.extraFrom` reach the API (needs a CNI that enforces it) | off |
 | `connectivity.provider` | `none`, `wireguard` (gateway on its own VM, see below) | `none` |
 
 Device WireGuard (browser SSH, app endpoints): the WireGuard server runs outside

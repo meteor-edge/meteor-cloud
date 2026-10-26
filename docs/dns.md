@@ -63,12 +63,13 @@ once their tunnel goes quiet (about 3 minutes) and reconnect. See
 
 ## Where you see this list
 
-- **`make aws-up ARGS='--demo'`** asks for the domain, finds the Route53 zone
+- **`make aws-up ARGS='--route53'`** asks for the domain, finds the public Route53 zone
   that contains it, and Terraform creates `<domain>`, `*.<domain>`, and
   `wg.<domain>`. Or set `platform.domain` and `aws.dns_zone_id` in
   `installation.yaml`.
-- **`make up`** asks for the domain. With `--demo` and the AWS CLI it upserts
-  those records to the matching hosted zone; otherwise it prints them.
+- **`make up`** asks for the domain. With `--route53` and the AWS CLI it creates
+  the missing records in the matching public hosted zone, and stops if a name
+  already points elsewhere; otherwise it prints them.
 - **`make up`** prints the records (with the public IP it detected) before and
   after the install.
 - **Ansible** prints them at the end of every install

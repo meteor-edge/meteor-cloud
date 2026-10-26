@@ -2,7 +2,7 @@
 # Fill missing EDGE_PLATFORM_* secrets (same idea as make up). Used by make aws-up.
 #
 #   ./scripts/ensure-platform-secrets.sh                 # generate / reuse, write file
-#   ./scripts/ensure-platform-secrets.sh --report        # print saved values
+#   ./scripts/ensure-platform-secrets.sh --report        # print the login and where secrets are
 #   ./scripts/ensure-platform-secrets.sh --run -- CMD    # ensure, export, run CMD
 #   ./scripts/ensure-platform-secrets.sh --run --report -- CMD
 set -euo pipefail
@@ -46,65 +46,47 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-rand() { openssl rand -hex "$1"; }
+# Variable (without EDGE_PLATFORM_) and how to make a missing value.
+SPECS=(
+  "POSTGRES_PASSWORD hex 16"
+  "JWT_SECRET hex 32"
+  "CONNECTIVITY_INTERNAL_TOKEN hex 24"
+  "MQTT_PLATFORM_PASSWORD hex 16"
+  "MQTT_INTERNAL_TOKEN hex 24"
+  "ADMIN_EMAIL fixed admin@example.com"
+  "ADMIN_PASSWORD hex 12"
+)
 
-# Env already set by the caller wins over a saved file.
-keep_pg="${EDGE_PLATFORM_POSTGRES_PASSWORD:-}"
-keep_jwt="${EDGE_PLATFORM_JWT_SECRET:-}"
-keep_conn="${EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN:-}"
-keep_mqtt_pw="${EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD:-}"
-keep_mqtt_token="${EDGE_PLATFORM_MQTT_INTERNAL_TOKEN:-}"
-keep_admin_email="${EDGE_PLATFORM_ADMIN_EMAIL:-}"
-keep_admin_password="${EDGE_PLATFORM_ADMIN_PASSWORD:-}"
+# Parsed, not sourced: the file only holds KEY=value lines. Env set by the caller wins.
+saved() {
+  [[ -f "${SECRETS}" ]] || return 0
+  sed -n "s/^$1=//p" "${SECRETS}" | tail -n 1
+}
 
-if [[ -f "${SECRETS}" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "${SECRETS}"
-  set +a
-fi
-
-if [[ -n "${keep_pg}" ]]; then EDGE_PLATFORM_POSTGRES_PASSWORD="${keep_pg}"; fi
-if [[ -n "${keep_jwt}" ]]; then EDGE_PLATFORM_JWT_SECRET="${keep_jwt}"; fi
-if [[ -n "${keep_conn}" ]]; then EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN="${keep_conn}"; fi
-if [[ -n "${keep_mqtt_pw}" ]]; then EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD="${keep_mqtt_pw}"; fi
-if [[ -n "${keep_mqtt_token}" ]]; then EDGE_PLATFORM_MQTT_INTERNAL_TOKEN="${keep_mqtt_token}"; fi
-if [[ -n "${keep_admin_email}" ]]; then EDGE_PLATFORM_ADMIN_EMAIL="${keep_admin_email}"; fi
-if [[ -n "${keep_admin_password}" ]]; then EDGE_PLATFORM_ADMIN_PASSWORD="${keep_admin_password}"; fi
-
-export EDGE_PLATFORM_POSTGRES_PASSWORD="${EDGE_PLATFORM_POSTGRES_PASSWORD:-$(rand 16)}"
-export EDGE_PLATFORM_JWT_SECRET="${EDGE_PLATFORM_JWT_SECRET:-$(rand 32)}"
-export EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN="${EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN:-$(rand 24)}"
-export EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD="${EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD:-$(rand 16)}"
-export EDGE_PLATFORM_MQTT_INTERNAL_TOKEN="${EDGE_PLATFORM_MQTT_INTERNAL_TOKEN:-$(rand 24)}"
-export EDGE_PLATFORM_ADMIN_EMAIL="${EDGE_PLATFORM_ADMIN_EMAIL:-admin@example.com}"
-export EDGE_PLATFORM_ADMIN_PASSWORD="${EDGE_PLATFORM_ADMIN_PASSWORD:-$(rand 12)}"
+for spec in "${SPECS[@]}"; do
+  read -r name kind arg <<<"${spec}"
+  var="EDGE_PLATFORM_${name}"
+  value="${!var:-$(saved "${var}")}"
+  if [[ -z "${value}" ]]; then
+    if [[ "${kind}" == hex ]]; then value="$(openssl rand -hex "${arg}")"; else value="${arg}"; fi
+  fi
+  export "${var}=${value}"
+done
 
 mkdir -p "${HOME_DIR}"
 chmod 700 "${HOME_DIR}"
 umask 077
-{
-  printf 'EDGE_PLATFORM_POSTGRES_PASSWORD=%s\n' "${EDGE_PLATFORM_POSTGRES_PASSWORD}"
-  printf 'EDGE_PLATFORM_JWT_SECRET=%s\n' "${EDGE_PLATFORM_JWT_SECRET}"
-  printf 'EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN=%s\n' "${EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN}"
-  printf 'EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD=%s\n' "${EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD}"
-  printf 'EDGE_PLATFORM_MQTT_INTERNAL_TOKEN=%s\n' "${EDGE_PLATFORM_MQTT_INTERNAL_TOKEN}"
-  printf 'EDGE_PLATFORM_ADMIN_EMAIL=%s\n' "${EDGE_PLATFORM_ADMIN_EMAIL}"
-  printf 'EDGE_PLATFORM_ADMIN_PASSWORD=%s\n' "${EDGE_PLATFORM_ADMIN_PASSWORD}"
-} > "${SECRETS}"
+for spec in "${SPECS[@]}"; do
+  var="EDGE_PLATFORM_${spec%% *}"
+  printf '%s=%s\n' "${var}" "${!var}"
+done > "${SECRETS}"
 chmod 600 "${SECRETS}"
 
+# Only the login: the other secrets stay in the 0600 file, out of terminals and CI logs.
 report() {
   echo
-  echo "Secrets (copy and keep; saved mode 0600 at ${SECRETS}):"
-  echo "  EDGE_PLATFORM_ADMIN_EMAIL=${EDGE_PLATFORM_ADMIN_EMAIL}"
-  echo "  EDGE_PLATFORM_ADMIN_PASSWORD=${EDGE_PLATFORM_ADMIN_PASSWORD}"
-  echo "  EDGE_PLATFORM_POSTGRES_PASSWORD=${EDGE_PLATFORM_POSTGRES_PASSWORD}"
-  echo "  EDGE_PLATFORM_JWT_SECRET=${EDGE_PLATFORM_JWT_SECRET}"
-  echo "  EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN=${EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN}"
-  echo "  EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD=${EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD}"
-  echo "  EDGE_PLATFORM_MQTT_INTERNAL_TOKEN=${EDGE_PLATFORM_MQTT_INTERNAL_TOKEN}"
-  echo "Re-run make aws-up to reuse the same values."
+  echo "Login:   ${EDGE_PLATFORM_ADMIN_EMAIL} / ${EDGE_PLATFORM_ADMIN_PASSWORD}"
+  echo "Secrets: ${SECRETS} (mode 0600; re-run make aws-up to reuse them)"
 }
 
 if [[ "${RUN}" -eq 1 ]]; then

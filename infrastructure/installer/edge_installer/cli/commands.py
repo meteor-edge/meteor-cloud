@@ -65,10 +65,12 @@ def run_plan(*, config_path: Path, console: Console) -> None:
     console.print(result.get("plan_output", ""))
 
 
-def run_apply(*, config_path: Path, console: Console, demo: bool | None = None) -> None:
+def run_apply(
+    *, config_path: Path, console: Console, demo: bool | None = None, route53: bool = False
+) -> None:
     try:
         config = load_configuration(config_path)
-        prepare_apply(config, config_path=config_path, console=console, demo=demo)
+        prepare_apply(config, config_path=config_path, console=console, demo=demo, route53=route53)
     except ConfigurationError as exc:
         console.print(f"[red]{exc.message}[/red]")
         raise SystemExit(1) from exc

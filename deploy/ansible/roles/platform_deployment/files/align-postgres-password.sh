@@ -7,14 +7,6 @@
 # so we can reset the role without knowing the previous secret.
 set -eu
 
-sql_literal() {
-  printf '%s' "$1" | sed "s/'/''/g"
-}
-
-sql_ident() {
-  printf '%s' "$1" | sed 's/"/""/g'
-}
-
 cmd="${1:-align}"
 user="${POSTGRES_USER:?}"
 db="${POSTGRES_DB:?}"
@@ -27,10 +19,13 @@ case "$cmd" in
     PGPASSWORD="$password" psql -h postgres -U "$user" -d "$db" -c 'SELECT 1' >/dev/null
     ;;
   align)
-    ident=$(sql_ident "$user")
-    lit=$(sql_literal "$password")
-    psql -U "$user" -d "$db" -v ON_ERROR_STOP=1 \
-      -c "ALTER ROLE \"${ident}\" PASSWORD '${lit}'"
+    # psql reads the password from the environment (\getenv, psql 15+) and quotes it
+    # itself, so it never appears in argv (`ps`). Variables only expand on stdin, not -c.
+    psql -U "$user" -d "$db" -v ON_ERROR_STOP=1 <<'SQL'
+\getenv role POSTGRES_USER
+\getenv pw POSTGRES_PASSWORD
+ALTER ROLE :"role" PASSWORD :'pw';
+SQL
     ;;
   *)
     echo "usage: $0 check|align" >&2

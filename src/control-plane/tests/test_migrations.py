@@ -91,3 +91,34 @@ def test_upgrade_restores_permissions_missing_from_an_older_catalog(migrations_u
     finally:
         engine.dispose()
     assert granted == 1
+
+
+def test_upgrade_takes_device_shell_away_from_operators(migrations_url: str) -> None:
+    _alembic(migrations_url, "upgrade", "head")
+    _alembic(migrations_url, "downgrade", "0021_connectivity_ssh_auth")
+    operator_shell = (
+        "SELECT count(*) FROM role_permissions rp"
+        " JOIN permissions p ON p.id = rp.permission_id"
+        " JOIN roles r ON r.id = rp.role_id"
+        " WHERE r.key = 'operator' AND r.organization_id IS NULL"
+        " AND p.resource = 'device' AND p.action = 'shell'"
+    )
+    engine = create_engine(migrations_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO role_permissions (role_id, permission_id)"
+                    " SELECT r.id, p.id FROM roles r, permissions p"
+                    " WHERE r.key = 'operator' AND r.organization_id IS NULL"
+                    " AND p.resource = 'device' AND p.action = 'shell'"
+                    " ON CONFLICT DO NOTHING"
+                )
+            )
+            assert connection.scalar(text(operator_shell)) == 1
+        _alembic(migrations_url, "upgrade", "head")
+        with engine.connect() as connection:
+            remaining = connection.scalar(text(operator_shell))
+    finally:
+        engine.dispose()
+    assert remaining == 0
