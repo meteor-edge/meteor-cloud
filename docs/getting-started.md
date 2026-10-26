@@ -18,7 +18,7 @@ Do not run `make up` on a developer laptop. That path is Ansible + production Co
 ```bash
 cp deploy/compose/.env.example deploy/compose/.env   # make dev does this if missing
 make dev
-make seed      # owner@example.com / dev-password-123
+make seed      # owner@example.com / dev-password-123; includes a demo fleet
 ```
 
 | Surface | URL |
@@ -30,6 +30,9 @@ make seed      # owner@example.com / dev-password-123
 | MQTT TLS | mqtts://localhost:8883 |
 
 Stop with `make stop`. More options: [Development](development.md).
+
+The demo fleet contains three devices: one online, one offline, and one never seen. It also
+includes Storefronts and Lab groups plus Raspberry Pi 5 and Intel NUC 13 device types.
 
 ## 2. Sign in and create an organization
 

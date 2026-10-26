@@ -165,6 +165,9 @@ make migrate
 make seed
 ```
 
+`make seed` is safe to rerun. It creates the development users and organization, plus a small
+demo fleet with device types, groups, and online/offline/never-seen devices.
+
 See [Identity and organizations](identity-and-organizations.md) for auth and tenant details.
 
 ## Lint and format
