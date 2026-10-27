@@ -13,7 +13,7 @@ function initialTheme(): Theme {
     return savedTheme;
   }
 
-  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return "dark";
 }
 
 export function ThemeToggle() {

@@ -62,35 +62,6 @@
   --sent-border: color-mix(in srgb, var(--sky-blue) 55%, transparent);
 }
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    color-scheme: light;
-
-    --background: #edf5ff;
-    --foreground: var(--midnight);
-    --section: color-mix(in srgb, #e7f1ff 78%, transparent);
-    --card: color-mix(in srgb, var(--paper) 72%, transparent);
-    --card-foreground: var(--midnight);
-    --muted: color-mix(in srgb, var(--mist) 70%, transparent);
-    --muted-foreground: var(--slate);
-    /* Slate on Mist is below AA, so chrome on Mist uses Midnight. */
-    --nav: var(--midnight);
-    --border: color-mix(in srgb, var(--sky-blue) 22%, transparent);
-    --input: color-mix(in srgb, var(--slate) 42%, transparent);
-    --field: color-mix(in srgb, var(--paper) 58%, transparent);
-    --ring: var(--cosmic-blue);
-    --primary: var(--cloud-blue);
-    --primary-foreground: var(--paper);
-    --secondary: color-mix(in srgb, var(--paper) 60%, transparent);
-    --secondary-foreground: var(--midnight);
-    --secondary-hover: color-mix(in srgb, var(--mist) 82%, transparent);
-    --accent: color-mix(in srgb, var(--sky-blue) 74%, transparent);
-    --tab-hover: color-mix(in srgb, var(--sky-blue) 12%, transparent);
-    --accent-foreground: var(--cloud-white);
-    --link: var(--link-on-light);
-  }
-}
-
 :root[data-theme="light"] {
   color-scheme: light;
 
