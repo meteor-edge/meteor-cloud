@@ -62,7 +62,9 @@ def run_plan(*, config_path: Path, console: Console) -> None:
         console.print(f"[red]Plan failed[/red] ({exc.stage}): {exc.message}")
         raise SystemExit(1) from exc
     console.print("[bold]Terraform plan summary[/bold]")
-    console.print(result.get("plan_output", ""))
+    # Terraform plan text is already formatted. Highlighting digits breaks
+    # exact comparisons when stdout is a terminal (Rich bolds numbers).
+    console.print(result.get("plan_output", ""), highlight=False)
 
 
 def run_apply(
