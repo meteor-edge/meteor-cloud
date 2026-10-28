@@ -407,6 +407,15 @@ def test_shell_session_records_ssh_result(client: TestClient, db_session: Sessio
         websocket.receive_bytes()
         websocket.send_text("exit\n")
         websocket.receive_bytes()
+        # Output arrives before bridge cleanup. Wait for the server to finish instead of
+        # letting TestClient cancel the handler as this context exits.
+        with pytest.raises(WebSocketDisconnect) as closed:
+            websocket.receive_bytes()
+        assert closed.value.code == 1000
+    row = db_session.get(DeviceShellSession, uuid.UUID(created["session_id"]))
+    db_session.refresh(row)
+    assert row.status == ShellSessionStatus.CLOSED.value
+    assert row.closed_at is not None
     shown = _connectivity(client, headers, org.id, reg["device_id"])
     assert shown["last_ssh_ok_at"] is not None
     assert shown["last_ssh_error"] is None
