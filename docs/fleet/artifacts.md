@@ -31,7 +31,8 @@ Local development Compose runs MinIO (profile `minio`,
 `bitnamilegacy/minio:2024.12.18-debian-12-r1`): API on port 9000, browser
 console on port 9001 (`meteorcloud` / `meteorcloud-dev-secret`). Override the
 image with `MINIO_IMAGE` if needed. Production installs do not need MinIO:
-Ansible and the Helm chart default to `filesystem`.
+Ansible and the Helm chart default to `filesystem`. Upstream MinIO is AGPLv3;
+prefer filesystem or cloud S3 in commercial production — see [Licensing](../licensing.md).
 
 | Setting | Default | Notes |
 |---------|---------|-------|

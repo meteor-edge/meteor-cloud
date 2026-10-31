@@ -21,6 +21,7 @@ export default {
         paper: "var(--paper)",
         ember: "var(--ember)",
         aurora: "var(--aurora)",
+        flare: "var(--flare)",
         link: "var(--link)",
         background: "var(--background)",
         foreground: "var(--foreground)",

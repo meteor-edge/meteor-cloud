@@ -1,5 +1,4 @@
 import {
-  Activity,
   BookOpen,
   Boxes,
   Building2,
@@ -298,18 +297,6 @@ export function Sidebar() {
                     active={isPage("endpoints")}
                   >
                     Endpoints
-                  </SubLink>
-                </NavSection>
-
-                <NavSection
-                  icon={Activity}
-                  label="Observability"
-                  active={isPage("mqtt")}
-                  collapsed={collapsed}
-                  onExpand={() => setCollapsed(false)}
-                >
-                  <SubLink to={`${orgPath}/mqtt`} icon={Activity} active={isPage("mqtt")}>
-                    Monitoring
                   </SubLink>
                 </NavSection>
                 {(showMembers || showTeams) && (

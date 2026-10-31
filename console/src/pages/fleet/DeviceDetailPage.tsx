@@ -21,6 +21,7 @@ import { DeviceEndpointsPanel } from "@/components/fleet/DeviceEndpointsPanel";
 import { DeviceLogs } from "@/components/fleet/DeviceLogs";
 import { DeviceMqttStatus } from "@/components/fleet/DeviceMqttStatus";
 import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
+import { DeviceResourceMeters } from "@/components/fleet/DeviceResourceMeters";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
@@ -46,14 +47,6 @@ function Detail({ label, value }: { label: string; value: string | null | undefi
       <p className="mt-1 text-sm">{value || "—"}</p>
     </div>
   );
-}
-
-function metricText(metrics: Record<string, unknown> | null, key: string): string | null {
-  if (!metrics || metrics[key] == null) {
-    return null;
-  }
-  const value = metrics[key];
-  return typeof value === "number" ? String(value) : String(value);
 }
 
 type DeviceTab = "overview" | "software" | "network" | "mqtt" | "access" | "settings";
@@ -415,36 +408,34 @@ export function DeviceDetailPage() {
       )}
 
       {activeTab === "overview" && (
-        <div className="grid gap-4 rounded-lg border border-border bg-card p-6 shadow-glow sm:grid-cols-2">
-        <Detail label="CPU %" value={metricText(device.mqtt_metrics, "cpu_percent")} />
-        <Detail label="Memory %" value={metricText(device.mqtt_metrics, "memory_percent")} />
-        <Detail label="Disk %" value={metricText(device.mqtt_metrics, "disk_percent")} />
-        <Detail label="Temperature °C" value={metricText(device.mqtt_metrics, "temperature_c")} />
-        <Detail
-          label="Metrics updated"
-          value={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
-        />
-        <Detail label="Serial number" value={device.serial_number} />
-        <Detail
-          label="Operating system"
-          value={[device.os_name, device.os_version].filter(Boolean).join(" ")}
-        />
-        <Detail label="Kernel" value={device.kernel_version} />
-        <Detail label="Architecture" value={device.architecture} />
-        <Detail label="CPU" value={device.cpu_model} />
-        <Detail label="CPU cores" value={device.cpu_cores ? String(device.cpu_cores) : null} />
-        <Detail label="Memory (MB)" value={device.memory_mb ? String(device.memory_mb) : null} />
-        <Detail label="MAC address" value={device.mac_addresses.join(", ")} />
-        <Detail
-          label="Last seen"
-          value={device.last_seen_at ? formatDateTime(device.last_seen_at) : "Never"}
-        />
-        <Detail label="Created" value={formatDateTime(device.created_at)} />
-        <Detail
-          label="Registered"
-          value={device.registered_at ? formatDateTime(device.registered_at) : null}
-        />
-        <Detail label="Credential prefix" value={device.credential_prefix} />
+        <div className="space-y-4">
+          <DeviceResourceMeters
+            metrics={device.mqtt_metrics}
+            updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
+          />
+          <div className="grid gap-4 rounded-lg border border-border bg-card p-6 shadow-glow sm:grid-cols-2">
+            <Detail label="Serial number" value={device.serial_number} />
+            <Detail
+              label="Operating system"
+              value={[device.os_name, device.os_version].filter(Boolean).join(" ")}
+            />
+            <Detail label="Kernel" value={device.kernel_version} />
+            <Detail label="Architecture" value={device.architecture} />
+            <Detail label="CPU" value={device.cpu_model} />
+            <Detail label="CPU cores" value={device.cpu_cores ? String(device.cpu_cores) : null} />
+            <Detail label="Memory (MB)" value={device.memory_mb ? String(device.memory_mb) : null} />
+            <Detail label="MAC address" value={device.mac_addresses.join(", ")} />
+            <Detail
+              label="Last seen"
+              value={device.last_seen_at ? formatDateTime(device.last_seen_at) : "Never"}
+            />
+            <Detail label="Created" value={formatDateTime(device.created_at)} />
+            <Detail
+              label="Registered"
+              value={device.registered_at ? formatDateTime(device.registered_at) : null}
+            />
+            <Detail label="Credential prefix" value={device.credential_prefix} />
+          </div>
         </div>
       )}
 

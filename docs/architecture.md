@@ -134,6 +134,8 @@ Source: [`src/device-plane/agent/`](../src/device-plane/agent/). Runtime adapter
 | Persistence | PostgreSQL | — |
 | `RateLimiter` | `redis`, `memory` | — |
 | `MQTTGateway` | Data-plane HTTP → EMQX | other broker names |
+
+Bundled broker pin and licensing (Apache 2.0 5.8.x vs BSL 5.9+): [MQTT → EMQX version and licensing](fleet/mqtt.md#emqx-version-and-licensing). Full infra inventory: [Licensing](licensing.md).
 | Telemetry last-value | PostgreSQL columns on `Device` | `timescale`, `clickhouse` |
 | `OTAProvider` | `none` | `mender` and others later |
 | `DeviceConnectivityProvider` | `wireguard`, `none` | other tunnels later |
