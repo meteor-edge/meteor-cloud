@@ -365,7 +365,6 @@ describe("Navigation", () => {
       "Types",
       "All Artifacts",
       "OS Images",
-      "Monitoring",
       "Members",
       "Teams",
       "Settings",

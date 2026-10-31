@@ -161,7 +161,8 @@ cache:
       url: ""                # rediss://:password@host:6379/0 (TLS required with credentials)
     image:
       repository: redis
-      tag: "7-alpine"
+      # Pin 7.2.x (BSD-3-Clause). Do not use floating "7" / "7-alpine" (tracks 7.4+ RSAL/SSPL).
+      tag: "7.2-alpine"
       pullPolicy: IfNotPresent
     resources:
       requests: { cpu: 50m, memory: 64Mi }

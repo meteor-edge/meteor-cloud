@@ -18,7 +18,7 @@ prepares the server and runs those same files; it does not keep its own copy.
 | `redis` | profile `redis` | Only with `CACHE_PROVIDER=redis` |
 | `minio` | profile `minio` | Only with `OBJECT_STORAGE_PROVIDER=s3` and no other S3 service |
 | `data-plane` | profile `mqtt` | Needed whenever `MQTT_ENABLED=true` |
-| `emqx` | profile `emqx` | Bundled broker on 8883 (TLS); omit to use an external EMQX |
+| `emqx` | profile `emqx` | Bundled broker on 8883 (TLS), image `emqx/emqx:5.8.6`; omit to use an external EMQX. Licensing: [MQTT](fleet/mqtt.md#emqx-version-and-licensing) |
 | Prometheus, Loki, Alloy, Grafana | `docker-compose.observability.yml` | Bound to 127.0.0.1 |
 
 `/internal/*` (broker callbacks) and `/metrics` are never routed by Traefik.

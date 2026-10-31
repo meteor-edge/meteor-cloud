@@ -30,7 +30,8 @@ services:
       - meteorcloud
 
   redis:
-    image: redis:7-alpine
+    # Pin 7.2.x (BSD-3-Clause). Floating redis:7 / 7-alpine tracks 7.4+ (RSAL/SSPL).
+    image: redis:7.2-alpine
     profiles: [redis]
     volumes:
       - ${REDIS_DATA:-redis_data}:/data

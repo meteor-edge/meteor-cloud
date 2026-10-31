@@ -25,8 +25,9 @@
   --link-on-light: #0062d6; /* small text/links on white (5.6:1) */
 
   /* Accents (use sparingly) */
-  --ember: #ffb547; /* warnings only */
-  --aurora: #2ee6b8; /* success / live data */
+  --ember: #ffb547; /* warnings / elevated load */
+  --aurora: #2ee6b8; /* success / live / healthy */
+  --flare: #ff5a6a; /* critical / nearly exhausted */
 
   --gradient-meteor: linear-gradient(135deg, #02c5fe 0%, #007afd 55%, #003cfa 100%);
   --glow:
