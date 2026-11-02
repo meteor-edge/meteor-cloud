@@ -186,6 +186,7 @@ class DeploymentService:
             failed=raw.get(DeploymentDeviceStatus.FAILED.value, 0),
             cancelled=raw.get(DeploymentDeviceStatus.CANCELLED.value, 0),
             skipped=raw.get(DeploymentDeviceStatus.SKIPPED.value, 0),
+            timed_out=raw.get(DeploymentDeviceStatus.TIMED_OUT.value, 0),
         )
         counts.total = (
             counts.pending
@@ -195,6 +196,7 @@ class DeploymentService:
             + counts.failed
             + counts.cancelled
             + counts.skipped
+            + counts.timed_out
         )
         return counts
 
@@ -206,11 +208,11 @@ class DeploymentService:
             kind=release.kind,
         )
 
-    def _device_name_map(self, device_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    def _device_map(self, device_ids: list[uuid.UUID]) -> dict[uuid.UUID, Device]:
         if not device_ids:
             return {}
         rows = self.session.scalars(select(Device).where(Device.id.in_(device_ids))).all()
-        return {row.id: row.name for row in rows}
+        return {row.id: row for row in rows}
 
     def _to_response(
         self,
@@ -224,7 +226,7 @@ class DeploymentService:
         devices_payload: list[DeploymentDeviceResponse] | None = None
         if include_devices:
             rows = self.deployments.list_devices(deployment_id=deployment.id)
-            names = self._device_name_map([row.device_id for row in rows])
+            devices = self._device_map([row.device_id for row in rows])
             workload_key = (
                 workload_key_from_spec(release.kind, release.spec) if release is not None else None
             )
@@ -244,17 +246,20 @@ class DeploymentService:
             devices_payload = []
             for row in rows:
                 software_row = software_rows.get(row.device_id)
+                device = devices.get(row.device_id)
                 devices_payload.append(
                     DeploymentDeviceResponse(
                         id=row.id,
                         deployment_id=row.deployment_id,
                         device_id=row.device_id,
-                        device_name=names.get(row.device_id),
+                        device_name=device.name if device else None,
+                        device_last_seen_at=device.last_seen_at if device else None,
                         status=row.status,
                         progress_percent=software_row.progress_percent if software_row else None,
                         health=software_row.health if software_row else None,
                         reported_at=software_row.reported_at if software_row else None,
                         endpoint_availability=endpoint_availability.get(row.device_id),
+                        activated_at=row.activated_at,
                         previous_desired_release_id=row.previous_desired_release_id,
                         # A crash after install is reported on the software row, not this one.
                         last_error=(
@@ -356,17 +361,18 @@ class DeploymentService:
 
         activate_ids = self._initial_batch(deploy_ids, rollout)
         activate_set = set(activate_ids)
-        if rollout.get("strategy") == "batched":
-            for row in self.deployments.list_devices(deployment_id=deployment.id):
-                if (
-                    row.status == DeploymentDeviceStatus.PENDING.value
-                    and row.device_id not in activate_set
-                ):
-                    row.status = DeploymentDeviceStatus.QUEUED.value
+        now = datetime.now(UTC)
+        for row in self.deployments.list_devices(deployment_id=deployment.id):
+            if row.status != DeploymentDeviceStatus.PENDING.value:
+                continue
+            if row.device_id in activate_set:
+                row.activated_at = now
+            elif rollout.get("strategy") == "batched":
+                row.status = DeploymentDeviceStatus.QUEUED.value
         rollout = {
             **rollout,
             "activated_device_ids": [str(value) for value in activate_ids],
-            "batch_released_at": datetime.now(UTC).isoformat(),
+            "batch_released_at": now.isoformat(),
         }
         deployment.rollout = rollout
         flag_modified(deployment, "rollout")
@@ -616,17 +622,23 @@ class DeploymentService:
         self.authz.require(membership, "deployment.rollback")
         self._provider_or_404()
         original = self._require_deployment(organization_id, deployment_id)
+        # Paused is allowed: activated devices may already run the bad release.
         if original.status == DeploymentStatus.IN_PROGRESS.value:
             raise ConflictError(
                 "deployment_still_in_progress",
-                "Cancel or wait for the deployment to finish before rolling back.",
+                "Cancel, pause, or wait for the deployment to finish before rolling back.",
             )
 
+        # Only devices that received this release; queued devices never changed.
+        activated_rows = [
+            row
+            for row in self.deployments.list_devices(deployment_id=original.id)
+            if row.activated_at is not None and row.status != DeploymentDeviceStatus.SKIPPED.value
+        ]
         previous_ids = [
             row.previous_desired_release_id
-            for row in self.deployments.list_devices(deployment_id=original.id)
+            for row in activated_rows
             if row.previous_desired_release_id is not None
-            and row.status != DeploymentDeviceStatus.SKIPPED.value
         ]
         if not previous_ids:
             raise ValidationAppError(
@@ -636,21 +648,10 @@ class DeploymentService:
         previous_release_id = Counter(previous_ids).most_common(1)[0][0]
         previous = self._require_release(organization_id, previous_release_id)
 
-        resolved = [
-            uuid.UUID(value)
-            for value in (original.target or {}).get("resolved_device_ids") or []
-        ]
-        if not resolved:
-            resolved = [
-                row.device_id
-                for row in self.deployments.list_devices(deployment_id=original.id)
-                if row.status != DeploymentDeviceStatus.SKIPPED.value
-            ]
-
         payload = DeploymentCreate(
             release_id=previous.id,
             name=f"Rollback of {original.name or str(original.id)[:8]}",
-            target=DeployTarget(device_ids=resolved),
+            target=DeployTarget(device_ids=[row.device_id for row in activated_rows]),
             rollout=DeployRollout(strategy="immediate"),
         )
         return self.create_deployment(
@@ -660,18 +661,39 @@ class DeploymentService:
             rollback_of_deployment_id=original.id,
         )
 
+    def _lock_deployment(self, deployment_id: uuid.UUID) -> Deployment | None:
+        """Re-load the row with SELECT ... FOR UPDATE so concurrent ticks serialize."""
+        return self.session.scalar(
+            select(Deployment)
+            .where(Deployment.id == deployment_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+    def tick_deployment(self, deployment: Deployment) -> Deployment:
+        """Advance the rollout and refresh status under a row lock (API replicas race)."""
+        self.session.flush()
+        locked = self._lock_deployment(deployment.id)
+        if locked is None or locked.status != DeploymentStatus.IN_PROGRESS.value:
+            return locked or deployment
+        self.maybe_advance_batched_rollout(locked)
+        self.refresh_deployment_status(locked)
+        self.session.flush()
+        return locked
+
     def refresh_deployment_status(self, deployment: Deployment) -> None:
         """Mark deployment completed/failed when every device is terminal."""
         if deployment.status != DeploymentStatus.IN_PROGRESS.value:
             return
-        self.maybe_advance_batched_rollout(deployment)
         counts = self._counts(deployment.id)
         open_count = counts.pending + counts.queued + counts.updating
         if open_count > 0:
             return
-        if counts.failed > 0 and counts.succeeded == 0 and counts.cancelled == 0 and counts.skipped == 0:
+        # timed_out counts like failed: the device never confirmed the release.
+        failed = counts.failed + counts.timed_out
+        if failed > 0 and counts.succeeded == 0 and counts.cancelled == 0 and counts.skipped == 0:
             deployment.status = DeploymentStatus.FAILED.value
-        elif counts.cancelled > 0 and counts.succeeded == 0 and counts.failed == 0:
+        elif counts.cancelled > 0 and counts.succeeded == 0 and failed == 0:
             deployment.status = DeploymentStatus.CANCELLED.value
         else:
             # Succeeded and/or skipped (and no open rows) counts as completed.
@@ -732,9 +754,11 @@ class DeploymentService:
         except NotFoundError:
             return
 
+        now = datetime.now(UTC)
         for row in next_batch:
             row.status = DeploymentDeviceStatus.PENDING.value
             row.last_error = None
+            row.activated_at = now
 
         provider.deploy(
             organization_id=deployment.organization_id,
@@ -748,7 +772,7 @@ class DeploymentService:
         rollout = {
             **rollout,
             "activated_device_ids": sorted(activated),
-            "batch_released_at": datetime.now(UTC).isoformat(),
+            "batch_released_at": now.isoformat(),
         }
         deployment.rollout = rollout
         flag_modified(deployment, "rollout")
@@ -784,6 +808,10 @@ class DeploymentService:
             device_id=device_id,
             release_id=row.desired_release_id,
         )
+        # Lock touched Deploys in id order before writing their rows, so two
+        # heartbeats (or a heartbeat and a tick) cannot deadlock on each other.
+        for deployment_id in sorted({progress.deployment_id for progress in open_rows}):
+            self._lock_deployment(deployment_id)
         touched_deployments: dict[uuid.UUID, Deployment] = {}
         for progress in open_rows:
             progress.status = mapped
@@ -806,5 +834,5 @@ class DeploymentService:
         # Flush so status aggregates see the updated deployment_devices rows.
         if open_rows:
             self.session.flush()
-        for deployment in touched_deployments.values():
-            self.refresh_deployment_status(deployment)
+        for deployment_id in sorted(touched_deployments):
+            self.tick_deployment(touched_deployments[deployment_id])

@@ -98,6 +98,10 @@ class DeploymentDeviceResponse(BaseModel):
     # Runtime health from the agent (healthy / unhealthy / unknown); separate from install status.
     health: str | None = None
     reported_at: datetime | None = None
+    # When desired software was written for this device; null while queued or skipped.
+    activated_at: datetime | None = None
+    # Device.last_seen_at, so the console can tell "waiting for device" from "installing".
+    device_last_seen_at: datetime | None = None
     # URL state, only when this Deploy created an endpoint for the device.
     endpoint_availability: str | None = None
     previous_desired_release_id: uuid.UUID | None
@@ -114,6 +118,7 @@ class DeploymentCounts(BaseModel):
     failed: int = 0
     cancelled: int = 0
     skipped: int = 0
+    timed_out: int = 0
     total: int = 0
 
 

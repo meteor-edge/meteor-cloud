@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import enum
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +19,8 @@ class DeploymentStatus(enum.StrEnum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     FAILED = "failed"
+    # Phased/batched rollout stopped activating new devices (rollout.state.paused_reason).
+    PAUSED = "paused"
 
 
 class DeploymentDeviceStatus(enum.StrEnum):
@@ -28,6 +31,8 @@ class DeploymentDeviceStatus(enum.StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     SKIPPED = "skipped"
+    # Activated but no report within rollout.pending_timeout_seconds.
+    TIMED_OUT = "timed_out"
 
 
 class Deployment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -115,9 +120,12 @@ class DeploymentDevice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When desired software was written for this device (null while queued or skipped).
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("deployment_id", "device_id", name="uq_deployment_devices_deployment_device"),
         Index("ix_deployment_devices_deployment_id", "deployment_id"),
         Index("ix_deployment_devices_device_id", "device_id"),
+        Index("ix_deployment_devices_deployment_status", "deployment_id", "status"),
     )

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -163,6 +164,7 @@ class NativeDeploymentProvider:
                 status_code=422,
             )
 
+        now = datetime.now(UTC)
         for row in failed_rows:
             software = self.software.set_desired_software(
                 organization_id=organization_id,
@@ -172,6 +174,7 @@ class NativeDeploymentProvider:
             )
             row.status = DeploymentDeviceStatus.PENDING.value
             row.last_error = None
+            row.activated_at = now
             self._notify_sync_desired(device_id=row.device_id, revision=software.desired_revision)
 
         if deployment.status != DeploymentStatus.IN_PROGRESS.value:
