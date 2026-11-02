@@ -6,7 +6,7 @@ import uuid
 
 from fastapi.testclient import TestClient
 
-from app.core.metrics import CONTENT_TYPE_LATEST, generate_latest
+from app.adapters.prometheus_metrics import CONTENT_TYPE_LATEST, generate_latest
 from app.main import create_app
 
 

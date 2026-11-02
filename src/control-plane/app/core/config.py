@@ -208,6 +208,9 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_format: Literal["console", "json"] = Field(default="console", alias="LOG_FORMAT")
+    # Observability switches. The app never connects to a metrics or log system; these only
+    # control what it exposes on /metrics and writes to stdout.
+    metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
     observability_backend: Literal["prometheus", "cloudwatch"] = Field(
         default="prometheus",
         alias="OBSERVABILITY_BACKEND",
