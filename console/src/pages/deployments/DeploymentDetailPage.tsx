@@ -5,8 +5,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   cancelDeployment,
   getDeployment,
+  pauseDeployment,
+  resumeDeployment,
   retryFailedDeployment,
   rollbackDeployment,
+  type Deployment,
+  type DeploymentDevice,
 } from "@/api/fleet";
 import { getOrganization } from "@/api/organizations";
 import { ApiError } from "@/api/http";
@@ -20,12 +24,75 @@ const STATUS_LABELS: Record<string, string> = {
   completed: "Completed",
   cancelled: "Cancelled",
   failed: "Failed",
+  paused: "Paused",
   pending: "Pending",
   queued: "Queued",
-  updating: "Updating",
+  updating: "Installing",
   succeeded: "Succeeded",
   skipped: "Skipped",
+  timed_out: "Timed out",
 };
+
+const PAUSE_REASONS: Record<string, string> = {
+  failure_threshold: "failure threshold reached",
+  manual: "paused by an operator",
+};
+
+/** Open Deploys keep polling at about the heartbeat rate. */
+const LIVE_STATUSES = new Set(["in_progress", "paused"]);
+
+function deviceStatusLabel(row: DeploymentDevice): string {
+  if (
+    row.status === "pending" &&
+    row.activated_at &&
+    (!row.device_last_seen_at ||
+      new Date(row.device_last_seen_at).getTime() < new Date(row.activated_at).getTime())
+  ) {
+    return "Waiting for device";
+  }
+  return STATUS_LABELS[row.status] ?? row.status;
+}
+
+/** Cumulative phase sizes, as the control plane computes them (percent rounds up, min 1). */
+function phaseSizes(total: number, phases: { count?: number | null; percent?: number | null }[]) {
+  let previous = 0;
+  return phases.map((phase) => {
+    const raw = phase.count ?? Math.max(1, Math.ceil((total * (phase.percent ?? 0)) / 100));
+    previous = Math.min(total, Math.max(raw, previous));
+    return previous;
+  });
+}
+
+function formatDuration(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60000));
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+/** "Phase N of M" plus the soak time left before the next phase, for phased Deploys. */
+function phaseSummary(deployment: Deployment, now: number): string | null {
+  const phases = deployment.rollout.phases;
+  const state = deployment.rollout.state;
+  if (deployment.rollout.strategy !== "phased" || !phases?.length || state?.current_phase == null) {
+    return null;
+  }
+  const parts = [`Phase ${state.current_phase + 1} of ${phases.length}`];
+  const activated = (deployment.devices ?? []).filter((row) => row.activated_at).length;
+  const sizes = phaseSizes(deployment.counts.total - deployment.counts.skipped, phases);
+  const next = sizes.findIndex((size, index) => index > state.current_phase! && size > activated);
+  const delay = next >= 0 ? (phases[next].delay_seconds ?? 0) : 0;
+  if (deployment.status === "in_progress" && state.phase_completed_at && delay > 0) {
+    const left = new Date(state.phase_completed_at).getTime() + delay * 1000 - now;
+    if (left > 0) {
+      parts.push(`next phase in ${formatDuration(left)}`);
+    }
+  }
+  return parts.join(" · ");
+}
 
 export function DeploymentDetailPage() {
   const { organizationId = "", deploymentId = "" } = useParams();
@@ -33,7 +100,9 @@ export function DeploymentDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"cancel" | "retry" | "rollback" | null>(null);
+  const [busy, setBusy] = useState<"cancel" | "pause" | "resume" | "retry" | "rollback" | null>(
+    null,
+  );
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -46,7 +115,8 @@ export function DeploymentDetailPage() {
     queryFn: () => getDeployment(token!, organizationId, deploymentId),
     enabled: Boolean(token && organizationId && deploymentId),
     // Health and URLs keep changing after install finishes, so keep polling at about the heartbeat rate.
-    refetchInterval: (query) => (query.state.data?.status === "in_progress" ? 5000 : 30000),
+    refetchInterval: (query) =>
+      LIVE_STATUSES.has(query.state.data?.status ?? "") ? 5000 : 30000,
     refetchOnWindowFocus: true,
   });
 
@@ -61,6 +131,34 @@ export function DeploymentDetailPage() {
   const healthyCount = rows.filter((row) => row.health === "healthy").length;
   const urlCount = rows.filter((row) => row.endpoint_availability !== null).length;
   const urlReadyCount = rows.filter((row) => row.endpoint_availability === "ready").length;
+  const strategy = deployment?.rollout.strategy;
+  const canPause =
+    deployment?.status === "in_progress" && (strategy === "batched" || strategy === "phased");
+  const pausedReason = deployment?.rollout.state?.paused_reason;
+  const phaseLine = deployment ? phaseSummary(deployment, Date.now()) : null;
+
+  async function onPauseOrResume(action: "pause" | "resume") {
+    if (!token || !deployment) {
+      return;
+    }
+    setBusy(action);
+    setError(null);
+    try {
+      await (action === "pause" ? pauseDeployment : resumeDeployment)(
+        token,
+        organizationId,
+        deploymentId,
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ["deployment", organizationId, deploymentId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["deployments", organizationId] });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Could not ${action} the deployment.`);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function onCancel() {
     if (!token || !deployment || !window.confirm("Cancel this deployment?")) {
@@ -140,6 +238,9 @@ export function DeploymentDetailPage() {
             <p className="mt-2 text-muted-foreground">
               {releaseLabel}
               {deployment ? ` · ${STATUS_LABELS[deployment.status] ?? deployment.status}` : ""}
+              {deployment?.status === "paused" && pausedReason
+                ? ` (${PAUSE_REASONS[pausedReason] ?? pausedReason})`
+                : ""}
               {deployment?.rollback_of_deployment_id ? " · rollback" : ""}
             </p>
           </div>
@@ -164,7 +265,27 @@ export function DeploymentDetailPage() {
                 {busy === "rollback" ? "Rolling back…" : "Rollback"}
               </Button>
             )}
-            {canManage && deployment?.status === "in_progress" && (
+            {canManage && canPause && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy !== null}
+                onClick={() => void onPauseOrResume("pause")}
+              >
+                {busy === "pause" ? "Pausing…" : "Pause"}
+              </Button>
+            )}
+            {canManage && deployment?.status === "paused" && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy !== null}
+                onClick={() => void onPauseOrResume("resume")}
+              >
+                {busy === "resume" ? "Resuming…" : "Resume"}
+              </Button>
+            )}
+            {canManage && deployment && LIVE_STATUSES.has(deployment.status) && (
               <Button
                 type="button"
                 variant="outline"
@@ -183,6 +304,8 @@ export function DeploymentDetailPage() {
         <p className="text-sm text-destructive">Could not load this deployment.</p>
       )}
 
+      {phaseLine && <p className="text-sm font-medium">{phaseLine}</p>}
+
       {deployment && (
         <p className="text-sm text-muted-foreground">
           {deployment.counts.succeeded}/{deployment.counts.total} installed · {healthyCount} healthy
@@ -191,6 +314,7 @@ export function DeploymentDetailPage() {
           {deployment.counts.queued > 0 ? ` · ${deployment.counts.queued} queued` : ""}
           {deployment.counts.updating > 0 ? ` · ${deployment.counts.updating} updating` : ""}
           {deployment.counts.failed > 0 ? ` · ${deployment.counts.failed} failed` : ""}
+          {deployment.counts.timed_out > 0 ? ` · ${deployment.counts.timed_out} timed out` : ""}
           {deployment.counts.cancelled > 0 ? ` · ${deployment.counts.cancelled} cancelled` : ""}
           {deployment.counts.skipped > 0 ? ` · ${deployment.counts.skipped} skipped` : ""}
         </p>
@@ -220,7 +344,7 @@ export function DeploymentDetailPage() {
                   </Link>
                 </td>
                 <td className="px-4 py-3">
-                  {STATUS_LABELS[row.status] ?? row.status}
+                  {deviceStatusLabel(row)}
                   {row.status === "updating" && row.progress_percent != null
                     ? ` (${row.progress_percent}%)`
                     : ""}

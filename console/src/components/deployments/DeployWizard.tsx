@@ -8,12 +8,13 @@ import {
   listReleases,
   type DeploymentCreatePayload,
   type Release,
+  type RolloutPhase,
 } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { AppAddressPicker } from "@/components/fleet/AppAddressPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { parseYamlObject } from "@/lib/yaml";
+import { parseYamlObject, toYaml } from "@/lib/yaml";
 
 const KIND_LABELS: Record<string, string> = {
   systemd: "systemd service",
@@ -26,6 +27,35 @@ const KIND_CAPABILITY: Record<string, string> = {
   docker: "docker",
   docker_compose: "docker_compose",
 };
+
+type Strategy = "immediate" | "batched" | "phased";
+
+const STRATEGIES: { value: Strategy; label: string; hint: string }[] = [
+  { value: "immediate", label: "Immediate", hint: "Every target at once." },
+  { value: "batched", label: "Batched", hint: "A fixed number of devices at a time." },
+  {
+    value: "phased",
+    label: "Phased",
+    hint: "Canary first, then larger phases with a soak time. Pauses when too many fail.",
+  },
+];
+
+const PHASED_PRESETS: Record<string, { label: string; phases: RolloutPhase[] }> = {
+  canary: {
+    label: "Canary 1, then all",
+    phases: [{ count: 1 }, { percent: 100, delay_seconds: 3600 }],
+  },
+  tiered: {
+    label: "1 / 10% / 100%",
+    phases: [
+      { count: 1 },
+      { percent: 10, delay_seconds: 3600 },
+      { percent: 100, delay_seconds: 86400 },
+    ],
+  },
+};
+
+const NUMBER_OR_NULL = (value: unknown): number | null => (value == null ? null : Number(value));
 
 type DeployWizardProps = {
   token: string;
@@ -50,7 +80,12 @@ export function DeployWizard({
   const [deviceIds, setDeviceIds] = useState<string[]>(initialDeviceId ? [initialDeviceId] : []);
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const [name, setName] = useState("");
+  const [strategy, setStrategy] = useState<Strategy>("immediate");
   const [batchSize, setBatchSize] = useState("");
+  const [preset, setPreset] = useState("canary");
+  const [failureThreshold, setFailureThreshold] = useState("10");
+  const [maxConcurrent, setMaxConcurrent] = useState("");
+  const [pendingTimeout, setPendingTimeout] = useState("86400");
   const [publish, setPublish] = useState(false);
   const [endpointHostname, setEndpointHostname] = useState<string | null>(null);
   const [endpointPort, setEndpointPort] = useState("");
@@ -114,10 +149,25 @@ export function DeployWizard({
     setList(list.includes(id) ? list.filter((value) => value !== id) : [...list, id]);
   }
 
+  function buildRollout(): DeploymentCreatePayload["rollout"] {
+    if (strategy === "batched") {
+      const size = batchSize.trim() ? Number(batchSize) : null;
+      return size && size > 0 ? { strategy: "batched", batch_size: size } : { strategy: "immediate" };
+    }
+    if (strategy === "phased") {
+      return {
+        strategy: "phased",
+        phases: PHASED_PRESETS[preset].phases,
+        ...(failureThreshold.trim() ? { failure_threshold_percent: Number(failureThreshold) } : {}),
+        ...(maxConcurrent.trim() ? { max_concurrent: Number(maxConcurrent) } : {}),
+        ...(pendingTimeout.trim() ? { pending_timeout_seconds: Number(pendingTimeout) } : {}),
+      };
+    }
+    return { strategy: "immediate" };
+  }
+
   function buildPayload(): DeploymentCreatePayload {
-    const size = batchSize.trim() ? Number(batchSize) : null;
-    const rollout =
-      size && size > 0 ? { strategy: "batched", batch_size: size } : { strategy: "immediate" };
+    const rollout = buildRollout();
     const port = endpointPort.trim() ? Number(endpointPort) : null;
     const singleDevice = deviceIds.length === 1 && groupIds.length === 0;
     return {
@@ -157,6 +207,10 @@ export function DeployWizard({
       setError("Select at least one device or group.");
       return;
     }
+    if (strategy === "batched" && !(Number(batchSize) > 0)) {
+      setError("Enter a batch size.");
+      return;
+    }
     if (publish && deviceIds.length === 1 && groupIds.length === 0) {
       if (!endpointPort.trim()) {
         setError("Enter the port the app listens on.");
@@ -187,9 +241,18 @@ export function DeployWizard({
         },
         rollout: {
           strategy: String(rolloutRaw.strategy ?? "immediate"),
-          batch_size: rolloutRaw.batch_size == null ? null : Number(rolloutRaw.batch_size),
-          delay_seconds: rolloutRaw.delay_seconds == null ? null : Number(rolloutRaw.delay_seconds),
+          batch_size: NUMBER_OR_NULL(rolloutRaw.batch_size),
+          delay_seconds: NUMBER_OR_NULL(rolloutRaw.delay_seconds),
+          ...(rolloutRaw.strategy === "phased"
+            ? {
+                phases: Array.isArray(rolloutRaw.phases) ? (rolloutRaw.phases as RolloutPhase[]) : null,
+                max_concurrent: NUMBER_OR_NULL(rolloutRaw.max_concurrent),
+                failure_threshold_percent: NUMBER_OR_NULL(rolloutRaw.failure_threshold_percent),
+                pending_timeout_seconds: NUMBER_OR_NULL(rolloutRaw.pending_timeout_seconds),
+              }
+            : {}),
         },
+        endpoint: (raw.endpoint as DeploymentCreatePayload["endpoint"]) ?? null,
       };
       if (!payload.release_id) {
         setError("YAML must include release_id.");
@@ -236,7 +299,13 @@ export function DeployWizard({
             type="button"
             size="sm"
             variant={mode === "yaml" ? "default" : "outline"}
-            onClick={() => setMode("yaml")}
+            onClick={() => {
+              // The YAML editor starts from what the wizard has chosen so far.
+              if (mode === "wizard") {
+                setYamlText(toYaml(buildPayload()));
+              }
+              setMode("yaml");
+            }}
           >
             Advanced YAML
           </Button>
@@ -376,23 +445,101 @@ export function DeployWizard({
                     <dd>{deviceIds.length}</dd>
                   </div>
                 </dl>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium" htmlFor="deploy-batch">
-                    Batch size (optional)
-                  </label>
-                  <Input
-                    id="deploy-batch"
-                    type="number"
-                    min={1}
-                    placeholder="All at once"
-                    value={batchSize}
-                    onChange={(event) => setBatchSize(event.target.value)}
-                  />
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">Rollout</legend>
+                  <div className="flex flex-wrap gap-2">
+                    {STRATEGIES.map((item) => (
+                      <Button
+                        key={item.value}
+                        type="button"
+                        size="sm"
+                        variant={strategy === item.value ? "default" : "outline"}
+                        aria-pressed={strategy === item.value}
+                        onClick={() => setStrategy(item.value)}
+                      >
+                        {item.label}
+                      </Button>
+                    ))}
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    Leave empty to deploy to every target immediately. Set a number to activate that
-                    many devices at a time.
+                    {STRATEGIES.find((item) => item.value === strategy)?.hint}
                   </p>
-                </div>
+                  {strategy === "batched" && (
+                    <>
+                      <label className="block text-sm font-medium" htmlFor="deploy-batch">
+                        Batch size
+                      </label>
+                      <Input
+                        id="deploy-batch"
+                        type="number"
+                        min={1}
+                        value={batchSize}
+                        onChange={(event) => setBatchSize(event.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        The next batch starts when every device in the current one has finished.
+                      </p>
+                    </>
+                  )}
+                  {strategy === "phased" && (
+                    <>
+                      <label className="block text-sm font-medium" htmlFor="deploy-preset">
+                        Phases
+                      </label>
+                      <select
+                        id="deploy-preset"
+                        className="h-10 w-full rounded-md border border-input bg-field px-3 text-sm"
+                        value={preset}
+                        onChange={(event) => setPreset(event.target.value)}
+                      >
+                        {Object.entries(PHASED_PRESETS).map(([key, item]) => (
+                          <option key={key} value={key}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                      <details className="rounded-md border border-border p-3">
+                        <summary className="cursor-pointer text-sm font-medium">Advanced</summary>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                          <label className="space-y-1 text-sm">
+                            <span>Pause at failure %</span>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={failureThreshold}
+                              onChange={(event) => setFailureThreshold(event.target.value)}
+                            />
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span>Max concurrent</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              placeholder="No limit"
+                              value={maxConcurrent}
+                              onChange={(event) => setMaxConcurrent(event.target.value)}
+                            />
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span>Pending timeout (s)</span>
+                            <Input
+                              type="number"
+                              min={60}
+                              placeholder="No timeout"
+                              value={pendingTimeout}
+                              onChange={(event) => setPendingTimeout(event.target.value)}
+                            />
+                          </label>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Offline devices stay pending and are marked timed out after the timeout;
+                          they still install when they come back.
+                        </p>
+                      </details>
+                    </>
+                  )}
+                </fieldset>
                 {deviceIds.length === 1 && groupIds.length === 0 && (
                   <div className="space-y-2 rounded-md border border-border p-3">
                     <label className="flex items-center gap-2 text-sm font-medium">

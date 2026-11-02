@@ -74,6 +74,18 @@ export type ReleaseCreatePayload = {
   spec: Record<string, unknown>;
 };
 
+export type DeploymentStatus = "in_progress" | "paused" | "completed" | "cancelled" | "failed";
+
+export type DeploymentDeviceStatus =
+  | "pending"
+  | "queued"
+  | "updating"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "skipped"
+  | "timed_out";
+
 export type DeploymentCounts = {
   pending: number;
   queued: number;
@@ -82,7 +94,39 @@ export type DeploymentCounts = {
   failed: number;
   cancelled: number;
   skipped: number;
+  timed_out: number;
   total: number;
+};
+
+/** One phase of a phased rollout: exactly one of count or percent (cumulative share). */
+export type RolloutPhase = {
+  count?: number | null;
+  percent?: number | null;
+  /** Soak time after the previous phase became terminal. */
+  delay_seconds?: number | null;
+};
+
+/** Rollout engine state the control plane keeps under rollout.state. */
+export type RolloutState = {
+  current_phase?: number;
+  phase_started_at?: string | null;
+  phase_completed_at?: string | null;
+  paused_reason?: "failure_threshold" | "manual" | null;
+  paused_at?: string | null;
+};
+
+export type DeploymentRollout = {
+  strategy?: "immediate" | "batched" | "phased" | string;
+  batch_size?: number | null;
+  delay_seconds?: number | null;
+  phases?: RolloutPhase[] | null;
+  max_concurrent?: number | null;
+  failure_threshold_percent?: number | null;
+  pending_timeout_seconds?: number | null;
+  activated_device_ids?: string[];
+  batch_released_at?: string;
+  state?: RolloutState;
+  [key: string]: unknown;
 };
 
 export type DeploymentDevice = {
@@ -90,13 +134,16 @@ export type DeploymentDevice = {
   deployment_id: string;
   device_id: string;
   device_name: string | null;
-  status: string;
+  status: DeploymentDeviceStatus;
   progress_percent: number | null;
   /** Runtime health the agent reports (healthy / unhealthy / unknown); null before any report. */
   health: string | null;
   reported_at: string | null;
   /** URL state, only when this Deploy created an endpoint for the device. */
   endpoint_availability: string | null;
+  /** When desired software was written for this device; null while queued or skipped. */
+  activated_at: string | null;
+  device_last_seen_at: string | null;
   previous_desired_release_id: string | null;
   last_error: string | null;
   created_at: string;
@@ -110,8 +157,8 @@ export type Deployment = {
   release: ReleaseSummary | null;
   name: string | null;
   target: Record<string, unknown>;
-  rollout: Record<string, unknown>;
-  status: string;
+  rollout: DeploymentRollout;
+  status: DeploymentStatus;
   provider: string;
   provider_ref: string | null;
   counts: DeploymentCounts;
@@ -141,6 +188,10 @@ export type DeploymentCreatePayload = {
     strategy?: string;
     batch_size?: number | null;
     delay_seconds?: number | null;
+    phases?: RolloutPhase[] | null;
+    max_concurrent?: number | null;
+    failure_threshold_percent?: number | null;
+    pending_timeout_seconds?: number | null;
   };
   endpoint?: {
     hostname: string;

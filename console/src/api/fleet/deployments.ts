@@ -62,6 +62,28 @@ export function cancelDeployment(
   );
 }
 
+export function pauseDeployment(
+  token: string,
+  organizationId: string,
+  deploymentId: string,
+): Promise<Deployment> {
+  return apiRequest<Deployment>(
+    `/api/v1/organizations/${organizationId}/deployments/${deploymentId}/pause`,
+    { method: "POST", token },
+  );
+}
+
+export function resumeDeployment(
+  token: string,
+  organizationId: string,
+  deploymentId: string,
+): Promise<Deployment> {
+  return apiRequest<Deployment>(
+    `/api/v1/organizations/${organizationId}/deployments/${deploymentId}/resume`,
+    { method: "POST", token },
+  );
+}
+
 export function retryFailedDeployment(
   token: string,
   organizationId: string,

@@ -16,6 +16,7 @@ const STATUS_LABELS: Record<string, string> = {
   completed: "Completed",
   cancelled: "Cancelled",
   failed: "Failed",
+  paused: "Paused",
 };
 
 export function DeploymentsPage() {
