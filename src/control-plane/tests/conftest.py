@@ -7,6 +7,8 @@ import uuid
 from collections.abc import Generator
 
 os.environ["MQTT_ENABLED"] = "false"
+# Tests call sweep_deployments directly; no background sweeper against the test DB.
+os.environ["DEPLOY_TICK_INTERVAL_SECONDS"] = "0"
 os.environ.setdefault("CONNECTIVITY_PROVIDER", "wireguard")
 os.environ.setdefault("SHELL_PROVIDER", "echo")
 os.environ.setdefault(

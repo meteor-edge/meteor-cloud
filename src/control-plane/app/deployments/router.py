@@ -80,6 +80,34 @@ def cancel_deployment(
     )
 
 
+@router.post("/{deployment_id}/pause", response_model=DeploymentResponse)
+def pause_deployment(
+    organization_id: uuid.UUID,
+    deployment_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: DeploymentSvc,
+) -> DeploymentResponse:
+    return service.pause_deployment(
+        actor=current_user,
+        organization_id=organization_id,
+        deployment_id=deployment_id,
+    )
+
+
+@router.post("/{deployment_id}/resume", response_model=DeploymentResponse)
+def resume_deployment(
+    organization_id: uuid.UUID,
+    deployment_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: DeploymentSvc,
+) -> DeploymentResponse:
+    return service.resume_deployment(
+        actor=current_user,
+        organization_id=organization_id,
+        deployment_id=deployment_id,
+    )
+
+
 @router.post("/{deployment_id}/retry-failed", response_model=DeploymentResponse)
 def retry_failed_deployment(
     organization_id: uuid.UUID,

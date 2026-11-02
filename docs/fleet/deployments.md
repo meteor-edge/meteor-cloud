@@ -23,15 +23,17 @@ device’s current desired software. The agent verifies `X-Checksum-SHA256`.
 ## API
 
 Requires `deployment.read` to list and view. Creating requires `deployment.create`.
-Cancel requires `deployment.cancel`. Device-group scoped operators can only target
-devices in their groups.
+Cancel and pause require `deployment.cancel`; resume requires `deployment.create`.
+Device-group scoped operators can only target devices in their groups.
 
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET` | `/api/v1/organizations/{org}/deployments` | Filters: `status`, `release_id`, `page`, `page_size` |
 | `POST` | `/api/v1/organizations/{org}/deployments` | Start a Deploy |
 | `GET` | `/api/v1/organizations/{org}/deployments/{id}` | Detail + per-device rows |
-| `POST` | `/api/v1/organizations/{org}/deployments/{id}/cancel` | Cancel in-progress only |
+| `POST` | `/api/v1/organizations/{org}/deployments/{id}/cancel` | Cancel an in-progress or paused Deploy |
+| `POST` | `/api/v1/organizations/{org}/deployments/{id}/pause` | Stop activating new devices (batched/phased, in-progress only; `409` otherwise) |
+| `POST` | `/api/v1/organizations/{org}/deployments/{id}/resume` | Resume a paused Deploy and tick it at once (`409` unless paused) |
 | `POST` | `/api/v1/organizations/{org}/deployments/{id}/retry-failed` | Re-queue failed devices (`deployment.create`) |
 | `POST` | `/api/v1/organizations/{org}/deployments/{id}/rollback` | New Deploy of the previous release (`deployment.rollback`) |
 

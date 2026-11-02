@@ -23,7 +23,13 @@ from app.deployments.models import (
     DeploymentStatus,
 )
 from app.deployments.repository import DeploymentRepository
-from app.deployments.rollout import RolloutConfig, RolloutRow, config_from_rollout, plan_tick
+from app.deployments.rollout import (
+    PAUSE_MANUAL,
+    RolloutConfig,
+    RolloutRow,
+    config_from_rollout,
+    plan_tick,
+)
 from app.deployments.schemas import (
     DeploymentCounts,
     DeploymentCreate,
@@ -47,6 +53,8 @@ from app.releases.kinds import ReleaseKind, workload_key_from_spec
 from app.releases.models import Release
 from app.releases.repository import ReleaseRepository
 from app.tenancy.models import OrganizationMembership
+
+_CANCELLABLE_STATUSES = frozenset({DeploymentStatus.IN_PROGRESS.value, DeploymentStatus.PAUSED.value})
 
 # Capability flag required for each release kind (when the device has reported caps).
 _KIND_CAPABILITY: dict[str, str] = {
@@ -549,14 +557,14 @@ class DeploymentService:
         self.authz.require(membership, "deployment.cancel")
         provider = self._provider_or_404()
         deployment = self._require_deployment(organization_id, deployment_id)
-        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
+        if deployment.status not in _CANCELLABLE_STATUSES:
             raise ConflictError(
                 "deployment_not_cancellable",
-                "Only in-progress deployments can be cancelled.",
+                "Only in-progress or paused deployments can be cancelled.",
             )
         provider.cancel(organization_id=organization_id, deployment_id=deployment_id)
         self.session.refresh(deployment)
-        if deployment.status == DeploymentStatus.IN_PROGRESS.value:
+        if deployment.status in _CANCELLABLE_STATUSES:
             # Providers that only talk to a vendor still leave local history to us.
             open_statuses = {
                 DeploymentDeviceStatus.PENDING.value,
@@ -575,6 +583,90 @@ class DeploymentService:
             resource_type="deployment",
             resource_id=deployment.id,
             metadata={"status": deployment.status},
+        )
+        self.session.commit()
+        return self._to_response(deployment, include_devices=True)
+
+    def pause_deployment(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        deployment_id: uuid.UUID,
+    ) -> DeploymentResponse:
+        """Stop activating new devices; activated devices keep installing and reporting."""
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "deployment.cancel")
+        self._provider_or_404()
+        self._require_deployment(organization_id, deployment_id)
+        deployment = self._lock_deployment(deployment_id)
+        assert deployment is not None
+        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
+            raise ConflictError(
+                "deployment_not_pausable",
+                "Only in-progress deployments can be paused.",
+            )
+        if (deployment.rollout or {}).get("strategy") not in {"batched", "phased"}:
+            raise ConflictError(
+                "deployment_not_pausable",
+                "Only batched or phased deployments can be paused.",
+            )
+        rollout = dict(deployment.rollout or {})
+        rollout["state"] = {
+            **(rollout.get("state") or {}),
+            "paused_reason": PAUSE_MANUAL,
+            "paused_at": datetime.now(UTC).isoformat(),
+        }
+        deployment.rollout = rollout
+        flag_modified(deployment, "rollout")
+        deployment.status = DeploymentStatus.PAUSED.value
+        self.session.flush()
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="deployment.pause",
+            resource_type="deployment",
+            resource_id=deployment.id,
+            metadata={"reason": PAUSE_MANUAL},
+        )
+        self.session.commit()
+        return self._to_response(deployment, include_devices=True)
+
+    def resume_deployment(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        deployment_id: uuid.UUID,
+    ) -> DeploymentResponse:
+        """Clear the pause and tick at once; the failure threshold is checked again."""
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "deployment.create")
+        self._provider_or_404()
+        self._require_deployment(organization_id, deployment_id)
+        deployment = self._lock_deployment(deployment_id)
+        assert deployment is not None
+        if deployment.status != DeploymentStatus.PAUSED.value:
+            raise ConflictError(
+                "deployment_not_paused",
+                "Only paused deployments can be resumed.",
+            )
+        rollout = dict(deployment.rollout or {})
+        state = dict(rollout.get("state") or {})
+        reason = state.pop("paused_reason", None)
+        state.pop("paused_at", None)
+        rollout["state"] = state
+        deployment.rollout = rollout
+        flag_modified(deployment, "rollout")
+        deployment.status = DeploymentStatus.IN_PROGRESS.value
+        deployment = self.tick_deployment(deployment)
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="deployment.resume",
+            resource_type="deployment",
+            resource_id=deployment.id,
+            metadata={"reason": reason, "status": deployment.status},
         )
         self.session.commit()
         return self._to_response(deployment, include_devices=True)

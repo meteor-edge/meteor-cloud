@@ -86,10 +86,10 @@ class NativeDeploymentProvider:
         deployment = self.deployments.get(organization_id=organization_id, deployment_id=deployment_id)
         if deployment is None:
             raise NotFoundError("deployment_not_found", "Deployment was not found.")
-        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
+        if deployment.status not in {DeploymentStatus.IN_PROGRESS.value, DeploymentStatus.PAUSED.value}:
             raise ConflictError(
                 "deployment_not_cancellable",
-                "Only in-progress deployments can be cancelled.",
+                "Only in-progress or paused deployments can be cancelled.",
             )
 
         release = self.releases.get(organization_id=organization_id, release_id=deployment.release_id)
@@ -101,11 +101,14 @@ class NativeDeploymentProvider:
             DeploymentDeviceStatus.PENDING.value,
             DeploymentDeviceStatus.QUEUED.value,
             DeploymentDeviceStatus.UPDATING.value,
+            DeploymentDeviceStatus.TIMED_OUT.value,
         }
         # Only activated rows had desired rewritten; queued devices keep prior desired.
+        # timed_out devices still hold the release as desired and may come back online.
         undo_desired_statuses = {
             DeploymentDeviceStatus.PENDING.value,
             DeploymentDeviceStatus.UPDATING.value,
+            DeploymentDeviceStatus.TIMED_OUT.value,
         }
         for row in self.deployments.list_devices(deployment_id=deployment.id):
             if row.status not in open_statuses:
@@ -177,7 +180,8 @@ class NativeDeploymentProvider:
             row.activated_at = now
             self._notify_sync_desired(device_id=row.device_id, revision=software.desired_revision)
 
-        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
+        # A paused Deploy stays paused; only finished ones run again.
+        if deployment.status in {DeploymentStatus.COMPLETED.value, DeploymentStatus.FAILED.value}:
             deployment.status = DeploymentStatus.IN_PROGRESS.value
         self.session.flush()
 

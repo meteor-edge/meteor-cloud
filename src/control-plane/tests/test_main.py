@@ -34,3 +34,26 @@ def test_metrics_and_request_id_middleware_are_registered() -> None:
 
     assert MetricsMiddleware in middleware_classes
     assert RequestIdMiddleware in middleware_classes
+
+
+def test_lifespan_starts_and_cancels_the_deploy_sweeper(monkeypatch) -> None:
+    import asyncio
+
+    from app import main
+    from app.core.config import get_settings
+
+    started: list[int] = []
+
+    async def fake_sweeper(interval_seconds: int) -> None:
+        started.append(interval_seconds)
+        await asyncio.Event().wait()
+
+    monkeypatch.setenv("DEPLOY_TICK_INTERVAL_SECONDS", "5")
+    monkeypatch.setattr(main, "run_sweeper", fake_sweeper)
+    get_settings.cache_clear()
+    try:
+        with TestClient(create_app()):
+            pass
+    finally:
+        get_settings.cache_clear()
+    assert started == [5]
