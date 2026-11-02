@@ -211,6 +211,9 @@ class Settings(BaseSettings):
     # Observability switches. The app never connects to a metrics or log system; these only
     # control what it exposes on /metrics and writes to stdout.
     metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
+    # Fleet gauges (devices online/offline, waiting on deploys) computed on scrape, cached.
+    fleet_metrics_enabled: bool = Field(default=True, alias="FLEET_METRICS_ENABLED")
+    fleet_metrics_cache_seconds: float = Field(default=30.0, ge=0, alias="FLEET_METRICS_CACHE_SECONDS")
     # One JSON line per request. None (unset) = on when LOG_FORMAT=json, off otherwise.
     access_log: bool | None = Field(default=None, alias="ACCESS_LOG")
     observability_backend: Literal["prometheus", "cloudwatch"] = Field(

@@ -20,10 +20,11 @@ from app.core.access_log import AccessLogMiddleware
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.core.metrics import MetricsMiddleware, configure_metrics, metrics_enabled, metrics_response
+from app.core.metrics import BUILD_INFO, MetricsMiddleware, configure_metrics, metrics_enabled, metrics_response
 from app.core.request_id import RequestIdMiddleware
 from app.deployments.router import router as deployments_router
 from app.devices.agent_router import router as agent_router
+from app.devices.fleet_metrics import register_fleet_metrics
 from app.devices.router import router as fleet_router
 from app.endpoints.router import router as endpoints_router
 from app.endpoints.routing import router as routing_internal_router
@@ -63,6 +64,9 @@ def create_app() -> FastAPI:
 
     if metrics_enabled():
         application.add_middleware(MetricsMiddleware)
+        BUILD_INFO.labels(version=settings.app_version).set(1)
+        if settings.fleet_metrics_enabled:
+            register_fleet_metrics(settings)
     if settings.access_log_enabled:
         application.add_middleware(AccessLogMiddleware)
     application.add_middleware(RequestIdMiddleware)

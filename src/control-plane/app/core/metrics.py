@@ -186,6 +186,11 @@ SHELL_SESSIONS_ACTIVE = gauge("meteorcloud_shell_sessions_active", "Open browser
 # kind: shell | logs; result: opened | failed
 SHELL_SESSIONS = counter("meteorcloud_shell_sessions_total", "Shell/log session attempts", ["kind", "result"])
 
+# --- Build ------------------------------------------------------------------------
+
+# version: the running application version (one series per deploy)
+BUILD_INFO = gauge("meteorcloud_build_info", "Running MeteorCloud control-plane version", ["version"])
+
 # --- HTTP (RED) --------------------------------------------------------------
 
 HTTP_REQUESTS = counter("http_requests_total", "HTTP requests", ["method", "path", "status"])
