@@ -151,6 +151,41 @@ RATE_LIMITED = counter("meteorcloud_rate_limited_total", "Requests rejected by a
 # result: success | failure
 AUTH_LOGINS = counter("meteorcloud_auth_logins_total", "Console user logins by outcome", ["result"])
 
+# --- MQTT, device commands ----------------------------------------------------
+
+# action: authenticate | authorize; result: allow | deny
+MQTT_AUTH = counter("meteorcloud_mqtt_auth_total", "EMQX authentication/authorization decisions", ["action", "result"])
+# kind: status | metrics | command_result | unknown; result: applied | rejected
+MQTT_MESSAGES_INGESTED = counter(
+    "meteorcloud_mqtt_messages_ingested_total", "Device MQTT messages received from the data plane", ["kind", "result"]
+)
+# result: ok | error
+MQTT_PUBLISH = counter("meteorcloud_mqtt_publish_total", "Publishes sent to the data plane", ["result"])
+# kind: ping; result: sent | failed
+DEVICE_COMMANDS = counter("meteorcloud_device_commands_total", "Commands sent to devices", ["kind", "result"])
+
+# --- Deployments ----------------------------------------------------------------
+
+# strategy: the validated rollout strategy (immediate | batched | ...)
+DEPLOYMENTS_CREATED = counter("meteorcloud_deployments_created_total", "Deploys created", ["strategy"])
+# status: completed | failed | cancelled
+DEPLOYMENTS_FINISHED = counter(
+    "meteorcloud_deployments_finished_total", "Deploys that reached a terminal status", ["status"]
+)
+# status: succeeded | failed | cancelled
+DEPLOYMENT_DEVICE_RESULTS = counter(
+    "meteorcloud_deployment_device_results_total",
+    "Per-device Deploy outcomes reported by agents",
+    ["status"],
+)
+
+# --- Remote shell and log sessions ---------------------------------------------
+
+# kind: shell | logs
+SHELL_SESSIONS_ACTIVE = gauge("meteorcloud_shell_sessions_active", "Open browser shell/log sessions", ["kind"])
+# kind: shell | logs; result: opened | failed
+SHELL_SESSIONS = counter("meteorcloud_shell_sessions_total", "Shell/log session attempts", ["kind", "result"])
+
 # --- HTTP (RED) --------------------------------------------------------------
 
 HTTP_REQUESTS = counter("http_requests_total", "HTTP requests", ["method", "path", "status"])

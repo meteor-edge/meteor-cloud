@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.metrics import DEVICE_COMMANDS, MQTT_AUTH
 from app.devices.models import Device, DeviceCommand, DeviceMqttCredential
 from app.devices.tokens import hash_token
 from app.mqtt.acl import can_access_topic, device_id_from_username
@@ -53,6 +54,11 @@ class MqttService:
         self.settings = settings or get_settings()
 
     def authenticate(self, *, username: str, password: str) -> MqttAuthResponse:
+        response = self._authenticate(username=username, password=password)
+        MQTT_AUTH.labels(action="authenticate", result=response.result).inc()
+        return response
+
+    def _authenticate(self, *, username: str, password: str) -> MqttAuthResponse:
         if username == self.settings.mqtt_platform_username:
             if password and password == self.settings.mqtt_platform_password:
                 return MqttAuthResponse(result="allow", is_superuser=True)
@@ -74,6 +80,11 @@ class MqttService:
         return MqttAuthResponse(result="allow", is_superuser=False)
 
     def authorize(self, *, username: str, action: str, topic: str) -> MqttAuthorizeResponse:
+        response = self._authorize(username=username, action=action, topic=topic)
+        MQTT_AUTH.labels(action="authorize", result=response.result).inc()
+        return response
+
+    def _authorize(self, *, username: str, action: str, topic: str) -> MqttAuthorizeResponse:
         if username == self.settings.mqtt_platform_username:
             return MqttAuthorizeResponse(result="allow")
         device_id = device_id_from_username(username)
@@ -171,6 +182,7 @@ class MqttService:
                 retain=False,
             )
         except Exception:
+            DEVICE_COMMANDS.labels(kind="ping", result="failed").inc()
             self.session.refresh(command)
             if command.status not in {"completed", "failed"}:
                 command.status = "failed"
@@ -183,6 +195,7 @@ class MqttService:
                 message="Could not publish ping to the MQTT broker.",
             )
 
+        DEVICE_COMMANDS.labels(kind="ping", result="sent").inc()
         deadline = time.monotonic() + self.settings.mqtt_ping_timeout_seconds
         while time.monotonic() < deadline:
             self.session.expire(command)
