@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -103,6 +103,12 @@ export function DeploymentDetailPage() {
   const [busy, setBusy] = useState<"cancel" | "pause" | "resume" | "retry" | "rollback" | null>(
     null,
   );
+  // Polls with unchanged data do not re-render, so the countdown keeps its own clock.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -135,7 +141,7 @@ export function DeploymentDetailPage() {
   const canPause =
     deployment?.status === "in_progress" && (strategy === "batched" || strategy === "phased");
   const pausedReason = deployment?.rollout.state?.paused_reason;
-  const phaseLine = deployment ? phaseSummary(deployment, Date.now()) : null;
+  const phaseLine = deployment ? phaseSummary(deployment, now) : null;
 
   async function onPauseOrResume(action: "pause" | "resume") {
     if (!token || !deployment) {

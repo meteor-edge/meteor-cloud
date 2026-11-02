@@ -99,4 +99,68 @@ describe("DeployWizard", () => {
       failure_threshold_percent: 10,
     });
   });
+
+  it("keeps edited YAML when switching to the wizard and back", async () => {
+    const user = await openReview();
+    await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
+    const editor = screen.getByLabelText("Deploy body (YAML)");
+    const custom = [
+      "release_id: rel-1",
+      "target:",
+      "  device_ids: [dev-1]",
+      "rollout:",
+      "  strategy: Phased",
+      "  phases:",
+      "    - count: 2",
+      "    - percent: 100",
+      "      delay_seconds: 600",
+      "  failure_threshold_percent: 5",
+    ].join("\n");
+    await user.clear(editor);
+    await user.click(editor);
+    await user.paste(custom);
+
+    await user.click(screen.getByRole("button", { name: "Wizard" }));
+    await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
+    expect((screen.getByLabelText("Deploy body (YAML)") as HTMLTextAreaElement).value).toBe(custom);
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+    expect(vi.mocked(createDeployment).mock.calls[0][2].rollout).toMatchObject({
+      strategy: "phased",
+      phases: [{ count: 2 }, { percent: 100, delay_seconds: 600 }],
+      failure_threshold_percent: 5,
+    });
+  });
+
+  it("rejects a non-numeric rollout value in YAML", async () => {
+    const user = await openReview();
+    await user.click(screen.getByRole("button", { name: "Phased" }));
+    await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
+    const editor = screen.getByLabelText("Deploy body (YAML)") as HTMLTextAreaElement;
+    const broken = editor.value.replace("failure_threshold_percent: 10", "failure_threshold_percent: bad");
+    expect(broken).not.toBe(editor.value);
+    await user.clear(editor);
+    await user.click(editor);
+    await user.paste(broken);
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+    expect(await screen.findByText('Expected a number, got "bad".')).toBeInTheDocument();
+    expect(createDeployment).not.toHaveBeenCalled();
+  });
+
+  it("fills the YAML from the wizard again on request", async () => {
+    const user = await openReview();
+    await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
+    const editor = screen.getByLabelText("Deploy body (YAML)") as HTMLTextAreaElement;
+    await user.type(editor, "\n# note");
+    await user.click(screen.getByRole("button", { name: "Wizard" }));
+    await user.click(screen.getByRole("button", { name: "Phased" }));
+    await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
+    const yaml = () => (screen.getByLabelText("Deploy body (YAML)") as HTMLTextAreaElement).value;
+    expect(yaml()).toContain("# note");
+
+    await user.click(screen.getByRole("button", { name: "Fill from wizard" }));
+    expect(yaml()).toContain("strategy: phased");
+    expect(yaml()).not.toContain("# note");
+  });
 });

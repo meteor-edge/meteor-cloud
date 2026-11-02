@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -197,6 +197,36 @@ describe("DeploymentDetailPage", () => {
     expect(await screen.findByText("Phase 1 of 2 · next phase in 40 min")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Pause" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+  });
+
+  it("counts the soak time down even when polls return the same data", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const completed = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      vi.mocked(getDeployment).mockResolvedValue(
+        deployment(
+          [
+            device({ id: "dd-1" }),
+            device({ id: "dd-2", device_id: "dev-2", device_name: "edge-02", status: "queued", activated_at: null }),
+          ],
+          "in_progress",
+          {
+            strategy: "phased",
+            phases: [{ count: 1 }, { percent: 100, delay_seconds: 3600 }],
+            state: { current_phase: 0, phase_completed_at: completed },
+          },
+        ),
+      );
+      renderPage();
+      expect(await screen.findByText("Phase 1 of 2 · next phase in 40 min")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      });
+      expect(screen.getByText("Phase 1 of 2 · next phase in 30 min")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("labels devices that have not checked in since activation, and timed out devices", async () => {

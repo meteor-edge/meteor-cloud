@@ -77,8 +77,9 @@ Responses include `provider` (e.g. `native`) and optional `provider_ref` (vendor
 Works on in-progress and paused Deploys. Pending, updating, queued and timed-out
 devices are marked cancelled. With the native provider, desired software on
 activated devices (pending, updating, timed out) is restored to the previous
-release when one was recorded; otherwise desired is cleared. Queued devices never
-received the release and keep what they had. Devices that already succeeded stay
+release when one was recorded; otherwise desired is cleared. A device whose
+desired software a newer Deploy has since changed is left alone. Queued devices
+never received the release and keep what they had. Devices that already succeeded stay
 as they are.
 
 ## Rollout strategies
@@ -155,7 +156,8 @@ Rollouts advance on every heartbeat from a device in the Deploy and on a
 background sweep every `DEPLOY_TICK_INTERVAL_SECONDS` (default `60`; `0`
 disables the sweep, then only heartbeats advance rollouts). Each tick takes a
 row lock on the Deploy, so several API replicas never activate the same phase
-twice.
+twice. One replica sweeps at a time (a Postgres advisory lock), and each Deploy
+is committed on its own, so a heartbeat waits for at most one Deploy's tick.
 
 The Deploy detail page shows **Phase N of M** and the soak time left before
 the next phase.
@@ -184,6 +186,8 @@ timed out (or failed) ends as **failed**.
 - **Cancel** works while paused (see [Cancel](#cancel)).
 - **Rollback** works on paused and finished Deploys and only targets devices
   that were activated (received the release). Queued devices are left alone.
+  Once a Deploy is rolled back, **Resume** and **Retry failed** on it return
+  `409 deployment_rolled_back`, so they cannot write the release again.
 
 ### Compared with Balena and Mender
 
@@ -217,7 +221,8 @@ Cancel, and a Deploy wizard (release → devices/groups → review). The review
 step picks **Immediate**, **Batched** or **Phased** (presets
 `Canary 1, then all` and `1 / 10% / 100%`, with an Advanced section for the
 failure threshold, max concurrent and pending timeout). **Advanced YAML**
-starts from the wizard's choices. You can also start a Deploy from a release
+starts from the wizard's choices; once you edit the YAML it is kept until you
+press **Fill from wizard**. You can also start a Deploy from a release
 row or from an empty device Software panel.
 
 ## After you deploy

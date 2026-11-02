@@ -117,6 +117,12 @@ class NativeDeploymentProvider:
             row.status = DeploymentDeviceStatus.CANCELLED.value
             if not should_undo or workload_key is None:
                 continue
+            current = self.software.software.get_by_workload(
+                device_id=row.device_id, workload_key=workload_key
+            )
+            if current is None or current.desired_release_id != deployment.release_id:
+                # A newer Deploy (or rollback) owns desired now; leave it alone.
+                continue
             if row.previous_desired_release_id is not None:
                 previous = self.releases.get(
                     organization_id=organization_id,

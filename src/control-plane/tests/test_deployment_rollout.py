@@ -688,3 +688,79 @@ def test_phased_fields_rejected_for_batched(client: TestClient, db_session: Sess
     )
     assert response.status_code == 422
     assert "only supported with strategy 'phased'" in response.text
+
+
+def test_tick_and_heartbeat_in_parallel_sessions(client: TestClient, db_session: Session, engine) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.deployments.service import DeploymentService
+    from app.deployments.software_models import DeviceSoftware
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 3, "cc")
+    body = _phased_deploy(client, org.id, headers, release, regs, phases=[{"count": 1}, {"percent": 100}])
+    canary = UUID(body["rollout"]["activated_device_ids"][0])
+    db_session.expire_all()
+    software = db_session.scalar(select(DeviceSoftware).where(DeviceSoftware.device_id == canary))
+    assert software is not None
+    # The heartbeat already wrote device_software; only the Deploy rows are left to sync.
+    software.sync_status = "in_sync"
+    software.health = "healthy"
+    workload_key = software.workload_key
+    db_session.commit()
+    start = threading.Barrier(2)
+
+    def run(action: str) -> str:
+        start.wait(timeout=5)
+        with Session(engine) as session:
+            service = DeploymentService(session)
+            if action == "heartbeat":
+                service.sync_progress_from_software(
+                    organization_id=org.id, device_id=canary, workload_key=workload_key
+                )
+            else:
+                deployment = session.get(Deployment, UUID(body["id"]))
+                assert deployment is not None
+                service.tick_deployment(deployment)
+            session.commit()
+        return action
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, ["heartbeat", "tick"]))
+    assert sorted(results) == ["heartbeat", "tick"]
+
+    detail = _detail(client, org.id, headers, body["id"])
+    assert detail["counts"]["succeeded"] == 1
+    assert detail["counts"]["pending"] == 2
+    assert len(detail["rollout"]["activated_device_ids"]) == 3
+    db_session.expire_all()
+    revisions = db_session.scalars(
+        select(DeviceSoftware.desired_revision).where(DeviceSoftware.device_id != canary)
+    ).all()
+    assert revisions == [1, 1]
+
+
+def test_cancel_keeps_desired_written_by_a_newer_deploy(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 2, "cd")
+    body = _phased_deploy(
+        client, org.id, headers, release, regs, phases=CANARY_THEN_ALL, pending_timeout_seconds=60
+    )
+    canary = body["rollout"]["activated_device_ids"][0]
+    _age_activation(db_session, body["id"], canary, 120)
+    _tick(db_session, body["id"])
+    assert _detail(client, org.id, headers, body["id"])["counts"]["timed_out"] == 1
+
+    release2 = _second_release(client, org.id, headers)
+    newer = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={"release_id": release2["id"], "target": {"device_ids": [canary]}},
+    )
+    assert newer.status_code == 201, newer.text
+
+    cancelled = client.post(f"/api/v1/organizations/{org.id}/deployments/{body['id']}/cancel", headers=headers)
+    assert cancelled.status_code == 200, cancelled.text
+    software = client.get(f"/api/v1/organizations/{org.id}/devices/{canary}/software", headers=headers).json()
+    assert software[0]["desired_release_id"] == release2["id"]

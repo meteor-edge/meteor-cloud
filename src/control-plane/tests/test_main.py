@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.metrics import MetricsMiddleware
@@ -57,3 +58,33 @@ def test_lifespan_starts_and_cancels_the_deploy_sweeper(monkeypatch) -> None:
     finally:
         get_settings.cache_clear()
     assert started == [5]
+
+
+def test_run_sweeper_dispatches_sweep_in_worker_thread(monkeypatch) -> None:
+    import asyncio
+    import threading
+
+    from app.deployments import sweeper
+
+    class StopLoop(BaseException):
+        pass
+
+    sleeps: list[float] = []
+    sweep_threads: list[int] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            raise StopLoop
+
+    def fake_sweep() -> int:
+        sweep_threads.append(threading.get_ident())
+        raise RuntimeError("sweep errors are logged, not raised")
+
+    monkeypatch.setattr(sweeper.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(sweeper, "_sweep_with_new_session", fake_sweep)
+    with pytest.raises(StopLoop):
+        asyncio.run(sweeper.run_sweeper(7))
+    assert sleeps == [7, 7]
+    assert len(sweep_threads) == 1
+    assert sweep_threads[0] != threading.get_ident()

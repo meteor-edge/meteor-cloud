@@ -55,7 +55,16 @@ const PHASED_PRESETS: Record<string, { label: string; phases: RolloutPhase[] }> 
   },
 };
 
-const NUMBER_OR_NULL = (value: unknown): number | null => (value == null ? null : Number(value));
+const NUMBER_OR_NULL = (value: unknown): number | null => {
+  if (value == null) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Expected a number, got ${JSON.stringify(value)}.`);
+  }
+  return parsed;
+};
 
 type DeployWizardProps = {
   token: string;
@@ -100,6 +109,8 @@ export function DeployWizard({
       "  strategy: immediate",
     ].join("\n"),
   );
+  // Once edited by hand, the YAML is kept until the user fills it from the wizard again.
+  const [yamlEdited, setYamlEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -229,6 +240,8 @@ export function DeployWizard({
       const raw = parseYamlObject(yamlText);
       const target = (raw.target as Record<string, unknown> | undefined) ?? {};
       const rolloutRaw = (raw.rollout as Record<string, unknown> | undefined) ?? {};
+      // The API trims and lowercases the strategy; match it so phased fields are kept.
+      const yamlStrategy = String(rolloutRaw.strategy ?? "immediate").trim().toLowerCase();
       const payload: DeploymentCreatePayload = {
         release_id: String(raw.release_id ?? ""),
         name: raw.name == null ? null : String(raw.name),
@@ -240,10 +253,10 @@ export function DeployWizard({
             : [],
         },
         rollout: {
-          strategy: String(rolloutRaw.strategy ?? "immediate"),
+          strategy: yamlStrategy,
           batch_size: NUMBER_OR_NULL(rolloutRaw.batch_size),
           delay_seconds: NUMBER_OR_NULL(rolloutRaw.delay_seconds),
-          ...(rolloutRaw.strategy === "phased"
+          ...(yamlStrategy === "phased"
             ? {
                 phases: Array.isArray(rolloutRaw.phases) ? (rolloutRaw.phases as RolloutPhase[]) : null,
                 max_concurrent: NUMBER_OR_NULL(rolloutRaw.max_concurrent),
@@ -301,7 +314,7 @@ export function DeployWizard({
             variant={mode === "yaml" ? "default" : "outline"}
             onClick={() => {
               // The YAML editor starts from what the wizard has chosen so far.
-              if (mode === "wizard") {
+              if (mode === "wizard" && !yamlEdited) {
                 setYamlText(toYaml(buildPayload()));
               }
               setMode("yaml");
@@ -320,11 +333,25 @@ export function DeployWizard({
               id="deploy-yaml"
               className="min-h-[220px] w-full rounded-md border border-input bg-field px-3 py-2 font-mono text-sm"
               value={yamlText}
-              onChange={(event) => setYamlText(event.target.value)}
+              onChange={(event) => {
+                setYamlText(event.target.value);
+                setYamlEdited(true);
+              }}
               spellCheck={false}
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting}
+                onClick={() => {
+                  setYamlText(toYaml(buildPayload()));
+                  setYamlEdited(false);
+                }}
+              >
+                Fill from wizard
+              </Button>
               <Button type="button" disabled={submitting} onClick={() => void onDeployYaml()}>
                 {submitting ? "Deploying…" : "Deploy"}
               </Button>

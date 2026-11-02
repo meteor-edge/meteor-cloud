@@ -663,6 +663,11 @@ def test_rollback_while_paused_only_targets_activated(client: TestClient, db_ses
     assert rolled.status_code == 201, rolled.text
     assert rolled.json()["release_id"] == release["id"]
     assert rolled.json()["target"]["device_ids"] == [canary["device_id"]]
+    # Resuming or retrying the original would write the rolled-back release again.
+    for action in ("resume", "retry-failed"):
+        refused = _action(client, org, headers, body["id"], action)
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["error"]["code"] == "deployment_rolled_back"
 
 
 def test_retry_failed_keeps_paused_deploy_paused(client: TestClient, db_session: Session) -> None:
@@ -740,3 +745,53 @@ def test_sweeper_times_out_silent_devices_and_advances_batched_delay(
     assert advanced["counts"]["queued"] == 0
     assert advanced["counts"]["pending"] == 1
     assert advanced["counts"]["succeeded"] == 1
+
+
+def test_sweeper_runs_on_one_replica_and_releases_its_lock(
+    client: TestClient, db_session: Session, engine
+) -> None:
+    from sqlalchemy import text
+    from sqlalchemy.orm import sessionmaker
+
+    from app.deployments.sweeper import SWEEP_LOCK_KEY, sweep_once
+
+    org, headers, token, release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="sw-lock", mac="aa:bb:cc:77:00:01")
+    _phased(client, org, headers, release, [reg["device_id"]])
+    factory = sessionmaker(bind=engine)
+
+    with engine.connect() as other_replica:
+        assert other_replica.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": SWEEP_LOCK_KEY})
+        assert sweep_once(engine, factory) == 0
+        other_replica.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": SWEEP_LOCK_KEY})
+        other_replica.commit()
+
+    assert sweep_once(engine, factory) == 1
+    with engine.connect() as other_replica:
+        assert other_replica.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": SWEEP_LOCK_KEY})
+        other_replica.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": SWEEP_LOCK_KEY})
+        other_replica.commit()
+
+
+def test_sweeper_failure_on_one_deploy_does_not_stop_the_others(
+    client: TestClient, db_session: Session, monkeypatch
+) -> None:
+    from uuid import UUID
+
+    from app.deployments.service import DeploymentService
+    from app.deployments.sweeper import sweep_deployments
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [_register_device(client, token, name=f"sf-{index}", mac=f"aa:bb:cc:78:00:0{index}") for index in range(2)]
+    # Deploys are swept in id order, so the failing one runs first.
+    bodies = [_phased(client, org, headers, release, [reg["device_id"]]) for reg in regs]
+    first = min(bodies, key=lambda body: body["id"])
+    original = DeploymentService.tick_deployment
+
+    def flaky_tick(self, deployment):
+        if deployment.id == UUID(first["id"]):
+            raise RuntimeError("boom")
+        return original(self, deployment)
+
+    monkeypatch.setattr(DeploymentService, "tick_deployment", flaky_tick)
+    assert sweep_deployments(db_session) == 1

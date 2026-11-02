@@ -119,6 +119,19 @@ class DeploymentService:
             raise NotFoundError("deployment_not_found", "Deployment was not found.")
         return deployment
 
+    def _require_not_rolled_back(self, deployment: Deployment) -> None:
+        """Resume/retry would write the release again onto devices a rollback restored."""
+        rolled_back = self.session.scalar(
+            select(Deployment.id)
+            .where(Deployment.rollback_of_deployment_id == deployment.id)
+            .limit(1)
+        )
+        if rolled_back is not None:
+            raise ConflictError(
+                "deployment_rolled_back",
+                "This deployment was rolled back; create a new deployment instead.",
+            )
+
     def device_supports_kind(self, device: Device, kind: ReleaseKind | str) -> bool:
         """False only when the device has reported capabilities and lacks the kind's runtime."""
         kind_value = kind.value if isinstance(kind, ReleaseKind) else str(kind)
@@ -651,6 +664,7 @@ class DeploymentService:
                 "deployment_not_paused",
                 "Only paused deployments can be resumed.",
             )
+        self._require_not_rolled_back(deployment)
         rollout = dict(deployment.rollout or {})
         state = dict(rollout.get("state") or {})
         reason = state.pop("paused_reason", None)
@@ -681,7 +695,10 @@ class DeploymentService:
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "deployment.create")
         provider = self._provider_or_404()
-        deployment = self._require_deployment(organization_id, deployment_id)
+        self._require_deployment(organization_id, deployment_id)
+        deployment = self._lock_deployment(deployment_id)
+        assert deployment is not None
+        self._require_not_rolled_back(deployment)
         failed = [
             row
             for row in self.deployments.list_devices(deployment_id=deployment.id)
@@ -721,7 +738,10 @@ class DeploymentService:
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "deployment.rollback")
         self._provider_or_404()
-        original = self._require_deployment(organization_id, deployment_id)
+        self._require_deployment(organization_id, deployment_id)
+        # Lock first: a concurrent resume or tick must not activate devices after targets are read.
+        original = self._lock_deployment(deployment_id)
+        assert original is not None
         # Paused is allowed: activated devices may already run the bad release.
         if original.status == DeploymentStatus.IN_PROGRESS.value:
             raise ConflictError(
