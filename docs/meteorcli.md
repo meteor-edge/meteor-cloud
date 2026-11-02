@@ -91,6 +91,10 @@ meteorcli run --once                    # one heartbeat (allowed even if the ser
 
 `meteorcli run` is not a daemon. If `meteorcli.service` is already active, it exits instead of starting a second copy. Stop the unit first (`sudo systemctl stop meteorcli`) when you need a foreground session.
 
+Foreground `meteorcli run` is unprivileged. systemd Deploys go through
+`meteorcli-systemd` (installed by `sudo ./installcli.sh`). `meteorcli.service`
+already runs as root and does not need that helper.
+
 ## Related
 
 - [Getting started](getting-started.md)

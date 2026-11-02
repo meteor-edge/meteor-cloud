@@ -44,15 +44,18 @@ and brings `wg0` down when the helper is present).
 
 `meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
 and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`).
-`sudo ./installcli.sh` installs a root-owned helper, `/usr/local/libexec/meteorcli-wg`,
-and passwordless sudo for that helper only, so the agent can create `wg0` without
-running the whole CLI as root. The helper only accepts meteorcli's own `wg0.conf`
-keys (no `PostUp`/`PreUp` hooks or other `wg-quick` options) and fixed `wg` calls
-on `wg0`, so the sudo rule does not grant root. It also installs
-`/usr/local/libexec/meteorcli-logs`, a read-only log helper for the console's Logs
-window and `meteorcli logs` (see [Device logs](../../../docs/fleet/logs.md)). When the
-control plane has WireGuard enabled, `run` registers this device’s **public**
-key and brings up a tunnel (private key stays on the device). See
+`sudo ./installcli.sh` installs root-owned helpers and passwordless sudo for those
+files only, so `meteorcli run` can stay unprivileged:
+
+- `/usr/local/libexec/meteorcli-wg` — create `wg0` (meteorcli's own `wg0.conf`
+  keys only; no `PostUp`/`PreUp` hooks)
+- `/usr/local/libexec/meteorcli-logs` — read-only logs for the console Logs
+  window and `meteorcli logs` (see [Device logs](../../../docs/fleet/logs.md))
+- `/usr/local/libexec/meteorcli-systemd` — install a Deployed `.service` unit
+  under `/etc/systemd/system` (does not overwrite `meteorcli.service`)
+
+When the control plane has WireGuard enabled, `run` registers this device’s
+**public** key and brings up a tunnel (private key stays on the device). See
 [Device connectivity](../../../docs/fleet/connectivity.md).
 
 Config and credentials go in `~/.config/meteorcli` for a normal user, or

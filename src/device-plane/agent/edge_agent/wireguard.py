@@ -99,7 +99,7 @@ class ConnectivityState:
         self.next_register_at = self.clock() + BLOCKED_RETRY_SECONDS * self.jitter(0.8, 1.2)
 
 
-# Root-owned helper installed by installcli.sh; the only command the agent may sudo.
+# Root-owned helper installed by installcli.sh; passwordless sudo for this file only.
 # It brings wg0 up from a sanitized, root-owned copy of wg0.conf (no wg-quick hooks).
 WG_HELPER = "/usr/local/libexec/meteorcli-wg"
 

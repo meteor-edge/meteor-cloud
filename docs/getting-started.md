@@ -43,6 +43,9 @@ includes Storefronts and Lab groups plus Raspberry Pi 5 and Intel NUC 13 device 
 | `seed-docker` | `1.0.0-ok`, `1.0.0-fail` | container `seed-nginx` (`nginx:alpine` vs exiting `busybox`) |
 | `seed-compose` | `1.0.0-ok`, `1.0.0-fail` | project `seed-compose` (nginx + HTML zip vs exiting busybox) |
 
+If Deploy fails with `artifact_content_missing`, the release row exists but MinIO has no
+file (host seed used AWS or Docker DNS). Re-run `make seed` with Compose MinIO up.
+
 ## 2. Sign in and create an organization
 
 1. Open the console → sign in with the seed user (or register via `POST /api/v1/auth/register`).
@@ -64,6 +67,8 @@ curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/
 meteorcli register --server http://localhost:8000 --token reg_... --name edge-01
 sudo systemctl enable --now meteorcli   # if installed with --with-service
 # or: meteorcli run                     # foreground; Ctrl+C to stop
+# systemd Deploys need: sudo ./installcli.sh  (meteorcli-systemd helper)
+# or run meteorcli.service (root)
 ```
 
 Details: [Registration tokens](fleet/registration-tokens.md), [Device registration](fleet/device-registration.md).

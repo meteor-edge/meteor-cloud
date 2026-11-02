@@ -60,6 +60,13 @@ def test_seed_creates_a_repeatable_demo_fleet(db_session, object_storage):
     assert len(object_storage.objects) == 4
 
 
+def test_seed_restores_missing_artifact_bytes(db_session, object_storage):
+    seed(db_session, storage=object_storage)
+    object_storage.objects.clear()
+    seed(db_session, storage=object_storage)
+    assert len(object_storage.objects) == 4
+
+
 def test_seed_skips_file_artifacts_when_storage_is_offline(db_session, object_storage):
     object_storage.fail_puts = True
     seed(db_session, storage=object_storage)

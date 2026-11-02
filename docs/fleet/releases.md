@@ -49,9 +49,12 @@ kinds later (for example AI models) without a separate wizard.
 
 ## Apply notes
 
-- **systemd** — agent installs the unit under `/etc/systemd/system` (needs root /
-  `meteorcli.service`), then `daemon-reload` / `enable` / `restart` when
-  `start` is true.
+- **systemd** — agent installs the unit under `/etc/systemd/system`, then
+  `daemon-reload` / `enable` / `restart` when `start` is true. Unprivileged
+  `meteorcli run` uses the `meteorcli-systemd` helper from `sudo ./installcli.sh`
+  (passwordless sudo for that file only). `meteorcli.service` already runs as
+  root. Re-run the installer after upgrading if Deploy fails with permission
+  denied on the unit file.
 - **docker** — pull `spec.image` and/or `docker load` a tarball, then
   `docker run`.
 - **docker_compose** — materialize YAML/zip and `docker compose up -d`.

@@ -141,7 +141,8 @@ uninstall() {
   fi
   if [[ "${EUID}" -eq 0 ]]; then
     rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg \
-      /etc/sudoers.d/meteorcli-logs /usr/local/libexec/meteorcli-logs
+      /etc/sudoers.d/meteorcli-logs /usr/local/libexec/meteorcli-logs \
+      /etc/sudoers.d/meteorcli-systemd /usr/local/libexec/meteorcli-systemd
     remove_config_dir /etc/meteorcli
     if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
       user_home="$(getent passwd "${SUDO_USER}" | cut -d: -f6 || true)"
@@ -203,6 +204,10 @@ install_root_helpers() {
   # Read-only logs (journal, Docker, /var/log) for the console's Logs window and
   # `meteorcli logs`, without putting the user in the root-equivalent docker group.
   install_root_helper meteorcli-logs /etc/sudoers.d/meteorcli-logs 'read device logs'
+  # Install / enable systemd units from a Deploy. The helper copies a
+  # caller-owned .service file and runs fixed systemctl argv (not arbitrary shell).
+  install_root_helper meteorcli-systemd /etc/sudoers.d/meteorcli-systemd \
+    'install systemd units from meteorcli without `sudo meteorcli`'
 }
 
 # meteorcli.service always uses /etc/meteorcli. If the operator enrolled as a
@@ -332,7 +337,7 @@ install_meteorcli() {
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: sudo ./installcli.sh installs the meteorcli-wg and meteorcli-logs helpers (wg0 and logs without root)."
+    echo "Tip: sudo ./installcli.sh installs meteorcli-wg, meteorcli-logs, and meteorcli-systemd helpers."
     echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
   fi
 }

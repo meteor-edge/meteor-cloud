@@ -3,18 +3,49 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
+
+# Host `make seed` must talk to Compose on localhost, not Docker DNS or AWS.
+# Apply before importing Settings / SessionLocal (they cache DATABASE_URL).
+def _apply_host_seed_env() -> None:
+    env_file = Path(__file__).resolve().parents[3] / "deploy" / "compose" / ".env"
+    if env_file.is_file():
+        for raw in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key and key not in os.environ:
+                os.environ[key] = value.strip().strip("'\"")
+    for key in ("OBJECT_STORAGE_ENDPOINT_URL", "DATABASE_URL", "REDIS_URL"):
+        current = os.environ.get(key, "")
+        rewritten = (
+            current.replace("://minio:", "://127.0.0.1:")
+            .replace("@postgres:", "@127.0.0.1:")
+            .replace("://redis:", "://127.0.0.1:")
+        )
+        if rewritten != current:
+            os.environ[key] = rewritten
+
+
+if "pytest" not in sys.modules:
+    _apply_host_seed_env()
+
+# isort: off
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters import object_storage as build_object_storage
-from app.artifacts.models import ArtifactType
+from app.artifacts.models import Artifact, ArtifactType
 from app.artifacts.repository import ArtifactRepository
 from app.artifacts.schemas import ArtifactCreate
 from app.artifacts.service import ArtifactService
@@ -35,6 +66,7 @@ from app.releases.schemas import ReleaseCreate
 from app.releases.service import ReleaseService
 from app.tenancy.models import Organization, OrganizationRole
 from app.tenancy.repository import MembershipRepository, OrganizationRepository
+# isort: on
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +279,29 @@ def _demo_releases() -> tuple[_SeedRelease, ...]:
     )
 
 
+def _restore_missing_artifact_bytes(
+    storage: ObjectStorage,
+    artifact: Artifact,
+    *,
+    content: bytes,
+    content_type: str | None,
+) -> None:
+    """Put seed bytes when the DB row exists but object storage has no file."""
+    try:
+        present = storage.exists(artifact.storage_key)
+    except Exception:
+        logger.warning("Could not check storage for %s %s", artifact.name, artifact.version)
+        return
+    if present:
+        return
+    try:
+        storage.put(artifact.storage_key, BytesIO(content), content_type=content_type)
+    except Exception:
+        logger.warning("Could not restore artifact content %s %s", artifact.name, artifact.version)
+        return
+    logger.info("Restored missing artifact content %s %s", artifact.name, artifact.version)
+
+
 def _seed_demo_software(
     session: Session,
     *,
@@ -315,6 +370,13 @@ def _seed_demo_software(
                         version=item.version,
                     )
                     artifact_id = existing_artifact.id if existing_artifact else None
+                    if existing_artifact is not None:
+                        _restore_missing_artifact_bytes(
+                            resolved,
+                            existing_artifact,
+                            content=item.content,
+                            content_type=item.content_type,
+                        )
                 except AppError as exc:
                     if exc.status_code == 503 or exc.code in {"storage_unavailable", "artifact_empty"}:
                         logger.warning(
@@ -328,6 +390,12 @@ def _seed_demo_software(
                     raise
             else:
                 artifact_id = existing_artifact.id
+                _restore_missing_artifact_bytes(
+                    resolved,
+                    existing_artifact,
+                    content=item.content,
+                    content_type=item.content_type,
+                )
                 logger.info("Artifact already exists: %s %s", item.name, item.version)
 
         existing_release = release_repo.find_duplicate(
