@@ -11,6 +11,7 @@ import paho.mqtt.client as mqtt
 
 from data_plane.config import Settings
 from data_plane.ingest import ingest_message
+from data_plane.metrics import MESSAGES_RECEIVED, MQTT_CONNECTED, message_kind
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +119,10 @@ class PlatformMqttClient:
     ) -> None:
         if str(reason_code) not in {"Success", "0"}:
             logger.warning("MQTT platform client connect failed: %s", reason_code)
+            MQTT_CONNECTED.set(0)
             self._ready.clear()
             return
+        MQTT_CONNECTED.set(1)
         self._ready.clear()
         with self._lock:
             extra = [name for name, count in self._watch_counts.items() if count > 0]
@@ -159,6 +162,7 @@ class PlatformMqttClient:
         _reason_code: object,
         _properties: object = None,
     ) -> None:
+        MQTT_CONNECTED.set(0)
         self._ready.clear()
 
     def _on_message(
@@ -168,6 +172,7 @@ class PlatformMqttClient:
         message: mqtt.MQTTMessage,
     ) -> None:
         payload = message.payload.decode("utf-8", errors="replace")
+        MESSAGES_RECEIVED.labels(kind=message_kind(message.topic)).inc()
         try:
             ingest_message(self.settings, topic=message.topic, payload=payload)
         except Exception:
