@@ -132,6 +132,25 @@ def metrics_enabled() -> bool:
     return _backend is not None and _backend.pull_endpoint
 
 
+# --- Devices, enrollment and identity -----------------------------------------
+# Every label below has a fixed set of values; see the comment on each metric.
+
+# result: created | reregistered | invalid_token | conflict | error
+DEVICE_REGISTRATIONS = counter(
+    "meteorcloud_device_registrations_total", "Agent registration attempts by outcome", ["result"]
+)
+AGENT_HEARTBEATS = counter("meteorcloud_agent_heartbeats_total", "Agent heartbeats accepted")
+# result: submitted | error
+ENROLLMENT_REQUESTS = counter(
+    "meteorcloud_enrollment_requests_total", "Enrollment requests submitted by agents", ["result"]
+)
+# status: pending | approved | rejected | expired | unauthorized | error
+ENROLLMENT_POLLS = counter("meteorcloud_enrollment_polls_total", "Enrollment polls by returned status", ["status"])
+# limiter: registration | enrollment_request | enrollment_poll | connectivity
+RATE_LIMITED = counter("meteorcloud_rate_limited_total", "Requests rejected by a rate limiter", ["limiter"])
+# result: success | failure
+AUTH_LOGINS = counter("meteorcloud_auth_logins_total", "Console user logins by outcome", ["result"])
+
 # --- HTTP (RED) --------------------------------------------------------------
 
 HTTP_REQUESTS = counter("http_requests_total", "HTTP requests", ["method", "path", "status"])

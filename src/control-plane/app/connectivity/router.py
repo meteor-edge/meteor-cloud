@@ -14,6 +14,7 @@ from app.connectivity.schemas import (
     DeviceConnectivityResponse,
 )
 from app.core.exceptions import AppError
+from app.core.metrics import RATE_LIMITED
 from app.devices.dependencies import CurrentDevice
 from app.devices.rate_limit import RateLimiter
 from app.identity.dependencies import CurrentUser
@@ -36,6 +37,7 @@ def enforce_connectivity_rate_limit(
 ) -> None:
     client = request.client.host if request.client else "unknown"
     if not limiter.allow(client):
+        RATE_LIMITED.labels(limiter="connectivity").inc()
         raise ConnectivityRateLimitError()
 
 
