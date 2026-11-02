@@ -198,6 +198,7 @@ Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed
 | `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
 | `DEPLOYMENT_PROVIDER` | Who *executes* Deploys: `native` (default), `none`, or `mender` (stub until adapter exists). Releases/UI stay in MeteorCloud |
 | `OTA_PROVIDER` | Deprecated; prefer `DEPLOYMENT_PROVIDER` |
+| `DEPLOY_TICK_INTERVAL_SECONDS` | Seconds between background Deploy sweeps (batched delays, phased soak, pending timeouts). Default `60`; `0` disables |
 | `IDENTITY_PROVIDER` | Member sign-in account directory (`local` only: PostgreSQL users) |
 
 HTTP JSON between planes is documented in [`contracts/mqtt-http.md`](../contracts/mqtt-http.md).
