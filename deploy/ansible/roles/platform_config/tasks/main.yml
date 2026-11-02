@@ -230,9 +230,20 @@
         group: root
         mode: "0755"
 
-- name: Write Alertmanager receiver secrets
+- name: Prepare observability data and Alertmanager secrets
   when: observability_enabled | bool
   block:
+    # Also created by platform_directories (provision.yml); repeated here so a deploy-only
+    # run (playbooks/services/*.yml) does not leave Docker to create it root-owned, which
+    # prom/prometheus (nobody) cannot write.
+    - name: Create the Prometheus data directory
+      ansible.builtin.file:
+        path: "{{ platform_root }}/data/prometheus"
+        state: directory
+        owner: "65534"
+        group: "65534"
+        mode: "0750"
+
     - name: Create the Alertmanager secrets directory
       ansible.builtin.file:
         path: "{{ platform_root }}/secrets/alertmanager"
