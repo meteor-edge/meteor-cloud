@@ -16,6 +16,7 @@ from app.audit.router import router as audit_router
 from app.authorization.router import router as authorization_router
 from app.connectivity.internal_router import router as connectivity_internal_router
 from app.connectivity.router import router as connectivity_router
+from app.core.access_log import AccessLogMiddleware
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
@@ -62,6 +63,8 @@ def create_app() -> FastAPI:
 
     if metrics_enabled():
         application.add_middleware(MetricsMiddleware)
+    if settings.access_log_enabled:
+        application.add_middleware(AccessLogMiddleware)
     application.add_middleware(RequestIdMiddleware)
     application.add_middleware(
         CORSMiddleware,

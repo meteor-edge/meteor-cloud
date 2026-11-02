@@ -137,7 +137,7 @@ def metrics_enabled() -> bool:
 HTTP_REQUESTS = counter("http_requests_total", "HTTP requests", ["method", "path", "status"])
 HTTP_DURATION = histogram("http_request_duration_seconds", "HTTP request duration in seconds", ["method", "path"])
 
-_SKIP_PATHS = frozenset({"/health", "/api/v1/health", "/metrics"})
+SKIP_PATHS = frozenset({"/health", "/api/v1/health", "/metrics"})
 
 
 def _iter_routes(routes):
@@ -149,9 +149,9 @@ def _iter_routes(routes):
         yield route
 
 
-def _route_template(request: Request) -> str:
+def route_template(request: Request) -> str:
     path = request.url.path
-    if path in _SKIP_PATHS:
+    if path in SKIP_PATHS:
         return path
     for route in _iter_routes(request.app.router.routes):
         match, _ = route.matches(request.scope)
@@ -164,8 +164,8 @@ def _route_template(request: Request) -> str:
 
 class MetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
-        path = _route_template(request)
-        if path in _SKIP_PATHS:
+        path = route_template(request)
+        if path in SKIP_PATHS:
             return await call_next(request)
         started = time.perf_counter()
         try:

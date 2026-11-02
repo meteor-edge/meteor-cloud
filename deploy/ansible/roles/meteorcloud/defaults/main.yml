@@ -26,6 +26,9 @@ platform_domain: ""
 acme_email: "{{ EDGE_PLATFORM_ACME_EMAIL | default(lookup('env', 'EDGE_PLATFORM_ACME_EMAIL'), true) }}"
 log_format: console
 log_level: INFO
+# Empty = app default (access log on when log_format is json).
+access_log: ""
+metrics_enabled: true
 registration_require_https: false
 docs_public_url: http://localhost:3000/docs
 
