@@ -45,6 +45,7 @@ services:
       - "--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-5GB}"
     volumes:
       - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/observability/rules:/etc/prometheus/rules:ro
       - ${PROMETHEUS_DATA:-prometheus_data}:/prometheus
     ports:
       - "127.0.0.1:9090:9090"

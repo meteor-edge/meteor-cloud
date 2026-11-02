@@ -1,0 +1,46 @@
+# Recording rules for MeteorCloud. Standard Prometheus rule format: they also load in
+# Mimir, VictoriaMetrics, Thanos or kube-prometheus-stack (the Helm chart ships this file).
+#
+# scope="public"   = console/agent API (/api/...)
+# scope="internal" = service-to-service calls (/internal/...: EMQX auth, gateway polls)
+#
+# Latency excludes long routes on purpose: artifact upload (POST .../artifacts), artifact
+# downloads (.../download) and the MQTT test event stream (.../mqtt/events). They are slow by
+# design and would hide real API latency.
+groups:
+  - name: meteorcloud-http
+    rules:
+      - record: meteorcloud:http_requests:rate5m
+        expr: sum(rate(http_requests_total{path=~"/api/.*"}[5m]))
+        labels:
+          scope: public
+      - record: meteorcloud:http_requests:rate5m
+        expr: sum(rate(http_requests_total{path=~"/internal/.*"}[5m]))
+        labels:
+          scope: internal
+      - record: meteorcloud:http_5xx:rate5m
+        expr: sum(rate(http_requests_total{path=~"/api/.*", status=~"5.."}[5m]))
+        labels:
+          scope: public
+      - record: meteorcloud:http_5xx:rate5m
+        expr: sum(rate(http_requests_total{path=~"/internal/.*", status=~"5.."}[5m]))
+        labels:
+          scope: internal
+      - record: meteorcloud:http_5xx:ratio5m
+        expr: meteorcloud:http_5xx:rate5m / meteorcloud:http_requests:rate5m
+      - record: meteorcloud:http_latency_p95:5m
+        expr: |
+          histogram_quantile(0.95, sum by (le) (
+            rate(http_request_duration_seconds_bucket{path=~"/api/.*", path!~".*/download|.*/mqtt/events"}[5m])
+            unless on (method, path)
+            http_request_duration_seconds_bucket{method="POST", path="/api/v1/organizations/{organization_id}/artifacts"}
+          ))
+        labels:
+          scope: public
+      - record: meteorcloud:http_latency_p95:5m
+        expr: |
+          histogram_quantile(0.95, sum by (le) (
+            rate(http_request_duration_seconds_bucket{path=~"/internal/.*"}[5m])
+          ))
+        labels:
+          scope: internal

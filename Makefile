@@ -304,8 +304,11 @@ compose-config: ## Validate the Compose files and overlays
 		config --quiet || exit 1; done
 
 observability-check: ## Validate Prometheus, Loki and Alertmanager config and alert rules (uses Docker)
-	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro --entrypoint promtool \
+	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro \
+		-v $(CURDIR)/$(COMPOSE_DIR)/config/observability/rules:/etc/prometheus/rules:ro --entrypoint promtool \
 		$(OBS_IMAGES_PROMETHEUS) check config /cfg/prometheus.yml
+	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro -w /cfg/rules --entrypoint promtool \
+		$(OBS_IMAGES_PROMETHEUS) test rules tests/alerts_test.yml
 	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro \
 		$(OBS_IMAGES_LOKI) -config.file=/cfg/loki.yml -config.expand-env=true -verify-config
 	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro \

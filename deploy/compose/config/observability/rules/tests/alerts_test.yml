@@ -1,0 +1,210 @@
+# promtool test rules tests/alerts_test.yml  (run by `make observability-check`)
+rule_files:
+  - ../recording.yml
+  - ../alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # A real error spike pages within ~3 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+        values: '0+60x20'
+      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="500"}'
+        values: '0+6x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: APIHighErrorRate
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: APIHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              scope: public
+            exp_annotations:
+              summary: "More than 1% of API requests are failing with 5xx"
+              description: "9.091% of public API requests returned 5xx over the last 5 minutes."
+              runbook: "docs/observability.md#apihigherrorrate"
+
+  # One 500 on a quiet install is not an incident.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+        values: '0+3x20'
+      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="500"}'
+        values: '0x5 1x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: APIHighErrorRate
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: APIErrorBurst
+        exp_alerts: []
+
+  # Internal (EMQX auth) failures do not count toward the public error rate.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{method="POST",path="/internal/mqtt/authenticate",status="500"}'
+        values: '0+60x20'
+      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: APIHighErrorRate
+        exp_alerts: []
+
+  # Slow artifact uploads and downloads do not trip the latency alert...
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="0.5"}'
+        values: '0x30'
+      - series: 'http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="10"}'
+        values: '0+600x30'
+      - series: 'http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="+Inf"}'
+        values: '0+600x30'
+      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/agent/artifacts/{artifact_id}/download",le="0.5"}'
+        values: '0x30'
+      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/agent/artifacts/{artifact_id}/download",le="+Inf"}'
+        values: '0+600x30'
+      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="0.5"}'
+        values: '0+60x30'
+      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="10"}'
+        values: '0+60x30'
+      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="+Inf"}'
+        values: '0+60x30'
+      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: APIHighLatency
+        exp_alerts: []
+
+  # ...but a slow regular API route does.
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="0.5"}'
+        values: '0x30'
+      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="10"}'
+        values: '0+60x30'
+      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="+Inf"}'
+        values: '0+60x30'
+      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: APIHighLatency
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              scope: public
+            exp_annotations:
+              summary: "API p95 latency above 2s"
+              description: "p95 latency of public API requests is 9.525s (uploads, downloads and streams excluded)."
+              runbook: "docs/observability.md#apihighlatency"
+
+  # The control plane stops answering scrapes.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="backend",instance="backend:8000"}'
+        values: '1 1 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ControlPlaneDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: ControlPlaneDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: backend
+              instance: backend:8000
+            exp_annotations:
+              summary: "Control plane API is not answering scrapes"
+              description: "Prometheus cannot scrape the control plane /metrics endpoint."
+              runbook: "docs/observability.md#controlplanedown"
+
+  # A fleet that is mostly offline by design does not alert; a sudden drop does.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_devices{state="online",instance="a"}'
+        values: '20x30'
+      - series: 'meteorcloud_devices{state="offline",instance="a"}'
+        values: '80x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: FleetOfflineSpike
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      # Two replicas report the same totals; max() keeps them from doubling.
+      - series: 'meteorcloud_devices{state="online",instance="a"}'
+        values: '70x10 50x20'
+      - series: 'meteorcloud_devices{state="offline",instance="a"}'
+        values: '10x10 30x20'
+      - series: 'meteorcloud_devices{state="online",instance="b"}'
+        values: '70x10 50x20'
+      - series: 'meteorcloud_devices{state="offline",instance="b"}'
+        values: '10x10 30x20'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FleetOfflineSpike
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: FleetOfflineSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Many devices went offline at once"
+              description: "More than 30% of seen devices are offline and more than 5 dropped off in the last 10 minutes."
+              runbook: "docs/observability.md#fleetofflinespike"
+
+  # A failed Deploy is reported.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_deployments_finished_total{status="failed",instance="a"}'
+        values: '0x5 1x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: DeploymentFailures
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: DeploymentFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "A Deploy failed in the last hour"
+              description: "1 Deploy(s) finished as failed in the last hour."
+              runbook: "docs/observability.md#deploymentfailures"
+
+  # The data plane loses its broker connection.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_dataplane_mqtt_connected{instance="dp"}'
+        values: '1 1 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DataPlaneMqttDisconnected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Data plane is not connected to the MQTT broker"
+              description: "No device status, metrics or command results are reaching the control plane."
+              runbook: "docs/observability.md#dataplanemqttdisconnected"
+
+  # The pipeline heartbeat always fires.
+  - interval: 1m
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              severity: none
+            exp_annotations:
+              summary: "Always firing; proves the alert pipeline works"
+              description: "Route this to a dead-man's-switch receiver. If it stops arriving, alerting is broken."
+              runbook: "docs/observability.md#watchdog"
