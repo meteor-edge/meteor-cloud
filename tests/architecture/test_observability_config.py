@@ -151,3 +151,14 @@ def test_rules_reference_declared_metrics() -> None:
 def test_name_check_catches_a_typo() -> None:
     assert _check_names(['sum(rate(meteorcloud_devise_registrations_total[5m]))']) != []
     assert _check_names(['sum by (status) (rate(http_requests_total{status=~"5.."}[5m]))']) == []
+
+
+HELM_RULES = REPO / "deploy" / "kubernetes" / "helm" / "meteorcloud" / "files" / "rules"
+
+
+@pytest.mark.parametrize("name", ["alerts.yml", "recording.yml"])
+def test_helm_rules_are_a_copy_of_the_compose_rules(name: str) -> None:
+    # Helm can only read files inside the chart, so the rules are copied, not linked.
+    assert (HELM_RULES / name).read_bytes() == (OBS / "rules" / name).read_bytes(), (
+        f"cp {OBS.relative_to(REPO)}/rules/{name} {HELM_RULES.relative_to(REPO)}/"
+    )

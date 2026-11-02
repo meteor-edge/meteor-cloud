@@ -27,4 +27,12 @@ spec:
       ports:
         - port: 8000
           protocol: TCP
+    {{- with .Values.metrics.networkPolicyFrom }}
+    # Metrics scrapers (metrics.networkPolicyFrom).
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: 8000
+          protocol: TCP
+    {{- end }}
 {{- end }}

@@ -44,6 +44,12 @@ spec:
               value: {{ printf "http://%s-backend:8000" $fullname | quote }}
             - name: HTTP_ADDR
               value: ":8081"
+            - name: METRICS_ENABLED
+              value: {{ .Values.metrics.enabled | toString | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.config.logFormat | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
             - name: MQTT_ENABLED
               value: "true"
             - name: MQTT_PROVIDER

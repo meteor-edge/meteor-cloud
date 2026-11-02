@@ -92,6 +92,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and $v.connectivity.apps.proxy.enabled (or (ne $v.connectivity.provider "wireguard") (not $v.connectivity.apps.baseDomain) (not $v.connectivity.apps.proxy.acme.email)) }}
 {{- fail "connectivity.apps.proxy.enabled needs connectivity.provider=wireguard, connectivity.apps.baseDomain and connectivity.apps.proxy.acme.email" }}
 {{- end }}
+{{- if and (or $v.metrics.serviceMonitor.enabled $v.metrics.prometheusRule.enabled) (not ($.Capabilities.APIVersions.Has "monitoring.coreos.com/v1")) }}
+{{- fail "metrics.serviceMonitor/prometheusRule need the Prometheus Operator CRDs (monitoring.coreos.com/v1). Install them, or pass --api-versions monitoring.coreos.com/v1 to helm template" }}
+{{- end }}
+{{- if and $v.metrics.serviceMonitor.enabled (not $v.metrics.enabled) }}
+{{- fail "metrics.serviceMonitor.enabled needs metrics.enabled=true" }}
+{{- end }}
 {{- if not (has $v.cache.provider (list "memory" "redis")) }}
 {{- fail "cache.provider must be memory or redis" }}
 {{- end }}

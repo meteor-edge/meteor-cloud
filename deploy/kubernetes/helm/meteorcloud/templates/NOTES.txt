@@ -22,6 +22,11 @@ Devices connect to mqtts://{{ .Values.mqtt.publicHost }}:{{ .Values.mqtt.port }}
 WARNING: cache.provider=memory keeps rate-limit counters per pod; with
 {{ .Values.backend.replicaCount }} replicas the effective limits are {{ .Values.backend.replicaCount }}x higher. Use cache.provider=redis.
 {{- end }}
+{{- if .Values.metrics.enabled }}
+
+Metrics: GET /metrics on service {{ include "meteorcloud.fullname" . }}-backend:8000{{ if .Values.mqtt.enabled }} and {{ include "meteorcloud.fullname" . }}-data-plane:8081{{ end }} (not routed by the ingress).
+{{- if .Values.metrics.serviceMonitor.enabled }} Scraped through ServiceMonitor objects as job="backend"{{ if .Values.mqtt.enabled }} and job="data-plane"{{ end }}.{{ else }} Set metrics.serviceMonitor.enabled=true with the Prometheus Operator, or scrape these yourself.{{ end }}
+{{- end }}
 {{- if eq .Values.postgresql.mode "bundled" }}
 
 PostgreSQL runs inside this release without backups. Use postgresql.mode=external

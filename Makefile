@@ -320,11 +320,19 @@ observability-check: ## Validate Prometheus, Loki and Alertmanager config and al
 compose-smoke: ## Start the minimal production Compose stack, smoke-test it, remove it
 	IMAGE_TAG=$(IMAGE_TAG) ./scripts/compose-smoke.sh
 
+# values-monitoring.yaml renders Prometheus Operator objects, so declare their API.
+# helm lint cannot, so that overlay is only rendered (and must fail without the CRDs).
+HELM_API_VERSIONS := --api-versions monitoring.coreos.com/v1
+
 helm-lint: ## Lint the Helm chart and render it with every values file
 	helm lint --strict $(CHART)
-	for f in $(CHART)/values-*.yaml; do \
+	for f in $(filter-out %/values-monitoring.yaml,$(wildcard $(CHART)/values-*.yaml)); do \
 		helm lint --strict $(CHART) -f $$f && \
 		helm template meteorcloud $(CHART) -f $$f > /dev/null || exit 1; done
+	helm template meteorcloud $(CHART) $(HELM_API_VERSIONS) -f $(CHART)/values-ci.yaml \
+		--set mqtt.enabled=true,mqtt.tls.existingSecret=ci,mqtt.publicHost=mqtt.example.com \
+		-f $(CHART)/values-monitoring.yaml > /dev/null
+	! helm template meteorcloud $(CHART) -f $(CHART)/values-monitoring.yaml > /dev/null 2>&1
 
 images: ## Build the backend, data-plane, and console images (IMAGE_TAG=dev)
 	docker build -t meteorcloud/backend:$(IMAGE_TAG) $(BACKEND_DIR)
