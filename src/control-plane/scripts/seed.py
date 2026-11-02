@@ -4,20 +4,36 @@ from __future__ import annotations
 
 import logging
 import sys
+import zipfile
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters import object_storage as build_object_storage
+from app.artifacts.models import ArtifactType
+from app.artifacts.repository import ArtifactRepository
+from app.artifacts.schemas import ArtifactCreate
+from app.artifacts.service import ArtifactService
 from app.authorization.seed import seed_authorization_catalog
 from app.core.config import get_settings
 from app.core.database import SessionLocal
+from app.core.exceptions import AppError, ConflictError
 from app.core.logging import configure_logging
 from app.core.security import hash_password
 from app.devices.models import Device, DeviceGroup, DeviceMqttCredential, DeviceType
 from app.devices.tokens import hash_token
+from app.identity.models import User
 from app.identity.repository import UserRepository
-from app.tenancy.models import OrganizationRole
+from app.ports.storage import ObjectStorage
+from app.releases.kinds import ReleaseKind
+from app.releases.repository import ReleaseRepository
+from app.releases.schemas import ReleaseCreate
+from app.releases.service import ReleaseService
+from app.tenancy.models import Organization, OrganizationRole
 from app.tenancy.repository import MembershipRepository, OrganizationRepository
 
 logger = logging.getLogger(__name__)
@@ -87,8 +103,267 @@ SEED_DEVICE_GROUPS = (
     },
 )
 
+# Same workload key per kind so good/fail Deploys replace each other on a device.
+_SYSTEMD_UNIT = "seed-systemd.service"
+_DOCKER_CONTAINER = "seed-nginx"
+_COMPOSE_PROJECT = "seed-compose"
 
-def seed(session: Session) -> None:
+_SYSTEMD_OK_UNIT = b"""[Unit]
+Description=MeteorCloud seed demo (ok)
+[Service]
+Type=simple
+ExecStart=/bin/sleep infinity
+Restart=no
+[Install]
+WantedBy=multi-user.target
+"""
+
+_SYSTEMD_FAIL_UNIT = b"""[Unit]
+Description=MeteorCloud seed demo (fail)
+[Service]
+Type=oneshot
+ExecStart=/bin/false
+RemainAfterExit=no
+[Install]
+WantedBy=multi-user.target
+"""
+
+_COMPOSE_OK_YAML = """services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+"""
+
+_COMPOSE_OK_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>MeteorCloud seed</title></head>
+<body><h1>seed-compose 1.0.0-ok</h1></body>
+</html>
+"""
+
+_COMPOSE_FAIL_YAML = """services:
+  web:
+    image: busybox:1.36
+    command: ["false"]
+    restart: "no"
+"""
+
+
+@dataclass(frozen=True)
+class _SeedRelease:
+    name: str
+    version: str
+    kind: ReleaseKind
+    description: str
+    spec: dict[str, Any]
+    artifact_type: ArtifactType | None = None
+    file_name: str | None = None
+    content_type: str | None = None
+    content: bytes | None = None
+
+
+def _compose_zip(compose_yaml: str, extra: dict[str, str] | None = None) -> bytes:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("docker-compose.yml", compose_yaml)
+        for path, body in (extra or {}).items():
+            archive.writestr(path, body)
+    return buffer.getvalue()
+
+
+def _demo_releases() -> tuple[_SeedRelease, ...]:
+    return (
+        _SeedRelease(
+            name="seed-systemd",
+            version="1.0.0-ok",
+            kind=ReleaseKind.SYSTEMD,
+            description="Stays active. Use to test a successful systemd Deploy.",
+            spec={"unit_name": _SYSTEMD_UNIT, "start": True},
+            artifact_type=ArtifactType.SYSTEMD,
+            file_name=_SYSTEMD_UNIT,
+            content_type="text/plain",
+            content=_SYSTEMD_OK_UNIT,
+        ),
+        _SeedRelease(
+            name="seed-systemd",
+            version="1.0.0-fail",
+            kind=ReleaseKind.SYSTEMD,
+            description="Exits immediately. Use to test a failing systemd Deploy.",
+            spec={"unit_name": _SYSTEMD_UNIT, "start": True},
+            artifact_type=ArtifactType.SYSTEMD,
+            file_name=_SYSTEMD_UNIT,
+            content_type="text/plain",
+            content=_SYSTEMD_FAIL_UNIT,
+        ),
+        _SeedRelease(
+            name="seed-docker",
+            version="1.0.0-ok",
+            kind=ReleaseKind.DOCKER,
+            description="Pulls nginx:alpine. Use to test a successful Docker Deploy.",
+            spec={
+                "container_name": _DOCKER_CONTAINER,
+                "image": "nginx:alpine",
+                "ports": ["8080:80"],
+                "restart": "unless-stopped",
+            },
+        ),
+        _SeedRelease(
+            name="seed-docker",
+            version="1.0.0-fail",
+            kind=ReleaseKind.DOCKER,
+            description="busybox that exits. Use to test a failing Docker Deploy.",
+            spec={
+                "container_name": _DOCKER_CONTAINER,
+                "image": "busybox:1.36",
+                "command": "false",
+                "restart": "no",
+            },
+        ),
+        _SeedRelease(
+            name="seed-compose",
+            version="1.0.0-ok",
+            kind=ReleaseKind.DOCKER_COMPOSE,
+            description="Nginx + static HTML zip. Use to test a successful Compose Deploy.",
+            spec={"project_name": _COMPOSE_PROJECT},
+            artifact_type=ArtifactType.DOCKER_COMPOSE,
+            file_name="seed-compose-ok.zip",
+            content_type="application/zip",
+            content=_compose_zip(_COMPOSE_OK_YAML, {"html/index.html": _COMPOSE_OK_HTML}),
+        ),
+        _SeedRelease(
+            name="seed-compose",
+            version="1.0.0-fail",
+            kind=ReleaseKind.DOCKER_COMPOSE,
+            description="Compose service that exits. Use to test a failing Compose Deploy.",
+            spec={"project_name": _COMPOSE_PROJECT},
+            artifact_type=ArtifactType.DOCKER_COMPOSE,
+            file_name="seed-compose-fail.zip",
+            content_type="application/zip",
+            content=_compose_zip(_COMPOSE_FAIL_YAML),
+        ),
+    )
+
+
+def _seed_demo_software(
+    session: Session,
+    *,
+    actor: User,
+    organization: Organization,
+    storage: ObjectStorage | None,
+) -> None:
+    """Upload demo artifacts and create good/fail releases. Idempotent; storage is optional."""
+    resolved = storage
+    if resolved is None:
+        try:
+            resolved = build_object_storage(get_settings())
+        except Exception:
+            logger.warning(
+                "Object storage is not available; seeding image-only docker releases only"
+            )
+            resolved = None
+
+    artifact_svc = ArtifactService(session, resolved) if resolved is not None else None
+    artifact_repo = ArtifactRepository(session)
+    release_svc = ReleaseService(session)
+    release_repo = ReleaseRepository(session)
+    seeded: list[str] = []
+
+    for item in _demo_releases():
+        artifact_id = None
+        if item.content is not None:
+            if artifact_svc is None or item.artifact_type is None:
+                logger.warning(
+                    "Skipping %s %s: needs an artifact and object storage is unavailable",
+                    item.name,
+                    item.version,
+                )
+                continue
+            existing_artifact = artifact_repo.find_duplicate(
+                organization_id=organization.id,
+                device_type_id=None,
+                type=item.artifact_type,
+                name=item.name,
+                version=item.version,
+            )
+            if existing_artifact is None:
+                try:
+                    uploaded = artifact_svc.upload_artifact(
+                        actor=actor,
+                        organization_id=organization.id,
+                        payload=ArtifactCreate(
+                            name=item.name,
+                            version=item.version,
+                            type=item.artifact_type,
+                            description=item.description,
+                            metadata={"seeded": True},
+                        ),
+                        data=BytesIO(item.content),
+                        file_name=item.file_name,
+                        content_type=item.content_type,
+                    )
+                    artifact_id = uploaded.id
+                    logger.info("Created artifact %s %s", item.name, item.version)
+                except ConflictError:
+                    existing_artifact = artifact_repo.find_duplicate(
+                        organization_id=organization.id,
+                        device_type_id=None,
+                        type=item.artifact_type,
+                        name=item.name,
+                        version=item.version,
+                    )
+                    artifact_id = existing_artifact.id if existing_artifact else None
+                except AppError as exc:
+                    if exc.status_code == 503 or exc.code in {"storage_unavailable", "artifact_empty"}:
+                        logger.warning(
+                            "Skipping remaining file artifacts (%s %s): %s",
+                            item.name,
+                            item.version,
+                            exc.message,
+                        )
+                        artifact_svc = None
+                        continue
+                    raise
+            else:
+                artifact_id = existing_artifact.id
+                logger.info("Artifact already exists: %s %s", item.name, item.version)
+
+        existing_release = release_repo.find_duplicate(
+            organization_id=organization.id,
+            kind=item.kind,
+            name=item.name,
+            version=item.version,
+        )
+        if existing_release is not None:
+            logger.info("Release already exists: %s %s", item.name, item.version)
+            seeded.append(f"{item.name} {item.version}")
+            continue
+        try:
+            created = release_svc.create_release(
+                actor=actor,
+                organization_id=organization.id,
+                payload=ReleaseCreate(
+                    name=item.name,
+                    version=item.version,
+                    kind=item.kind,
+                    artifact_id=artifact_id,
+                    description=item.description,
+                    spec=item.spec,
+                ),
+            )
+            logger.info("Created release %s %s (%s)", created.name, created.version, created.kind.value)
+            seeded.append(f"{created.name} {created.version}")
+        except ConflictError:
+            logger.info("Release already exists: %s %s", item.name, item.version)
+            seeded.append(f"{item.name} {item.version}")
+
+    if seeded:
+        logger.info("Demo releases: %s", ", ".join(seeded))
+
+
+def seed(session: Session, *, storage: ObjectStorage | None = None) -> None:
     seed_authorization_catalog(session)
     users = UserRepository(session)
     organizations = OrganizationRepository(session)
@@ -303,6 +578,12 @@ def seed(session: Session) -> None:
         )
         logger.info("Created device %s", item["name"])
 
+    _seed_demo_software(
+        session,
+        actor=created_users["owner@example.com"],
+        organization=organization,
+        storage=storage,
+    )
     session.commit()
 
 

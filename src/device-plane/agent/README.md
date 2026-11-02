@@ -39,7 +39,8 @@ meteorcli --help
 A user install puts the venv in `~/.local/share/meteorcli` and the command in
 `~/.local/bin`. A system install uses `/opt/meteorcli` and `/usr/local/bin`.
 Re-run the script to upgrade. Uninstall with `./installcli.sh --uninstall`
-(credentials are kept; the systemd unit is removed when present).
+(removes the venv, systemd unit, `~/.config/meteorcli` or `/etc/meteorcli`,
+and brings `wg0` down when the helper is present).
 
 `meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
 and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`).

@@ -18,7 +18,7 @@ Do not run `make up` on a developer laptop. That path is Ansible + production Co
 ```bash
 cp deploy/compose/.env.example deploy/compose/.env   # make dev does this if missing
 make dev
-make seed      # owner@example.com / dev-password-123; includes a demo fleet
+make seed      # owner@example.com / dev-password-123; demo fleet + good/fail releases
 ```
 
 | Surface | URL |
@@ -33,6 +33,15 @@ Stop with `make stop`. More options: [Development](development.md).
 
 The demo fleet contains three devices: one online, one offline, and one never seen. It also
 includes Storefronts and Lab groups plus Raspberry Pi 5 and Intel NUC 13 device types.
+
+`make seed` also creates **good** and **fail** releases you can Deploy from the console
+(same workload per kind, so a fail Deploy replaces a good one):
+
+| Release | Versions | Notes |
+| --- | --- | --- |
+| `seed-systemd` | `1.0.0-ok`, `1.0.0-fail` | systemd unit (`seed-systemd.service`) |
+| `seed-docker` | `1.0.0-ok`, `1.0.0-fail` | container `seed-nginx` (`nginx:alpine` vs exiting `busybox`) |
+| `seed-compose` | `1.0.0-ok`, `1.0.0-fail` | project `seed-compose` (nginx + HTML zip vs exiting busybox) |
 
 ## 2. Sign in and create an organization
 
@@ -67,6 +76,7 @@ Details: [Registration tokens](fleet/registration-tokens.md), [Device registrati
 ```bash
 # install meteorcli first (same curl as Path A) if the device does not have it
 meteorcli config --domain localhost:8000 --api-key key_...
+# from a Pi on the LAN to your laptop: --domain 192.168.0.118:8000
 meteorcli test
 meteorcli request-token --name edge-01
 ```

@@ -9,7 +9,7 @@ import pytest
 
 from edge_agent.client import AgentApiError
 from meteorcli import cli as meteorcli
-from meteorcli.config import default_config_dir, derive_api_base
+from meteorcli.config import default_config_dir, derive_api_base, lan_host_missing_port
 from tests.conftest import FakeClient
 
 
@@ -25,6 +25,62 @@ def test_derive_api_base() -> None:
     assert derive_api_base("https://api.192.168.0.107") == "http://192.168.0.107"
     assert derive_api_base("https://api.192.168.0.107", http=True) == "http://192.168.0.107"
     assert derive_api_base("localhost:8000") == "http://localhost:8000"
+
+
+def test_lan_host_missing_port() -> None:
+    assert lan_host_missing_port("192.168.0.118") is True
+    assert lan_host_missing_port("http://192.168.0.118") is True
+    assert lan_host_missing_port("192.168.0.118:8000") is False
+    assert lan_host_missing_port("localhost:8000") is False
+    assert lan_host_missing_port("demo.meteor-edge.io") is False
+
+
+def test_config_clears_previous_mqtt_when_domain_changes(tmp_path, capsys) -> None:
+    config_dir = tmp_path / "meteorcli"
+    meteorcli.main(
+        ["--config-dir", str(config_dir), "config", "--domain", "demo.meteor-edge.io", "--api-key", "key_old"]
+    )
+    (config_dir / "mqtt.json").write_text(
+        '{"host": "demo.meteor-edge.io", "port": 8883, "username": "u", "password": "p", "tls": true}',
+        encoding="utf-8",
+    )
+    (config_dir / "device-token").write_text("dev_old", encoding="utf-8")
+    (config_dir / "mqtt-ca.crt").write_text("CERT", encoding="utf-8")
+
+    code = meteorcli.main(
+        ["--config-dir", str(config_dir), "config", "--domain", "192.168.0.118:8000", "--api-key", "key_new"]
+    )
+    assert code == 0
+    out = capsys.readouterr()
+    assert "http://192.168.0.118:8000" in out.out
+    assert "Cleared previous enrollment" in out.out
+    assert not (config_dir / "mqtt.json").exists()
+    assert not (config_dir / "device-token").exists()
+    assert not (config_dir / "mqtt-ca.crt").exists()
+
+
+def test_config_warns_when_lan_ip_has_no_port(tmp_path, capsys) -> None:
+    config_dir = tmp_path / "meteorcli"
+    code = meteorcli.main(
+        ["--config-dir", str(config_dir), "config", "--domain", "192.168.0.118", "--api-key", "key_x"]
+    )
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "http://192.168.0.118" in captured.out
+    assert "port 8000" in captured.err
+
+
+def test_test_hints_port_when_lan_api_returns_404(tmp_path, monkeypatch, capsys) -> None:
+    config_dir = tmp_path / "meteorcli"
+    client = FakeClient()
+    client.health_error = AgentApiError(404, "not_found", "Request failed with status 404")
+    monkeypatch.setattr(meteorcli, "EdgeClient", lambda server_url, **_: client)
+    meteorcli.main(["--config-dir", str(config_dir), "config", "--domain", "192.168.0.118"])
+    code = meteorcli.main(["--config-dir", str(config_dir), "test"])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "cannot reach" in err
+    assert "port 8000" in err
 
 
 def test_default_config_dir_user(monkeypatch, tmp_path) -> None:

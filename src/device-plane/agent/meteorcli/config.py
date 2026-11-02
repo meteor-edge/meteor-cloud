@@ -166,14 +166,39 @@ def resolve_server_url(config: AgentConfig | None, *, override: str | None = Non
     return None
 
 
+def lan_host_missing_port(value: str) -> bool:
+    """True when a LAN/IP host has no port (make dev API is :8000)."""
+    try:
+        _, host = _split_scheme_host(value)
+    except ValueError:
+        return False
+    if not host or not _host_is_local(host):
+        return False
+    hostname = _hostname_of(host)
+    return hostname == host
+
+
+def drop_stale_enrollment(paths: CliPaths) -> list[str]:
+    """Remove device token and MQTT files left over from a previous server."""
+    removed: list[str] = []
+    base = paths.config_path.parent
+    for name in ("device-token", "mqtt.json", "mqtt-ca.crt", "claim-secret"):
+        path = base / name
+        if path.is_file():
+            path.unlink()
+            removed.append(name)
+    return removed
+
+
 def persist_connection(
     paths: CliPaths,
     *,
     domain: str | None = None,
     api_base: str | None = None,
     http: bool = False,
-) -> AgentConfig:
+) -> tuple[AgentConfig, list[str]]:
     existing = load_config(paths.agent_paths()) or AgentConfig(server_url="")
+    previous = resolve_server_url(existing)
     if domain is not None:
         existing.domain = domain
         if api_base is None and not http:
@@ -186,4 +211,7 @@ def persist_connection(
     if resolved:
         existing.server_url = resolved
     save_config(paths.agent_paths(), existing)
-    return existing
+    dropped: list[str] = []
+    if previous and resolved and previous.rstrip("/") != resolved.rstrip("/"):
+        dropped = drop_stale_enrollment(paths)
+    return existing, dropped

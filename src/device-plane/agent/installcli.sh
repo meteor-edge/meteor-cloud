@@ -3,7 +3,7 @@
 #
 #   ./installcli.sh              Install for the current user (~/.local)
 #   sudo ./installcli.sh         System-wide (/opt + /usr/local/bin)
-#   ./installcli.sh --uninstall  Remove the install (keeps credentials)
+#   ./installcli.sh --uninstall  Remove the install, credentials, and MQTT/WireGuard state
 
 set -euo pipefail
 
@@ -26,13 +26,13 @@ Usage:
   $0                      Install for this user (${USER_PREFIX}, ${USER_BIN})
   sudo $0                 Install system-wide (${SYSTEM_PREFIX}, ${SYSTEM_BIN})
   sudo $0 --with-service  System-wide + enable meteorcli.service (Raspberry Pi OS)
-  $0 --uninstall          Remove the install (keeps credentials)
+  $0 --uninstall          Remove the install, credentials, and MQTT/WireGuard state
 
 Options:
   --prefix DIR     Virtualenv location
   --bin-dir DIR    Directory for the meteorcli symlink
   --with-service   Install and enable systemd unit (root / system install only)
-  --uninstall      Remove the venv and symlink (and unit if present)
+  --uninstall      Remove the venv, symlink, unit, and ~/.config/meteorcli (and /etc/meteorcli as root)
   -h, --help       Show this help
 EOF
 }
@@ -106,13 +106,31 @@ find_python() {
   return 1
 }
 
+remove_config_dir() {
+  local dir="$1"
+  if [[ -d "${dir}" ]]; then
+    rm -rf "${dir}"
+    echo "Removed ${dir}"
+  fi
+}
+
+bring_wg0_down() {
+  if [[ -x /usr/local/libexec/meteorcli-wg ]]; then
+    /usr/local/libexec/meteorcli-wg down >/dev/null 2>&1 || true
+  elif command -v wg-quick >/dev/null 2>&1; then
+    wg-quick down wg0 >/dev/null 2>&1 || true
+  fi
+}
+
 uninstall() {
   local link="${BIN_DIR}/meteorcli"
+  local user_home=""
   if [[ "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl disable --now meteorcli.service 2>/dev/null || true
     rm -f /etc/systemd/system/meteorcli.service
     systemctl daemon-reload 2>/dev/null || true
   fi
+  bring_wg0_down
   if [[ -L "${link}" || -f "${link}" ]]; then
     rm -f "${link}"
     echo "Removed ${link}"
@@ -124,9 +142,15 @@ uninstall() {
   if [[ "${EUID}" -eq 0 ]]; then
     rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg \
       /etc/sudoers.d/meteorcli-logs /usr/local/libexec/meteorcli-logs
-    echo "Left /etc/meteorcli in place (device credentials)."
+    remove_config_dir /etc/meteorcli
+    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+      user_home="$(getent passwd "${SUDO_USER}" | cut -d: -f6 || true)"
+      if [[ -n "${user_home}" ]]; then
+        remove_config_dir "${user_home}/.config/meteorcli"
+      fi
+    fi
   else
-    echo "Left ${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli in place (device credentials)."
+    remove_config_dir "${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli"
   fi
 }
 

@@ -214,6 +214,10 @@ The port is `DeploymentProvider` in `app/ports/deployment.py`. Adapters live und
 `app/adapters/` (`native_deployment`, `mender_deployment`). Domain services must
 not import Mender (or other vendor) clients directly.
 
+Planned OS A/B path (Mender-friendly Pi images, kind-based routing, BYO Mender):
+[Future: Mender-friendly OS A/B](../future/mender-friendly-os-ab.md) ·
+[Future plans](../future-plans.md).
+
 ## UI
 
 **Deployments** in the organization menu: list, detail with Pause / Resume /

@@ -166,7 +166,9 @@ make seed
 ```
 
 `make seed` is safe to rerun. It creates the development users and organization, plus a small
-demo fleet with device types, groups, and online/offline/never-seen devices.
+demo fleet with device types, groups, and online/offline/never-seen devices. It also uploads
+demo artifacts and creates good/fail releases for systemd, Docker, and Compose so you can
+exercise Deploy, health, and rollback locally (see [Getting started](getting-started.md)).
 
 See [Identity and organizations](identity-and-organizations.md) for auth and tenant details.
 

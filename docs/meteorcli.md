@@ -49,7 +49,11 @@ directory the service reads.
 
 Env overrides: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`, `METEORCLI_TOKEN`, `METEORCLI_CONFIG_DIR`.
 
-`--domain` is the **API host** (no `api.` subdomain). IP/localhost uses HTTP; names default to HTTPS unless `--http` or `--api-base` / `METEORCLI_SERVER` is set.
+`--domain` is the **API host** (no `api.` subdomain). IP/localhost uses HTTP; names default to HTTPS unless `--http` or `--api-base` / `METEORCLI_SERVER` is set. For laptop `make dev`, include the control-plane port: `--domain 192.168.0.118:8000`. A bare IP is port 80 and will 404.
+
+Changing `--domain` to a different server clears the previous device token and `mqtt.json` (those pointed at the old cloud). Re-register on the new API.
+
+Uninstall (`./installcli.sh --uninstall`) removes the install **and** stored credentials (`~/.config/meteorcli` or `/etc/meteorcli`), so a later install does not keep talking to a previous MQTT broker.
 
 ## Configure
 
