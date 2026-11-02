@@ -24,7 +24,7 @@ Optional **observability** Compose overlay (`deploy/compose/docker-compose.obser
 
 | Component | License | Note |
 | --- | --- | --- |
-| Prometheus, node-exporter | Apache 2.0 | Fine for self-host |
+| Prometheus, node-exporter, Alertmanager | Apache 2.0 | Fine for self-host |
 | Grafana, Loki, Alloy | AGPL (Grafana Labs) | Optional lab stack only; review AGPL before offering them as part of a commercial service |
 
 ## What “right” looks like for MeteorCloud
