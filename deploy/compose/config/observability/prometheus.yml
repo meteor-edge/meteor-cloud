@@ -1,5 +1,8 @@
+# Scrape targets for the optional observability stack. The app only exposes /metrics;
+# it never connects here. Any Prometheus-compatible scraper can replace this file.
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
   - job_name: backend
@@ -9,8 +12,26 @@ scrape_configs:
         labels:
           service: edge-platform-backend
 
+  # The data plane only runs with the mqtt profile. DNS discovery finds it when it runs and
+  # yields no target (and no alert) when it is not part of this install.
+  - job_name: data-plane
+    metrics_path: /metrics
+    dns_sd_configs:
+      - names: ["data-plane"]
+        type: A
+        port: 8081
+    relabel_configs:
+      - target_label: service
+        replacement: data-plane
+
   - job_name: node
     static_configs:
       - targets: ["node-exporter:9100"]
         labels:
           service: node
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: prometheus

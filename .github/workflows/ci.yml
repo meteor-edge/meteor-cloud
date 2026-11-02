@@ -216,6 +216,8 @@ jobs:
         run: gunzip -c images.tar.gz | docker load
       - name: Compose config (base, dev, prod, observability)
         run: make compose-config
+      - name: Observability config and alert rules
+        run: make observability-check
       - name: Minimal production stack smoke test
         run: make compose-smoke IMAGE_TAG=ci
 

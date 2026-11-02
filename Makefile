@@ -1,9 +1,16 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
 ENV_FILE := $(COMPOSE_DIR)/.env
 COMPOSE := docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f $(COMPOSE_DIR)/docker-compose.observability.yml
+# Observability components to run (Compose profiles); drop any to turn that component off.
+OBS_PROFILES ?= metrics,logs,alerting,dashboards
+# Profiles already chosen in .env (postgres, mqtt, ...), kept when observability profiles are added.
+ENV_PROFILES = $(shell sed -n 's/^COMPOSE_PROFILES=//p' $(ENV_FILE) 2>/dev/null | tail -1)
+OBS_IMAGES_PROMETHEUS := prom/prometheus:v2.55.1
+OBS_IMAGES_LOKI := grafana/loki:3.3.2
+OBS_IMAGES_ALLOY := grafana/alloy:v1.8.3
 CP_COMPOSE := docker compose -p meteorcloud-cp -f $(COMPOSE_DIR)/control-plane.yml
 DP_COMPOSE := docker compose -p meteorcloud-dp -f $(COMPOSE_DIR)/data-plane.yml
 CONSOLE_COMPOSE := docker compose -p meteorcloud-console -f $(COMPOSE_DIR)/console.yml
@@ -96,9 +103,9 @@ test-cloud-e2e: ## Terraform+Ansible AWS deploy, same MQTT tests, always destroy
 observability: ## Start the development stack plus Prometheus, Loki, and Grafana
 	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
-	$(OBS_COMPOSE) up --build -d
+	COMPOSE_PROFILES="$(ENV_PROFILES),$(OBS_PROFILES)" $(OBS_COMPOSE) up --build -d
 	@echo ""
-	@echo "Observability stack is starting:"
+	@echo "Observability stack is starting (profiles: $(OBS_PROFILES)):"
 	@echo "  App:        http://localhost:5173"
 	@echo "  API:        http://localhost:8000"
 	@echo "  Metrics:    http://localhost:8000/metrics"
@@ -291,6 +298,18 @@ compose-config: ## Validate the Compose files and overlays
 		-f $(COMPOSE_DIR)/docker-compose.vpn.yml config --quiet
 	GRAFANA_ADMIN_PASSWORD=check docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.prod.yml \
 		-f $(COMPOSE_DIR)/docker-compose.observability.yml config --quiet
+	for p in metrics logs alerting dashboards metrics,logs,alerting,dashboards; do \
+		COMPOSE_PROFILES=$$p GRAFANA_ADMIN_PASSWORD=check docker compose -f $(COMPOSE_DIR)/docker-compose.yml \
+		-f $(COMPOSE_DIR)/docker-compose.prod.yml -f $(COMPOSE_DIR)/docker-compose.observability.yml \
+		config --quiet || exit 1; done
+
+observability-check: ## Validate Prometheus, Loki and Alertmanager config and alert rules (uses Docker)
+	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro --entrypoint promtool \
+		$(OBS_IMAGES_PROMETHEUS) check config /cfg/prometheus.yml
+	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro \
+		$(OBS_IMAGES_LOKI) -config.file=/cfg/loki.yml -config.expand-env=true -verify-config
+	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro \
+		$(OBS_IMAGES_ALLOY) fmt /cfg/config.alloy >/dev/null
 
 compose-smoke: ## Start the minimal production Compose stack, smoke-test it, remove it
 	IMAGE_TAG=$(IMAGE_TAG) ./scripts/compose-smoke.sh
