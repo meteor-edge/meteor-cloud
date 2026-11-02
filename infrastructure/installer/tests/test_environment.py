@@ -185,3 +185,11 @@ def test_alert_webhook_url_is_a_secret_env_var(monkeypatch: pytest.MonkeyPatch) 
 
     assert "observability_alert_webhook_url" not in build_ansible_extra_vars(config, _outputs())
     assert secret_env_vars()["EDGE_PLATFORM_ALERT_WEBHOOK_URL"] == "https://hooks.example.com/x"
+
+
+def test_grafana_password_reaches_ansible(monkeypatch: pytest.MonkeyPatch) -> None:
+    from edge_installer.deployment.environment import secret_env_vars
+
+    monkeypatch.setenv("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD", "grafana-secret")
+
+    assert secret_env_vars()["EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD"] == "grafana-secret"

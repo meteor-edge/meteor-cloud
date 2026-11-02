@@ -7,7 +7,10 @@
       - postgres_provider != 'external' or external_database_url | length > 0
       - cache_provider != 'redis' or redis_provider == 'bundled' or external_redis_url | length > 0
       - not (mqtt_enabled | bool) or (mqtt_platform_password | length > 0 and mqtt_internal_token | length > 0)
-      - not (observability_enabled | bool) or grafana_admin_password | length > 0
+      - >-
+        not (observability_enabled | bool)
+        or 'dashboards' not in (observability_components.split(',') | map('trim') | list)
+        or grafana_admin_password | length > 0
       - not (mqtt_enabled | bool) or mqtt_broker == 'bundled' or mqtt_broker_host | length > 0
       - >-
         not (object_storage_provider == 's3' and minio_enabled | bool)
@@ -18,7 +21,7 @@
       redis_provider=external, EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD and EDGE_PLATFORM_MQTT_INTERNAL_TOKEN
       when mqtt_enabled (plus mqtt_broker_host for an external broker),
       EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID and EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY
-      (8+ chars) for bundled MinIO, and EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD when observability_enabled.
+      (8+ chars) for bundled MinIO, and EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD when observability_enabled with the dashboards component.
     quiet: true
 
 - name: Check provider settings

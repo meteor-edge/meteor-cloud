@@ -112,8 +112,8 @@ make observability                          # all components
 make observability OBS_PROFILES=metrics     # Prometheus only
 ```
 
-Grafana is on http://localhost:3001 (`GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`, the
-password is required), Prometheus on http://localhost:9090. `make dev` does not start this
+Grafana is on http://localhost:3001 (`GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`; the
+Grafana container refuses to start without a password, other profiles do not need one), Prometheus on http://localhost:9090. `make dev` does not start this
 stack. Profiles already in `COMPOSE_PROFILES` in `.env` (for example `mqtt`) are kept.
 
 `make observability-check` validates the Prometheus, Loki, Alloy and Alertmanager configs and
@@ -135,9 +135,11 @@ observability:
   metrics_retention_size: 5GB
 ```
 
-Put `EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD` and, for alert delivery,
-`EDGE_PLATFORM_ALERT_WEBHOOK_URL` (https) in the environment, not in the file. `make aws-up`
-sizes the host per enabled component. See [installer-configuration.md](installer-configuration.md).
+Put `EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD` (required only with `dashboards`; `validate`
+checks it) and, for alert delivery, `EDGE_PLATFORM_ALERT_WEBHOOK_URL` (https) in the
+environment, not in the file. `make aws-up` sizes the instance per enabled component and
+the root disk from `metrics_retention_size`; Terraform opens no extra ports, because every
+UI stays on 127.0.0.1. See [installer-configuration.md](installer-configuration.md).
 
 ### Ansible
 

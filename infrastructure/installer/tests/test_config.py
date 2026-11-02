@@ -299,6 +299,7 @@ def _enabled_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config = load_configuration(EXAMPLE)
     config.aws.ssh_private_key_path = str(key_path)
     config.observability.enabled = True
+    monkeypatch.setenv("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD", "grafana-secret")
     return config
 
 
@@ -330,3 +331,15 @@ def test_validate_rejects_plain_http_alert_webhook(tmp_path: Path, monkeypatch: 
 
     monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
     assert not any("ALERT_WEBHOOK_URL" in item for item in validate_configuration(config))
+
+
+def test_validate_requires_grafana_password_only_for_dashboards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _enabled_config(tmp_path, monkeypatch)
+    monkeypatch.delenv("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD")
+
+    assert any("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD" in item for item in validate_configuration(config))
+
+    config.observability.components.dashboards = False
+    assert not any("GRAFANA" in item for item in validate_configuration(config))

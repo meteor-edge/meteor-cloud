@@ -97,6 +97,10 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
             errors.append("observability.components.alerting needs components.metrics (alerts are Prometheus rules)")
         if components.dashboards and not (components.metrics or components.logs):
             errors.append("observability.components.dashboards needs components.metrics or components.logs")
+        if components.dashboards and not os.environ.get("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD", "").strip():
+            errors.append(
+                "EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD is required for observability.components.dashboards"
+            )
         webhook = os.environ.get("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "").strip()
         if webhook and not webhook.startswith("https://"):
             errors.append("EDGE_PLATFORM_ALERT_WEBHOOK_URL must be an https:// URL")

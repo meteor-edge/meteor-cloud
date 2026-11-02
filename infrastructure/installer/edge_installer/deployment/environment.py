@@ -101,5 +101,6 @@ def secret_env_vars() -> dict[str, str]:
         "EDGE_PLATFORM_MQTT_INTERNAL_TOKEN",
         "APP_SECRET_KEY",
         "EDGE_PLATFORM_ALERT_WEBHOOK_URL",
+        "EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD",
     )
     return {key: value for key in keys if (value := os.environ.get(key))}
