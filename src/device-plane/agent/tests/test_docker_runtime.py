@@ -171,6 +171,7 @@ def _ps(*services: dict) -> str:
         ("true|running|0|unhealthy", "unhealthy", "container web HEALTHCHECK failed"),
         ("true|running|0|starting", "unknown", "container web HEALTHCHECK starting"),
         ("false|exited|1|", "unhealthy", "container web is not running (exited, exit 1)"),
+        ("true|restarting|3|", "unhealthy", "container web is not running (restarting, exit 3)"),
         (None, "missing", "container web not found"),
     ],
 )
