@@ -43,11 +43,16 @@
       - >-
         not (observability_enabled | bool)
         or (observability_components.split(',') | map('trim') | reject('equalto', '') | list | length > 0)
+      # Alerts are Prometheus rules, so alerting needs the metrics component.
+      - >-
+        not (observability_enabled | bool)
+        or 'alerting' not in (observability_components.split(',') | map('trim') | list)
+        or 'metrics' in (observability_components.split(',') | map('trim') | list)
     fail_msg: >-
       Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
       redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external,
       image_source git|archive|registry (archive needs platform_source_archive), observability_components
-      (at least one) from metrics,logs,alerting,dashboards; the bundled MQTT broker always uses port 8883.
+      (at least one) from metrics,logs,alerting,dashboards, alerting needs metrics; the bundled MQTT broker always uses port 8883.
     quiet: true
 
 # Hosts deployed before the Compose files moved into the repository ran a stack

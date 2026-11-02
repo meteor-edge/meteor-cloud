@@ -129,22 +129,23 @@ def test_received_messages_are_counted_by_kind(monkeypatch: pytest.MonkeyPatch) 
     assert _sample("meteorcloud_dataplane_mqtt_messages_received_total", kind="status") - before == 1
 
 
-def test_uvicorn_logs_are_json(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("name", ["uvicorn", "uvicorn.error", "uvicorn.access"])
+def test_uvicorn_logs_are_json(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     root = logging.getLogger()
     handlers, level = list(root.handlers), root.level
-    uvicorn_error = logging.getLogger("uvicorn.error")
-    uvicorn_error.addHandler(logging.StreamHandler(io.StringIO()))
+    uvicorn_logger = logging.getLogger(name)
+    uvicorn_logger.addHandler(logging.StreamHandler(io.StringIO()))
     buffer = io.StringIO()
     monkeypatch.setattr(sys, "stdout", buffer)
     try:
         configure_logging("INFO", "json")
-        uvicorn_error.error("server boom")
+        uvicorn_logger.error("server boom")
     finally:
         root.handlers[:] = handlers
         root.setLevel(level)
     line = json.loads(buffer.getvalue().strip().splitlines()[-1])
-    assert line["logger"] == "uvicorn.error" and line["level"] == "error"
-    assert uvicorn_error.handlers == []
+    assert line["logger"] == name and line["level"] == "error"
+    assert uvicorn_logger.handlers == []
 
 
 def test_message_kind() -> None:

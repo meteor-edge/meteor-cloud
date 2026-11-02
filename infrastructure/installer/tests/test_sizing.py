@@ -110,7 +110,7 @@ def test_metrics_only_observability_does_not_force_large() -> None:
     config.observability.components.dashboards = False
     config.observability.components.alerting = False
 
-    assert recommend_host_size(config).instance_type != "t3.large"
+    assert recommend_host_size(config).instance_type == "t3.medium"
 
 
 def test_observability_disk_follows_metrics_retention_size() -> None:
