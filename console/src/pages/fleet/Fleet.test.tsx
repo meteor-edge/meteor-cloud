@@ -669,8 +669,8 @@ describe("Device detail", () => {
     });
 
     renderApp(["/organizations/org-1/devices/device-1"]);
-    expect(await screen.findByText("18.4")).toBeInTheDocument();
-    expect(screen.getByText("42.1")).toBeInTheDocument();
+    expect(await screen.findByText("18.4%")).toBeInTheDocument();
+    expect(screen.getByText("42.1%")).toBeInTheDocument();
     await user.click(await screen.findByRole("tab", { name: "MQTT" }));
     expect(await screen.findByText("MQTT Connection")).toBeInTheDocument();
     expect(screen.getAllByText("aa:bb:cc:dd:ee:ff").length).toBeGreaterThan(0);
