@@ -17,7 +17,7 @@ groups:
           description: "{{ $value | humanizePercentage }} of public API requests returned 5xx over the last 5 minutes."
           runbook: "docs/observability.md#apihigherrorrate"
       - alert: APIErrorBurst
-        expr: sum(increase(http_requests_total{path=~"/api/.*", status=~"5.."}[5m])) > 10
+        expr: sum(increase(http_requests_total{job="backend", path=~"/api/.*", status=~"5.."}[5m])) > 10
         labels:
           severity: warning
         annotations:

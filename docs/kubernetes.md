@@ -4,7 +4,10 @@
 [`deploy/kubernetes/helm/meteorcloud/`](../deploy/kubernetes/helm/meteorcloud/)
 installs MeteorCloud into a cluster you already operate. It contains no cloud
 provider APIs, CRDs, operators, or controllers, so the same chart works on k3s,
-k3d, GKE, EKS, AKS, OpenShift, and customer clusters.
+k3d, GKE, EKS, AKS, OpenShift, and customer clusters. The only exception is
+opt-in: `metrics.serviceMonitor` and `metrics.prometheusRule` (off by default)
+render Prometheus Operator objects for clusters that already run it
+([Observability](observability.md#kubernetes-helm)).
 
 ## What the chart deploys
 

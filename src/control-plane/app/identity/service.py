@@ -80,7 +80,6 @@ class AuthenticationService:
         except UnauthorizedError:
             AUTH_LOGINS.labels(result="failure").inc()
             raise
-        AUTH_LOGINS.labels(result="success").inc()
         token = self.issue_access_token(user)
         audit = AuditRecorder(self.session)
         organization_ids = [
@@ -95,6 +94,7 @@ class AuthenticationService:
                 organization_id=organization_id,
             )
         self.session.commit()
+        AUTH_LOGINS.labels(result="success").inc()
         return token
 
     def get_user_by_id(self, user_id: uuid.UUID) -> User | None:

@@ -65,8 +65,7 @@ def create_app() -> FastAPI:
     if metrics_enabled():
         application.add_middleware(MetricsMiddleware)
         BUILD_INFO.labels(version=settings.app_version).set(1)
-        if settings.fleet_metrics_enabled:
-            register_fleet_metrics(settings)
+        register_fleet_metrics(settings)
     if settings.access_log_enabled:
         application.add_middleware(AccessLogMiddleware)
     application.add_middleware(RequestIdMiddleware)

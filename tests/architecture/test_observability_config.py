@@ -67,9 +67,17 @@ def _metric_names(expr: str) -> set[str]:
     }
 
 
+def _declared_histograms() -> set[str]:
+    names: set[str] = set()
+    for path in METRIC_SOURCES:
+        names.update(re.findall(r"[Hh]istogram\(\s*\"([a-z0-9_]+)\"", path.read_text()))
+    return names
+
+
 def _base_name(name: str) -> str:
+    """The histogram a ``_bucket``/``_sum``/``_count`` series belongs to (only for histograms)."""
     for suffix in HISTOGRAM_SUFFIXES:
-        if name.endswith(suffix):
+        if name.endswith(suffix) and name[: -len(suffix)] in _declared_histograms():
             return name[: -len(suffix)]
     return name
 
@@ -184,6 +192,8 @@ def test_name_check_catches_a_typo() -> None:
         _check_names(['sum by (status) (rate(http_requests_total{status=~"5.."}[5m]))'])
         == []
     )
+    assert _check_names(["rate(http_request_duration_seconds_bucket[5m])"]) == []
+    assert _check_names(["rate(http_requests_total_bucket[5m])"]) != []
 
 
 HELM_RULES = REPO / "deploy" / "kubernetes" / "helm" / "meteorcloud" / "files" / "rules"

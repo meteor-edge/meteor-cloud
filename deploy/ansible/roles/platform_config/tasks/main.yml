@@ -36,10 +36,15 @@
       - image_source != 'archive' or platform_source_archive | length > 0
       # Devices and the data plane share MQTT_BROKER_PORT; the bundled EMQX listens on 8883.
       - mqtt_broker == 'external' or (mqtt_broker_port | int) == 8883
+      - >-
+        not (observability_enabled | bool)
+        or (observability_components.split(',') | map('trim') | reject('equalto', '')
+            | difference(['metrics', 'logs', 'alerting', 'dashboards']) | list | length == 0)
     fail_msg: >-
       Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
       redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external,
-      image_source git|archive|registry (archive needs platform_source_archive); the bundled MQTT broker always uses port 8883.
+      image_source git|archive|registry (archive needs platform_source_archive), observability_components
+      from metrics,logs,alerting,dashboards; the bundled MQTT broker always uses port 8883.
     quiet: true
 
 # Hosts deployed before the Compose files moved into the repository ran a stack
@@ -252,24 +257,24 @@
         group: root
         mode: "0755"
 
-    # Alertmanager runs as nobody, so the file is world-readable inside a root-owned directory
-    # that only exists on this host; it never enters the repository or the Compose file.
+    # Readable only by Alertmanager (nobody, 65534); it lives on this host only and never
+    # enters the repository or the Compose file.
     - name: Write the alert webhook URL
       ansible.builtin.copy:
         content: "{{ observability_alert_webhook_url }}"
         dest: "{{ platform_root }}/secrets/alertmanager/webhook_url"
-        owner: root
-        group: root
-        mode: "0644"
+        owner: "65534"
+        group: "65534"
+        mode: "0600"
       no_log: true
       register: platform_alertmanager_secret
       when: observability_alert_webhook_url | length > 0
 
-    - name: Remove a stale alert webhook URL
-      ansible.builtin.file:
-        path: "{{ platform_root }}/secrets/alertmanager/webhook_url"
-        state: absent
-      when: observability_alert_webhook_url | length == 0
+- name: Remove a stale alert webhook URL
+  ansible.builtin.file:
+    path: "{{ platform_root }}/secrets/alertmanager/webhook_url"
+    state: absent
+  when: not (observability_enabled | bool) or observability_alert_webhook_url | length == 0
 
 - name: Render Compose environment file
   ansible.builtin.template:

@@ -64,5 +64,8 @@ data:
   MQTT_CA_CERT_PATH: /certs/ca.crt
   DATA_PLANE_URL: {{ printf "http://%s-data-plane:8081" $fullname | quote }}
   {{- range $key, $value := .Values.config.extraEnv }}
+  {{- if eq $key "METRICS_ENABLED" }}
+  {{- fail "config.extraEnv.METRICS_ENABLED: set metrics.enabled instead" }}
+  {{- end }}
   {{ $key }}: {{ $value | toString | quote }}
   {{- end }}

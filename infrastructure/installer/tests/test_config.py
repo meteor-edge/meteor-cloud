@@ -329,6 +329,8 @@ def test_validate_rejects_plain_http_alert_webhook(tmp_path: Path, monkeypatch: 
     monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "http://hooks.example.com/x")
     assert any("ALERT_WEBHOOK_URL must be an https" in item for item in validate_configuration(config))
 
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://")
+    assert any("ALERT_WEBHOOK_URL must be an https" in item for item in validate_configuration(config))
     monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
     assert not any("ALERT_WEBHOOK_URL" in item for item in validate_configuration(config))
 

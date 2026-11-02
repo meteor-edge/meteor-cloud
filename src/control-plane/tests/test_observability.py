@@ -69,3 +69,4 @@ def test_overlong_request_id_does_not_break_audit(client: TestClient, db_session
     request_ids = [event.request_id for event in db_session.query(AuditEvent).all()]
     assert request_ids
     assert all(rid is not None and len(rid) <= 64 for rid in request_ids)
+    assert set(request_ids) == {response.headers["x-request-id"]}

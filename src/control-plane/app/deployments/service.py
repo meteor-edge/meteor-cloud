@@ -16,7 +16,12 @@ from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
-from app.core.metrics import DEPLOYMENT_DEVICE_RESULTS, DEPLOYMENTS_CREATED, DEPLOYMENTS_FINISHED
+from app.core.metrics import (
+    DEPLOYMENT_DEVICE_RESULTS,
+    DEPLOYMENTS_CREATED,
+    DEPLOYMENTS_FINISHED,
+    inc_after_commit,
+)
 from app.deployments.models import (
     Deployment,
     DeploymentDevice,
@@ -691,7 +696,7 @@ class DeploymentService:
         else:
             # Succeeded and/or skipped (and no open rows) counts as completed.
             deployment.status = DeploymentStatus.COMPLETED.value
-        DEPLOYMENTS_FINISHED.labels(status=deployment.status).inc()
+        inc_after_commit(self.session, DEPLOYMENTS_FINISHED.labels(status=deployment.status))
 
     def maybe_advance_batched_rollout(self, deployment: Deployment) -> None:
         """When the current batch is terminal, activate the next batch of devices."""
@@ -803,7 +808,7 @@ class DeploymentService:
         touched_deployments: dict[uuid.UUID, Deployment] = {}
         for progress in open_rows:
             if progress.status != mapped and mapped in _REPORTED_DEVICE_RESULTS:
-                DEPLOYMENT_DEVICE_RESULTS.labels(status=mapped).inc()
+                inc_after_commit(self.session, DEPLOYMENT_DEVICE_RESULTS.labels(status=mapped))
             progress.status = mapped
             progress.last_error = row.last_error
             deployment = self.deployments.get(

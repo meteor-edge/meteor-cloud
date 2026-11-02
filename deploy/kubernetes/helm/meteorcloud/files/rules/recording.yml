@@ -11,19 +11,19 @@ groups:
   - name: meteorcloud-http
     rules:
       - record: meteorcloud:http_requests:rate5m
-        expr: sum(rate(http_requests_total{path=~"/api/.*"}[5m]))
+        expr: sum(rate(http_requests_total{job="backend", path=~"/api/.*"}[5m]))
         labels:
           scope: public
       - record: meteorcloud:http_requests:rate5m
-        expr: sum(rate(http_requests_total{path=~"/internal/.*"}[5m]))
+        expr: sum(rate(http_requests_total{job="backend", path=~"/internal/.*"}[5m]))
         labels:
           scope: internal
       - record: meteorcloud:http_5xx:rate5m
-        expr: sum(rate(http_requests_total{path=~"/api/.*", status=~"5.."}[5m]))
+        expr: sum(rate(http_requests_total{job="backend", path=~"/api/.*", status=~"5.."}[5m]))
         labels:
           scope: public
       - record: meteorcloud:http_5xx:rate5m
-        expr: sum(rate(http_requests_total{path=~"/internal/.*", status=~"5.."}[5m]))
+        expr: sum(rate(http_requests_total{job="backend", path=~"/internal/.*", status=~"5.."}[5m]))
         labels:
           scope: internal
       - record: meteorcloud:http_5xx:ratio5m
@@ -31,16 +31,16 @@ groups:
       - record: meteorcloud:http_latency_p95:5m
         expr: |
           histogram_quantile(0.95, sum by (le) (
-            rate(http_request_duration_seconds_bucket{path=~"/api/.*", path!~".*/download|.*/mqtt/events"}[5m])
+            rate(http_request_duration_seconds_bucket{job="backend", path=~"/api/.*", path!~".*/download|.*/mqtt/events"}[5m])
             unless on (method, path)
-            http_request_duration_seconds_bucket{method="POST", path="/api/v1/organizations/{organization_id}/artifacts"}
+            http_request_duration_seconds_bucket{job="backend", method="POST", path="/api/v1/organizations/{organization_id}/artifacts"}
           ))
         labels:
           scope: public
       - record: meteorcloud:http_latency_p95:5m
         expr: |
           histogram_quantile(0.95, sum by (le) (
-            rate(http_request_duration_seconds_bucket{path=~"/internal/.*"}[5m])
+            rate(http_request_duration_seconds_bucket{job="backend", path=~"/internal/.*"}[5m])
           ))
         labels:
           scope: internal

@@ -16,6 +16,8 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -130,6 +132,29 @@ def register_gauge_callback(name: str, documentation: str, labelnames: Sequence[
 def metrics_enabled() -> bool:
     """True when the bound backend serves a pull endpoint (``GET /metrics``)."""
     return _backend is not None and _backend.pull_endpoint
+
+
+_AFTER_COMMIT_KEY = "metrics_after_commit"
+
+
+def inc_after_commit(session: Session, handle: Any, amount: float = 1.0) -> None:
+    """Increment ``handle`` once ``session`` commits; drop it if the transaction rolls back.
+
+    For outcomes recorded inside a transaction (a Deploy finishing, a device result), so a
+    failed commit and the client's retry do not count the same outcome twice.
+    """
+    session.info.setdefault(_AFTER_COMMIT_KEY, []).append((handle, amount))
+
+
+@event.listens_for(Session, "after_commit")
+def _apply_after_commit(session: Session) -> None:
+    for handle, amount in session.info.pop(_AFTER_COMMIT_KEY, []):
+        handle.inc(amount)
+
+
+@event.listens_for(Session, "after_rollback")
+def _drop_after_rollback(session: Session) -> None:
+    session.info.pop(_AFTER_COMMIT_KEY, None)
 
 
 # --- Devices, enrollment and identity -----------------------------------------

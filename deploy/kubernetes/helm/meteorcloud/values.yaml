@@ -285,8 +285,10 @@ metrics:
   prometheusRule:
     enabled: false
     labels: {}
-  # With networkPolicy.enabled: peers allowed to scrape /metrics, e.g.
+  # With networkPolicy.enabled: peers allowed to scrape /metrics. /metrics is served on the
+  # API port, so these peers can also reach the API: select only your Prometheus pods, e.g.
   #   - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+  #     podSelector: { matchLabels: { app.kubernetes.io/name: prometheus } }
   networkPolicyFrom: []
 
 serviceAccount:

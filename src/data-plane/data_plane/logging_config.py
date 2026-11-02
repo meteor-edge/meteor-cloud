@@ -33,3 +33,9 @@ def configure_logging(level: str = "INFO", log_format: str = "console") -> None:
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(level.upper())
+    # uvicorn installs its own plain-text handlers before the app is imported; send its
+    # records through the root handler so server errors are JSON too.
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        server_logger = logging.getLogger(name)
+        server_logger.handlers.clear()
+        server_logger.propagate = True

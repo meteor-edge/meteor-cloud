@@ -103,7 +103,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (level) (count_over_time({service=~\"$service\"} | json [$__interval]))",
+          "expr": "sum by (level) (count_over_time({service=~\"$service\"} | json | __error__=\"\" [$__interval]))",
           "legendFormat": "{{level}}"
         }
       ],
@@ -144,7 +144,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (service) (count_over_time({service=~\"$service\"} | json | level=~\"error|critical\" [$__interval]))",
+          "expr": "sum by (service) (count_over_time({service=~\"$service\"} | json | __error__=\"\" | level=~\"error|critical\" [$__interval]))",
           "legendFormat": "{{service}}"
         }
       ],
@@ -185,7 +185,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service=~\"$service\"} | json | level=~\"$level\" | request_id=~\".*$request_id.*\"",
+          "expr": "{service=~\"$service\"} | json | level=~\"$level\" | request_id=~`.*${request_id:regex}.*`",
           "queryType": "range"
         }
       ],

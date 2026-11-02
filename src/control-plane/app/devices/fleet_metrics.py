@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings
 from app.core.metrics import register_gauge_callback
 from app.devices.models import Device
 from app.devices.status import offline_cutoff
@@ -86,6 +87,8 @@ class FleetMetrics:
             waiting_rows = dict(
                 session.execute(
                     select(DeploymentDevice.status, func.count())
+                    .join(Deployment, Deployment.id == DeploymentDevice.deployment_id)
+                    .where(Deployment.status == "in_progress")
                     .where(DeploymentDevice.status.in_(WAITING_DEVICE_STATUSES))
                     .group_by(DeploymentDevice.status)
                 ).all()
@@ -104,7 +107,13 @@ class FleetMetrics:
             ],
         }
 
-    def register(self) -> None:
+    def register(self, *, enabled: bool = True) -> None:
+        """Register the gauges; ``enabled=False`` registers empty ones.
+
+        prometheus_client keeps one process-wide registry, so a callback registered by an
+        earlier app would otherwise keep querying the database for a later app that turned
+        fleet metrics off.
+        """
         gauges = {
             "meteorcloud_devices": ("Devices by connectivity state", ["state"]),
             "meteorcloud_devices_disabled": ("Devices switched off by an operator", []),
@@ -113,15 +122,19 @@ class FleetMetrics:
             "meteorcloud_deployment_devices": ("Devices waiting on a running Deploy", ["status"]),
         }
         for name, (documentation, labelnames) in gauges.items():
-            register_gauge_callback(name, documentation, labelnames, lambda name=name: self.snapshot().get(name, []))
+            if enabled:
+                callback = lambda name=name: self.snapshot().get(name, [])  # noqa: E731
+            else:
+                callback = list
+            register_gauge_callback(name, documentation, labelnames, callback)
 
 
-def register_fleet_metrics(settings) -> None:
-    """Register fleet gauges with the active metrics backend (no-op when metrics are off)."""
+def register_fleet_metrics(settings: Settings) -> None:
+    """Register fleet gauges (empty when FLEET_METRICS_ENABLED=false; no-op when metrics are off)."""
     from app.core.database import SessionLocal
 
     FleetMetrics(
         SessionLocal,
         offline_threshold_seconds=settings.device_offline_threshold_seconds,
         cache_seconds=settings.fleet_metrics_cache_seconds,
-    ).register()
+    ).register(enabled=settings.fleet_metrics_enabled)

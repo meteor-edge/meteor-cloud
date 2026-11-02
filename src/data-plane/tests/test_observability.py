@@ -44,8 +44,11 @@ class _FakeClient:
 
 def test_metrics_endpoint_lists_data_plane_metrics() -> None:
     set_mqtt_client(_FakeClient())
+    labels = {"method": "POST", "path": "/v1/publish", "status": "200"}
     with TestClient(create_app()) as client:
+        before = _sample("http_requests_total", **labels)
         client.post("/v1/publish", headers=TOKEN, json={"topic": "devices/x/commands", "payload": "{}"})
+        assert _sample("http_requests_total", **labels) - before == 1
         body = client.get("/metrics").text
     for name in (
         "meteorcloud_dataplane_mqtt_connected",
@@ -114,6 +117,34 @@ def test_ingest_forward_results_are_counted(monkeypatch: pytest.MonkeyPatch, rai
     before = _sample("meteorcloud_dataplane_ingest_forward_total", result=result)
     ingest_message(settings, topic="devices/1/status", payload="{}")
     assert _sample("meteorcloud_dataplane_ingest_forward_total", result=result) - before == 1
+
+
+def test_received_messages_are_counted_by_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    from data_plane.client import PlatformMqttClient
+
+    monkeypatch.setattr("data_plane.client.ingest_message", lambda *args, **kwargs: None)
+    message = MagicMock(topic="devices/abc/status", payload=b"{}")
+    before = _sample("meteorcloud_dataplane_mqtt_messages_received_total", kind="status")
+    PlatformMqttClient(MagicMock())._on_message(MagicMock(), None, message)
+    assert _sample("meteorcloud_dataplane_mqtt_messages_received_total", kind="status") - before == 1
+
+
+def test_uvicorn_logs_are_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    uvicorn_error = logging.getLogger("uvicorn.error")
+    uvicorn_error.addHandler(logging.StreamHandler(io.StringIO()))
+    buffer = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buffer)
+    try:
+        configure_logging("INFO", "json")
+        uvicorn_error.error("server boom")
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(level)
+    line = json.loads(buffer.getvalue().strip().splitlines()[-1])
+    assert line["logger"] == "uvicorn.error" and line["level"] == "error"
+    assert uvicorn_error.handlers == []
 
 
 def test_message_kind() -> None:

@@ -9,9 +9,9 @@ tests:
   # A real error spike pages within ~3 minutes.
   - interval: 1m
     input_series:
-      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+      - series: 'http_requests_total{job="backend",method="GET",path="/api/v1/x",status="200"}'
         values: '0+60x20'
-      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="500"}'
+      - series: 'http_requests_total{job="backend",method="GET",path="/api/v1/x",status="500"}'
         values: '0+6x20'
     alert_rule_test:
       - eval_time: 1m
@@ -31,9 +31,9 @@ tests:
   # One 500 on a quiet install is not an incident.
   - interval: 1m
     input_series:
-      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+      - series: 'http_requests_total{job="backend",method="GET",path="/api/v1/x",status="200"}'
         values: '0+3x20'
-      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="500"}'
+      - series: 'http_requests_total{job="backend",method="GET",path="/api/v1/x",status="500"}'
         values: '0x5 1x15'
     alert_rule_test:
       - eval_time: 10m
@@ -46,9 +46,9 @@ tests:
   # Internal (EMQX auth) failures do not count toward the public error rate.
   - interval: 1m
     input_series:
-      - series: 'http_requests_total{method="POST",path="/internal/mqtt/authenticate",status="500"}'
+      - series: 'http_requests_total{job="backend",method="POST",path="/internal/mqtt/authenticate",status="500"}'
         values: '0+60x20'
-      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+      - series: 'http_requests_total{job="backend",method="GET",path="/api/v1/x",status="200"}'
         values: '0+60x20'
     alert_rule_test:
       - eval_time: 10m
@@ -58,23 +58,23 @@ tests:
   # Slow artifact uploads and downloads do not trip the latency alert...
   - interval: 1m
     input_series:
-      - series: 'http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="0.5"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="0.5"}'
         values: '0x30'
-      - series: 'http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="10"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="10"}'
         values: '0+600x30'
-      - series: 'http_request_duration_seconds_bucket{method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="+Inf"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="POST",path="/api/v1/organizations/{organization_id}/artifacts",le="+Inf"}'
         values: '0+600x30'
-      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/agent/artifacts/{artifact_id}/download",le="0.5"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="GET",path="/api/v1/agent/artifacts/{artifact_id}/download",le="0.5"}'
         values: '0x30'
-      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/agent/artifacts/{artifact_id}/download",le="+Inf"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="GET",path="/api/v1/agent/artifacts/{artifact_id}/download",le="+Inf"}'
         values: '0+600x30'
-      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="0.5"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="GET",path="/api/v1/x",le="0.5"}'
         values: '0+60x30'
-      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="10"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="GET",path="/api/v1/x",le="10"}'
         values: '0+60x30'
-      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="+Inf"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="GET",path="/api/v1/x",le="+Inf"}'
         values: '0+60x30'
-      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+      - series: 'http_requests_total{job="backend",method="GET",path="/api/v1/x",status="200"}'
         values: '0+60x30'
     alert_rule_test:
       - eval_time: 25m
@@ -84,13 +84,13 @@ tests:
   # ...but a slow regular API route does.
   - interval: 1m
     input_series:
-      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="0.5"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="GET",path="/api/v1/x",le="0.5"}'
         values: '0x30'
-      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="10"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="GET",path="/api/v1/x",le="10"}'
         values: '0+60x30'
-      - series: 'http_request_duration_seconds_bucket{method="GET",path="/api/v1/x",le="+Inf"}'
+      - series: 'http_request_duration_seconds_bucket{job="backend",method="GET",path="/api/v1/x",le="+Inf"}'
         values: '0+60x30'
-      - series: 'http_requests_total{method="GET",path="/api/v1/x",status="200"}'
+      - series: 'http_requests_total{job="backend",method="GET",path="/api/v1/x",status="200"}'
         values: '0+60x30'
     alert_rule_test:
       - eval_time: 15m

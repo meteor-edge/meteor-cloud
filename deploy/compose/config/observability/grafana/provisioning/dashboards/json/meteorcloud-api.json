@@ -203,7 +203,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_requests_total{path=~\"/api/.*\", status=~\"4..\"}[5m]))"
+          "expr": "sum(rate(http_requests_total{job=\"backend\", path=~\"/api/.*\", status=~\"4..\"}[5m]))"
         }
       ],
       "options": {
@@ -246,7 +246,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (class) (label_replace(rate(http_requests_total{path=~\"/api/.*\"}[5m]), \"class\", \"${1}xx\", \"status\", \"([0-9])..\"))",
+          "expr": "sum by (class) (label_replace(rate(http_requests_total{job=\"backend\", path=~\"/api/.*\"}[5m]), \"class\", \"${1}xx\", \"status\", \"([0-9])..\"))",
           "legendFormat": "{{class}}"
         }
       ],
@@ -381,7 +381,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_request_duration_seconds_bucket{path=~\"/api/.*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"backend\", path=~\"/api/.*\"}[5m])))",
           "legendFormat": "p50"
         },
         {
@@ -390,7 +390,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{path=~\"/api/.*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"backend\", path=~\"/api/.*\"}[5m])))",
           "legendFormat": "p95"
         },
         {
@@ -399,7 +399,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{path=~\"/api/.*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"backend\", path=~\"/api/.*\"}[5m])))",
           "legendFormat": "p99"
         }
       ],
@@ -442,7 +442,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "topk(10, sum by (method, path) (increase(http_requests_total{status=~\"5..\"}[1h])) > 0)"
+          "expr": "topk(10, sum by (method, path) (increase(http_requests_total{job=\"backend\", path=~\"/api/.*\", status=~\"5..\"}[1h])) > 0)"
         }
       ],
       "options": {
@@ -484,7 +484,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "topk(10, histogram_quantile(0.95, sum by (le, method, path) (rate(http_request_duration_seconds_bucket[1h]))))"
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, method, path) (rate(http_request_duration_seconds_bucket{job=\"backend\", path=~\"/api/.*\"}[1h]))))"
         }
       ],
       "options": {

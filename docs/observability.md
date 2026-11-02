@@ -176,8 +176,10 @@ metrics:
     labels: { release: kube-prometheus-stack }
   prometheusRule:
     enabled: true          # the same rules as Compose
-  networkPolicyFrom:       # with networkPolicy.enabled
+    labels: { release: kube-prometheus-stack }
+  networkPolicyFrom:       # with networkPolicy.enabled; these peers can also reach the API
     - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+      podSelector: { matchLabels: { app.kubernetes.io/name: prometheus } }
 ```
 
 `values-monitoring.yaml` is a ready overlay. The ServiceMonitors set `job` to `backend` and

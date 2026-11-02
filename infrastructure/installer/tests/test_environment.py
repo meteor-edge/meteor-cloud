@@ -193,3 +193,23 @@ def test_grafana_password_reaches_ansible(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD", "grafana-secret")
 
     assert secret_env_vars()["EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD"] == "grafana-secret"
+
+
+def test_secret_env_vars_reach_the_extra_vars_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import json
+
+    from edge_installer.deployment.ansible import AnsibleRunner
+    from edge_installer.process.runner import ProcessResult
+
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
+    monkeypatch.setattr(
+        "edge_installer.deployment.ansible.run_command",
+        lambda command, **kwargs: ProcessResult(command=command, returncode=0, stdout="", stderr=""),
+    )
+    inventory = tmp_path / "inventory.ini"
+    inventory.write_text("[platform]\n", encoding="utf-8")
+
+    AnsibleRunner(ansible_root=tmp_path).run_playbook("site.yml", inventory=inventory, extra_vars={})
+
+    extra = json.loads((tmp_path / "extra-vars.json").read_text(encoding="utf-8"))
+    assert extra["EDGE_PLATFORM_ALERT_WEBHOOK_URL"] == "https://hooks.example.com/x"

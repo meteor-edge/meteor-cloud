@@ -81,23 +81,27 @@ def test_fleet_gauges_on_metrics_endpoint(client: TestClient, db_session: Sessio
     org, _ = create_org_with_owner(db_session, owner)
     _device(db_session, org, "edge", last_seen=datetime.now(UTC))
 
-    body = client.get("/metrics").text
+    client.get("/metrics")
 
-    assert 'meteorcloud_devices{state="online"}' in body
+    assert sample("meteorcloud_devices", state="online") == 1
     assert sample("meteorcloud_build_info", version=get_settings().app_version) == 1
 
 
-@pytest.mark.parametrize("env", ["METRICS_ENABLED", "FLEET_METRICS_ENABLED"])
-def test_switches_skip_fleet_queries(monkeypatch: pytest.MonkeyPatch, env: str) -> None:
+@pytest.mark.parametrize(("env", "status"), [("METRICS_ENABLED", 404), ("FLEET_METRICS_ENABLED", 200)])
+def test_switches_skip_fleet_queries(monkeypatch: pytest.MonkeyPatch, env: str, status: int) -> None:
     calls = []
-    monkeypatch.setattr("app.devices.fleet_metrics.FleetMetrics.register", lambda self: calls.append(1))
+    monkeypatch.setattr("app.devices.fleet_metrics.FleetMetrics._query", lambda self: calls.append(1) or {})
     monkeypatch.setenv(env, "false")
     get_settings.cache_clear()
     try:
-        create_app()
+        response = TestClient(create_app()).get("/metrics")
     finally:
         monkeypatch.delenv(env)
         get_settings.cache_clear()
+    assert response.status_code == status
+    assert "meteorcloud_devices{" not in response.text
     assert calls == []
-    create_app()
+
+    TestClient(create_app()).get("/metrics")
     assert calls == [1]
+

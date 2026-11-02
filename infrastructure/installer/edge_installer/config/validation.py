@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from edge_installer.config.models import INSTALLATION_NAME_PATTERN, InstallationConfig
 from edge_installer.exceptions import ConfigurationError
@@ -102,8 +103,8 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
                 "EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD is required for observability.components.dashboards"
             )
         webhook = os.environ.get("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "").strip()
-        if webhook and not webhook.startswith("https://"):
-            errors.append("EDGE_PLATFORM_ALERT_WEBHOOK_URL must be an https:// URL")
+        if webhook and not (urlparse(webhook).scheme == "https" and urlparse(webhook).hostname):
+            errors.append("EDGE_PLATFORM_ALERT_WEBHOOK_URL must be an https:// URL with a host")
 
     return errors
 
