@@ -27,7 +27,10 @@ groups:
         labels:
           scope: internal
       - record: meteorcloud:http_5xx:ratio5m
-        expr: meteorcloud:http_5xx:rate5m / meteorcloud:http_requests:rate5m
+        # 0 (not "no data") until the first 5xx: the fallback keeps the scope label.
+        expr: |
+          (meteorcloud:http_5xx:rate5m or 0 * meteorcloud:http_requests:rate5m)
+          / meteorcloud:http_requests:rate5m
       - record: meteorcloud:http_latency_p95:5m
         expr: |
           histogram_quantile(0.95, sum by (le) (

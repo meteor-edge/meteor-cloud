@@ -442,6 +442,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "instant": true,
+          "range": false,
           "expr": "topk(10, sum by (method, path) (increase(http_requests_total{job=\"backend\", path=~\"/api/.*\", status=~\"5..\"}[1h])) > 0)"
         }
       ],
@@ -484,6 +486,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "instant": true,
+          "range": false,
           "expr": "topk(10, histogram_quantile(0.95, sum by (le, method, path) (rate(http_request_duration_seconds_bucket{job=\"backend\", path=~\"/api/.*\"}[1h]))))"
         }
       ],

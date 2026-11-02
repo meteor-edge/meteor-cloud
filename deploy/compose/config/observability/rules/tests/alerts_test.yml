@@ -208,3 +208,15 @@ tests:
               summary: "Always firing; proves the alert pipeline works"
               description: "Route this to a dead-man's-switch receiver. If it stops arriving, alerting is broken."
               runbook: "docs/observability.md#watchdog"
+
+  # The error ratio reads 0 (not "no data") before the first 5xx.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="backend",method="GET",path="/api/v1/x",status="200"}'
+        values: '0+60x20'
+    promql_expr_test:
+      - expr: meteorcloud:http_5xx:ratio5m{scope="public"}
+        eval_time: 10m
+        exp_samples:
+          - labels: 'meteorcloud:http_5xx:ratio5m{scope="public"}'
+            value: 0

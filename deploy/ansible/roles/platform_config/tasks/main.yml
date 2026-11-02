@@ -10,7 +10,7 @@
       - >-
         not (observability_enabled | bool)
         or 'dashboards' not in (observability_components.split(',') | map('trim') | list)
-        or grafana_admin_password | length > 0
+        or grafana_admin_password | trim | length > 0
       - not (mqtt_enabled | bool) or mqtt_broker == 'bundled' or mqtt_broker_host | length > 0
       - >-
         not (object_storage_provider == 's3' and minio_enabled | bool)
@@ -40,11 +40,14 @@
         not (observability_enabled | bool)
         or (observability_components.split(',') | map('trim') | reject('equalto', '')
             | difference(['metrics', 'logs', 'alerting', 'dashboards']) | list | length == 0)
+      - >-
+        not (observability_enabled | bool)
+        or (observability_components.split(',') | map('trim') | reject('equalto', '') | list | length > 0)
     fail_msg: >-
       Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
       redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external,
       image_source git|archive|registry (archive needs platform_source_archive), observability_components
-      from metrics,logs,alerting,dashboards; the bundled MQTT broker always uses port 8883.
+      (at least one) from metrics,logs,alerting,dashboards; the bundled MQTT broker always uses port 8883.
     quiet: true
 
 # Hosts deployed before the Compose files moved into the repository ran a stack

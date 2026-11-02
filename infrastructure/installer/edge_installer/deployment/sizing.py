@@ -100,7 +100,8 @@ def estimate_disk_gb(config: InstallationConfig) -> int:
         if components.metrics:
             disk += _size_gb(config.observability.metrics_retention_size) + 2  # TSDB WAL and compaction
         if components.logs:
-            disk += 5  # Loki chunks for the default 7-day retention of a single host
+            # Loki chunks: about 5 GiB per 7 days of retention on a single host.
+            disk += 5 * -(-config.observability.log_retention_hours // 168)
         disk += 3  # images
     return disk
 

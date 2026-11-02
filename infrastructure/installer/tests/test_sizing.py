@@ -120,3 +120,12 @@ def test_observability_disk_follows_metrics_retention_size() -> None:
     config.observability.metrics_retention_size = "25GB"
 
     assert recommend_host_size(config).root_volume_size_gb == default_disk + 20
+
+
+def test_observability_disk_follows_log_retention() -> None:
+    config = load_configuration(EXAMPLE)
+    config.observability.enabled = True
+    default_disk = recommend_host_size(config).root_volume_size_gb  # 168 h
+    config.observability.log_retention_hours = 720  # 30 days -> 5 weeks of chunks
+
+    assert recommend_host_size(config).root_volume_size_gb == default_disk + 4 * 5
