@@ -87,3 +87,17 @@ def test_explicit_larger_disk_is_kept() -> None:
     config.aws.root_volume_size_gb = 80
     _, disk, _ = resolve_aws_host(config)
     assert disk == 80
+
+
+def test_observability_sizing_counts_only_enabled_components() -> None:
+    config = load_configuration(EXAMPLE)
+    config.observability.enabled = True
+    full = recommend_host_size(config).ram_mib
+    config.observability.components.logs = False
+    config.observability.components.dashboards = False
+
+    size = recommend_host_size(config)
+
+    assert size.ram_mib < full
+    assert "observability_logs" not in size.reasons
+    assert "observability_metrics" in size.reasons

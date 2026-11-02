@@ -265,3 +265,68 @@ def test_external_mqtt_requires_broker_host() -> None:
         MqttServiceSettings(enabled=True, broker="external")
     with pytest.raises(ValueError, match="8883"):
         MqttServiceSettings(enabled=True, broker="bundled", broker_port=1883)
+
+
+def test_observability_components_and_retention_defaults() -> None:
+    settings = ObservabilitySettings()
+
+    assert settings.components.enabled_names() == ["metrics", "logs", "alerting", "dashboards"]
+    assert settings.log_retention_hours == 168
+    assert settings.metrics_retention_days == 15
+    assert settings.metrics_retention_size == "5GB"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"log_retention_hours": 1},
+        {"metrics_retention_days": 0},
+        {"metrics_retention_size": "5TB"},
+        {"metrics_retention_size": "lots"},
+        {"components": {"tracing": True}},
+    ],
+)
+def test_observability_settings_reject_bad_values(overrides: dict) -> None:
+    with pytest.raises(ValidationError):
+        ObservabilitySettings(**overrides)
+
+
+def _enabled_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    key_path = tmp_path / "key.pem"
+    key_path.write_text("key", encoding="utf-8")
+    monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "secret")
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+    config = load_configuration(EXAMPLE)
+    config.aws.ssh_private_key_path = str(key_path)
+    config.observability.enabled = True
+    return config
+
+
+def test_validate_observability_component_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _enabled_config(tmp_path, monkeypatch)
+    config.observability.components.metrics = False
+    config.observability.components.logs = False
+
+    errors = validate_configuration(config)
+
+    assert any("alerting needs components.metrics" in item for item in errors)
+    assert any("dashboards needs components.metrics or components.logs" in item for item in errors)
+
+
+def test_validate_allows_logs_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _enabled_config(tmp_path, monkeypatch)
+    config.observability.components.metrics = False
+    config.observability.components.alerting = False
+
+    errors = validate_configuration(config)
+
+    assert not any("observability" in item for item in errors)
+
+
+def test_validate_rejects_plain_http_alert_webhook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _enabled_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "http://hooks.example.com/x")
+    assert any("ALERT_WEBHOOK_URL must be an https" in item for item in validate_configuration(config))
+
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
+    assert not any("ALERT_WEBHOOK_URL" in item for item in validate_configuration(config))

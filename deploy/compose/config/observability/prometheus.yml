@@ -4,6 +4,15 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alertmanager is optional (alerting profile). DNS discovery means no errors when it is off;
+# to use an external Alertmanager, replace this block with its address.
+alerting:
+  alertmanagers:
+    - dns_sd_configs:
+        - names: ["alertmanager"]
+          type: A
+          port: 9093
+
 rule_files:
   - /etc/prometheus/rules/recording.yml
   - /etc/prometheus/rules/alerts.yml
@@ -39,3 +48,12 @@ scrape_configs:
       - targets: ["localhost:9090"]
         labels:
           service: prometheus
+
+  - job_name: alertmanager
+    dns_sd_configs:
+      - names: ["alertmanager"]
+        type: A
+        port: 9093
+    relabel_configs:
+      - target_label: service
+        replacement: alertmanager

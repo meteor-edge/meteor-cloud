@@ -5,6 +5,7 @@
 # Every component is optional and replaceable. Each service sits in a Compose profile:
 #   metrics     prometheus, node-exporter
 #   logs        loki, alloy (+ docker-socket-proxy)
+#   alerting    alertmanager
 #   dashboards  grafana
 # Choose with COMPOSE_PROFILES (make observability OBS_PROFILES=metrics,logs,...). Nothing in
 # the app depends on these services: it only serves /metrics and writes JSON logs to stdout.
@@ -49,6 +50,22 @@ services:
       - ${PROMETHEUS_DATA:-prometheus_data}:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
+    networks:
+      - meteorcloud
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    profiles: [alerting]
+    command:
+      - "--config.file=/etc/alertmanager/${ALERTMANAGER_CONFIG:-alertmanager.yml}"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./config/observability/alertmanager:/etc/alertmanager:ro
+      # Receiver secrets (webhook_url, ...) live outside the repo; Ansible fills this directory.
+      - ${ALERTMANAGER_SECRETS_DIR:-./config/observability/alertmanager/secrets}:/etc/alertmanager/secrets:ro
+      - ${ALERTMANAGER_DATA:-alertmanager_data}:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
     networks:
       - meteorcloud
 
@@ -118,6 +135,7 @@ services:
 volumes:
   prometheus_data:
   loki_data:
+  alertmanager_data:
 
 networks:
   meteorcloud:

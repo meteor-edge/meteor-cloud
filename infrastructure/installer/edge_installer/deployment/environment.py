@@ -44,6 +44,10 @@ def build_ansible_extra_vars(
         "observability_enabled": str(config.observability.enabled).lower(),
         "observability_backend": config.observability.backend,
         "log_format": "json" if config.observability.enabled else "console",
+        "observability_components": ",".join(config.observability.components.enabled_names()),
+        "observability_log_retention": f"{config.observability.log_retention_hours}h",
+        "observability_metrics_retention_time": f"{config.observability.metrics_retention_days}d",
+        "observability_metrics_retention_size": config.observability.metrics_retention_size,
         "vpn_listen_port": str(config.services.vpn.listen_port),
         "vpn_network_cidr": config.services.vpn.network_cidr,
         "vpn_server_address": config.services.vpn.server_address,
@@ -96,5 +100,6 @@ def secret_env_vars() -> dict[str, str]:
         "EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD",
         "EDGE_PLATFORM_MQTT_INTERNAL_TOKEN",
         "APP_SECRET_KEY",
+        "EDGE_PLATFORM_ALERT_WEBHOOK_URL",
     )
     return {key: value for key in keys if (value := os.environ.get(key))}

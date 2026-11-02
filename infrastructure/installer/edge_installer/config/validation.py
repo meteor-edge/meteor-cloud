@@ -89,6 +89,17 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
             "observability.backend=cloudwatch is not implemented yet; "
             "use backend=prometheus or set observability.enabled=false"
         )
+    if config.observability.enabled:
+        components = config.observability.components
+        if not components.enabled_names():
+            errors.append("observability.components: enable at least one component or set observability.enabled=false")
+        if components.alerting and not components.metrics:
+            errors.append("observability.components.alerting needs components.metrics (alerts are Prometheus rules)")
+        if components.dashboards and not (components.metrics or components.logs):
+            errors.append("observability.components.dashboards needs components.metrics or components.logs")
+        webhook = os.environ.get("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "").strip()
+        if webhook and not webhook.startswith("https://"):
+            errors.append("EDGE_PLATFORM_ALERT_WEBHOOK_URL must be an https:// URL")
 
     return errors
 

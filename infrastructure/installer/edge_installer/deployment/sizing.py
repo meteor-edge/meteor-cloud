@@ -24,7 +24,11 @@ _CONTAINER_MIB: dict[str, int] = {
     "minio": 200,
     "data_plane": 150,
     "emqx": 400,
-    "observability": 900,
+    # Observability, per component (prometheus+node-exporter, loki+alloy, alertmanager, grafana).
+    "observability_metrics": 400,
+    "observability_logs": 350,
+    "observability_alerting": 50,
+    "observability_dashboards": 150,
     "git_build": 500,
 }
 
@@ -73,7 +77,7 @@ def workload_units(config: InstallationConfig) -> list[str]:
     if config.components.redis.enabled:
         units.append("redis")
     if config.observability.enabled:
-        units.append("observability")
+        units.extend(f"observability_{name}" for name in config.observability.components.enabled_names())
     if config.deployment.image_source == "git":
         units.append("git_build")
     return units
@@ -109,7 +113,7 @@ def recommend_host_size(config: InstallationConfig) -> HostSize:
     # Docker build and the Grafana stack need headroom the working-set sum misses.
     if "git_build" in reasons:
         chosen = _at_least(family, chosen, family[2])
-    if "observability" in reasons:
+    if any(reason.startswith("observability_") for reason in reasons):
         chosen = _at_least(family, chosen, family[3])
     return HostSize(
         instance_type=chosen,

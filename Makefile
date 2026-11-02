@@ -11,6 +11,7 @@ ENV_PROFILES = $(shell sed -n 's/^COMPOSE_PROFILES=//p' $(ENV_FILE) 2>/dev/null 
 OBS_IMAGES_PROMETHEUS := prom/prometheus:v2.55.1
 OBS_IMAGES_LOKI := grafana/loki:3.3.2
 OBS_IMAGES_ALLOY := grafana/alloy:v1.8.3
+OBS_IMAGES_ALERTMANAGER := prom/alertmanager:v0.27.0
 CP_COMPOSE := docker compose -p meteorcloud-cp -f $(COMPOSE_DIR)/control-plane.yml
 DP_COMPOSE := docker compose -p meteorcloud-dp -f $(COMPOSE_DIR)/data-plane.yml
 CONSOLE_COMPOSE := docker compose -p meteorcloud-console -f $(COMPOSE_DIR)/console.yml
@@ -313,6 +314,8 @@ observability-check: ## Validate Prometheus, Loki and Alertmanager config and al
 		$(OBS_IMAGES_LOKI) -config.file=/cfg/loki.yml -config.expand-env=true -verify-config
 	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro \
 		$(OBS_IMAGES_ALLOY) fmt /cfg/config.alloy >/dev/null
+	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability/alertmanager:/cfg:ro --entrypoint amtool \
+		$(OBS_IMAGES_ALERTMANAGER) check-config /cfg/alertmanager.yml /cfg/alertmanager.webhook.yml
 
 compose-smoke: ## Start the minimal production Compose stack, smoke-test it, remove it
 	IMAGE_TAG=$(IMAGE_TAG) ./scripts/compose-smoke.sh

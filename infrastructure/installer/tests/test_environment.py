@@ -159,3 +159,29 @@ def test_build_ansible_extra_vars_disables_mqtt() -> None:
 
     assert extra["mqtt_enabled"] == "false"
     assert "mqtt_broker" not in extra
+
+
+def test_build_ansible_extra_vars_passes_observability_components() -> None:
+    config = load_configuration(EXAMPLE)
+    config.observability.enabled = True
+    config.observability.components.dashboards = False
+    config.observability.log_retention_hours = 72
+    config.observability.metrics_retention_days = 30
+    config.observability.metrics_retention_size = "20GB"
+
+    extra = build_ansible_extra_vars(config, _outputs())
+
+    assert extra["observability_components"] == "metrics,logs,alerting"
+    assert extra["observability_log_retention"] == "72h"
+    assert extra["observability_metrics_retention_time"] == "30d"
+    assert extra["observability_metrics_retention_size"] == "20GB"
+
+
+def test_alert_webhook_url_is_a_secret_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    from edge_installer.deployment.environment import secret_env_vars
+
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
+    config = load_configuration(EXAMPLE)
+
+    assert "observability_alert_webhook_url" not in build_ansible_extra_vars(config, _outputs())
+    assert secret_env_vars()["EDGE_PLATFORM_ALERT_WEBHOOK_URL"] == "https://hooks.example.com/x"

@@ -227,6 +227,36 @@
         group: root
         mode: "0755"
 
+- name: Write Alertmanager receiver secrets
+  when: observability_enabled | bool
+  block:
+    - name: Create the Alertmanager secrets directory
+      ansible.builtin.file:
+        path: "{{ platform_root }}/secrets/alertmanager"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Alertmanager runs as nobody, so the file is world-readable inside a root-owned directory
+    # that only exists on this host; it never enters the repository or the Compose file.
+    - name: Write the alert webhook URL
+      ansible.builtin.copy:
+        content: "{{ observability_alert_webhook_url }}"
+        dest: "{{ platform_root }}/secrets/alertmanager/webhook_url"
+        owner: root
+        group: root
+        mode: "0644"
+      no_log: true
+      register: platform_alertmanager_secret
+      when: observability_alert_webhook_url | length > 0
+
+    - name: Remove a stale alert webhook URL
+      ansible.builtin.file:
+        path: "{{ platform_root }}/secrets/alertmanager/webhook_url"
+        state: absent
+      when: observability_alert_webhook_url | length == 0
+
 - name: Render Compose environment file
   ansible.builtin.template:
     src: meteorcloud.env.j2
