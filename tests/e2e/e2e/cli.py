@@ -185,6 +185,7 @@ def run_suite(cfg: Config, state: State, secrets: dict[str, str], *, only: set[s
         s8_update,
         s9_fleet,
         s9b_rollouts,
+        s9c_rollout_kinds,
         s10_cleanup,
     )
     from e2e.suite.context import Context, new_run_id

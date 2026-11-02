@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from e2e.report import NOT_SUPPORTED, PASS, Report
-from e2e.suite import s9b_rollouts
+from e2e.suite import s9b_rollouts, s9c_rollout_kinds
 from e2e.suite.framework import REGISTRY, Check, Runner
 
 
@@ -26,3 +26,9 @@ def test_rollout_checks_are_skipped_with_fewer_than_five_devices() -> None:
 
 def test_parse_time_accepts_z_suffix() -> None:
     assert s9b_rollouts.parse_time("2026-11-02T12:00:00Z").utcoffset().total_seconds() == 0
+
+
+def test_compose_file_renders_port_and_env_references() -> None:
+    rendered = s9c_rollout_kinds.COMPOSE_FILE.format(port=8082)
+    assert '"8082:8080"' in rendered
+    assert "RUN_ID: ${RUN_ID}" in rendered and "$$VERSION" in rendered
