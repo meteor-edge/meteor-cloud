@@ -10,6 +10,20 @@ These rules apply to **any** coding agent working in this repository (Cursor, Cl
 - Do not add dependencies, frameworks, services, or abstraction layers without a concrete need.
 - Do not split this git repository, re-extract the console, or migrate planes to another language unless asked.
 
+## Third-party licensing (always check)
+
+MeteorCloud is installed for **other companies** (they self-host, or we manage it on their infra). Prefer **permissive** production defaults. Full table: [docs/licensing.md](docs/licensing.md).
+
+When you **add, upgrade, pin, or enable** a third-party image, library, broker, DB, object store, or observability tool:
+
+1. Look up the **license** and version (do not guess).
+2. State **Production OK**: `Yes` | `Yes, with limits` | `No (as default)` | `Only with commercial license`.
+3. Put a visible **LICENSING RISK** note in your reply (component, license, Production OK, risk, action).
+4. If Production OK is not `Yes`, **ask before** making it a default install, public URL, or console product feature.
+5. Update [docs/licensing.md](docs/licensing.md) when the inventory changes.
+
+Shortcuts: pin Redis to **7.2**; EMQX **5.8.6** only unless BSL is reviewed; no MinIO as commercial production default; Grafana/Loki/Alloy optional localhost ops only.
+
 ## Architecture (must follow)
 
 - **Control plane** stays Python (`src/control-plane/`, package `app`).
@@ -47,4 +61,4 @@ These rules apply to **any** coding agent working in this repository (Cursor, Cl
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/development.md](docs/development.md)
-- Cursor-only extras (ignore if you are not Cursor): `.cursor/rules/`
+- Cursor-only extras (ignore if you are not Cursor): `.cursor/rules/` (includes `third-party-licensing.mdc`)
