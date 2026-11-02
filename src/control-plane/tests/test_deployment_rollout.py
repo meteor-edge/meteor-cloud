@@ -351,3 +351,340 @@ def test_counts_include_timed_out(client: TestClient, db_session: Session) -> No
     assert detail["counts"]["timed_out"] == 1
     assert detail["counts"]["pending"] == 1
     assert detail["counts"]["total"] == 2
+
+
+def _phased_deploy(
+    client: TestClient, org_id, headers: dict, release: dict, regs: list[dict], **rollout
+) -> dict:
+    response = client.post(
+        f"/api/v1/organizations/{org_id}/deployments",
+        headers=headers,
+        json={
+            "release_id": release["id"],
+            "target": {"device_ids": [reg["device_id"] for reg in regs]},
+            "rollout": {"strategy": "phased", **rollout},
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _devices(client: TestClient, token: str, count: int, prefix: str) -> list[dict]:
+    return [
+        _register_device(client, token, name=f"pi-{prefix}{index}", mac=f"aa:bb:{prefix}:00:00:0{index}")
+        for index in range(count)
+    ]
+
+
+def _report_health(client: TestClient, reg: dict, release: dict, *, health: str, sync_status: str = "in_sync") -> None:
+    response = client.post(
+        "/api/v1/agent/heartbeat",
+        headers={"Authorization": f"Bearer {reg['device_token']}"},
+        json={
+            "software_report": [
+                {
+                    "workload_key": "camera-agent.service",
+                    "installed_release_id": release["id"],
+                    "installed_version": release["version"],
+                    "sync_status": sync_status,
+                    "progress_percent": 100,
+                    "health": health,
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
+def _tick(db_session: Session, deployment_id: str) -> Deployment:
+    from app.deployments.service import DeploymentService
+
+    db_session.expire_all()
+    row = db_session.get(Deployment, UUID(deployment_id))
+    assert row is not None
+    ticked = DeploymentService(db_session).tick_deployment(row)
+    db_session.commit()
+    return ticked
+
+
+def _detail(client: TestClient, org_id, headers: dict, deployment_id: str) -> dict:
+    response = client.get(f"/api/v1/organizations/{org_id}/deployments/{deployment_id}", headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _reg_for(regs: list[dict], device_id: str) -> dict:
+    return next(reg for reg in regs if reg["device_id"] == device_id)
+
+
+def _set_state(db_session: Session, deployment_id: str, **values) -> None:
+    db_session.expire_all()
+    row = db_session.get(Deployment, UUID(deployment_id))
+    assert row is not None
+    rollout = dict(row.rollout)
+    rollout["state"] = {**rollout.get("state", {}), **values}
+    row.rollout = rollout
+    db_session.commit()
+
+
+CANARY_THEN_ALL = [{"count": 1}, {"percent": 100, "delay_seconds": 3600}]
+
+
+def test_phased_create_activates_only_the_canary(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 3, "c1")
+    body = _phased_deploy(client, org.id, headers, release, regs, phases=CANARY_THEN_ALL)
+    assert body["status"] == "in_progress"
+    assert body["counts"]["pending"] == 1
+    assert body["counts"]["queued"] == 2
+    assert body["rollout"]["state"]["current_phase"] == 0
+    assert len(body["rollout"]["activated_device_ids"]) == 1
+
+
+def test_phased_delay_counts_from_phase_completion(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 3, "c2")
+    body = _phased_deploy(client, org.id, headers, release, regs, phases=CANARY_THEN_ALL)
+    canary = _reg_for(regs, body["rollout"]["activated_device_ids"][0])
+    # Phase 1 started long ago; only its completion time matters.
+    _set_state(db_session, body["id"], phase_started_at=(datetime.now(UTC) - timedelta(days=2)).isoformat())
+    _report_in_sync(client, canary["device_token"], release["id"], "1.2.0")
+
+    detail = _detail(client, org.id, headers, body["id"])
+    assert detail["counts"]["succeeded"] == 1
+    assert detail["counts"]["queued"] == 2
+    assert detail["rollout"]["state"]["phase_completed_at"] is not None
+
+    _set_state(db_session, body["id"], phase_completed_at=(datetime.now(UTC) - timedelta(minutes=30)).isoformat())
+    _tick(db_session, body["id"])
+    assert _detail(client, org.id, headers, body["id"])["counts"]["queued"] == 2
+
+    _set_state(db_session, body["id"], phase_completed_at=(datetime.now(UTC) - timedelta(hours=2)).isoformat())
+    _tick(db_session, body["id"])
+    advanced = _detail(client, org.id, headers, body["id"])
+    assert advanced["counts"]["queued"] == 0
+    assert advanced["counts"]["pending"] == 2
+    assert advanced["rollout"]["state"]["current_phase"] == 1
+
+
+def test_phased_pauses_when_failure_threshold_is_reached(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 3, "c3")
+    body = _phased_deploy(
+        client, org.id, headers, release, regs, phases=CANARY_THEN_ALL, failure_threshold_percent=10
+    )
+    canary = _reg_for(regs, body["rollout"]["activated_device_ids"][0])
+    _report_health(client, canary, release, health="unhealthy", sync_status="failed")
+
+    detail = _detail(client, org.id, headers, body["id"])
+    assert detail["status"] == "paused"
+    assert detail["rollout"]["state"]["paused_reason"] == "failure_threshold"
+    assert detail["rollout"]["state"]["paused_at"]
+    assert detail["counts"]["failed"] == 1
+    assert detail["counts"]["queued"] == 2
+
+
+def test_phased_pauses_mid_phase_with_max_concurrent(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 5, "c4")
+    body = _phased_deploy(
+        client,
+        org.id,
+        headers,
+        release,
+        regs,
+        phases=[{"percent": 100}],
+        max_concurrent=2,
+        failure_threshold_percent=50,
+    )
+    assert body["counts"]["pending"] == 2
+    assert body["counts"]["queued"] == 3
+
+    first, second = body["rollout"]["activated_device_ids"]
+    _report_in_sync(client, _reg_for(regs, first)["device_token"], release["id"], "1.2.0")
+    detail = _detail(client, org.id, headers, body["id"])
+    assert detail["counts"]["succeeded"] == 1
+    assert detail["counts"]["pending"] == 2
+    assert detail["counts"]["queued"] == 2
+
+    _report_health(client, _reg_for(regs, second), release, health="unhealthy", sync_status="failed")
+    paused = _detail(client, org.id, headers, body["id"])
+    assert paused["status"] == "paused"
+    assert paused["rollout"]["state"]["paused_reason"] == "failure_threshold"
+    assert paused["rollout"]["state"]["current_phase"] == 0
+    assert paused["counts"]["queued"] == 2
+
+
+def test_phased_in_sync_but_unhealthy_is_a_failure(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 3, "c5")
+    body = _phased_deploy(
+        client, org.id, headers, release, regs, phases=CANARY_THEN_ALL, failure_threshold_percent=10
+    )
+    canary = _reg_for(regs, body["rollout"]["activated_device_ids"][0])
+    _report_health(client, canary, release, health="unhealthy")
+    detail = _detail(client, org.id, headers, body["id"])
+    assert detail["counts"]["failed"] == 1
+    assert detail["status"] == "paused"
+
+
+def test_device_turning_unhealthy_during_soak_trips_the_budget(
+    client: TestClient, db_session: Session
+) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 3, "c6")
+    body = _phased_deploy(
+        client, org.id, headers, release, regs, phases=CANARY_THEN_ALL, failure_threshold_percent=10
+    )
+    canary = _reg_for(regs, body["rollout"]["activated_device_ids"][0])
+    _report_health(client, canary, release, health="healthy")
+    soaking = _detail(client, org.id, headers, body["id"])
+    assert soaking["status"] == "in_progress"
+    assert soaking["counts"]["succeeded"] == 1
+
+    _report_health(client, canary, release, health="unhealthy")
+    paused = _detail(client, org.id, headers, body["id"])
+    assert paused["status"] == "paused"
+    assert paused["rollout"]["state"]["paused_reason"] == "failure_threshold"
+    # The row keeps its install result; current health is what counts against the budget.
+    assert paused["counts"]["succeeded"] == 1
+    assert paused["counts"]["queued"] == 2
+
+
+def _age_activation(db_session: Session, deployment_id: str, device_id: str, seconds: int) -> None:
+    db_session.expire_all()
+    row = db_session.scalar(
+        select(DeploymentDevice).where(
+            DeploymentDevice.deployment_id == UUID(deployment_id),
+            DeploymentDevice.device_id == UUID(device_id),
+        )
+    )
+    assert row is not None and row.activated_at is not None
+    row.activated_at = row.activated_at - timedelta(seconds=seconds)
+    db_session.commit()
+
+
+def test_timed_out_is_terminal_and_excluded_from_failure_rate(
+    client: TestClient, db_session: Session
+) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 4, "c7")
+    body = _phased_deploy(
+        client,
+        org.id,
+        headers,
+        release,
+        regs,
+        phases=[{"count": 2}, {"percent": 100}],
+        failure_threshold_percent=50,
+        pending_timeout_seconds=60,
+    )
+    online, offline = body["rollout"]["activated_device_ids"]
+    _report_in_sync(client, _reg_for(regs, online)["device_token"], release["id"], "1.2.0")
+    assert _detail(client, org.id, headers, body["id"])["counts"]["queued"] == 2
+
+    _age_activation(db_session, body["id"], offline, 120)
+    _tick(db_session, body["id"])
+    detail = _detail(client, org.id, headers, body["id"])
+    assert detail["status"] == "in_progress"
+    assert detail["counts"]["timed_out"] == 1
+    assert detail["counts"]["queued"] == 0
+    assert detail["counts"]["pending"] == 2
+    timed_out = next(row for row in detail["devices"] if row["device_id"] == offline)
+    assert timed_out["status"] == "timed_out"
+
+    # The offline device comes back and still picks up the release.
+    _report_in_sync(client, _reg_for(regs, offline)["device_token"], release["id"], "1.2.0")
+    late = _detail(client, org.id, headers, body["id"])
+    assert late["counts"]["timed_out"] == 0
+    assert late["counts"]["succeeded"] == 2
+
+
+def test_late_report_does_not_reopen_a_finished_deploy(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 1, "c8")
+    body = _phased_deploy(
+        client, org.id, headers, release, regs, phases=[{"percent": 100}], pending_timeout_seconds=60
+    )
+    device_id = regs[0]["device_id"]
+    _age_activation(db_session, body["id"], device_id, 120)
+    _tick(db_session, body["id"])
+    finished = _detail(client, org.id, headers, body["id"])
+    assert finished["status"] == "failed"
+    assert finished["counts"]["timed_out"] == 1
+
+    _report_health(client, regs[0], release, health="healthy", sync_status="updating")
+    assert _detail(client, org.id, headers, body["id"])["counts"]["timed_out"] == 1
+
+    _report_in_sync(client, regs[0]["device_token"], release["id"], "1.2.0")
+    late = _detail(client, org.id, headers, body["id"])
+    assert late["status"] == "failed"
+    assert late["counts"]["succeeded"] == 1
+
+
+def test_canary_picks_the_most_recently_seen_device(client: TestClient, db_session: Session) -> None:
+    from app.devices.models import Device
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 3, "c9")
+    now = datetime.now(UTC)
+    seen = {regs[0]["device_id"]: None, regs[1]["device_id"]: now - timedelta(hours=1), regs[2]["device_id"]: now}
+    for device_id, last_seen in seen.items():
+        device = db_session.get(Device, UUID(device_id))
+        assert device is not None
+        device.last_seen_at = last_seen
+    db_session.commit()
+
+    body = _phased_deploy(client, org.id, headers, release, regs, phases=CANARY_THEN_ALL)
+    assert body["rollout"]["activated_device_ids"] == [regs[2]["device_id"]]
+    row = next(item for item in body["devices"] if item["device_id"] == regs[2]["device_id"])
+    assert row["device_last_seen_at"] is not None
+
+
+def test_ticks_in_sequence_do_not_double_activate(client: TestClient, db_session: Session) -> None:
+    from app.deployments.software_models import DeviceSoftware
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 4, "ca")
+    body = _phased_deploy(
+        client, org.id, headers, release, regs, phases=[{"count": 1}, {"count": 2}, {"percent": 100}]
+    )
+    canary = body["rollout"]["activated_device_ids"][0]
+    db_session.expire_all()
+    row = db_session.scalar(
+        select(DeploymentDevice).where(
+            DeploymentDevice.deployment_id == UUID(body["id"]),
+            DeploymentDevice.device_id == UUID(canary),
+        )
+    )
+    assert row is not None
+    row.status = "succeeded"
+    db_session.commit()
+
+    _tick(db_session, body["id"])
+    _tick(db_session, body["id"])
+    detail = _detail(client, org.id, headers, body["id"])
+    assert detail["counts"]["pending"] == 1
+    assert detail["counts"]["queued"] == 2
+    assert len(detail["rollout"]["activated_device_ids"]) == 2
+    assert detail["rollout"]["state"]["current_phase"] == 1
+    second = next(value for value in detail["rollout"]["activated_device_ids"] if value != canary)
+    software = db_session.scalar(select(DeviceSoftware).where(DeviceSoftware.device_id == UUID(second)))
+    assert software is not None
+    assert software.desired_revision == 1
+
+
+def test_phased_fields_rejected_for_batched(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 1, "cb")
+    response = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={
+            "release_id": release["id"],
+            "target": {"device_ids": [regs[0]["device_id"]]},
+            "rollout": {"strategy": "batched", "batch_size": 1, "failure_threshold_percent": 10},
+        },
+    )
+    assert response.status_code == 422
+    assert "only supported with strategy 'phased'" in response.text

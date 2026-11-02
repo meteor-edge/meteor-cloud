@@ -88,10 +88,14 @@ class DeploymentRepository:
         device_id: uuid.UUID,
         release_id: uuid.UUID,
     ) -> list[DeploymentDevice]:
-        """Open progress rows for this device on deployments of ``release_id``."""
+        """Open progress rows for this device on deployments of ``release_id``.
+
+        timed_out is included so a late report still records the outcome.
+        """
         open_statuses = (
             DeploymentDeviceStatus.PENDING.value,
             DeploymentDeviceStatus.UPDATING.value,
+            DeploymentDeviceStatus.TIMED_OUT.value,
         )
         return list(
             self.session.scalars(

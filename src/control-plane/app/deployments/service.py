@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -23,6 +23,7 @@ from app.deployments.models import (
     DeploymentStatus,
 )
 from app.deployments.repository import DeploymentRepository
+from app.deployments.rollout import RolloutConfig, RolloutRow, config_from_rollout, plan_tick
 from app.deployments.schemas import (
     DeploymentCounts,
     DeploymentCreate,
@@ -33,7 +34,7 @@ from app.deployments.schemas import (
     EndpointSpec,
     ReleaseBrief,
 )
-from app.deployments.software_models import SoftwareSyncStatus
+from app.deployments.software_models import SoftwareHealth, SoftwareSyncStatus
 from app.deployments.software_repository import DeviceSoftwareRepository
 from app.deployments.software_service import DeviceSoftwareService
 from app.devices.models import Device
@@ -311,7 +312,8 @@ class DeploymentService:
             device_type_ids=payload.target.device_type_ids,
         )
         all_device_ids = [device.id for device in devices]
-        rollout = payload.rollout.model_dump()
+        rollout = payload.rollout.to_record()
+        progressive = rollout.get("strategy") in {"batched", "phased"}
         workload_key = workload_key_from_spec(release.kind, release.spec)
         kind_value = release.kind.value if hasattr(release.kind, "value") else str(release.kind)
         cap_name = _KIND_CAPABILITY.get(kind_value, kind_value)
@@ -342,7 +344,12 @@ class DeploymentService:
             )
             previous_desired = existing.desired_release_id if existing else None
             if self.device_supports_kind(device, release.kind):
-                status = DeploymentDeviceStatus.PENDING.value
+                # Progressive rollouts start queued; the engine picks the first wave below.
+                status = (
+                    DeploymentDeviceStatus.QUEUED.value
+                    if progressive
+                    else DeploymentDeviceStatus.PENDING.value
+                )
                 last_error = None
                 deploy_ids.append(device.id)
             else:
@@ -359,21 +366,31 @@ class DeploymentService:
             )
         self.session.flush()
 
-        activate_ids = self._initial_batch(deploy_ids, rollout)
-        activate_set = set(activate_ids)
         now = datetime.now(UTC)
-        for row in self.deployments.list_devices(deployment_id=deployment.id):
-            if row.status != DeploymentDeviceStatus.PENDING.value:
-                continue
+        rows = self.deployments.list_devices(deployment_id=deployment.id)
+        state: dict[str, Any] | None = None
+        config = config_from_rollout(rollout, len(deploy_ids)) if progressive else None
+        if config is not None:
+            # Target order, so batched keeps picking the first batch_size devices.
+            position = {device_id: index for index, device_id in enumerate(all_device_ids)}
+            ordered = sorted(rows, key=lambda row: position.get(row.device_id, len(position)))
+            plan = plan_tick(self._rollout_rows(deployment, ordered, config), {}, config, now)
+            activate_ids = plan.ids_to_activate
+            state = plan.new_state
+        else:
+            activate_ids = list(deploy_ids)
+        activate_set = set(activate_ids)
+        for row in rows:
             if row.device_id in activate_set:
+                row.status = DeploymentDeviceStatus.PENDING.value
                 row.activated_at = now
-            elif rollout.get("strategy") == "batched":
-                row.status = DeploymentDeviceStatus.QUEUED.value
         rollout = {
             **rollout,
             "activated_device_ids": [str(value) for value in activate_ids],
             "batch_released_at": now.isoformat(),
         }
+        if state is not None and rollout.get("strategy") == "phased":
+            rollout["state"] = state
         deployment.rollout = rollout
         flag_modified(deployment, "rollout")
         self.session.flush()
@@ -480,15 +497,6 @@ class DeploymentService:
             ),
             commit=False,
         )
-
-    @staticmethod
-    def _initial_batch(deploy_ids: list[uuid.UUID], rollout: dict) -> list[uuid.UUID]:
-        if not deploy_ids:
-            return []
-        if rollout.get("strategy") != "batched":
-            return list(deploy_ids)
-        batch_size = int(rollout.get("batch_size") or len(deploy_ids))
-        return list(deploy_ids[: max(1, batch_size)])
 
     def list_deployments(
         self,
@@ -676,7 +684,7 @@ class DeploymentService:
         locked = self._lock_deployment(deployment.id)
         if locked is None or locked.status != DeploymentStatus.IN_PROGRESS.value:
             return locked or deployment
-        self.maybe_advance_batched_rollout(locked)
+        self._advance_rollout(locked)
         self.refresh_deployment_status(locked)
         self.session.flush()
         return locked
@@ -699,83 +707,101 @@ class DeploymentService:
             # Succeeded and/or skipped (and no open rows) counts as completed.
             deployment.status = DeploymentStatus.COMPLETED.value
 
-    def maybe_advance_batched_rollout(self, deployment: Deployment) -> None:
-        """When the current batch is terminal, activate the next batch of devices."""
+    def _rollout_rows(
+        self, deployment: Deployment, rows: list[DeploymentDevice], config: RolloutConfig
+    ) -> list[RolloutRow]:
+        """Engine view of the rows: device last_seen_at and current health when needed."""
+        last_seen: dict[uuid.UUID, datetime | None] = {}
+        if config.order_by_last_seen:
+            last_seen = {
+                device_id: device.last_seen_at
+                for device_id, device in self._device_map([row.device_id for row in rows]).items()
+            }
+        unhealthy: set[uuid.UUID] = set()
+        if config.failure_threshold_percent is not None:
+            release = self.releases.get(
+                organization_id=deployment.organization_id, release_id=deployment.release_id
+            )
+            if release is not None:
+                software = self.software_rows.by_device_for_workload(
+                    device_ids=[
+                        row.device_id
+                        for row in rows
+                        if row.status == DeploymentDeviceStatus.SUCCEEDED.value
+                    ],
+                    workload_key=workload_key_from_spec(release.kind, release.spec),
+                )
+                unhealthy = {
+                    device_id
+                    for device_id, item in software.items()
+                    if item.health == SoftwareHealth.UNHEALTHY.value
+                    and item.desired_release_id == deployment.release_id
+                }
+        return [
+            RolloutRow(
+                device_id=row.device_id,
+                status=row.status,
+                activated_at=row.activated_at,
+                last_seen_at=last_seen.get(row.device_id),
+                unhealthy=row.device_id in unhealthy,
+            )
+            for row in rows
+        ]
+
+    def _advance_rollout(self, deployment: Deployment) -> None:
+        """One engine step for batched/phased Deploys: timeouts, pause, next activations."""
         rollout = dict(deployment.rollout or {})
-        if rollout.get("strategy") != "batched":
-            return
-        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
-            return
-
-        activated = {str(value) for value in (rollout.get("activated_device_ids") or [])}
+        strategy = rollout.get("strategy")
         rows = self.deployments.list_devices(deployment_id=deployment.id)
-        open_statuses = {
-            DeploymentDeviceStatus.PENDING.value,
-            DeploymentDeviceStatus.UPDATING.value,
-        }
-        open_activated = [
-            row
-            for row in rows
-            if str(row.device_id) in activated and row.status in open_statuses
-        ]
-        if open_activated:
+        total = sum(1 for row in rows if row.status != DeploymentDeviceStatus.SKIPPED.value)
+        config = config_from_rollout(rollout, total)
+        if config is None:
             return
-
-        delay = int(rollout.get("delay_seconds") or 0)
-        if delay > 0:
-            released_raw = rollout.get("batch_released_at")
-            if released_raw:
-                try:
-                    released_at = datetime.fromisoformat(str(released_raw))
-                    if released_at.tzinfo is None:
-                        released_at = released_at.replace(tzinfo=UTC)
-                    if datetime.now(UTC) < released_at + timedelta(seconds=delay):
-                        return
-                except ValueError:
-                    pass
-
-        waiting = [
-            row
-            for row in rows
-            if str(row.device_id) not in activated
-            and row.status == DeploymentDeviceStatus.QUEUED.value
-        ]
-        if not waiting:
-            return
-
-        batch_size = int(rollout.get("batch_size") or 1)
-        next_batch = waiting[: max(1, batch_size)]
-        next_ids = [row.device_id for row in next_batch]
-        if not next_ids:
-            return
-
-        try:
-            provider = self._provider_or_404()
-        except NotFoundError:
-            return
-
+        state = dict(rollout.get("state") or {})
+        if strategy == "batched":
+            # Batched keeps no state; its delay counts from the last batch release.
+            state = {"phase_started_at": rollout.get("batch_released_at")}
         now = datetime.now(UTC)
-        for row in next_batch:
-            row.status = DeploymentDeviceStatus.PENDING.value
-            row.last_error = None
-            row.activated_at = now
+        plan = plan_tick(self._rollout_rows(deployment, rows, config), state, config, now)
 
-        provider.deploy(
-            organization_id=deployment.organization_id,
-            deployment_id=deployment.id,
-            release_id=deployment.release_id,
-            device_ids=next_ids,
-            rollout=rollout,
-            created_by_user_id=deployment.created_by_user_id or uuid.UUID(int=0),
-        )
-        activated.update(str(device_id) for device_id in next_ids)
-        rollout = {
-            **rollout,
-            "activated_device_ids": sorted(activated),
-            "batch_released_at": now.isoformat(),
-        }
-        deployment.rollout = rollout
-        flag_modified(deployment, "rollout")
+        by_device = {row.device_id: row for row in rows}
+        for device_id in plan.ids_to_time_out:
+            row = by_device[device_id]
+            row.status = DeploymentDeviceStatus.TIMED_OUT.value
+            row.last_error = (
+                f"No report within {config.pending_timeout_seconds} seconds of activation."
+            )
+        if plan.pause_reason is not None:
+            deployment.status = DeploymentStatus.PAUSED.value
+
+        if plan.ids_to_activate:
+            try:
+                provider = self._provider_or_404()
+            except NotFoundError:
+                self.session.flush()
+                return
+            for device_id in plan.ids_to_activate:
+                row = by_device[device_id]
+                row.status = DeploymentDeviceStatus.PENDING.value
+                row.last_error = None
+                row.activated_at = now
+            provider.deploy(
+                organization_id=deployment.organization_id,
+                deployment_id=deployment.id,
+                release_id=deployment.release_id,
+                device_ids=list(plan.ids_to_activate),
+                rollout=rollout,
+                created_by_user_id=deployment.created_by_user_id or uuid.UUID(int=0),
+            )
+            rollout["activated_device_ids"] = sorted(
+                str(row.device_id) for row in rows if row.activated_at is not None
+            )
+            rollout["batch_released_at"] = now.isoformat()
+        if strategy == "phased":
+            rollout["state"] = plan.new_state
+        if rollout != deployment.rollout:
+            deployment.rollout = rollout
+            flag_modified(deployment, "rollout")
         self.session.flush()
 
     def sync_progress_from_software(
@@ -814,11 +840,26 @@ class DeploymentService:
             self._lock_deployment(deployment_id)
         touched_deployments: dict[uuid.UUID, Deployment] = {}
         for progress in open_rows:
-            progress.status = mapped
-            progress.last_error = row.last_error
             deployment = self.deployments.get(
                 organization_id=organization_id, deployment_id=progress.deployment_id
             )
+            status = mapped
+            if (
+                deployment is not None
+                and (deployment.rollout or {}).get("strategy") == "phased"
+                and row.sync_status == SoftwareSyncStatus.IN_SYNC.value
+                and row.health == SoftwareHealth.UNHEALTHY.value
+            ):
+                # Installed but stopped or crashing: a failure for the phased budget.
+                status = DeploymentDeviceStatus.FAILED.value
+            if progress.status == DeploymentDeviceStatus.TIMED_OUT.value and status not in {
+                DeploymentDeviceStatus.SUCCEEDED.value,
+                DeploymentDeviceStatus.FAILED.value,
+            }:
+                # A late device may still finish, but never goes back to pending.
+                continue
+            progress.status = status
+            progress.last_error = row.last_error
             if deployment is not None:
                 touched_deployments[deployment.id] = deployment
 

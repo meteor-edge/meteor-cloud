@@ -23,23 +23,76 @@ class DeployTarget(BaseModel):
         return self
 
 
+class RolloutPhase(BaseModel):
+    """One phase of a phased rollout: a cumulative share of deployable targets."""
+
+    count: int | None = Field(default=None, ge=1)
+    percent: int | None = Field(default=None, ge=1, le=100)
+    # Soak time after the previous phase became terminal.
+    delay_seconds: int | None = Field(default=None, ge=0, le=604_800)
+
+    @model_validator(mode="after")
+    def _exactly_one_size(self) -> RolloutPhase:
+        if (self.count is None) == (self.percent is None):
+            raise ValueError("each phase needs exactly one of count or percent")
+        return self
+
+
+# Only valid with strategy "phased".
+_PHASED_FIELDS = ("phases", "max_concurrent", "failure_threshold_percent", "pending_timeout_seconds")
+
+
 class DeployRollout(BaseModel):
     strategy: str = "immediate"
     batch_size: int | None = Field(default=None, ge=1, le=10_000)
     delay_seconds: int | None = Field(default=None, ge=0, le=86_400)
+    phases: list[RolloutPhase] | None = Field(default=None, min_length=1, max_length=10)
+    max_concurrent: int | None = Field(default=None, ge=1, le=10_000)
+    failure_threshold_percent: int | None = Field(default=None, ge=0, le=100)
+    pending_timeout_seconds: int | None = Field(default=None, ge=60, le=2_592_000)
 
     @model_validator(mode="after")
     def _validate_strategy(self) -> DeployRollout:
         strategy = (self.strategy or "immediate").strip().lower()
-        if strategy not in {"immediate", "batched"}:
-            raise ValueError("rollout.strategy must be 'immediate' or 'batched'")
+        if strategy not in {"immediate", "batched", "phased"}:
+            raise ValueError("rollout.strategy must be 'immediate', 'batched' or 'phased'")
         self.strategy = strategy
+        if strategy != "phased":
+            for name in _PHASED_FIELDS:
+                if getattr(self, name) is not None:
+                    raise ValueError(f"rollout.{name} is only supported with strategy 'phased'")
         if strategy == "batched" and self.batch_size is None:
             raise ValueError("batched rollout requires batch_size")
         if strategy == "immediate":
             self.batch_size = None
             self.delay_seconds = None
+        if strategy == "phased":
+            self._validate_phases()
         return self
+
+    def _validate_phases(self) -> None:
+        if self.batch_size is not None or self.delay_seconds is not None:
+            raise ValueError(
+                "phased rollout uses phases; batch_size and delay_seconds are not allowed"
+            )
+        if not self.phases:
+            raise ValueError("phased rollout requires phases")
+        if self.phases[0].delay_seconds is not None:
+            raise ValueError("the first phase cannot have delay_seconds")
+        if self.phases[-1].percent != 100:
+            raise ValueError("the last phase must be percent 100")
+        for field_name in ("count", "percent"):
+            values = [getattr(phase, field_name) for phase in self.phases if getattr(phase, field_name) is not None]
+            if any(later <= earlier for earlier, later in zip(values, values[1:], strict=False)):
+                raise ValueError(f"phase {field_name} values must be strictly increasing")
+
+    def to_record(self) -> dict[str, Any]:
+        """What is stored on deployments.rollout; immediate and batched keep their old shape."""
+        record = self.model_dump()
+        if self.strategy != "phased":
+            for name in _PHASED_FIELDS:
+                record.pop(name)
+        return record
 
 
 class EndpointSpec(BaseModel):
