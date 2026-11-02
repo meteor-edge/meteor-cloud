@@ -11,7 +11,7 @@ meteorcloud-testenv up
   terraform   control plane EC2 (+ dedicated WireGuard gateway), N device EC2s,
               DNS <env>.<domain> and *.<env>.<domain>, Traefik DNS-01 role
   ansible     site.yml (cloud_app + vpn) and device.yml, run twice (2nd: changed=0)
-  suite       61 checks in 11 stages -> report.json + summary.txt
+  suite       67 checks in 12 stages -> report.json + summary.txt
 ```
 
 | Command | What it does |
@@ -84,6 +84,7 @@ dependent check is `not_supported` too.
 | 7b device logs | The device lists its log sources on demand (the deployed container marked deployed); a journal search finds a line written on the device; a followed log streams a new line and stops when the session closes; the container's log opens; the log certificate forces the helper command; the helper refuses a source it does not list |
 | 8 update | v2 replaces v1; the same public URL serves v2 |
 | 9 fleet and tenancy | Device 2 onboards; second hostname routes to device 2 and the first still to device 1, with no proxy file changes; devices cannot reach each other; another organization cannot read, shell into, publish or revoke this organization's resources; revoking device 2 removes its peer and route |
+| 9b rollouts | Needs `E2E_DEVICE_COUNT=5` (otherwise `not_supported`): devices 3-5 onboard as a fleet; phased canary, then the rest only after the 90 s soak; Pause holds the next phase and Resume finishes it; a crashing release pauses on the failure threshold, rollback restores the canary, the original then refuses resume / retry-failed, and cancelling it keeps the rollback's release; batched activates the first two targets, then the third; a device with its agent stopped times out by the background sweep, and its late report still records success |
 | 10 cleanup | Deleting the endpoint removes the route; workload removal (no product API today: `not_supported`) |
 
 The test app (`tests/e2e/testapp`) is a busybox HTTP server that returns
