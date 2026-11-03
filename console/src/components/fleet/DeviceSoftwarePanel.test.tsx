@@ -81,6 +81,29 @@ describe("DeviceSoftwarePanel", () => {
     );
   });
 
+  it("keeps the deploy button when the device already has software", async () => {
+    listMock.mockResolvedValue([inSyncRow()]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <DeviceSoftwarePanel token="t" organizationId="org-1" deviceId="dev-1" canDeploy />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("link", { name: /deploy a release/i })).toHaveAttribute(
+      "href",
+      "/organizations/org-1/deployments?deploy=1&device_id=dev-1",
+    );
+  });
+
+  it("hides the deploy button above the table without deploy permission", async () => {
+    listMock.mockResolvedValue([inSyncRow()]);
+    renderPanel();
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /deploy a release/i })).not.toBeInTheDocument();
+  });
+
   it("lists desired vs installed releases", async () => {
     listMock.mockResolvedValue([
       {

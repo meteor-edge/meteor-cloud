@@ -47,6 +47,10 @@ export function DeviceSoftwarePanel({
   });
 
   const items = softwareQuery.data ?? [];
+  const deployHref = `/organizations/${organizationId}/deployments?${new URLSearchParams({
+    deploy: "1",
+    device_id: deviceId,
+  }).toString()}`;
 
   if (softwareQuery.isLoading) {
     return <p className="text-sm text-muted-foreground">Loading software…</p>;
@@ -65,12 +69,7 @@ export function DeviceSoftwarePanel({
         </p>
         {canDeploy && (
           <Button type="button" className="mt-4" asChild>
-            <Link
-              to={`/organizations/${organizationId}/deployments?${new URLSearchParams({
-                deploy: "1",
-                device_id: deviceId,
-              }).toString()}`}
-            >
+            <Link to={deployHref}>
               Deploy a release
             </Link>
           </Button>
@@ -80,7 +79,15 @@ export function DeviceSoftwarePanel({
   }
 
   return (
-    <div className="overflow-x-auto rounded-md border border-border">
+    <div className="space-y-3">
+      {canDeploy && (
+        <div className="flex justify-end">
+          <Button type="button" size="sm" asChild>
+            <Link to={deployHref}>Deploy a release</Link>
+          </Button>
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-md border border-border">
       <table className="w-full min-w-[640px] text-left text-sm">
         <thead className="border-b border-border bg-muted/40 text-muted-foreground">
           <tr>
@@ -133,6 +140,7 @@ export function DeviceSoftwarePanel({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
