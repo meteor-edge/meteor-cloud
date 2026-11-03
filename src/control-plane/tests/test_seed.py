@@ -107,3 +107,40 @@ def test_seed_skips_file_artifacts_when_storage_is_offline(db_session, object_st
     ).all()
     assert set(kinds) == {ReleaseKind.DOCKER}
     assert db_session.scalar(select(Artifact).where(Artifact.organization_id == organization.id)) is None
+
+
+def test_seed_leaves_a_user_artifact_with_a_seed_name_alone(db_session, object_storage):
+    seed(db_session, storage=object_storage)
+    artifact = db_session.scalar(
+        select(Artifact).where(Artifact.name == "seed-compose", Artifact.version == "1.0.0-ok")
+    )
+    assert artifact is not None
+    # Pretend a user uploaded it: no seed marker, their own bytes.
+    artifact.metadata_ = {}
+    object_storage.objects[artifact.storage_key] = (b"user bytes", "application/zip")
+    artifact.checksum_sha256 = hashlib.sha256(b"user bytes").hexdigest()
+    artifact.size_bytes = len(b"user bytes")
+    db_session.flush()
+
+    seed(db_session, storage=object_storage)
+
+    db_session.refresh(artifact)
+    assert object_storage.objects[artifact.storage_key][0] == b"user bytes"
+    assert artifact.checksum_sha256 == hashlib.sha256(b"user bytes").hexdigest()
+
+
+def test_seed_skips_the_release_when_the_artifact_repair_fails(db_session, object_storage):
+    seed(db_session, storage=object_storage)
+    artifact = db_session.scalar(
+        select(Artifact).where(Artifact.name == "seed-compose", Artifact.version == "1.0.0-ok")
+    )
+    assert artifact is not None
+    release = db_session.scalar(select(Release).where(Release.artifact_id == artifact.id))
+    db_session.delete(release)
+    object_storage.objects.clear()
+    object_storage.fail_puts = True
+    db_session.flush()
+
+    seed(db_session, storage=object_storage)
+
+    assert db_session.scalar(select(Release).where(Release.artifact_id == artifact.id)) is None

@@ -314,7 +314,8 @@ export function ReleasesPage() {
       )}
 
       {/* Wait for the artifact so the dialog opens with its kind preselected. */}
-      {showCreate && token && (!artifactId || !artifactQuery.isLoading) && (
+      {/* `?create=1` opens it too, so it needs the same permission as the button. */}
+      {showCreate && canManage && token && (!artifactId || !artifactQuery.isLoading) && (
         <CreateReleaseDialog
           token={token}
           organizationId={organizationId}

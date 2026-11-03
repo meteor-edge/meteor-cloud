@@ -766,3 +766,29 @@ def test_cancel_keeps_desired_written_by_a_newer_deploy(client: TestClient, db_s
     assert cancelled.status_code == 200, cancelled.text
     software = client.get(f"/api/v1/organizations/{org.id}/devices/{canary}/software", headers=headers).json()
     assert software[0]["desired_release_id"] == release2["id"]
+
+
+def test_cancel_keeps_desired_written_by_a_newer_deploy_of_the_same_release(
+    client: TestClient, db_session: Session
+) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 2, "cs")
+    body = _phased_deploy(
+        client, org.id, headers, release, regs, phases=CANARY_THEN_ALL, pending_timeout_seconds=60
+    )
+    canary = body["rollout"]["activated_device_ids"][0]
+
+    # A second Deploy writes the same release to the canary while the first is still open.
+    newer = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={"release_id": release["id"], "target": {"device_ids": [canary]}},
+    )
+    assert newer.status_code == 201, newer.text
+    before = client.get(f"/api/v1/organizations/{org.id}/devices/{canary}/software", headers=headers).json()
+
+    cancelled = client.post(f"/api/v1/organizations/{org.id}/deployments/{body['id']}/cancel", headers=headers)
+    assert cancelled.status_code == 200, cancelled.text
+    software = client.get(f"/api/v1/organizations/{org.id}/devices/{canary}/software", headers=headers).json()
+    assert software[0]["desired_release_id"] == release["id"]
+    assert software[0]["desired_revision"] == before[0]["desired_revision"]

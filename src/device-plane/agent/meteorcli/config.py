@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from edge_agent.config import AgentConfig, AgentPaths, load_config, save_config
+from edge_agent.persist import STAGING_DIRNAME
 
 SYSTEM_CONFIG_DIR = Path("/etc/meteorcli")
 # Installed by installcli.sh --with-service (and the device Ansible role); it reads SYSTEM_CONFIG_DIR.
@@ -179,10 +181,19 @@ def lan_host_missing_port(value: str) -> bool:
 
 
 def drop_stale_enrollment(paths: CliPaths) -> list[str]:
-    """Remove device token and MQTT files left over from a previous server."""
+    """Remove credentials left over from a previous server.
+
+    That is the device token, MQTT files, claim secret and API key (keys are issued per
+    server), plus an uncommitted staging journal: a finished journal would otherwise be
+    committed on the next read and bring the old server's credentials back.
+    """
     removed: list[str] = []
     base = paths.config_path.parent
-    for name in ("device-token", "mqtt.json", "mqtt-ca.crt", "claim-secret"):
+    staging = base / STAGING_DIRNAME
+    if staging.is_dir():
+        shutil.rmtree(staging)
+        removed.append(STAGING_DIRNAME)
+    for name in ("device-token", "mqtt.json", "mqtt-ca.crt", "claim-secret", "api-key"):
         path = base / name
         if path.is_file():
             path.unlink()
@@ -210,8 +221,12 @@ def persist_connection(
     resolved = resolve_server_url(existing)
     if resolved:
         existing.server_url = resolved
-    save_config(paths.agent_paths(), existing)
     dropped: list[str] = []
     if previous and resolved and previous.rstrip("/") != resolved.rstrip("/"):
+        # Clean up before saving the new URL: if this is interrupted, the next run still
+        # sees a server change and retries, instead of sending the old token to the new server.
         dropped = drop_stale_enrollment(paths)
+        existing.device_id = ""
+        existing.organization_id = ""
+    save_config(paths.agent_paths(), existing)
     return existing, dropped

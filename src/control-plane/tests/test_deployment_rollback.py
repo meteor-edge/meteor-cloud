@@ -70,6 +70,68 @@ def test_rollback_returns_each_device_to_its_own_previous_release(client: TestCl
     assert software[0]["desired_release_id"] == v2["id"]
 
 
+def test_rollback_reports_a_group_that_fails_after_another_was_created(
+    client: TestClient, db_session: Session, monkeypatch
+) -> None:
+    from app.core.exceptions import ConflictError
+    from app.deployments.service import DeploymentService
+
+    org, headers, token, v1 = _setup_release(client, db_session)
+    a, b = (
+        _register_device(client, token, name=f"rbf-{name}", mac=f"aa:bb:cc:dd:51:0{index}")
+        for index, name in enumerate("ab")
+    )
+    v2 = _systemd_release(client, org.id, headers, "2.0.0")
+    v3 = _systemd_release(client, org.id, headers, "3.0.0")
+    _deploy(client, org.id, headers, v1, [a["device_id"]])
+    _deploy(client, org.id, headers, v2, [b["device_id"]])
+    bad = _deploy(client, org.id, headers, v3, [a["device_id"], b["device_id"]])
+    for reg in (a, b):
+        _report(client, reg, v3, health="unhealthy", last_error="crash")
+
+    real_create = DeploymentService.create_deployment
+    calls = {"n": 0}
+
+    def flaky_create(self, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise ConflictError("simulated_failure", "Second group failed.")
+        return real_create(self, **kwargs)
+
+    monkeypatch.setattr(DeploymentService, "create_deployment", flaky_create)
+    rolled = client.post(f"/api/v1/organizations/{org.id}/deployments/{bad['id']}/rollback", headers=headers)
+    assert rolled.status_code == 201, rolled.text
+    body = rolled.json()
+    assert len(body["deployments"]) == 1
+    applied = body["deployments"][0]["release_id"]
+    assert [item["code"] for item in body["failed"]] == ["simulated_failure"]
+    failed = body["failed"][0]
+    assert {applied, failed["release_id"]} == {v1["id"], v2["id"]}
+    assert failed["device_ids"] == [a["device_id"] if failed["release_id"] == v1["id"] else b["device_id"]]
+
+
+def test_rollback_fails_cleanly_when_the_first_group_fails(
+    client: TestClient, db_session: Session, monkeypatch
+) -> None:
+    from app.core.exceptions import ConflictError
+    from app.deployments.service import DeploymentService
+
+    org, headers, token, v1 = _setup_release(client, db_session)
+    device = _register_device(client, token, name="rbf-one", mac="aa:bb:cc:dd:51:10")
+    v2 = _systemd_release(client, org.id, headers, "2.0.0")
+    _deploy(client, org.id, headers, v1, [device["device_id"]])
+    bad = _deploy(client, org.id, headers, v2, [device["device_id"]])
+    _report(client, device, v2, health="unhealthy", last_error="crash")
+
+    def failing_create(self, **kwargs):
+        raise ConflictError("simulated_failure", "Group failed.")
+
+    monkeypatch.setattr(DeploymentService, "create_deployment", failing_create)
+    rolled = client.post(f"/api/v1/organizations/{org.id}/deployments/{bad['id']}/rollback", headers=headers)
+    assert rolled.status_code == 409, rolled.text
+    assert rolled.json()["error"]["code"] == "simulated_failure"
+
+
 def test_rollback_of_a_first_install_is_refused(client: TestClient, db_session: Session) -> None:
     org, headers, token, release = _setup_release(client, db_session)
     device = _register_device(client, token, name="rb-first", mac="aa:bb:cc:dd:50:10")

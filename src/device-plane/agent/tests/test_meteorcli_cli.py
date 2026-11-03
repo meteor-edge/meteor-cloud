@@ -59,6 +59,51 @@ def test_config_clears_previous_mqtt_when_domain_changes(tmp_path, capsys) -> No
     assert not (config_dir / "mqtt-ca.crt").exists()
 
 
+def test_config_server_change_clears_identity_staging_and_api_key(tmp_path, capsys) -> None:
+    import json
+
+    config_dir = tmp_path / "meteorcli"
+    meteorcli.main(
+        ["--config-dir", str(config_dir), "config", "--domain", "demo.meteor-edge.io", "--api-key", "key_old"]
+    )
+    config_file = config_dir / "config.json"
+    data = json.loads(config_file.read_text(encoding="utf-8"))
+    data.update(device_id="dev-old", organization_id="org-old")
+    config_file.write_text(json.dumps(data), encoding="utf-8")
+    staging = config_dir / ".device-secrets-staging"
+    staging.mkdir()
+    (staging / "device-token").write_text("dev_old", encoding="utf-8")
+    (staging / "DONE").write_text("", encoding="utf-8")
+
+    code = meteorcli.main(["--config-dir", str(config_dir), "config", "--domain", "other.meteor-edge.io"])
+    assert code == 0
+    capsys.readouterr()
+    assert not staging.exists()
+    assert not (config_dir / "api-key").exists()  # keys belong to the old server
+    saved = json.loads(config_file.read_text(encoding="utf-8"))
+    assert saved["device_id"] == "" and saved["organization_id"] == ""
+    assert not (config_dir / "device-token").exists()
+
+
+def test_config_port_hint_follows_the_saved_api_base(tmp_path, capsys) -> None:
+    config_dir = tmp_path / "meteorcli"
+    code = meteorcli.main(
+        [
+            "--config-dir", str(config_dir), "config",
+            "--domain", "192.168.0.118", "--api-base", "http://192.168.0.118:8000", "--api-key", "key_x",
+        ]
+    )
+    assert code == 0
+    assert "port 8000" not in capsys.readouterr().err
+
+    code = meteorcli.main(
+        ["--config-dir", str(config_dir), "config", "--domain", "lab.example.com", "--api-base", "http://10.0.0.5"]
+    )
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "--api-base http://10.0.0.5:8000" in err
+
+
 def test_config_warns_when_lan_ip_has_no_port(tmp_path, capsys) -> None:
     config_dir = tmp_path / "meteorcli"
     code = meteorcli.main(
@@ -893,3 +938,22 @@ def test_logs_without_helper_explains_install(monkeypatch, capsys) -> None:
     monkeypatch.setattr(logs, "helper_installed", lambda: False)
     assert meteorcli.main(["logs"]) == 1
     assert "installcli.sh" in capsys.readouterr().err
+
+
+def test_run_reowns_the_config_dir_after_reconcile(tmp_path, monkeypatch, capsys) -> None:
+    from edge_agent.wireguard import TunnelStatus
+
+    config_dir, _client = _enroll(tmp_path, monkeypatch)
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "inactive")
+    monkeypatch.setattr("edge_agent.wireguard.sync_connectivity", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "edge_agent.wireguard.describe_tunnel",
+        lambda _dir: TunnelStatus(available=True, configured=False, up=False),
+    )
+    events: list[str] = []
+    monkeypatch.setattr(meteorcli, "reconcile_software", lambda *_a, **_k: events.append("reconcile") or [])
+    monkeypatch.setattr(meteorcli, "chown_config_dir", lambda _path: events.append("chown"))
+    monkeypatch.setattr(meteorcli, "collect_capabilities", lambda: {})
+    assert meteorcli.main(["--config-dir", str(config_dir), "run", "--once"]) == 0
+    capsys.readouterr()
+    assert events[-2:] == ["reconcile", "chown"]

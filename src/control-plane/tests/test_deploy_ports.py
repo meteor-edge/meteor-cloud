@@ -139,3 +139,49 @@ def test_systemd_release_cannot_be_published(client: TestClient, db_session: Ses
     assert response.json()["error"]["code"] == "endpoint_requires_container"
     listed = client.get(f"/api/v1/organizations/{org.id}/deployments", headers=headers).json()
     assert listed["total"] == 0  # refused before anything was recorded
+
+
+def test_endpoint_needs_a_fixed_tcp_host_port(client: TestClient, db_session: Session) -> None:
+    org, headers, token, _ = _setup_release(client, db_session)
+    device = _register_device(client, token, name="edge-noport", mac="aa:bb:cc:dd:30:07")
+    for index, ports in enumerate((["80"], [], ["8080:80/udp"])):
+        release = _docker_release(client, org.id, headers, name=f"np{index}", container=f"np{index}", ports=ports)
+        response = _deploy(client, org.id, headers, release["id"], device["device_id"], {"port": 8080})
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["code"] == "endpoint_port_mismatch"
+
+
+def test_port_conflict_ignores_devices_that_skip_the_release(client: TestClient, db_session: Session) -> None:
+    from app.devices.models import Device
+
+    org, headers, token, _ = _setup_release(client, db_session)
+    device = _register_device(client, token, name="edge-nodocker", mac="aa:bb:cc:dd:30:08")
+    web = _docker_release(client, org.id, headers, name="web", container="web", ports=["8080:80"])
+    assert _deploy(client, org.id, headers, web["id"], device["device_id"]).status_code == 201
+    # The device then reports that docker is gone; a clashing release would be skipped there.
+    row = db_session.get(Device, device["device_id"])
+    row.metadata_ = {**(row.metadata_ or {}), "capabilities": {"docker": False, "systemd": True}}
+    db_session.commit()
+
+    other = _docker_release(client, org.id, headers, name="other", container="other", ports=["8080:3000"])
+    response = _deploy(client, org.id, headers, other["id"], device["device_id"])
+    assert response.status_code == 201, response.text
+    assert response.json()["counts"]["skipped"] == 1
+
+
+def test_release_rejects_a_host_port_range_too_wide_to_check(client: TestClient, db_session: Session) -> None:
+    org, headers, _token, _ = _setup_release(client, db_session)
+    response = client.post(
+        f"/api/v1/organizations/{org.id}/releases",
+        headers=headers,
+        json={
+            "name": "wide",
+            "version": "1.0.0",
+            "kind": "docker",
+            "spec": {"container_name": "wide", "image": "nginx:alpine", "ports": ["10000-11024:10000-11024"]},
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "invalid_release_spec"
+    ok = _docker_release(client, org.id, headers, name="narrow", container="narrow", ports=["10000-11022:10000-11022"])
+    assert len(docker_host_ports(ok["spec"])) == 1023

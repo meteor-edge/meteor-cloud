@@ -62,7 +62,14 @@ export function checkEndpointPort(
   if (release.kind === "docker") {
     const tcp = dockerHostPorts(release.spec).filter((p) => p.protocol === "tcp");
     const match = tcp.find((p) => p.port === port);
-    if (tcp.length > 0 && !match) {
+    if (tcp.length === 0) {
+      return {
+        level: "error",
+        message:
+          'This release publishes no fixed TCP host port, so nothing on the device listens on it. Add a ports entry such as "8080:80".',
+      };
+    }
+    if (!match) {
       return {
         level: "error",
         message: `This release publishes host port ${tcp.map((p) => p.port).join(", ")}; use that, not the container port.`,
@@ -94,5 +101,12 @@ export function existingEndpointFor(
 ): ApplicationEndpoint | undefined {
   if (!release) return undefined;
   const key = workloadKey(release);
-  return key ? endpoints.find((e) => e.workload_key === key) : undefined;
+  if (!key) return undefined;
+  // Same order as the API: enabled rows first, then by hostname.
+  return endpoints
+    .filter((e) => e.workload_key === key)
+    .sort(
+      (a, b) =>
+        Number(b.enabled) - Number(a.enabled) || a.hostname.localeCompare(b.hostname),
+    )[0];
 }

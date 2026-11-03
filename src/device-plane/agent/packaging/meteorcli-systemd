@@ -20,6 +20,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 UNIT_DIR = "/etc/systemd/system"
@@ -61,16 +62,29 @@ def read_caller_unit(path: str) -> bytes:
 def write_unit(name: str, data: bytes) -> None:
     os.makedirs(UNIT_DIR, mode=0o755, exist_ok=True)
     dest = os.path.join(UNIT_DIR, name)
-    tmp = dest + ".meteorcli.tmp"
-    if os.path.islink(dest) or os.path.islink(tmp):
+    if os.path.islink(dest):
         fail("unit path is a symlink")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+    # A unique temp file (O_EXCL, never follows a symlink), so overlapping applies of the
+    # same unit cannot share it. The suffix is not ".service", so systemd ignores leftovers.
+    fd, tmp = tempfile.mkstemp(dir=UNIT_DIR, prefix=f".{name}.", suffix=".meteorcli.tmp")
     try:
-        os.write(fd, data)
-        os.fchmod(fd, 0o644)
-    finally:
-        os.close(fd)
-    os.replace(tmp, dest)
+        try:
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                if written <= 0:
+                    fail("unit write failed")
+                view = view[written:]
+            os.fchmod(fd, 0o644)
+        finally:
+            os.close(fd)
+        os.replace(tmp, dest)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def systemctl(*args: str) -> None:

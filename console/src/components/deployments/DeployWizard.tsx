@@ -416,7 +416,11 @@ export function DeployWizard({
                   id="deploy-release"
                   className="h-10 w-full rounded-md border border-input bg-field px-3 text-sm"
                   value={releaseId}
-                  onChange={(event) => setReleaseId(event.target.value)}
+                  onChange={(event) => {
+                    setReleaseId(event.target.value);
+                    // The address was picked for the old release; step 3 picks a new one.
+                    setEndpointHostname(null);
+                  }}
                 >
                   <option value="">Select a release…</option>
                   {releases.map((release) => (
@@ -470,7 +474,10 @@ export function DeployWizard({
                         <input
                           type="checkbox"
                           checked={deviceIds.includes(device.id)}
-                          onChange={() => toggleId(deviceIds, device.id, setDeviceIds)}
+                          onChange={() => {
+                            toggleId(deviceIds, device.id, setDeviceIds);
+                            setEndpointHostname(null);
+                          }}
                         />
                         {device.name}
                       </label>

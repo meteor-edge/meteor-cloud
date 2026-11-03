@@ -69,6 +69,7 @@ class NativeDeploymentProvider:
         if not device_ids:
             raise AppError("no_deploy_targets", "No devices to deploy to.", status_code=422)
 
+        deploy_rows = {row.device_id: row for row in self.deployments.list_devices(deployment_id=deployment.id)}
         for device_id in device_ids:
             row = self.software.set_desired_software(
                 organization_id=organization_id,
@@ -76,6 +77,8 @@ class NativeDeploymentProvider:
                 release=release,
                 commit=False,
             )
+            if device_id in deploy_rows:
+                deploy_rows[device_id].desired_revision = row.desired_revision
             self._notify_sync_desired(device_id=device_id, revision=row.desired_revision)
 
         self.session.flush()
@@ -122,6 +125,9 @@ class NativeDeploymentProvider:
             )
             if current is None or current.desired_release_id != deployment.release_id:
                 # A newer Deploy (or rollback) owns desired now; leave it alone.
+                continue
+            if row.desired_revision is not None and current.desired_revision != row.desired_revision:
+                # Same release, but a newer write (another Deploy of it) owns desired now.
                 continue
             if row.previous_desired_release_id is not None:
                 previous = self.releases.get(
@@ -184,6 +190,7 @@ class NativeDeploymentProvider:
             row.status = DeploymentDeviceStatus.PENDING.value
             row.last_error = None
             row.activated_at = now
+            row.desired_revision = software.desired_revision
             self._notify_sync_desired(device_id=row.device_id, revision=software.desired_revision)
 
         # A paused Deploy stays paused; only finished ones run again.

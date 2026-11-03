@@ -103,6 +103,7 @@ function phaseSummary(deployment: Deployment, now: number): string | null {
 type RollbackNotice = {
   others: { id: string; label: string }[];
   skipped: string[];
+  failed: string[];
 };
 
 export function DeploymentDetailPage() {
@@ -255,6 +256,10 @@ export function DeploymentDetailPage() {
           label: item.release ? `${item.release.name} ${item.release.version}` : item.release_id,
         })),
         skipped: result.skipped.map((item) => item.device_name),
+        failed: (result.failed ?? []).map(
+          (item) =>
+            `${item.device_ids.length} device${item.device_ids.length === 1 ? "" : "s"} (${item.message})`,
+        ),
       };
       navigate(`/organizations/${organizationId}/deployments/${first.id}`, {
         state: { rollbackNotice: notice },
@@ -353,7 +358,10 @@ export function DeploymentDetailPage() {
         </div>
       </div>
 
-      {rollbackNotice && (rollbackNotice.others.length > 0 || rollbackNotice.skipped.length > 0) && (
+      {rollbackNotice &&
+        (rollbackNotice.others.length > 0 ||
+          rollbackNotice.skipped.length > 0 ||
+          rollbackNotice.failed.length > 0) && (
         <div className="space-y-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
           <p>Rollback started. Each device goes back to the release it had before.</p>
           {rollbackNotice.others.length > 0 && (
@@ -376,6 +384,11 @@ export function DeploymentDetailPage() {
           {rollbackNotice.skipped.length > 0 && (
             <p className="text-muted-foreground">
               Left as is (this Deploy was their first install): {rollbackNotice.skipped.join(", ")}.
+            </p>
+          )}
+          {rollbackNotice.failed.length > 0 && (
+            <p className="text-destructive">
+              Could not start the rollback for {rollbackNotice.failed.join("; ")}. Those devices were not rolled back.
             </p>
           )}
         </div>

@@ -4,6 +4,7 @@
 #   ./installcli.sh              Install for the current user (~/.local)
 #   sudo ./installcli.sh         System-wide (/opt + /usr/local/bin)
 #   ./installcli.sh --uninstall  Remove the install, credentials, and MQTT/WireGuard state
+#                                (default config locations only, not METEORCLI_CONFIG_DIR)
 
 set -euo pipefail
 
@@ -27,6 +28,7 @@ Usage:
   sudo $0                 Install system-wide (${SYSTEM_PREFIX}, ${SYSTEM_BIN})
   sudo $0 --with-service  System-wide + enable meteorcli.service (Raspberry Pi OS)
   $0 --uninstall          Remove the install, credentials, and MQTT/WireGuard state
+                          (default config locations; a METEORCLI_CONFIG_DIR is listed, not removed)
 
 Options:
   --prefix DIR     Virtualenv location
@@ -115,10 +117,19 @@ remove_config_dir() {
 }
 
 bring_wg0_down() {
-  if [[ -x /usr/local/libexec/meteorcli-wg ]]; then
-    /usr/local/libexec/meteorcli-wg down >/dev/null 2>&1 || true
-  elif command -v wg-quick >/dev/null 2>&1; then
-    wg-quick down wg0 >/dev/null 2>&1 || true
+  # The helper refuses to run unless it is root, so a non-root uninstall goes through
+  # its passwordless sudo rule. Failures are reported here, before the helper is removed.
+  local helper=/usr/local/libexec/meteorcli-wg
+  local -a sudo_cmd=()
+  [[ "${EUID}" -eq 0 ]] || sudo_cmd=(sudo -n)
+  if [[ -x "${helper}" ]] && "${sudo_cmd[@]}" "${helper}" down >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v wg-quick >/dev/null 2>&1 && "${sudo_cmd[@]}" wg-quick down wg0 >/dev/null 2>&1; then
+    return 0
+  fi
+  if ip link show wg0 >/dev/null 2>&1; then
+    echo "warning: could not bring the WireGuard interface wg0 down; it is still up." >&2
   fi
 }
 
@@ -152,6 +163,9 @@ uninstall() {
     fi
   else
     remove_config_dir "${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli"
+  fi
+  if [[ -n "${METEORCLI_CONFIG_DIR:-}" && -d "${METEORCLI_CONFIG_DIR}" ]]; then
+    echo "note: METEORCLI_CONFIG_DIR=${METEORCLI_CONFIG_DIR} was not removed; it may hold a device token." >&2
   fi
 }
 

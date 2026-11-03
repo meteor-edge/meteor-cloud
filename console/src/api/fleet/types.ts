@@ -187,6 +187,8 @@ export type RollbackResponse = {
   deployments: Deployment[];
   /** Devices left as is because this Deploy was their first install. */
   skipped: { device_id: string; device_name: string; reason: string }[];
+  /** Groups whose Deploy could not be created after an earlier group was; those devices did not roll back. */
+  failed?: { release_id: string; device_ids: string[]; code: string; message: string }[];
 };
 
 export type DeploymentListParams = {

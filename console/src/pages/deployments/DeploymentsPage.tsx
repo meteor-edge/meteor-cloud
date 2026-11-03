@@ -109,7 +109,9 @@ export function DeploymentsPage() {
             <strong>
               {filterReleaseQuery.data
                 ? `${filterReleaseQuery.data.name} ${filterReleaseQuery.data.version}`
-                : "…"}
+                : filterReleaseQuery.isError
+                  ? "(could not load this release)"
+                  : "…"}
             </strong>
           </span>
           <Button type="button" variant="outline" size="sm" onClick={clearReleaseFilter}>

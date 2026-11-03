@@ -67,8 +67,9 @@ curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/
 meteorcli register --server http://localhost:8000 --token reg_... --name edge-01
 sudo systemctl enable --now meteorcli   # if installed with --with-service
 # or: meteorcli run                     # foreground; Ctrl+C to stop
-# systemd Deploys need: sudo ./installcli.sh  (meteorcli-systemd helper)
-# or run meteorcli.service (root)
+# systemd Deploys need the meteorcli-systemd helper, which a root install adds:
+#   curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
+# or run meteorcli.service (root): ... | sudo bash -s -- --with-service
 ```
 
 Details: [Registration tokens](fleet/registration-tokens.md), [Device registration](fleet/device-registration.md).

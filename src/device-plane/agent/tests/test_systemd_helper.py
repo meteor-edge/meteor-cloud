@@ -56,7 +56,8 @@ def test_apply_writes_unit_enables_and_restarts(
 ) -> None:
     src = _unit(tmp_path / "seed.service")
     helper.main(["apply", "seed-systemd.service", str(src)])
-    assert (unit_dir / "seed-systemd.service").read_bytes().startswith(b"[Service]")
+    assert (unit_dir / "seed-systemd.service").read_bytes() == src.read_bytes()
+    assert os.listdir(unit_dir) == ["seed-systemd.service"]  # no temp file left behind
     assert systemctl_calls == [
         ["systemctl", "daemon-reload"],
         ["systemctl", "enable", "seed-systemd.service"],
@@ -126,3 +127,25 @@ def test_unit_file_must_be_regular(tmp_path: Path, unit_dir: Path) -> None:
     with pytest.raises(SystemExit):
         helper.main(["apply", "cam.service", str(src)])
     assert not (unit_dir / "cam.service").exists()
+
+
+def test_write_unit_retries_short_writes(unit_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_write = os.write
+
+    def short_write(fd, data):
+        return real_write(fd, bytes(data[:3]))
+
+    monkeypatch.setattr(helper.os, "write", short_write)
+    body = b"[Service]\nExecStart=/bin/true\n"
+    helper.write_unit("short.service", body)
+    assert (unit_dir / "short.service").read_bytes() == body
+
+
+def test_write_unit_removes_its_temp_file_on_failure(unit_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken_replace(_src, _dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(helper.os, "replace", broken_replace)
+    with pytest.raises(OSError):
+        helper.write_unit("broken.service", b"[Service]\n")
+    assert os.listdir(unit_dir) == []

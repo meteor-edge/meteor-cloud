@@ -193,7 +193,10 @@ def failure_threshold_rollback(ctx):
     held = {ctx.data["devices"][i]["name"]: running_version(ctx, i) for i in others}
     expect(all(v == "2" for v in held.values()), f"devices outside the canary changed: {held}")
 
-    rollback = action(ctx, created["id"], "rollback", (201,))
+    result = action(ctx, created["id"], "rollback", (201,))
+    expect(len(result.get("deployments") or []) == 1 and not result.get("failed"),
+           f"rollback result {result}")
+    rollback = result["deployments"][0]
     expect(rollback["release_id"] == ctx.data["fleet_release_v2"], f"rollback release {rollback['release_id']}")
     expect(rollback["target"]["device_ids"] == [canary], f"rollback targets {rollback['target']}")
     wait_status(ctx, rollback["id"], "completed", timeout=420)

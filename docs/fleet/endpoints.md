@@ -69,9 +69,9 @@ device**. For a docker release that is the host side of `host:container`
 | Code | When |
 |------|------|
 | `reserved_port` | The port is the device SSH port. |
-| `endpoint_port_mismatch` | Docker release whose `ports` do not publish this host port. |
+| `endpoint_port_mismatch` | Docker release whose `ports` do not publish this host port on TCP, including a release with no fixed host port (`"80"` alone, or no `ports`). |
 | `endpoint_port_loopback` | Docker binds the port to `127.0.0.1`/`::1` only; WireGuard cannot reach it. |
-| `device_port_in_use` (409) | Another workload on a target device already uses the port: a docker host binding or another app's public address. Also raised for a docker release whose host ports clash, even without publishing. |
+| `device_port_in_use` (409) | Another workload on a target device already uses the port: a docker host binding or another app's public address. Also raised for a docker release whose host ports clash, even without publishing. Devices that skip the release (no runtime for its kind) are not checked. A docker `ports` entry may span at most 1023 host ports (`invalid_release_spec` otherwise), so every bound port is checked. |
 
 The same workload never conflicts with itself: redeploying replaces it. If
 the app already has a public address on the device, the Deploy keeps that

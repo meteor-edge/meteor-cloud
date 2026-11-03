@@ -155,11 +155,12 @@ def _cmd_config(args: argparse.Namespace) -> int:
     print(f"Configuration saved under {paths.config_path.parent}")
     if server:
         print(f"API:            {server}")
-    hint_host = domain or api_base or ""
-    if hint_host and lan_host_missing_port(hint_host):
+    # Judge the URL that was saved: --api-base wins over --domain, so hint on that flag.
+    if server and lan_host_missing_port(server):
+        flag, value = ("--api-base", server) if api_base else ("--domain", domain or server)
         print(
             f"hint: laptop `make dev` listens on port 8000, not 80. "
-            f"Use '{PROG} config --domain {hint_host}:8000 …'",
+            f"Use '{PROG} config {flag} {value.rstrip('/')}:8000 …'",
             file=sys.stderr,
         )
     if dropped:
@@ -633,6 +634,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {"capabilities": collect_capabilities()}
         reports = reconcile_software(client, device_token, artifacts_dir)
+        # Under sudo, files this pass downloaded are root-owned; hand them back so a later
+        # unprivileged run (and the meteorcli-systemd helper's owner check) can use them.
+        try:
+            chown_config_dir(paths.config_path.parent)
+        except OSError:
+            logger.warning("Could not give %s back to the sudo user", paths.config_path.parent)
         if reports:
             payload["software_report"] = reports
         return payload

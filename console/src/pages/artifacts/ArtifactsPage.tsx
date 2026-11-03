@@ -39,8 +39,8 @@ export function ArtifactsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const type = parseType(searchParams.get("type"));
   const [deviceTypeId, setDeviceTypeId] = useState("");
-  const [version, setVersion] = useState("");
-  // `?search=` lets a release's artifact link land on that artifact.
+  // `?search=` and `?version=` let a release's artifact link land on that artifact version.
+  const [version, setVersion] = useState(searchParams.get("version") ?? "");
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
   const [page, setPage] = useState(1);
   const [showUpload, setShowUpload] = useState(false);

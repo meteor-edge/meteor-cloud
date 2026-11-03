@@ -181,15 +181,27 @@ class RollbackSkippedDevice(BaseModel):
     reason: str
 
 
+class RollbackFailedGroup(BaseModel):
+    """A rollback group whose Deploy could not be created after earlier groups were."""
+
+    release_id: uuid.UUID
+    device_ids: list[uuid.UUID]
+    code: str
+    message: str
+
+
 class RollbackResponse(BaseModel):
     """Rollback returns each device to its own previous release.
 
     Devices that had different previous releases get one Deploy per release; devices with no
-    previous release (a first install) are left alone and listed in ``skipped``.
+    previous release (a first install) are left alone and listed in ``skipped``. Each group's
+    Deploy is committed on its own, so when a later group fails after an earlier one was
+    created, the request still succeeds and lists that group in ``failed``.
     """
 
     deployments: list[DeploymentResponse]
     skipped: list[RollbackSkippedDevice] = Field(default_factory=list)
+    failed: list[RollbackFailedGroup] = Field(default_factory=list)
 
 
 class DeploymentResponse(BaseModel):

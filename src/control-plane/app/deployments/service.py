@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -14,7 +15,7 @@ from app.adapters import deployment_provider as resolve_deployment_provider
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import get_settings
-from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.core.exceptions import AppError, ConflictError, NotFoundError, ValidationAppError
 from app.deployments.models import (
     Deployment,
     DeploymentDevice,
@@ -38,6 +39,7 @@ from app.deployments.schemas import (
     DeployTarget,
     EndpointSpec,
     ReleaseBrief,
+    RollbackFailedGroup,
     RollbackResponse,
     RollbackSkippedDevice,
 )
@@ -55,6 +57,8 @@ from app.releases.kinds import ReleaseKind, docker_host_ports, workload_key_from
 from app.releases.models import Release
 from app.releases.repository import ReleaseRepository
 from app.tenancy.models import OrganizationMembership
+
+logger = logging.getLogger(__name__)
 
 _KIND_LABELS = {
     ReleaseKind.SYSTEMD.value: "systemd service",
@@ -358,10 +362,11 @@ class DeploymentService:
                 "Only Single container and Compose releases can be published on the internet.",
             )
         self._reject_kind_change(release=release, workload_key=workload_key, devices=devices)
+        # Devices without the release's runtime are skipped and bind nothing.
         self._reject_port_conflicts(
             release=release,
             workload_key=workload_key,
-            devices=devices,
+            devices=[device for device in devices if self.device_supports_kind(device, release.kind)],
             endpoint_port=payload.endpoint.port if payload.endpoint is not None else None,
         )
 
@@ -591,11 +596,15 @@ class DeploymentService:
             # The tunnel connects to <device WireGuard IP>:<port>, so the port is the host side.
             bindings = [b for b in docker_host_ports(dict(release.spec or {})) if b.protocol == "tcp"]
             match = next((b for b in bindings if b.port == spec.port), None)
-            if bindings and match is None:
+            if match is None:
+                # Without a fixed TCP host binding nothing on the device listens on the port.
                 listed = ", ".join(str(b.port) for b in bindings)
                 raise ValidationAppError(
                     "endpoint_port_mismatch",
-                    f"Endpoint port must be a host port this docker release publishes ({listed}).",
+                    f"Endpoint port must be a host port this docker release publishes ({listed})."
+                    if bindings
+                    else "This docker release publishes no fixed TCP host port, so nothing on the "
+                    "device listens on the endpoint port. Add a ports entry such as \"8080:80\".",
                 )
             if match is not None and match.loopback_only:
                 raise ValidationAppError(
@@ -609,13 +618,15 @@ class DeploymentService:
         endpoints = EndpointService(self.session)
         workload_key = workload_key_from_spec(release.kind, release.spec)
         # Redeploying an app that already has a public address keeps that address.
-        current = next(
+        # Prefer an enabled row, then the hostname, so the console and the API pick the same one.
+        current = min(
             (
                 row
                 for row in EndpointRepository(self.session).list_for_device(device_id=device_id)
                 if row.organization_id == organization_id and row.workload_key == workload_key
             ),
-            None,
+            key=lambda row: (not row.enabled, row.hostname),
+            default=None,
         )
         if current is not None:
             endpoints.reattach_endpoint(
@@ -921,22 +932,39 @@ class DeploymentService:
         # Largest group first: the console opens that one when there are several.
         ordered = sorted(groups.items(), key=lambda item: (-len(item[1]), str(item[0])))
         created: list[DeploymentResponse] = []
+        failed: list[RollbackFailedGroup] = []
         for release_id, device_ids in ordered:
             release = releases[release_id]
             name = base_name if len(ordered) == 1 else f"{base_name} → {release.name} {release.version}"
-            created.append(
-                self.create_deployment(
-                    actor=actor,
-                    organization_id=organization_id,
-                    payload=DeploymentCreate(
-                        release_id=release.id,
-                        name=name[:255],
-                        target=DeployTarget(device_ids=device_ids),
-                        rollout=DeployRollout(strategy="immediate"),
-                    ),
-                    rollback_of_deployment_id=original.id,
+            try:
+                created.append(
+                    self.create_deployment(
+                        actor=actor,
+                        organization_id=organization_id,
+                        payload=DeploymentCreate(
+                            release_id=release.id,
+                            name=name[:255],
+                            target=DeployTarget(device_ids=device_ids),
+                            rollout=DeployRollout(strategy="immediate"),
+                        ),
+                        rollback_of_deployment_id=original.id,
+                    )
                 )
-            )
+            except Exception as exc:
+                # create_deployment commits each group, so earlier groups are already applied.
+                # With nothing applied yet the error is the answer; otherwise report it per group.
+                if not created:
+                    raise
+                self.session.rollback()
+                logger.exception("rollback group for release %s failed", release_id)
+                failed.append(
+                    RollbackFailedGroup(
+                        release_id=release_id,
+                        device_ids=device_ids,
+                        code=exc.code if isinstance(exc, AppError) else "internal_error",
+                        message=exc.message if isinstance(exc, AppError) else "Could not create this rollback.",
+                    )
+                )
         skipped = [
             RollbackSkippedDevice(
                 device_id=device_id,
@@ -945,7 +973,7 @@ class DeploymentService:
             )
             for device_id in no_previous
         ]
-        return RollbackResponse(deployments=created, skipped=skipped)
+        return RollbackResponse(deployments=created, skipped=skipped, failed=failed)
 
     def _lock_deployment(self, deployment_id: uuid.UUID) -> Deployment | None:
         """Re-load the row with SELECT ... FOR UPDATE so concurrent ticks serialize."""

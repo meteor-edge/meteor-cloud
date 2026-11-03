@@ -104,7 +104,7 @@ describe("ReleasesPage", () => {
     const link = await screen.findByRole("link", { name: "camera-unit 1.0" });
     expect(link).toHaveAttribute(
       "href",
-      "/organizations/org-1/artifacts?type=systemd&search=camera-unit",
+      "/organizations/org-1/artifacts?type=systemd&search=camera-unit&version=1.0",
     );
     expect(screen.getByText("camera-agent.service")).toBeInTheDocument();
   });

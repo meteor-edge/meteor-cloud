@@ -28,12 +28,33 @@ def create_token(ctx, name: str) -> str:
     return token
 
 
+def machine_macs(ctx) -> set[str]:
+    """MAC addresses of this run's device machines, read the way the agent reads them."""
+    macs: set[str] = set()
+    for host in ctx.devices:
+        result = ctx.sh(host, "for f in /sys/class/net/*/address; do "
+                              "[ \"$f\" = /sys/class/net/lo/address ] || cat \"$f\"; done",
+                        sudo=False, check=False)
+        if not result.ok:
+            continue
+        for line in result.stdout.split():
+            mac = line.strip().lower()
+            if mac and mac != "00:00:00:00:00:00":
+                macs.add(mac)
+    return macs
+
+
 def release_earlier_runs(ctx) -> list[str]:
-    """Delete devices left in earlier runs' organizations.
+    """Delete devices from earlier runs' organizations that are this run's machines.
 
     The API matches a device by its MAC addresses across organizations, so the same
     machines cannot register into this run's organization while an earlier run owns them.
+    Only devices whose MAC addresses overlap this run's machines are deleted; other devices
+    in an ``E2E `` organization are left alone.
     """
+    macs = machine_macs(ctx)
+    if not macs:
+        return []
     api = ctx.admin()
     deleted = []
     for org in api.call("GET", "/api/v1/organizations"):
@@ -41,6 +62,8 @@ def release_earlier_runs(ctx) -> list[str]:
             continue
         page = api.call("GET", ctx.org_path("/devices?page_size=100", org=org["id"]))
         for device in page["items"]:
+            if not macs & {mac.lower() for mac in device.get("mac_addresses") or []}:
+                continue
             api.call("DELETE", ctx.org_path(f"/devices/{device['id']}", org=org["id"]), expect=(204,))
             deleted.append(device["name"])
     return deleted

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { checkEndpointPort, dockerHostPorts, suggestedEndpointPort } from "@/components/deployments/ports";
+import {
+  checkEndpointPort,
+  dockerHostPorts,
+  existingEndpointFor,
+  suggestedEndpointPort,
+} from "@/components/deployments/ports";
 
 const docker = (ports: string[]) => ({ kind: "docker" as const, spec: { container_name: "web", ports } });
 
@@ -27,5 +32,16 @@ describe("endpoint port checks", () => {
     ] as never;
     expect(checkEndpointPort(docker(["8080:80", "9000:90"]), 8080, endpoints)).toBeNull();
     expect(checkEndpointPort(docker(["8080:80", "9000:90"]), 9000, endpoints)?.level).toBe("error");
+  });
+});
+
+describe("existingEndpointFor", () => {
+  it("prefers an enabled row, then the hostname", () => {
+    const endpoints = [
+      { workload_key: "web", port: 8080, enabled: false, hostname: "a.example.com" },
+      { workload_key: "web", port: 8080, enabled: true, hostname: "c.example.com" },
+      { workload_key: "web", port: 8080, enabled: true, hostname: "b.example.com" },
+    ] as never;
+    expect(existingEndpointFor(docker(["8080:80"]), endpoints)?.hostname).toBe("b.example.com");
   });
 });

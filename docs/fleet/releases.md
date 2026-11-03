@@ -62,10 +62,12 @@ Releases and artifacts link both ways in the console:
 
 - **systemd** — agent installs the unit under `/etc/systemd/system`, then
   `daemon-reload` / `enable` / `restart` when `start` is true. Unprivileged
-  `meteorcli run` uses the `meteorcli-systemd` helper from `sudo ./installcli.sh`
-  (passwordless sudo for that file only). `meteorcli.service` already runs as
-  root. Re-run the installer after upgrading if Deploy fails with permission
-  denied on the unit file.
+  `meteorcli run` uses the `meteorcli-systemd` helper, which the installer adds
+  only when it runs as root (passwordless sudo for that file only):
+  `curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash`
+  (from a cloud checkout: `sudo ./installcli.sh` in `src/device-plane/agent`).
+  `meteorcli.service` already runs as root. Re-run the installer with `sudo`
+  after upgrading if Deploy fails with permission denied on the unit file.
 - **docker** — pull `spec.image` and/or `docker load` a tarball, then
   `docker run`.
 - **docker_compose** — materialize YAML/zip and `docker compose up -d`.

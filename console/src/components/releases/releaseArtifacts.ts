@@ -34,8 +34,9 @@ export function deploymentsForReleasePath(organizationId: string, releaseId: str
 
 export function artifactPath(
   organizationId: string,
-  artifact: { type: ArtifactType; name: string },
+  artifact: { type: ArtifactType; name: string; version?: string },
 ): string {
   const query = new URLSearchParams({ type: artifact.type, search: artifact.name });
+  if (artifact.version) query.set("version", artifact.version);
   return `/organizations/${organizationId}/artifacts?${query.toString()}`;
 }

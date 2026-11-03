@@ -91,14 +91,22 @@ export function CreateReleaseDialog({
   });
 
   const artifacts: Artifact[] = artifactsQuery.data?.items ?? [];
-  const artifactOptions = useMemo(
-    () =>
-      artifacts.map((item) => ({
-        id: item.id,
-        label: `${item.name} ${item.version} (${item.file_name})`,
-      })),
-    [artifacts],
-  );
+  const artifactOptions = useMemo(() => {
+    const options = artifacts.map((item) => ({
+      id: item.id,
+      label: `${item.name} ${item.version} (${item.file_name})`,
+    }));
+    // The list holds the first 100 artifacts; keep the preselected one visible when it is not among them.
+    if (
+      initialArtifact &&
+      initialArtifact.kind === kind &&
+      !options.some((item) => item.id === initialArtifact.id)
+    ) {
+      const label = [initialArtifact.name, initialArtifact.version].filter(Boolean).join(" ");
+      options.unshift({ id: initialArtifact.id, label: label || initialArtifact.id });
+    }
+    return options;
+  }, [artifacts, initialArtifact, kind]);
 
 
   const kindMeta = RELEASE_KINDS.find((item) => item.id === kind)!;

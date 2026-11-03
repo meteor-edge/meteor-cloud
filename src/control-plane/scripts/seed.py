@@ -294,26 +294,37 @@ def _sync_seed_artifact_bytes(
     *,
     content: bytes,
     content_type: str | None,
-) -> None:
+) -> bool:
     """Make storage and the DB row match the seed content for an existing artifact.
 
     Re-uploads when the object is missing or the stored checksum differs from the
     seed bytes (older seeds built non-deterministic zips, so devices got
     ``checksum_mismatch``), then updates ``checksum_sha256`` and ``size_bytes``.
+
+    Returns False when the artifact cannot be used for a seed release: it was not created
+    by the seed (a user upload with the same name and version is never overwritten), or
+    its content could not be checked or restored. A later seed run retries the repair.
     """
+    if not (artifact.metadata_ or {}).get("seeded"):
+        logger.warning(
+            "Artifact %s %s exists but was not created by the seed; leaving it unchanged",
+            artifact.name,
+            artifact.version,
+        )
+        return False
     expected = hashlib.sha256(content).hexdigest()
     try:
         present = storage.exists(artifact.storage_key)
     except Exception:
         logger.warning("Could not check storage for %s %s", artifact.name, artifact.version)
-        return
+        return False
     if present and artifact.checksum_sha256 == expected and artifact.size_bytes == len(content):
-        return
+        return True
     try:
         storage.put(artifact.storage_key, BytesIO(content), content_type=content_type)
     except Exception:
         logger.warning("Could not restore artifact content %s %s", artifact.name, artifact.version)
-        return
+        return False
     artifact.checksum_sha256 = expected
     artifact.size_bytes = len(content)
     session.flush()
@@ -323,6 +334,7 @@ def _sync_seed_artifact_bytes(
         artifact.name,
         artifact.version,
     )
+    return True
 
 
 def _seed_demo_software(
@@ -393,14 +405,15 @@ def _seed_demo_software(
                         version=item.version,
                     )
                     artifact_id = existing_artifact.id if existing_artifact else None
-                    if existing_artifact is not None:
-                        _sync_seed_artifact_bytes(
-                            session,
-                            resolved,
-                            existing_artifact,
-                            content=item.content,
-                            content_type=item.content_type,
-                        )
+                    if existing_artifact is not None and not _sync_seed_artifact_bytes(
+                        session,
+                        resolved,
+                        existing_artifact,
+                        content=item.content,
+                        content_type=item.content_type,
+                    ):
+                        logger.warning("Skipping release %s %s", item.name, item.version)
+                        continue
                 except AppError as exc:
                     if exc.status_code == 503 or exc.code in {"storage_unavailable", "artifact_empty"}:
                         logger.warning(
@@ -414,13 +427,15 @@ def _seed_demo_software(
                     raise
             else:
                 artifact_id = existing_artifact.id
-                _sync_seed_artifact_bytes(
+                if not _sync_seed_artifact_bytes(
                     session,
                     resolved,
                     existing_artifact,
                     content=item.content,
                     content_type=item.content_type,
-                )
+                ):
+                    logger.warning("Skipping release %s %s", item.name, item.version)
+                    continue
                 logger.info("Artifact already exists: %s %s", item.name, item.version)
 
         existing_release = release_repo.find_duplicate(

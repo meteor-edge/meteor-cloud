@@ -37,7 +37,7 @@ Device-group scoped operators can only target devices in their groups.
 | `POST` | `/api/v1/organizations/{org}/deployments/{id}/pause` | Stop activating new devices (batched/phased, in-progress only; `409` otherwise) |
 | `POST` | `/api/v1/organizations/{org}/deployments/{id}/resume` | Resume a paused Deploy and tick it at once (`409` unless paused) |
 | `POST` | `/api/v1/organizations/{org}/deployments/{id}/retry-failed` | Re-queue failed devices (`deployment.create`) |
-| `POST` | `/api/v1/organizations/{org}/deployments/{id}/rollback` | Returns `{ deployments, skipped }`: one new Deploy per previous release (`deployment.rollback`) |
+| `POST` | `/api/v1/organizations/{org}/deployments/{id}/rollback` | Returns `{ deployments, skipped, failed }`: one new Deploy per previous release (`deployment.rollback`) |
 
 ### Create body
 
@@ -78,7 +78,9 @@ Works on in-progress and paused Deploys. Pending, updating, queued and timed-out
 devices are marked cancelled. With the native provider, desired software on
 activated devices (pending, updating, timed out) is restored to the previous
 release when one was recorded; otherwise desired is cleared. A device whose
-desired software a newer Deploy has since changed is left alone. Queued devices
+desired software a newer Deploy has since written is left alone, even when that
+Deploy installs the same release (each Deploy records the `desired_revision` it
+wrote). Queued devices
 never received the release and keep what they had. Devices that already succeeded stay
 as they are.
 
@@ -196,6 +198,11 @@ timed out (or failed) ends as **failed**.
   group first); devices for which this Deploy was the first install are left
   as is and listed in `skipped`. If no device has a previous release the call
   returns `422 no_previous_release` (there is no uninstall).
+- Each group's Deploy is created on its own. If the first one fails, the call
+  returns that error and nothing changed. If a later one fails, the call still
+  returns `201` with the Deploys that were created, and lists the group that
+  failed (`release_id`, `device_ids`, `code`, `message`) in `failed`; those
+  devices were not rolled back.
 - A Deploy cannot replace a workload of another kind under the same name (a
   container `web` and a Compose project `web`): `409 workload_kind_mismatch`.
   Give the release a different unit, container or project name.
