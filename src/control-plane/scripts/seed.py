@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import sys
@@ -197,12 +198,19 @@ class _SeedRelease:
     content: bytes | None = None
 
 
+# Fixed entry timestamp so every seed run builds byte-identical zips (same SHA-256).
+_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+
 def _compose_zip(compose_yaml: str, extra: dict[str, str] | None = None) -> bytes:
     buffer = BytesIO()
+    entries = {"docker-compose.yml": compose_yaml, **(extra or {})}
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("docker-compose.yml", compose_yaml)
-        for path, body in (extra or {}).items():
-            archive.writestr(path, body)
+        for path, body in entries.items():
+            info = zipfile.ZipInfo(path, date_time=_ZIP_EPOCH)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, body)
     return buffer.getvalue()
 
 
@@ -279,27 +287,42 @@ def _demo_releases() -> tuple[_SeedRelease, ...]:
     )
 
 
-def _restore_missing_artifact_bytes(
+def _sync_seed_artifact_bytes(
+    session: Session,
     storage: ObjectStorage,
     artifact: Artifact,
     *,
     content: bytes,
     content_type: str | None,
 ) -> None:
-    """Put seed bytes when the DB row exists but object storage has no file."""
+    """Make storage and the DB row match the seed content for an existing artifact.
+
+    Re-uploads when the object is missing or the stored checksum differs from the
+    seed bytes (older seeds built non-deterministic zips, so devices got
+    ``checksum_mismatch``), then updates ``checksum_sha256`` and ``size_bytes``.
+    """
+    expected = hashlib.sha256(content).hexdigest()
     try:
         present = storage.exists(artifact.storage_key)
     except Exception:
         logger.warning("Could not check storage for %s %s", artifact.name, artifact.version)
         return
-    if present:
+    if present and artifact.checksum_sha256 == expected and artifact.size_bytes == len(content):
         return
     try:
         storage.put(artifact.storage_key, BytesIO(content), content_type=content_type)
     except Exception:
         logger.warning("Could not restore artifact content %s %s", artifact.name, artifact.version)
         return
-    logger.info("Restored missing artifact content %s %s", artifact.name, artifact.version)
+    artifact.checksum_sha256 = expected
+    artifact.size_bytes = len(content)
+    session.flush()
+    logger.info(
+        "%s artifact content %s %s",
+        "Repaired" if present else "Restored missing",
+        artifact.name,
+        artifact.version,
+    )
 
 
 def _seed_demo_software(
@@ -371,7 +394,8 @@ def _seed_demo_software(
                     )
                     artifact_id = existing_artifact.id if existing_artifact else None
                     if existing_artifact is not None:
-                        _restore_missing_artifact_bytes(
+                        _sync_seed_artifact_bytes(
+                            session,
                             resolved,
                             existing_artifact,
                             content=item.content,
@@ -390,7 +414,8 @@ def _seed_demo_software(
                     raise
             else:
                 artifact_id = existing_artifact.id
-                _restore_missing_artifact_bytes(
+                _sync_seed_artifact_bytes(
+                    session,
                     resolved,
                     existing_artifact,
                     content=item.content,
