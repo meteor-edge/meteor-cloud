@@ -3,12 +3,22 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDeployment, listDeviceGroups, listDevices, listReleases } from "@/api/fleet";
+import {
+  createDeployment,
+  listDeviceGroups,
+  listDevices,
+  listEndpoints,
+  listReleases,
+  suggestHostname,
+} from "@/api/fleet";
 import { DeployWizard } from "@/components/deployments/DeployWizard";
 
 vi.mock("@/api/fleet", () => ({
   createDeployment: vi.fn(),
   listDeviceGroups: vi.fn(),
+  listEndpoints: vi.fn(),
+  suggestHostname: vi.fn(),
+  checkHostname: vi.fn(),
   listDevices: vi.fn(),
   listReleases: vi.fn(),
 }));
@@ -27,9 +37,32 @@ beforeEach(() => {
     page_size: 100,
   } as never);
   vi.mocked(listDeviceGroups).mockResolvedValue([]);
+  vi.mocked(listEndpoints).mockResolvedValue([]);
+  vi.mocked(suggestHostname).mockResolvedValue({
+    apps_domain: "apps.example.com",
+    hostname: "web.edge-01.acme.apps.example.com",
+    available: true,
+  } as never);
   vi.mocked(createDeployment).mockReset();
   vi.mocked(createDeployment).mockResolvedValue({ id: "dep-1" } as never);
 });
+
+function useDockerRelease(ports: string[]) {
+  vi.mocked(listReleases).mockResolvedValue({
+    items: [
+      {
+        id: "rel-1",
+        name: "camera-agent",
+        version: "1.2.0",
+        kind: "docker",
+        spec: { container_name: "web", image: "nginx:alpine", ports },
+      },
+    ],
+    total: 1,
+    page: 1,
+    page_size: 100,
+  } as never);
+}
 
 async function openReview() {
   const user = userEvent.setup();
@@ -63,6 +96,7 @@ describe("DeployWizard", () => {
         { percent: 100, delay_seconds: 86400 },
       ],
       failure_threshold_percent: 10,
+      max_concurrent: 50,
       pending_timeout_seconds: 86400,
     });
   });
@@ -71,6 +105,7 @@ describe("DeployWizard", () => {
     const user = await openReview();
     await user.click(screen.getByRole("button", { name: "Phased" }));
     await user.click(screen.getByText("Advanced"));
+    await user.clear(screen.getByLabelText("Max concurrent"));
     await user.type(screen.getByLabelText("Max concurrent"), "25");
     await user.click(screen.getByRole("button", { name: "Deploy" }));
 
@@ -162,5 +197,71 @@ describe("DeployWizard", () => {
     await user.click(screen.getByRole("button", { name: "Fill from wizard" }));
     expect(yaml()).toContain("strategy: phased");
     expect(yaml()).not.toContain("# note");
+  });
+
+  it("explains the selected phased preset", async () => {
+    const user = await openReview();
+    await user.click(screen.getByRole("button", { name: "Phased" }));
+    expect(screen.getByText(/one device installs first/i)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Phases"), "1 / 10% / 100%");
+    expect(screen.getByText(/then 10% of the targets/i)).toBeInTheDocument();
+    expect(screen.queryByText(/one device installs first/i)).not.toBeInTheDocument();
+  });
+
+  it("starts batched with a default batch size", async () => {
+    const user = await openReview();
+    await user.click(screen.getByRole("button", { name: "Batched" }));
+    expect(screen.getByLabelText("Batch size")).toHaveValue(5);
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+    expect(vi.mocked(createDeployment).mock.calls[0][2].rollout).toEqual({
+      strategy: "batched",
+      batch_size: 5,
+    });
+  });
+
+  it("prefills the docker host port and blocks a container port", async () => {
+    useDockerRelease(["8080:80"]);
+    const user = await openReview();
+    await user.click(screen.getByRole("checkbox", { name: "Publish on the internet" }));
+    const port = screen.getByLabelText("Port the app listens on");
+    expect(port).toHaveValue(8080);
+
+    await user.clear(port);
+    await user.type(port, "80");
+    expect(screen.getByText(/publishes host port 8080/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+    expect(createDeployment).not.toHaveBeenCalled();
+  });
+
+  it("blocks a port another app on the device already publishes", async () => {
+    useDockerRelease(["9000:80"]);
+    vi.mocked(listEndpoints).mockResolvedValue([
+      { workload_key: "seed-compose", hostname: "shop.example.com", port: 9000, enabled: true },
+    ] as never);
+    const user = await openReview();
+    await user.click(screen.getByRole("checkbox", { name: "Publish on the internet" }));
+    expect(await screen.findByText(/already published on this device for seed-compose/)).toBeInTheDocument();
+  });
+
+  it("keeps the existing address when the app is already published", async () => {
+    useDockerRelease(["8080:80"]);
+    vi.mocked(listEndpoints).mockResolvedValue([
+      { workload_key: "web", hostname: "web.example.com", port: 8080, enabled: true },
+    ] as never);
+    const user = await openReview();
+    await user.click(screen.getByRole("checkbox", { name: "Publish on the internet" }));
+    expect(await screen.findByText("web.example.com")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+    expect(vi.mocked(createDeployment).mock.calls[0][2].endpoint).toEqual({
+      hostname: "web.example.com",
+      port: 8080,
+      protocol: "http",
+    });
+  });
+
+  it("does not offer publishing for a systemd release", async () => {
+    await openReview();
+    expect(screen.queryByRole("checkbox", { name: "Publish on the internet" })).not.toBeInTheDocument();
+    expect(screen.getByText(/available for single container and compose releases/i)).toBeInTheDocument();
   });
 });

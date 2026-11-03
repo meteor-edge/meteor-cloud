@@ -175,6 +175,23 @@ class DeploymentCounts(BaseModel):
     total: int = 0
 
 
+class RollbackSkippedDevice(BaseModel):
+    device_id: uuid.UUID
+    device_name: str
+    reason: str
+
+
+class RollbackResponse(BaseModel):
+    """Rollback returns each device to its own previous release.
+
+    Devices that had different previous releases get one Deploy per release; devices with no
+    previous release (a first install) are left alone and listed in ``skipped``.
+    """
+
+    deployments: list[DeploymentResponse]
+    skipped: list[RollbackSkippedDevice] = Field(default_factory=list)
+
+
 class DeploymentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

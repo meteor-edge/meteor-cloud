@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   cancelDeployment,
@@ -12,12 +12,19 @@ import {
   type Deployment,
   type DeploymentDevice,
 } from "@/api/fleet";
+import { getMyAccess } from "@/api/access";
 import { getOrganization } from "@/api/organizations";
 import { ApiError } from "@/api/http";
 import { useAuth } from "@/auth/AuthContext";
 import { AvailabilityBadge, HealthBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
-import { canManageDeployments, canRollbackDeployments } from "@/lib/permissions";
+import { LIVE_POLL_MS, LIVE_STATUSES } from "@/components/deployments/liveStatus";
+import { releasePath } from "@/components/releases/releaseArtifacts";
+import {
+  canManageDeployments,
+  canRollbackDeployments,
+  canViewDeviceLogs,
+} from "@/lib/permissions";
 
 const STATUS_LABELS: Record<string, string> = {
   in_progress: "In progress",
@@ -39,7 +46,6 @@ const PAUSE_REASONS: Record<string, string> = {
 };
 
 /** Open Deploys keep polling at about the heartbeat rate. */
-const LIVE_STATUSES = new Set(["in_progress", "paused"]);
 
 function deviceStatusLabel(row: DeploymentDevice): string {
   if (
@@ -94,9 +100,18 @@ function phaseSummary(deployment: Deployment, now: number): string | null {
   return parts.join(" · ");
 }
 
+type RollbackNotice = {
+  others: { id: string; label: string }[];
+  skipped: string[];
+};
+
 export function DeploymentDetailPage() {
   const { organizationId = "", deploymentId = "" } = useParams();
   const { token } = useAuth();
+  const location = useLocation();
+  // Set by onRollback when the rollback split into several Deploys or skipped devices.
+  const rollbackNotice = (location.state as { rollbackNotice?: RollbackNotice } | null)
+    ?.rollbackNotice;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -116,18 +131,32 @@ export function DeploymentDetailPage() {
     enabled: Boolean(token && organizationId),
   });
 
+  const accessQuery = useQuery({
+    queryKey: ["my-access", token],
+    queryFn: () => getMyAccess(token!),
+    enabled: Boolean(token),
+    retry: false,
+  });
+
   const detailQuery = useQuery({
     queryKey: ["deployment", organizationId, deploymentId, token],
     queryFn: () => getDeployment(token!, organizationId, deploymentId),
     enabled: Boolean(token && organizationId && deploymentId),
     // Health and URLs keep changing after install finishes, so keep polling at about the heartbeat rate.
     refetchInterval: (query) =>
-      LIVE_STATUSES.has(query.state.data?.status ?? "") ? 5000 : 30000,
+      LIVE_STATUSES.has(query.state.data?.status ?? "") ? LIVE_POLL_MS : 30000,
     refetchOnWindowFocus: true,
   });
 
   const canManage = canManageDeployments(orgQuery.data?.current_user_role);
   const canRollback = canRollbackDeployments(orgQuery.data?.current_user_role);
+  // Effective permissions cover custom roles; the role check is the fallback (same as device page).
+  const orgAccess = accessQuery.data?.organizations.find(
+    (entry) => entry.organization_id === organizationId,
+  );
+  const canLogs = orgAccess
+    ? orgAccess.permissions.includes("device.logs")
+    : canViewDeviceLogs(orgQuery.data?.current_user_role);
   const deployment = detailQuery.data;
   const releaseLabel = deployment?.release
     ? `${deployment.release.name} ${deployment.release.version}`
@@ -209,7 +238,7 @@ export function DeploymentDetailPage() {
       !token ||
       !deployment ||
       !window.confirm(
-        "Roll back to the previous release? This starts a new Deploy for the prior desired software.",
+        "Roll back? Each device returns to the release it had before this Deploy. Devices for which this was the first install are left as is.",
       )
     ) {
       return;
@@ -217,9 +246,19 @@ export function DeploymentDetailPage() {
     setBusy("rollback");
     setError(null);
     try {
-      const created = await rollbackDeployment(token, organizationId, deploymentId);
+      const result = await rollbackDeployment(token, organizationId, deploymentId);
       await queryClient.invalidateQueries({ queryKey: ["deployments", organizationId] });
-      navigate(`/organizations/${organizationId}/deployments/${created.id}`);
+      const [first, ...others] = result.deployments;
+      const notice: RollbackNotice = {
+        others: others.map((item) => ({
+          id: item.id,
+          label: item.release ? `${item.release.name} ${item.release.version}` : item.release_id,
+        })),
+        skipped: result.skipped.map((item) => item.device_name),
+      };
+      navigate(`/organizations/${organizationId}/deployments/${first.id}`, {
+        state: { rollbackNotice: notice },
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not roll back the deployment.");
     } finally {
@@ -242,7 +281,16 @@ export function DeploymentDetailPage() {
               {deployment?.name || releaseLabel || "Deployment"}
             </h1>
             <p className="mt-2 text-muted-foreground">
-              {releaseLabel}
+              {deployment?.release ? (
+                <Link
+                  to={releasePath(organizationId, deployment.release)}
+                  className="text-link hover:underline"
+                >
+                  {releaseLabel}
+                </Link>
+              ) : (
+                releaseLabel
+              )}
               {deployment ? ` · ${STATUS_LABELS[deployment.status] ?? deployment.status}` : ""}
               {deployment?.status === "paused" && pausedReason
                 ? ` (${PAUSE_REASONS[pausedReason] ?? pausedReason})`
@@ -305,6 +353,33 @@ export function DeploymentDetailPage() {
         </div>
       </div>
 
+      {rollbackNotice && (rollbackNotice.others.length > 0 || rollbackNotice.skipped.length > 0) && (
+        <div className="space-y-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+          <p>Rollback started. Each device goes back to the release it had before.</p>
+          {rollbackNotice.others.length > 0 && (
+            <p>
+              Devices with a different previous release got their own rollback:{" "}
+              {rollbackNotice.others.map((item, index) => (
+                <span key={item.id}>
+                  {index > 0 ? ", " : ""}
+                  <Link
+                    to={`/organizations/${organizationId}/deployments/${item.id}`}
+                    className="text-link hover:underline"
+                  >
+                    {item.label}
+                  </Link>
+                </span>
+              ))}
+              .
+            </p>
+          )}
+          {rollbackNotice.skipped.length > 0 && (
+            <p className="text-muted-foreground">
+              Left as is (this Deploy was their first install): {rollbackNotice.skipped.join(", ")}.
+            </p>
+          )}
+        </div>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {detailQuery.isError && (
         <p className="text-sm text-destructive">Could not load this deployment.</p>
@@ -348,6 +423,15 @@ export function DeploymentDetailPage() {
                   >
                     {row.device_name || row.device_id}
                   </Link>
+                  {canLogs && (
+                    <Link
+                      to={`/organizations/${organizationId}/devices/${row.device_id}?tab=logs`}
+                      className="ml-2 text-xs text-link hover:underline"
+                      aria-label={`Logs for ${row.device_name || row.device_id}`}
+                    >
+                      Logs
+                    </Link>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   {deviceStatusLabel(row)}

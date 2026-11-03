@@ -321,6 +321,52 @@ class EndpointService:
         self.session.refresh(row)
         return self._to_response(row)
 
+    def reattach_endpoint(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        row: ApplicationEndpoint,
+        deployment_id: uuid.UUID,
+        port: int,
+        protocol: str,
+        hostname: str | None,
+    ) -> EndpointResponse:
+        """Point an app's existing public address at a new Deploy (flushes, does not commit)."""
+        membership = self._require_membership(organization_id, actor.id)
+        device = self._device(organization_id, row.device_id)
+        self.authz.require(membership, "endpoint.update", device_group_id=device.device_group_id)
+        self._reject_reserved_port(port)
+        clash = self.endpoints.enabled_on_port(device_id=row.device_id, port=port)
+        if clash is not None and clash.id != row.id:
+            raise ConflictError(
+                "device_port_in_use",
+                "An enabled endpoint already uses this port on the device.",
+            )
+        if hostname and hostname != row.hostname:
+            hostname = self._validate_hostname(hostname, organization_id=organization_id, device=device)
+            existing = self.endpoints.get_by_hostname(hostname)
+            if existing is not None and existing.id != row.id:
+                raise ConflictError("hostname_taken", "This hostname is already registered.")
+            row.hostname = hostname
+        software = self.software.get_by_workload(device_id=row.device_id, workload_key=row.workload_key or "")
+        row.deployment_id = deployment_id
+        row.device_software_id = software.id if software is not None else row.device_software_id
+        row.port = port
+        row.protocol = protocol
+        row.enabled = True
+        row.availability = EndpointAvailability.UNKNOWN.value
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="endpoint.update",
+            resource_type="endpoint",
+            resource_id=row.id,
+            metadata={"hostname": row.hostname, "port": port, "deployment_id": str(deployment_id)},
+        )
+        self.session.flush()
+        return self._to_response(row)
+
     def delete_endpoint(
         self, *, actor: User, organization_id: uuid.UUID, endpoint_id: uuid.UUID
     ) -> None:

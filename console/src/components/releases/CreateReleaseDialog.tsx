@@ -1,11 +1,10 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
   createRelease,
   listArtifacts,
   type Artifact,
-  type ArtifactType,
   type Release,
   type ReleaseCreatePayload,
   type ReleaseKind,
@@ -14,6 +13,7 @@ import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ARTIFACT_TYPE_FOR_KIND } from "@/components/releases/releaseArtifacts";
 import { parseYamlObject } from "@/lib/yaml";
 
 const SELECT_CLASS =
@@ -38,15 +38,11 @@ const RELEASE_KINDS: { id: ReleaseKind; label: string; hint: string }[] = [
   },
 ];
 
-const ARTIFACT_TYPE_FOR_KIND: Record<ReleaseKind, ArtifactType | null> = {
-  systemd: "systemd",
-  docker: "docker",
-  docker_compose: "docker_compose",
-};
-
 type CreateReleaseDialogProps = {
   token: string;
   organizationId: string;
+  /** Start from this artifact (e.g. "Create release" on an artifact row): kind and artifact preselected. */
+  initialArtifact?: { id: string; kind: ReleaseKind; name?: string; version?: string } | null;
   onClose: () => void;
   onCreated: (release: Release) => void;
 };
@@ -54,14 +50,15 @@ type CreateReleaseDialogProps = {
 export function CreateReleaseDialog({
   token,
   organizationId,
+  initialArtifact = null,
   onClose,
   onCreated,
 }: CreateReleaseDialogProps) {
   const [mode, setMode] = useState<"form" | "yaml">("form");
-  const [kind, setKind] = useState<ReleaseKind>("systemd");
-  const [name, setName] = useState("");
-  const [version, setVersion] = useState("");
-  const [artifactId, setArtifactId] = useState("");
+  const [kind, setKind] = useState<ReleaseKind>(initialArtifact?.kind ?? "systemd");
+  const [name, setName] = useState(initialArtifact?.name ?? "");
+  const [version, setVersion] = useState(initialArtifact?.version ?? "");
+  const [artifactId, setArtifactId] = useState(initialArtifact?.id ?? "");
   const [unitName, setUnitName] = useState("");
   const [containerName, setContainerName] = useState("");
   const [image, setImage] = useState("");
@@ -87,10 +84,10 @@ export function CreateReleaseDialog({
     queryKey: ["artifacts", organizationId, artifactType, token],
     queryFn: () =>
       listArtifacts(token, organizationId, {
-        type: artifactType ?? undefined,
+        type: artifactType,
         page_size: 100,
       }),
-    enabled: Boolean(token && organizationId && artifactType),
+    enabled: Boolean(token && organizationId),
   });
 
   const artifacts: Artifact[] = artifactsQuery.data?.items ?? [];
@@ -103,10 +100,6 @@ export function CreateReleaseDialog({
     [artifacts],
   );
 
-  useEffect(() => {
-    setArtifactId("");
-    setError(null);
-  }, [kind]);
 
   const kindMeta = RELEASE_KINDS.find((item) => item.id === kind)!;
   const artifactRequired = kind !== "docker";
@@ -294,7 +287,12 @@ export function CreateReleaseDialog({
               id="release-kind"
               className={SELECT_CLASS}
               value={kind}
-              onChange={(event) => setKind(event.target.value as ReleaseKind)}
+              onChange={(event) => {
+                // Artifacts are filtered by kind, so a choice from another kind no longer fits.
+                setKind(event.target.value as ReleaseKind);
+                setArtifactId("");
+                setError(null);
+              }}
             >
               {RELEASE_KINDS.map((item) => (
                 <option key={item.id} value={item.id}>

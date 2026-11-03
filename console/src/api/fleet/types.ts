@@ -50,6 +50,10 @@ export type Release = {
   version: string;
   kind: ReleaseKind;
   artifact_id: string | null;
+  /** The artifact this release installs (null for image-only docker releases). */
+  artifact?: ReleaseArtifactBrief | null;
+  /** Deploys of this release; it cannot be deleted while above zero. */
+  deployment_count?: number;
   description: string | null;
   spec: Record<string, unknown>;
   created_by_user_id: string | null;
@@ -57,7 +61,16 @@ export type Release = {
   updated_at: string;
 };
 
+export type ReleaseArtifactBrief = {
+  id: string;
+  name: string;
+  version: string;
+  type: ArtifactType;
+  file_name: string;
+};
+
 export type ReleaseListParams = {
+  artifact_id?: string;
   kind?: ReleaseKind;
   version?: string;
   search?: string;
@@ -167,6 +180,13 @@ export type Deployment = {
   created_at: string;
   updated_at: string;
   devices?: DeploymentDevice[] | null;
+};
+
+export type RollbackResponse = {
+  /** One Deploy per previous release; the largest group comes first. */
+  deployments: Deployment[];
+  /** Devices left as is because this Deploy was their first install. */
+  skipped: { device_id: string; device_name: string; reason: string }[];
 };
 
 export type DeploymentListParams = {
@@ -329,6 +349,8 @@ export type Artifact = {
   created_by_user_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Releases that install this artifact; it cannot be deleted while above zero. */
+  release_count?: number;
 };
 
 export type ArtifactListParams = {

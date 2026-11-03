@@ -172,7 +172,9 @@ def test_batched_rollout_then_retry_and_rollback(
         headers=headers,
     )
     assert rolled.status_code == 201, rolled.text
-    body = rolled.json()
+    assert len(rolled.json()["deployments"]) == 1
+    assert rolled.json()["skipped"] == []
+    body = rolled.json()["deployments"][0]
     assert body["release_id"] == release["id"]
     assert body["rollback_of_deployment_id"] == finished["id"]
 
@@ -324,7 +326,7 @@ def test_rollback_of_batched_deploy_only_targets_activated_devices(
         f"/api/v1/organizations/{org.id}/deployments/{second['id']}/rollback", headers=headers
     )
     assert rolled.status_code == 201, rolled.text
-    body = rolled.json()
+    body = rolled.json()["deployments"][0]
     assert body["release_id"] == release["id"]
     assert set(body["target"]["device_ids"]) == activated
     assert {row["device_id"] for row in body["devices"]} == activated

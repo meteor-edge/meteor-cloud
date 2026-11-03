@@ -19,7 +19,7 @@ Reading requires `artifact.read`. Creating and updating require `artifact.create
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `GET` | `/api/v1/organizations/{org}/releases` | Filters: `kind`, `version`, `search`, `page`, `page_size` |
+| `GET` | `/api/v1/organizations/{org}/releases` | Filters: `kind`, `version`, `search`, `artifact_id`, `page`, `page_size`. Each item includes `artifact` (`id`, `name`, `version`, `type`, `file_name`) or `null` |
 | `POST` | `/api/v1/organizations/{org}/releases` | JSON: `name`, `version`, `kind`, optional `artifact_id`, `description`, `spec` |
 | `GET` | `/api/v1/organizations/{org}/releases/{id}` | |
 | `PATCH` | `/api/v1/organizations/{org}/releases/{id}` | `description` and/or `spec` |
@@ -46,6 +46,17 @@ choosing a **deployment type**:
 
 Then fill the matching artifact and install fields. The same flow can grow new
 kinds later (for example AI models) without a separate wizard.
+
+Releases and artifacts link both ways in the console:
+
+- The **Releases** list has an **Artifact** column that opens that artifact
+  (image-only docker releases show the image instead).
+- The **Artifacts** list shows **Used by** (`release_count` in the API) linking
+  to the releases filtered by that artifact, and a **Create release** action for
+  systemd, docker and compose artifacts that opens the create dialog with the
+  kind and artifact preselected.
+- An artifact used by a release cannot be deleted (`409 artifact_in_use`); the
+  Delete button is disabled until those releases are deleted.
 
 ## Apply notes
 

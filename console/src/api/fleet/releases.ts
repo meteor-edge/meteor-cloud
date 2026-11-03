@@ -23,6 +23,16 @@ export function listReleases(
   );
 }
 
+export function getRelease(
+  token: string,
+  organizationId: string,
+  releaseId: string,
+): Promise<Release> {
+  return apiRequest<Release>(`/api/v1/organizations/${organizationId}/releases/${releaseId}`, {
+    token,
+  });
+}
+
 export function createRelease(
   token: string,
   organizationId: string,

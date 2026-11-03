@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { listDeployments } from "@/api/fleet";
+import { getRelease, listDeployments } from "@/api/fleet";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
 import { DeployWizard } from "@/components/deployments/DeployWizard";
+import { listRefetchInterval } from "@/components/deployments/liveStatus";
+import { releasePath } from "@/components/releases/releaseArtifacts";
 import { Button } from "@/components/ui/button";
 import { canManageDeployments } from "@/lib/permissions";
 
@@ -27,7 +29,10 @@ export function DeploymentsPage() {
   const [page, setPage] = useState(1);
   const [showWizard, setShowWizard] = useState(searchParams.get("deploy") === "1");
 
+  // `?release_id=` lists one release's Deploys (from the Releases page); the wizard also
+  // preselects it when opened with `deploy=1`.
   const initialReleaseId = searchParams.get("release_id");
+  const releaseFilter = initialReleaseId ?? "";
   const initialDeviceId = searchParams.get("device_id");
 
   const orgQuery = useQuery({
@@ -36,11 +41,23 @@ export function DeploymentsPage() {
     enabled: Boolean(token && organizationId),
   });
 
+  const filterReleaseQuery = useQuery({
+    queryKey: ["release", organizationId, releaseFilter, token],
+    queryFn: () => getRelease(token!, organizationId, releaseFilter),
+    enabled: Boolean(token && organizationId && releaseFilter),
+  });
+
   const deploymentsQuery = useQuery({
-    queryKey: ["deployments", organizationId, page, token],
+    queryKey: ["deployments", organizationId, page, releaseFilter, token],
     queryFn: () =>
-      listDeployments(token!, organizationId, { page, page_size: PAGE_SIZE }),
+      listDeployments(token!, organizationId, {
+        page,
+        page_size: PAGE_SIZE,
+        release_id: releaseFilter || undefined,
+      }),
     enabled: Boolean(token && organizationId),
+    // Same cadence as the detail page while a Deploy on this page is open; idle otherwise.
+    refetchInterval: (query) => listRefetchInterval(query.state.data?.items),
   });
 
   const canManage = canManageDeployments(orgQuery.data?.current_user_role);
@@ -50,6 +67,13 @@ export function DeploymentsPage() {
 
   function openWizard() {
     setShowWizard(true);
+  }
+
+  function clearReleaseFilter() {
+    setPage(1);
+    const next = new URLSearchParams(searchParams);
+    next.delete("release_id");
+    setSearchParams(next, { replace: true });
   }
 
   function closeWizard() {
@@ -78,6 +102,22 @@ export function DeploymentsPage() {
         )}
       </div>
 
+      {releaseFilter && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+          <span>
+            Deploys of release{" "}
+            <strong>
+              {filterReleaseQuery.data
+                ? `${filterReleaseQuery.data.name} ${filterReleaseQuery.data.version}`
+                : "…"}
+            </strong>
+          </span>
+          <Button type="button" variant="outline" size="sm" onClick={clearReleaseFilter}>
+            Show all Deploys
+          </Button>
+        </div>
+      )}
+
       {deploymentsQuery.isError && (
         <p className="text-sm text-destructive">Could not load deployments.</p>
       )}
@@ -86,7 +126,8 @@ export function DeploymentsPage() {
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="border-b border-border bg-muted/40 text-muted-foreground">
             <tr>
-              <th className="px-4 py-3 font-medium">Name / Release</th>
+              <th className="px-4 py-3 font-medium">Deploy</th>
+              <th className="px-4 py-3 font-medium">Release</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Progress</th>
               <th className="px-4 py-3 font-medium">Created</th>
@@ -107,8 +148,17 @@ export function DeploymentsPage() {
                     >
                       {title}
                     </Link>
-                    {deployment.name && (
-                      <p className="text-xs text-muted-foreground">{releaseLabel}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    {deployment.release ? (
+                      <Link
+                        to={releasePath(organizationId, deployment.release)}
+                        className="text-link hover:underline"
+                      >
+                        {releaseLabel}
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">{releaseLabel}</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -131,8 +181,8 @@ export function DeploymentsPage() {
             })}
             {!deploymentsQuery.isLoading && items.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
-                  No deployments yet.
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                  {releaseFilter ? "This release has not been deployed." : "No deployments yet."}
                   {canManage ? " Click Deploy to send a release to devices." : ""}
                 </td>
               </tr>

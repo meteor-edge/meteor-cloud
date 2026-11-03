@@ -40,7 +40,8 @@ export function ArtifactsPage() {
   const type = parseType(searchParams.get("type"));
   const [deviceTypeId, setDeviceTypeId] = useState("");
   const [version, setVersion] = useState("");
-  const [search, setSearch] = useState("");
+  // `?search=` lets a release's artifact link land on that artifact.
+  const [search, setSearch] = useState(searchParams.get("search") ?? "");
   const [page, setPage] = useState(1);
   const [showUpload, setShowUpload] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +147,7 @@ export function ArtifactsPage() {
         onDelete={onDelete}
         showType={!type}
         deviceTypeNames={deviceTypeNames}
+        organizationId={organizationId}
         emptyMessage={artifactsQuery.isLoading ? "Loading artifacts…" : "No artifacts found."}
       />
 

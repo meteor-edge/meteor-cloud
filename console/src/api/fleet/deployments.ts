@@ -4,6 +4,7 @@ import type {
   DeploymentCreatePayload,
   DeploymentListParams,
   Page,
+  RollbackResponse,
 } from "@/api/fleet/types";
 
 function buildQuery(params: DeploymentListParams): string {
@@ -99,8 +100,8 @@ export function rollbackDeployment(
   token: string,
   organizationId: string,
   deploymentId: string,
-): Promise<Deployment> {
-  return apiRequest<Deployment>(
+): Promise<RollbackResponse> {
+  return apiRequest<RollbackResponse>(
     `/api/v1/organizations/${organizationId}/deployments/${deploymentId}/rollback`,
     { method: "POST", token },
   );

@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.deployments.dependencies import DeploymentSvc
-from app.deployments.schemas import DeploymentCreate, DeploymentResponse
+from app.deployments.schemas import DeploymentCreate, DeploymentResponse, RollbackResponse
 from app.devices.schemas import Page
 from app.identity.dependencies import CurrentUser
 
@@ -122,13 +122,13 @@ def retry_failed_deployment(
     )
 
 
-@router.post("/{deployment_id}/rollback", response_model=DeploymentResponse, status_code=201)
+@router.post("/{deployment_id}/rollback", response_model=RollbackResponse, status_code=201)
 def rollback_deployment(
     organization_id: uuid.UUID,
     deployment_id: uuid.UUID,
     current_user: CurrentUser,
     service: DeploymentSvc,
-) -> DeploymentResponse:
+) -> RollbackResponse:
     return service.rollback_deployment(
         actor=current_user,
         organization_id=organization_id,

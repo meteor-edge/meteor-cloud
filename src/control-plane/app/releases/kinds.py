@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -143,3 +144,65 @@ def workload_key_from_spec(kind: ReleaseKind, spec: dict[str, Any]) -> str:
     if kind == ReleaseKind.DOCKER:
         return str(spec["container_name"])
     return str(spec["project_name"])
+
+
+@dataclass(frozen=True)
+class HostPortBinding:
+    """A port a docker release binds on the device itself (the left side of ``host:container``)."""
+
+    port: int
+    host_ip: str | None
+    protocol: str
+
+    @property
+    def loopback_only(self) -> bool:
+        """Bound to localhost: other workloads are unaffected, but WireGuard cannot reach it."""
+        return self.host_ip in {"127.0.0.1", "::1", "localhost"}
+
+
+_MAX_RANGE = 1024
+
+
+def _port_range(text: str) -> list[int]:
+    start, _, end = text.partition("-")
+    first = int(start)
+    last = int(end) if end else first
+    if not (1 <= first <= last <= 65535) or last - first >= _MAX_RANGE:
+        return []
+    return list(range(first, last + 1))
+
+
+def docker_host_ports(spec: dict[str, Any]) -> list[HostPortBinding]:
+    """Host ports a docker release spec publishes, from Docker's ``ports`` short syntax.
+
+    ``"8080:80"``, ``"127.0.0.1:8080:80"``, ``"[::1]:8080:80"``, ``"8000-8001:8000-8001"`` and
+    ``"8080:80/udp"`` bind host ports; ``"80"`` (container only) gets a random host port and
+    cannot conflict, so it is left out. Unparseable entries are skipped.
+    """
+    bindings: list[HostPortBinding] = []
+    for raw in spec.get("ports") or []:
+        text = str(raw).strip()
+        mapping, _, protocol = text.partition("/")
+        protocol = (protocol or "tcp").lower()
+        host_ip: str | None = None
+        if mapping.startswith("["):
+            closing = mapping.find("]")
+            if closing == -1:
+                continue
+            host_ip = mapping[1:closing]
+            mapping = mapping[closing + 1 :].lstrip(":")
+            parts = mapping.split(":")
+        else:
+            parts = mapping.split(":")
+            if len(parts) == 3:
+                host_ip = parts.pop(0) or None
+        if len(parts) != 2 or not parts[0]:
+            continue
+        try:
+            ports = _port_range(parts[0])
+        except ValueError:
+            continue
+        if host_ip in {"0.0.0.0", "::"}:
+            host_ip = None
+        bindings.extend(HostPortBinding(port=port, host_ip=host_ip, protocol=protocol) for port in ports)
+    return bindings

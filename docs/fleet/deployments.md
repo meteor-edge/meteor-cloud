@@ -37,7 +37,7 @@ Device-group scoped operators can only target devices in their groups.
 | `POST` | `/api/v1/organizations/{org}/deployments/{id}/pause` | Stop activating new devices (batched/phased, in-progress only; `409` otherwise) |
 | `POST` | `/api/v1/organizations/{org}/deployments/{id}/resume` | Resume a paused Deploy and tick it at once (`409` unless paused) |
 | `POST` | `/api/v1/organizations/{org}/deployments/{id}/retry-failed` | Re-queue failed devices (`deployment.create`) |
-| `POST` | `/api/v1/organizations/{org}/deployments/{id}/rollback` | New Deploy of the previous release (`deployment.rollback`) |
+| `POST` | `/api/v1/organizations/{org}/deployments/{id}/rollback` | Returns `{ deployments, skipped }`: one new Deploy per previous release (`deployment.rollback`) |
 
 ### Create body
 
@@ -188,6 +188,17 @@ timed out (or failed) ends as **failed**.
   that were activated (received the release). Queued devices are left alone.
   Once a Deploy is rolled back, **Resume** and **Retry failed** on it return
   `409 deployment_rolled_back`, so they cannot write the release again.
+- Rollback is per **workload** (systemd `unit_name`, container `container_name`,
+  Compose `project_name`): rolling back a Compose Deploy only touches that
+  Compose app, never a systemd unit or another container on the same device.
+- Each device goes back to **its own** previous release. Devices that had
+  different previous releases get one rollback Deploy per release (largest
+  group first); devices for which this Deploy was the first install are left
+  as is and listed in `skipped`. If no device has a previous release the call
+  returns `422 no_previous_release` (there is no uninstall).
+- A Deploy cannot replace a workload of another kind under the same name (a
+  container `web` and a Compose project `web`): `409 workload_kind_mismatch`.
+  Give the release a different unit, container or project name.
 
 ### Compared with Balena and Mender
 
@@ -224,10 +235,18 @@ Planned OS A/B path (Mender-friendly Pi images, kind-based routing, BYO Mender):
 Cancel, and a Deploy wizard (release → devices/groups → review). The review
 step picks **Immediate**, **Batched** or **Phased** (presets
 `Canary 1, then all` and `1 / 10% / 100%`, with an Advanced section for the
-failure threshold, max concurrent and pending timeout). **Advanced YAML**
+failure threshold, max concurrent and pending timeout). The wizard defaults
+are batch size `5` and max concurrent `50` (only binds when a phase holds
+more than 50 devices). **Advanced YAML**
 starts from the wizard's choices; once you edit the YAML it is kept until you
 press **Fill from wizard**. You can also start a Deploy from a release
-row or from an empty device Software panel.
+row or from a device's Software tab (the device is preselected).
+
+While any Deploy on the current page is in progress or paused, the list
+and the detail page poll every 5 seconds (progress arrives with device
+heartbeats, so there is no push channel). Each device row on the detail
+page has a **Logs** link that opens that device's logs
+(`/devices/{id}?tab=logs`); only one log session opens, and only on click.
 
 ## After you deploy
 

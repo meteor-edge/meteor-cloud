@@ -19,12 +19,19 @@ vi.mock("@/api/organizations", () => ({
   })),
 }));
 
+vi.mock("@/api/access", () => ({
+  getMyAccess: vi.fn(async () => ({
+    organizations: [{ organization_id: "org-1", permissions: ["device.logs"] }],
+  })),
+}));
+
 vi.mock("@/api/fleet", async () => {
   const actual = await vi.importActual<typeof import("@/api/fleet")>("@/api/fleet");
-  return { ...actual, getDeployment: vi.fn(), resumeDeployment: vi.fn() };
+  return { ...actual, getDeployment: vi.fn(), resumeDeployment: vi.fn(), rollbackDeployment: vi.fn() };
 });
 
-import { getDeployment, resumeDeployment } from "@/api/fleet";
+import { getDeployment, resumeDeployment, rollbackDeployment } from "@/api/fleet";
+import { getOrganization } from "@/api/organizations";
 import type { DeploymentRollout, DeploymentStatus } from "@/api/fleet/types";
 
 function device(overrides: Partial<DeploymentDevice>): DeploymentDevice {
@@ -274,5 +281,47 @@ describe("DeploymentDetailPage", () => {
     const timedOut = screen.getByText("edge-04").closest("tr")!;
     expect(within(timedOut).getByText("Timed out")).toBeInTheDocument();
     expect(screen.getByText(/1 timed out/)).toBeInTheDocument();
+  });
+
+  it("links each device row to that device's logs", async () => {
+    vi.mocked(getDeployment).mockResolvedValue(deployment([device({ status: "failed" })], "failed"));
+    renderPage();
+
+    const link = await screen.findByRole("link", { name: "Logs for edge-01" });
+    expect(link).toHaveAttribute("href", "/organizations/org-1/devices/dev-1?tab=logs");
+  });
+
+  it("rolls back per previous release and says which devices were left alone", async () => {
+    vi.mocked(getOrganization).mockResolvedValue({
+      id: "org-1",
+      name: "Acme",
+      current_user_role: "owner",
+    } as never);
+    vi.mocked(getDeployment).mockImplementation(async (_token, _org, id) => ({
+      ...deployment([device({ status: "failed" })], "failed"),
+      id,
+    }));
+    vi.mocked(rollbackDeployment).mockResolvedValue({
+      deployments: [
+        { ...deployment([device({})]), id: "dep-2" },
+        {
+          ...deployment([device({})]),
+          id: "dep-3",
+          release: { id: "rel-0", name: "camera-agent", version: "1.0.0", kind: "systemd" },
+        },
+      ],
+      skipped: [{ device_id: "dev-9", device_name: "edge-new", reason: "first install" }],
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Rollback" }));
+    expect(await screen.findByText(/rollback started/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "camera-agent 1.0.0" })).toHaveAttribute(
+      "href",
+      "/organizations/org-1/deployments/dep-3",
+    );
+    expect(screen.getByText(/left as is.*edge-new/i)).toBeInTheDocument();
   });
 });

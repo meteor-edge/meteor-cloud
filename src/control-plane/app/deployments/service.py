@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
@@ -39,6 +38,8 @@ from app.deployments.schemas import (
     DeployTarget,
     EndpointSpec,
     ReleaseBrief,
+    RollbackResponse,
+    RollbackSkippedDevice,
 )
 from app.deployments.software_models import SoftwareHealth, SoftwareSyncStatus
 from app.deployments.software_repository import DeviceSoftwareRepository
@@ -47,12 +48,24 @@ from app.devices.models import Device
 from app.devices.repository import DeviceRepository
 from app.devices.schemas import Page
 from app.endpoints.models import ApplicationEndpoint
+from app.endpoints.repository import EndpointRepository
 from app.identity.models import User
 from app.ports.deployment import DeploymentProvider
-from app.releases.kinds import ReleaseKind, workload_key_from_spec
+from app.releases.kinds import ReleaseKind, docker_host_ports, workload_key_from_spec
 from app.releases.models import Release
 from app.releases.repository import ReleaseRepository
 from app.tenancy.models import OrganizationMembership
+
+_KIND_LABELS = {
+    ReleaseKind.SYSTEMD.value: "systemd service",
+    ReleaseKind.DOCKER.value: "Single container",
+    ReleaseKind.DOCKER_COMPOSE.value: "Compose application",
+}
+
+
+def _kind_value(kind: Any) -> str:
+    return kind.value if hasattr(kind, "value") else str(kind)
+
 
 _CANCELLABLE_STATUSES = frozenset({DeploymentStatus.IN_PROGRESS.value, DeploymentStatus.PAUSED.value})
 
@@ -338,6 +351,19 @@ class DeploymentService:
         workload_key = workload_key_from_spec(release.kind, release.spec)
         kind_value = release.kind.value if hasattr(release.kind, "value") else str(release.kind)
         cap_name = _KIND_CAPABILITY.get(kind_value, kind_value)
+        if payload.endpoint is not None and kind_value == ReleaseKind.SYSTEMD.value:
+            # A systemd release declares no port to check or route to; publish containers only.
+            raise ValidationAppError(
+                "endpoint_requires_container",
+                "Only Single container and Compose releases can be published on the internet.",
+            )
+        self._reject_kind_change(release=release, workload_key=workload_key, devices=devices)
+        self._reject_port_conflicts(
+            release=release,
+            workload_key=workload_key,
+            devices=devices,
+            endpoint_port=payload.endpoint.port if payload.endpoint is not None else None,
+        )
 
         # MeteorCloud always records Deploy history; the provider only executes it.
         deployment = Deployment(
@@ -468,16 +494,85 @@ class DeploymentService:
         self.session.commit()
         return self._to_response(deployment, include_devices=True)
 
-    def _published_container_ports(self, spec: dict[str, Any]) -> list[int]:
-        ports: list[int] = []
-        for item in spec.get("ports") or []:
-            right = str(item).rsplit(":", 1)[-1]
-            number = right.split("/", 1)[0]
-            try:
-                ports.append(int(number))
-            except ValueError:
+    def _reject_kind_change(self, *, release: Release, workload_key: str, devices: list[Device]) -> None:
+        """Refuse replacing a workload with a release of another kind under the same name.
+
+        A container named ``web`` and a Compose project ``web`` share the workload key, so the
+        new Deploy would silently take over the other app (and rollback would cross kinds).
+        """
+        kind_value = _kind_value(release.kind)
+        clashes: list[str] = []
+        for device in devices:
+            existing = self.software_rows.get_by_workload(device_id=device.id, workload_key=workload_key)
+            if existing is not None and _kind_value(existing.kind) != kind_value:
+                existing_kind = _kind_value(existing.kind)
+                clashes.append(f"{device.name} ({_KIND_LABELS.get(existing_kind, existing_kind)})")
+        if clashes:
+            shown = ", ".join(clashes[:5]) + (f" and {len(clashes) - 5} more" if len(clashes) > 5 else "")
+            raise ConflictError(
+                "workload_kind_mismatch",
+                f"'{workload_key}' already runs as a different kind on {shown}. A "
+                f"{_KIND_LABELS.get(kind_value, kind_value)} release cannot replace it; give the "
+                "release a different name (unit, container or project name).",
+            )
+
+    def _ports_used_by_other_workloads(
+        self, *, device_id: uuid.UUID, workload_key: str
+    ) -> dict[tuple[int, str], str]:
+        """Device ports already claimed by other workloads: docker bindings and public addresses.
+
+        Compose and systemd apps only declare ports through an endpoint, so a port they bind
+        without one is invisible here; the agent then reports the bind error on install.
+        """
+        used: dict[tuple[int, str], str] = {}
+        for row in self.software_rows.list_for_device(device_id=device_id):
+            if row.workload_key == workload_key:
+                continue  # the same workload is replaced, not run alongside
+            kind = row.kind.value if hasattr(row.kind, "value") else str(row.kind)
+            if kind != ReleaseKind.DOCKER.value:
                 continue
-        return ports
+            for binding in docker_host_ports(dict(row.desired_spec or {})):
+                used.setdefault((binding.port, binding.protocol), row.workload_key)
+        for endpoint in EndpointRepository(self.session).list_for_device(device_id=device_id):
+            if not endpoint.enabled or (workload_key and endpoint.workload_key == workload_key):
+                continue
+            owner = endpoint.workload_key or "a manually published app"
+            used.setdefault((endpoint.port, "tcp"), f"{owner} (public address {endpoint.hostname})")
+        return used
+
+    def _reject_port_conflicts(
+        self,
+        *,
+        release: Release,
+        workload_key: str,
+        devices: list[Device],
+        endpoint_port: int | None,
+    ) -> None:
+        """Refuse a Deploy that would bind a device port another workload already uses.
+
+        Two workloads on one port means the second one fails to start (docker) or the public
+        address routes to the wrong app, so it is caught here instead of on the device.
+        """
+        kind_value = release.kind.value if hasattr(release.kind, "value") else str(release.kind)
+        wanted: set[tuple[int, str]] = set()
+        if kind_value == ReleaseKind.DOCKER.value:
+            wanted |= {(b.port, b.protocol) for b in docker_host_ports(dict(release.spec or {}))}
+        if endpoint_port is not None:
+            wanted.add((endpoint_port, "tcp"))
+        if not wanted:
+            return
+        problems: list[str] = []
+        for device in devices:
+            used = self._ports_used_by_other_workloads(device_id=device.id, workload_key=workload_key)
+            for port, protocol in sorted(wanted & used.keys()):
+                problems.append(f"port {port}/{protocol} on {device.name} is used by {used[(port, protocol)]}")
+        if problems:
+            shown = "; ".join(problems[:5]) + (f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
+            raise ConflictError(
+                "device_port_in_use",
+                f"{release.name} {release.version} would clash with software already on the device: "
+                f"{shown}. Use a different port or replace that workload first.",
+            )
 
     def _attach_endpoint(
         self,
@@ -492,16 +587,47 @@ class DeploymentService:
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "endpoint.create")
         kind_value = release.kind.value if hasattr(release.kind, "value") else str(release.kind)
-        published = self._published_container_ports(dict(release.spec or {}))
-        if kind_value == ReleaseKind.DOCKER.value and published and spec.port not in published:
-            raise ValidationAppError(
-                "endpoint_port_mismatch",
-                "Endpoint port must match a published container port on this docker release.",
-            )
+        if kind_value == ReleaseKind.DOCKER.value:
+            # The tunnel connects to <device WireGuard IP>:<port>, so the port is the host side.
+            bindings = [b for b in docker_host_ports(dict(release.spec or {})) if b.protocol == "tcp"]
+            match = next((b for b in bindings if b.port == spec.port), None)
+            if bindings and match is None:
+                listed = ", ".join(str(b.port) for b in bindings)
+                raise ValidationAppError(
+                    "endpoint_port_mismatch",
+                    f"Endpoint port must be a host port this docker release publishes ({listed}).",
+                )
+            if match is not None and match.loopback_only:
+                raise ValidationAppError(
+                    "endpoint_port_loopback",
+                    f"Port {spec.port} is bound to {match.host_ip} only, so the public address "
+                    "cannot reach it. Publish it on all interfaces (e.g. \"8080:80\").",
+                )
         from app.endpoints.schemas import EndpointCreate
         from app.endpoints.service import EndpointService
 
         endpoints = EndpointService(self.session)
+        workload_key = workload_key_from_spec(release.kind, release.spec)
+        # Redeploying an app that already has a public address keeps that address.
+        current = next(
+            (
+                row
+                for row in EndpointRepository(self.session).list_for_device(device_id=device_id)
+                if row.organization_id == organization_id and row.workload_key == workload_key
+            ),
+            None,
+        )
+        if current is not None:
+            endpoints.reattach_endpoint(
+                actor=actor,
+                organization_id=organization_id,
+                row=current,
+                deployment_id=deployment_id,
+                port=spec.port,
+                protocol=spec.protocol,
+                hostname=spec.hostname,
+            )
+            return
         hostname = spec.hostname or endpoints.suggest_hostname(
             actor=actor, organization_id=organization_id, device_id=device_id, app=release.name
         ).hostname
@@ -514,7 +640,7 @@ class DeploymentService:
                 port=spec.port,
                 protocol=spec.protocol,
                 deployment_id=deployment_id,
-                workload_key=workload_key_from_spec(release.kind, release.spec),
+                workload_key=workload_key,
             ),
             commit=False,
         )
@@ -734,7 +860,14 @@ class DeploymentService:
         actor: User,
         organization_id: uuid.UUID,
         deployment_id: uuid.UUID,
-    ) -> DeploymentResponse:
+    ) -> RollbackResponse:
+        """Return every device that got this Deploy to the release it had before it.
+
+        Devices are grouped by their own previous release (one rollback Deploy per group), so a
+        fleet with mixed history never lands on a version a device did not have. Devices with no
+        previous release (this Deploy was a first install) are skipped: there is nothing to go
+        back to, and installing another device's previous release would be wrong.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "deployment.rollback")
         self._provider_or_404()
@@ -755,31 +888,64 @@ class DeploymentService:
             for row in self.deployments.list_devices(deployment_id=original.id)
             if row.activated_at is not None and row.status != DeploymentDeviceStatus.SKIPPED.value
         ]
-        previous_ids = [
-            row.previous_desired_release_id
-            for row in activated_rows
-            if row.previous_desired_release_id is not None
-        ]
-        if not previous_ids:
+        groups: dict[uuid.UUID, list[uuid.UUID]] = {}
+        no_previous: list[uuid.UUID] = []
+        for row in activated_rows:
+            if row.previous_desired_release_id is None:
+                no_previous.append(row.device_id)
+            else:
+                groups.setdefault(row.previous_desired_release_id, []).append(row.device_id)
+        if not groups:
             raise ValidationAppError(
                 "no_previous_release",
                 "No previous desired release is recorded for this deployment.",
             )
-        previous_release_id = Counter(previous_ids).most_common(1)[0][0]
-        previous = self._require_release(organization_id, previous_release_id)
 
-        payload = DeploymentCreate(
-            release_id=previous.id,
-            name=f"Rollback of {original.name or str(original.id)[:8]}",
-            target=DeployTarget(device_ids=[row.device_id for row in activated_rows]),
-            rollout=DeployRollout(strategy="immediate"),
-        )
-        return self.create_deployment(
-            actor=actor,
-            organization_id=organization_id,
-            payload=payload,
-            rollback_of_deployment_id=original.id,
-        )
+        # Validate every group before creating any Deploy, so a refusal leaves nothing half done.
+        releases = {release_id: self._require_release(organization_id, release_id) for release_id in groups}
+        all_ids = [device_id for ids in groups.values() for device_id in ids] + no_previous
+        devices_by_id = {
+            device.id: device
+            for device in self.session.scalars(
+                select(Device).where(Device.organization_id == organization_id, Device.id.in_(all_ids))
+            ).all()
+        }
+        for release_id, device_ids in groups.items():
+            release = releases[release_id]
+            targets = [devices_by_id[device_id] for device_id in device_ids if device_id in devices_by_id]
+            key = workload_key_from_spec(release.kind, release.spec)
+            self._reject_kind_change(release=release, workload_key=key, devices=targets)
+            self._reject_port_conflicts(release=release, workload_key=key, devices=targets, endpoint_port=None)
+
+        base_name = f"Rollback of {original.name or str(original.id)[:8]}"
+        # Largest group first: the console opens that one when there are several.
+        ordered = sorted(groups.items(), key=lambda item: (-len(item[1]), str(item[0])))
+        created: list[DeploymentResponse] = []
+        for release_id, device_ids in ordered:
+            release = releases[release_id]
+            name = base_name if len(ordered) == 1 else f"{base_name} → {release.name} {release.version}"
+            created.append(
+                self.create_deployment(
+                    actor=actor,
+                    organization_id=organization_id,
+                    payload=DeploymentCreate(
+                        release_id=release.id,
+                        name=name[:255],
+                        target=DeployTarget(device_ids=device_ids),
+                        rollout=DeployRollout(strategy="immediate"),
+                    ),
+                    rollback_of_deployment_id=original.id,
+                )
+            )
+        skipped = [
+            RollbackSkippedDevice(
+                device_id=device_id,
+                device_name=devices_by_id[device_id].name if device_id in devices_by_id else str(device_id),
+                reason="No previous release: this Deploy was its first install, so it was left as is.",
+            )
+            for device_id in no_previous
+        ]
+        return RollbackResponse(deployments=created, skipped=skipped)
 
     def _lock_deployment(self, deployment_id: uuid.UUID) -> Deployment | None:
         """Re-load the row with SELECT ... FOR UPDATE so concurrent ticks serialize."""

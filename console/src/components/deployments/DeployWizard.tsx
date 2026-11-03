@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   createDeployment,
   listDeviceGroups,
+  listEndpoints,
   listDevices,
   listReleases,
   type DeploymentCreatePayload,
@@ -14,6 +15,11 @@ import { ApiError } from "@/api/http";
 import { AppAddressPicker } from "@/components/fleet/AppAddressPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  checkEndpointPort,
+  existingEndpointFor,
+  suggestedEndpointPort,
+} from "@/components/deployments/ports";
 import { parseYamlObject, toYaml } from "@/lib/yaml";
 
 const KIND_LABELS: Record<string, string> = {
@@ -31,22 +37,32 @@ const KIND_CAPABILITY: Record<string, string> = {
 type Strategy = "immediate" | "batched" | "phased";
 
 const STRATEGIES: { value: Strategy; label: string; hint: string }[] = [
-  { value: "immediate", label: "Immediate", hint: "Every target at once." },
-  { value: "batched", label: "Batched", hint: "A fixed number of devices at a time." },
+  {
+    value: "immediate",
+    label: "Immediate",
+    hint: "All selected devices get the release at once. Fastest, but a bad release hits every device together.",
+  },
+  {
+    value: "batched",
+    label: "Batched",
+    hint: "Opens a fixed number of devices at a time; the next batch starts when the current one finishes. Use for paced waves without a failure budget.",
+  },
   {
     value: "phased",
     label: "Phased",
-    hint: "Canary first, then larger phases with a soak time. Pauses when too many fail.",
+    hint: "Canary first, then larger shares after a soak delay. Pauses automatically if too many fail. Prefer for production fleets.",
   },
 ];
 
-const PHASED_PRESETS: Record<string, { label: string; phases: RolloutPhase[] }> = {
+const PHASED_PRESETS: Record<string, { label: string; hint: string; phases: RolloutPhase[] }> = {
   canary: {
     label: "Canary 1, then all",
+    hint: "One device installs first. If it succeeds, every other device follows after a 1 hour soak. Good for small fleets (up to ~10 devices).",
     phases: [{ count: 1 }, { percent: 100, delay_seconds: 3600 }],
   },
   tiered: {
     label: "1 / 10% / 100%",
+    hint: "One canary device, then 10% of the targets after a 1 hour soak, then everyone after another 24 hours. Each step only starts if the failure % stays under the limit. Good for 10+ devices.",
     phases: [
       { count: 1 },
       { percent: 10, delay_seconds: 3600 },
@@ -54,6 +70,10 @@ const PHASED_PRESETS: Record<string, { label: string; phases: RolloutPhase[] }> 
     ],
   },
 };
+
+const DEFAULT_BATCH_SIZE = "5";
+// Only binds when a phase holds more devices than this; caps parallel artifact downloads.
+const DEFAULT_MAX_CONCURRENT = "50";
 
 const NUMBER_OR_NULL = (value: unknown): number | null => {
   if (value == null) {
@@ -90,10 +110,10 @@ export function DeployWizard({
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [strategy, setStrategy] = useState<Strategy>("immediate");
-  const [batchSize, setBatchSize] = useState("");
+  const [batchSize, setBatchSize] = useState(DEFAULT_BATCH_SIZE);
   const [preset, setPreset] = useState("canary");
   const [failureThreshold, setFailureThreshold] = useState("10");
-  const [maxConcurrent, setMaxConcurrent] = useState("");
+  const [maxConcurrent, setMaxConcurrent] = useState(DEFAULT_MAX_CONCURRENT);
   const [pendingTimeout, setPendingTimeout] = useState("86400");
   const [publish, setPublish] = useState(false);
   const [endpointHostname, setEndpointHostname] = useState<string | null>(null);
@@ -156,6 +176,23 @@ export function DeployWizard({
     });
   }, [selectedRelease, deviceIds, devices]);
 
+  const singleDevice = deviceIds.length === 1 && groupIds.length === 0;
+  // A systemd release declares no port to route to; only containers can be published.
+  const publishableKind = selectedRelease?.kind !== "systemd";
+  const canPublish = singleDevice && publishableKind;
+  const endpointsQuery = useQuery({
+    queryKey: ["endpoints", organizationId, deviceIds[0], token],
+    queryFn: () => listEndpoints(token, organizationId, deviceIds[0]),
+    enabled: publish && canPublish,
+  });
+  const deviceEndpoints = endpointsQuery.data ?? [];
+  // Redeploying an app that is already public keeps its address (the API reuses it too).
+  const currentEndpoint = existingEndpointFor(selectedRelease, deviceEndpoints);
+  const effectiveHostname = currentEndpoint?.hostname ?? endpointHostname;
+  const portCheck = endpointPort.trim()
+    ? checkEndpointPort(selectedRelease, Number(endpointPort), deviceEndpoints)
+    : null;
+
   function toggleId(list: string[], id: string, setList: (next: string[]) => void) {
     setList(list.includes(id) ? list.filter((value) => value !== id) : [...list, id]);
   }
@@ -180,7 +217,6 @@ export function DeployWizard({
   function buildPayload(): DeploymentCreatePayload {
     const rollout = buildRollout();
     const port = endpointPort.trim() ? Number(endpointPort) : null;
-    const singleDevice = deviceIds.length === 1 && groupIds.length === 0;
     return {
       release_id: releaseId,
       name: name.trim() || null,
@@ -190,8 +226,8 @@ export function DeployWizard({
       },
       rollout,
       endpoint:
-        singleDevice && publish && endpointHostname && port
-          ? { hostname: endpointHostname, port, protocol: "http" }
+        canPublish && publish && effectiveHostname && port
+          ? { hostname: effectiveHostname, port, protocol: "http" }
           : null,
     };
   }
@@ -222,12 +258,16 @@ export function DeployWizard({
       setError("Enter a batch size.");
       return;
     }
-    if (publish && deviceIds.length === 1 && groupIds.length === 0) {
+    if (publish && canPublish) {
       if (!endpointPort.trim()) {
         setError("Enter the port the app listens on.");
         return;
       }
-      if (!endpointHostname) {
+      if (portCheck?.level === "error") {
+        setError(portCheck.message);
+        return;
+      }
+      if (!effectiveHostname) {
         setError("Choose an available public address.");
         return;
       }
@@ -491,6 +531,9 @@ export function DeployWizard({
                   <p className="text-xs text-muted-foreground">
                     {STRATEGIES.find((item) => item.value === strategy)?.hint}
                   </p>
+                  <p className="text-xs text-muted-foreground">
+                    Devices apply on their next heartbeat; progress updates as they check in.
+                  </p>
                   {strategy === "batched" && (
                     <>
                       <label className="block text-sm font-medium" htmlFor="deploy-batch">
@@ -505,6 +548,10 @@ export function DeployWizard({
                       />
                       <p className="text-xs text-muted-foreground">
                         The next batch starts when every device in the current one has finished.
+                        Default {DEFAULT_BATCH_SIZE}
+                        {singleDevice || (groupIds.length === 0 && deviceIds.length <= Number(batchSize))
+                          ? "; with this few devices it behaves like Immediate."
+                          : "."}
                       </p>
                     </>
                   )}
@@ -525,6 +572,7 @@ export function DeployWizard({
                           </option>
                         ))}
                       </select>
+                      <p className="text-xs text-muted-foreground">{PHASED_PRESETS[preset].hint}</p>
                       <details className="rounded-md border border-border p-3">
                         <summary className="cursor-pointer text-sm font-medium">Advanced</summary>
                         <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -560,6 +608,11 @@ export function DeployWizard({
                           </label>
                         </div>
                         <p className="mt-2 text-xs text-muted-foreground">
+                          Max concurrent (default {DEFAULT_MAX_CONCURRENT}) caps how many devices
+                          download and install at once; it only matters when a phase holds more
+                          devices than that. Clear it for no limit.
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
                           Offline devices stay pending and are marked timed out after the timeout;
                           they still install when they come back.
                         </p>
@@ -567,13 +620,24 @@ export function DeployWizard({
                     </>
                   )}
                 </fieldset>
-                {deviceIds.length === 1 && groupIds.length === 0 && (
+                {singleDevice && !publishableKind && (
+                  <p className="text-xs text-muted-foreground">
+                    Publishing on the internet is available for Single container and Compose
+                    releases.
+                  </p>
+                )}
+                {canPublish && (
                   <div className="space-y-2 rounded-md border border-border p-3">
                     <label className="flex items-center gap-2 text-sm font-medium">
                       <input
                         type="checkbox"
                         checked={publish}
-                        onChange={(event) => setPublish(event.target.checked)}
+                        onChange={(event) => {
+                          setPublish(event.target.checked);
+                          if (event.target.checked && !endpointPort.trim()) {
+                            setEndpointPort(suggestedEndpointPort(selectedRelease));
+                          }
+                        }}
                       />
                       Publish on the internet
                     </label>
@@ -586,14 +650,38 @@ export function DeployWizard({
                           placeholder="Port the app listens on (80, 8080, …)"
                           value={endpointPort}
                           onChange={(event) => setEndpointPort(event.target.value)}
+                          aria-label="Port the app listens on"
                         />
-                        <AppAddressPicker
-                          token={token}
-                          organizationId={organizationId}
-                          deviceId={deviceIds[0]}
-                          appName={selectedRelease?.name ?? "app"}
-                          onChange={setEndpointHostname}
-                        />
+                        <p className="text-xs text-muted-foreground">
+                          The port on the device (for docker, the host side of{" "}
+                          <code>host:container</code>). Each port can only be published once per
+                          device.
+                        </p>
+                        {portCheck && (
+                          <p
+                            className={
+                              portCheck.level === "error"
+                                ? "text-xs text-destructive"
+                                : "text-xs text-muted-foreground"
+                            }
+                          >
+                            {portCheck.message}
+                          </p>
+                        )}
+                        {currentEndpoint ? (
+                          <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                            Already published at <strong>{currentEndpoint.hostname}</strong>. This
+                            Deploy keeps that address and points it at the new release.
+                          </p>
+                        ) : (
+                          <AppAddressPicker
+                            token={token}
+                            organizationId={organizationId}
+                            deviceId={deviceIds[0]}
+                            appName={selectedRelease?.name ?? "app"}
+                            onChange={setEndpointHostname}
+                          />
+                        )}
                         <p className="text-xs text-muted-foreground">
                           The address goes live once the app is healthy on the device.
                         </p>

@@ -49,6 +49,24 @@ def _setup_release(client: TestClient, db_session: Session):
     return org, headers, token, release
 
 
+def _docker_web_release(
+    client: TestClient, org_id, headers, *, name: str = "camera-agent", ports: tuple[str, ...] = ("80:80",)
+) -> dict:
+    """An image-pull docker release; only container kinds can be published on the internet."""
+    created = client.post(
+        f"/api/v1/organizations/{org_id}/releases",
+        headers=headers,
+        json={
+            "name": name,
+            "version": "1.0.0",
+            "kind": "docker",
+            "spec": {"container_name": name, "image": "nginx:alpine", "ports": list(ports)},
+        },
+    )
+    assert created.status_code == 201, created.text
+    return created.json()
+
+
 def _register_device(client: TestClient, token: str, *, name: str, mac: str) -> dict:
     return client.post(
         "/api/v1/agent/register",
@@ -454,7 +472,8 @@ def test_deploy_detail_shows_runtime_health(client: TestClient, db_session: Sess
 
 
 def test_deploy_detail_shows_endpoint_availability(client: TestClient, db_session: Session) -> None:
-    org, headers, token, release = _setup_release(client, db_session)
+    org, headers, token, _ = _setup_release(client, db_session)
+    release = _docker_web_release(client, org.id, headers)
     reg = _register_device(client, token, name="edge-url", mac="aa:bb:cc:dd:ee:42")
     created = client.post(
         f"/api/v1/organizations/{org.id}/deployments",
@@ -661,8 +680,8 @@ def test_rollback_while_paused_only_targets_activated(client: TestClient, db_ses
 
     rolled = _action(client, org, headers, body["id"], "rollback")
     assert rolled.status_code == 201, rolled.text
-    assert rolled.json()["release_id"] == release["id"]
-    assert rolled.json()["target"]["device_ids"] == [canary["device_id"]]
+    assert rolled.json()["deployments"][0]["release_id"] == release["id"]
+    assert rolled.json()["deployments"][0]["target"]["device_ids"] == [canary["device_id"]]
     # Resuming or retrying the original would write the rolled-back release again.
     for action in ("resume", "retry-failed"):
         refused = _action(client, org, headers, body["id"], action)
