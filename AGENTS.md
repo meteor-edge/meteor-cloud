@@ -56,6 +56,18 @@ Shortcuts: pin Redis to **7.2**; EMQX **5.8.6** only unless BSL is reviewed; no 
 - Run the relevant tests (`make test`, or `make backend-test` / `data-plane-test` / `agent-test` / `console-test` / `make check-plane-imports`). Report exactly what ran and what did not.
 - Do not claim tests, deploys, or installs succeeded unless they actually ran and passed.
 
+## Cursor Cloud
+
+Cloud Agent machines already have Python 3.13 (`python` on `PATH`, venv at `/opt/meteorcloud-venv`), Node 22, and Docker (`fuse-overlayfs`). Boot starts the laptop Compose stack (`make dev`) and runs `make seed`.
+
+| Surface | URL |
+| --- | --- |
+| Console | http://localhost:5173 |
+| Control plane | http://localhost:8000 |
+| Data plane | http://localhost:8081/health |
+
+Open the console at `localhost`, not `127.0.0.1` (API CORS allows the former). Seed login: `owner@example.com` / `dev-password-123`. `make test` needs the published Postgres on `localhost:5432`.
+
 ## Further reading
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
