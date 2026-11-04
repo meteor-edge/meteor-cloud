@@ -1,11 +1,14 @@
 """systemd unit install / health / recover for the device agent.
 
-Uses ``systemctl`` via subprocess. Callers inject ``runner`` in tests.
+Uses ``systemctl`` via subprocess. Unprivileged ``meteorcli run`` goes through
+the root-owned ``meteorcli-systemd`` helper (passwordless sudo for that file
+only). Callers inject ``runner`` in tests.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -14,6 +17,11 @@ from pathlib import Path
 logger = logging.getLogger("edge_agent.runtime.systemd")
 
 DEFAULT_UNIT_DIR = Path("/etc/systemd/system")
+SYSTEMD_HELPER = "/usr/local/libexec/meteorcli-systemd"
+HELPER_HINT = (
+    "Cannot install systemd units as this user. Re-run: sudo ./installcli.sh "
+    "(installs meteorcli-systemd), or start meteorcli.service."
+)
 
 
 class SystemdError(Exception):
@@ -29,6 +37,10 @@ def systemd_available() -> bool:
     if shutil.which("systemctl") is None:
         return False
     return Path("/run/systemd/system").exists() or Path("/run/systemd").exists()
+
+
+def systemd_helper_installed() -> bool:
+    return Path(SYSTEMD_HELPER).is_file()
 
 
 def _default_runner(args: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -63,6 +75,14 @@ class SystemdAdapter:
         if "/" in name or name.startswith("."):
             raise SystemdError(f"Invalid unit_name: {name}")
 
+        if self._use_helper():
+            args = ["apply", name, str(unit_file)]
+            if not start:
+                args.append("--no-start")
+            self._run(self._helper_cmd(*args))
+            logger.info("Applied systemd unit %s (start=%s)", name, start)
+            return
+
         self.unit_dir.mkdir(parents=True, exist_ok=True)
         dest = self.unit_dir / name
         try:
@@ -83,13 +103,25 @@ class SystemdAdapter:
 
     def recover(self, *, unit_name: str) -> None:
         """Restart the unit (best-effort recovery)."""
-        self._run(["systemctl", "restart", unit_name.strip()])
+        name = unit_name.strip()
+        if self._use_helper():
+            self._run(self._helper_cmd("restart", name))
+            return
+        self._run(["systemctl", "restart", name])
+
+    def _use_helper(self) -> bool:
+        return os.geteuid() != 0 and self.unit_dir == DEFAULT_UNIT_DIR
+
+    def _helper_cmd(self, *args: str) -> list[str]:
+        if not systemd_helper_installed():
+            raise SystemdError(HELPER_HINT)
+        return ["sudo", "-n", SYSTEMD_HELPER, *args]
 
     def _run(self, args: Sequence[str]) -> None:
         try:
             result = self._runner(args, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise SystemdError(f"systemctl failed ({' '.join(args)}): {exc}") from exc
+            raise SystemdError(f"{args[0]} failed ({' '.join(args)}): {exc}") from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip() or f"exit {result.returncode}"
-            raise SystemdError(f"systemctl {' '.join(args[1:])} failed: {detail}")
+            raise SystemdError(f"{' '.join(args)} failed: {detail}")

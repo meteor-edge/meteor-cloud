@@ -17,7 +17,7 @@ from app.endpoints.validation import (
     validate_hostname,
 )
 from tests.conftest import auth_header, create_org_with_owner, create_user
-from tests.test_deployments import _register_device, _setup_release
+from tests.test_deployments import _docker_web_release, _register_device, _setup_release
 
 DOMAIN = "meteor-edge.com"
 WG_KEY = base64.b64encode(bytes(range(64, 96))).decode()
@@ -172,7 +172,8 @@ def test_custom_name_taken_across_organizations(client: TestClient, db_session: 
 
 
 def test_deploy_without_hostname_uses_suggestion(client: TestClient, db_session: Session) -> None:
-    org, headers, token, release = _setup_release(client, db_session)
+    org, headers, token, _ = _setup_release(client, db_session)
+    release = _docker_web_release(client, org.id, headers)
     device = _register_device(client, token, name="Pi Deploy", mac="aa:bb:cc:dd:10:04")
     created = client.post(
         f"/api/v1/organizations/{org.id}/deployments",

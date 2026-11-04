@@ -174,7 +174,7 @@ def test_disabled_device_or_revoked_credential_drops_peer_and_routes(client: Tes
 
     client.post(f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/disable", headers=headers)
     assert _peer_keys(client) == set()
-    assert client.get("/internal/routing/traefik", headers=ROUTING).json()["http"]["routers"] == {}
+    assert client.get("/internal/routing/traefik", headers=ROUTING).json() == {}
 
     # Re-enabling restores the same peer and route without any device action.
     client.post(f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/enable", headers=headers)
@@ -183,7 +183,7 @@ def test_disabled_device_or_revoked_credential_drops_peer_and_routes(client: Tes
 
     client.post(f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/revoke-credential", headers=headers)
     assert _peer_keys(client) == set()
-    assert client.get("/internal/routing/traefik", headers=ROUTING).json()["http"]["routers"] == {}
+    assert client.get("/internal/routing/traefik", headers=ROUTING).json() == {}
 
 
 def test_registration_retries_once_after_a_concurrent_insert(

@@ -20,7 +20,7 @@ from app.shell.service import ShellService
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
 from tests.metrics_helpers import sample
-from tests.test_deployments import _register_device, _setup_release
+from tests.test_deployments import _docker_web_release, _register_device, _setup_release
 
 WG_KEY_A = base64.b64encode(bytes(range(32))).decode()
 WG_KEY_B = base64.b64encode(bytes(range(32, 64))).decode()
@@ -319,7 +319,8 @@ def test_internal_peers_and_shell_ticket(client: TestClient, db_session: Session
 
 
 def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: Session) -> None:
-    org, headers, token, release = _setup_release(client, db_session)
+    org, headers, token, _ = _setup_release(client, db_session)
+    release = _docker_web_release(client, org.id, headers)
     reg = _register_device(client, token, name="pi-deploy", mac="aa:bb:cc:dd:00:07")
     created = client.post(
         f"/api/v1/organizations/{org.id}/deployments",

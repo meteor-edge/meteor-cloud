@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -53,6 +54,11 @@ class DockerSpec(BaseModel):
         if not cleaned:
             raise ValueError("container_name must not be blank")
         return cleaned
+
+    @field_validator("ports")
+    @classmethod
+    def _check_ports(cls, value: list[str]) -> list[str]:
+        return _reject_wide_host_ranges(value)
 
     @field_validator("image")
     @classmethod
@@ -143,3 +149,94 @@ def workload_key_from_spec(kind: ReleaseKind, spec: dict[str, Any]) -> str:
     if kind == ReleaseKind.DOCKER:
         return str(spec["container_name"])
     return str(spec["project_name"])
+
+
+@dataclass(frozen=True)
+class HostPortBinding:
+    """A port a docker release binds on the device itself (the left side of ``host:container``)."""
+
+    port: int
+    host_ip: str | None
+    protocol: str
+
+    @property
+    def loopback_only(self) -> bool:
+        """Bound to localhost: other workloads are unaffected, but WireGuard cannot reach it."""
+        return self.host_ip in {"127.0.0.1", "::1", "localhost"}
+
+
+_MAX_RANGE = 1024
+
+
+def _port_range(text: str) -> list[int]:
+    start, _, end = text.partition("-")
+    first = int(start)
+    last = int(end) if end else first
+    if not (1 <= first <= last <= 65535) or last - first >= _MAX_RANGE:
+        return []
+    return list(range(first, last + 1))
+
+
+def _split_port_entry(raw: Any) -> tuple[str | None, str, str] | None:
+    """``(host_ip, host_ports_text, protocol)`` for a ``host:container`` entry, else None."""
+    text = str(raw).strip()
+    mapping, _, protocol = text.partition("/")
+    protocol = (protocol or "tcp").lower()
+    host_ip: str | None = None
+    if mapping.startswith("["):
+        closing = mapping.find("]")
+        if closing == -1:
+            return None
+        host_ip = mapping[1:closing]
+        mapping = mapping[closing + 1 :].lstrip(":")
+        parts = mapping.split(":")
+    else:
+        parts = mapping.split(":")
+        if len(parts) == 3:
+            host_ip = parts.pop(0) or None
+    if len(parts) != 2 or not parts[0]:
+        return None
+    return host_ip, parts[0], protocol
+
+
+def docker_host_ports(spec: dict[str, Any]) -> list[HostPortBinding]:
+    """Host ports a docker release spec publishes, from Docker's ``ports`` short syntax.
+
+    ``"8080:80"``, ``"127.0.0.1:8080:80"``, ``"[::1]:8080:80"``, ``"8000-8001:8000-8001"`` and
+    ``"8080:80/udp"`` bind host ports; ``"80"`` (container only) gets a random host port and
+    cannot conflict, so it is left out. Unparseable entries are skipped. New releases cannot
+    declare a host range of ``_MAX_RANGE`` ports or more (see ``DockerSpec``).
+    """
+    bindings: list[HostPortBinding] = []
+    for raw in spec.get("ports") or []:
+        entry = _split_port_entry(raw)
+        if entry is None:
+            continue
+        host_ip, host_ports, protocol = entry
+        try:
+            ports = _port_range(host_ports)
+        except ValueError:
+            continue
+        if host_ip in {"0.0.0.0", "::"}:
+            host_ip = None
+        bindings.extend(HostPortBinding(port=port, host_ip=host_ip, protocol=protocol) for port in ports)
+    return bindings
+
+
+def _reject_wide_host_ranges(ports: list[str]) -> list[str]:
+    """Port conflict checks expand host ranges, so a range that would be dropped is refused."""
+    for raw in ports:
+        entry = _split_port_entry(raw)
+        if entry is None:
+            continue
+        start, _, end = entry[1].partition("-")
+        try:
+            first, last = int(start), int(end) if end else int(start)
+        except ValueError:
+            continue
+        if last - first >= _MAX_RANGE:
+            raise ValueError(
+                f"port range {entry[1]} spans {last - first + 1} host ports; "
+                f"publish fewer than {_MAX_RANGE} ports per entry"
+            )
+    return ports

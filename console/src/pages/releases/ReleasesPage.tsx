@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import {
   deleteRelease,
+  getArtifact,
   listReleases,
   type ReleaseKind,
   type ReleaseListParams,
@@ -12,6 +13,11 @@ import { getOrganization } from "@/api/organizations";
 import { ApiError } from "@/api/http";
 import { useAuth } from "@/auth/AuthContext";
 import { CreateReleaseDialog } from "@/components/releases/CreateReleaseDialog";
+import {
+  artifactPath,
+  deploymentsForReleasePath,
+  releaseKindForArtifactType,
+} from "@/components/releases/releaseArtifacts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { canManageArtifacts, canManageDeployments } from "@/lib/permissions";
@@ -30,10 +36,15 @@ export function ReleasesPage() {
   const { organizationId = "" } = useParams();
   const { token } = useAuth();
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState("");
   const [kind, setKind] = useState<ReleaseKind | "">("");
   const [page, setPage] = useState(1);
-  const [showCreate, setShowCreate] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // `?search=` lets a Deploy's release link land on that release.
+  const [search, setSearch] = useState(searchParams.get("search") ?? "");
+  // `?artifact_id=` lists the releases that use one artifact; with `create=1` it opens the
+  // create dialog starting from that artifact (the "Create release" action on Artifacts).
+  const artifactId = searchParams.get("artifact_id") ?? "";
+  const [showCreate, setShowCreate] = useState(searchParams.get("create") === "1");
   const [error, setError] = useState<string | null>(null);
 
   const orgQuery = useQuery({
@@ -42,7 +53,16 @@ export function ReleasesPage() {
     enabled: Boolean(token && organizationId),
   });
 
+  const artifactQuery = useQuery({
+    queryKey: ["artifact", organizationId, artifactId, token],
+    queryFn: () => getArtifact(token!, organizationId, artifactId),
+    enabled: Boolean(token && organizationId && artifactId),
+  });
+  const filterArtifact = artifactQuery.data;
+  const initialKind = filterArtifact ? releaseKindForArtifactType(filterArtifact.type) : null;
+
   const params: ReleaseListParams = {
+    artifact_id: artifactId || undefined,
     kind: kind || undefined,
     search: search || undefined,
     page,
@@ -60,6 +80,32 @@ export function ReleasesPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const items = releasesQuery.data?.items ?? [];
 
+  /** Releases changed, so artifact "used by" counts did too. */
+  async function refreshLists() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["releases", organizationId] }),
+      queryClient.invalidateQueries({ queryKey: ["artifacts", organizationId] }),
+      queryClient.invalidateQueries({ queryKey: ["artifact", organizationId] }),
+    ]);
+  }
+
+  function clearArtifactFilter() {
+    setPage(1);
+    const next = new URLSearchParams(searchParams);
+    next.delete("artifact_id");
+    next.delete("create");
+    setSearchParams(next, { replace: true });
+  }
+
+  function closeCreate() {
+    setShowCreate(false);
+    if (searchParams.get("create")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("create");
+      setSearchParams(next, { replace: true });
+    }
+  }
+
   async function onDelete(releaseId: string, label: string) {
     if (!token || !window.confirm(`Delete release ${label}?`)) {
       return;
@@ -67,7 +113,7 @@ export function ReleasesPage() {
     setError(null);
     try {
       await deleteRelease(token, organizationId, releaseId);
-      await queryClient.invalidateQueries({ queryKey: ["releases", organizationId] });
+      await refreshLists();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not delete the release.");
     }
@@ -116,6 +162,20 @@ export function ReleasesPage() {
         </select>
       </div>
 
+      {artifactId && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+          <span>
+            Releases using artifact{" "}
+            <strong>
+              {filterArtifact ? `${filterArtifact.name} ${filterArtifact.version}` : "…"}
+            </strong>
+          </span>
+          <Button type="button" variant="outline" size="sm" onClick={clearArtifactFilter}>
+            Show all releases
+          </Button>
+        </div>
+      )}
+
       {error && <p className="text-sm text-destructive">{error}</p>}
       {releasesQuery.isError && (
         <p className="text-sm text-destructive">Could not load releases.</p>
@@ -128,6 +188,8 @@ export function ReleasesPage() {
               <th className="px-4 py-3 font-medium">Name</th>
               <th className="px-4 py-3 font-medium">Version</th>
               <th className="px-4 py-3 font-medium">Kind</th>
+              <th className="px-4 py-3 font-medium">Artifact</th>
+              <th className="px-4 py-3 font-medium">Deploys</th>
               <th className="px-4 py-3 font-medium">Created</th>
               {(canManage || canDeploy) && (
                 <th className="px-4 py-3 font-medium">Actions</th>
@@ -140,6 +202,37 @@ export function ReleasesPage() {
                 <td className="px-4 py-3 font-medium">{release.name}</td>
                 <td className="px-4 py-3">{release.version}</td>
                 <td className="px-4 py-3">{KIND_LABELS[release.kind] ?? release.kind}</td>
+                <td className="px-4 py-3">
+                  {release.artifact ? (
+                    <>
+                      <Link
+                        to={artifactPath(organizationId, release.artifact)}
+                        className="text-link hover:underline"
+                      >
+                        {release.artifact.name} {release.artifact.version}
+                      </Link>
+                      <p className="text-xs text-muted-foreground">{release.artifact.file_name}</p>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {typeof release.spec?.image === "string"
+                        ? `Image ${release.spec.image}`
+                        : "—"}
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {(release.deployment_count ?? 0) > 0 ? (
+                    <Link
+                      to={deploymentsForReleasePath(organizationId, release.id)}
+                      className="text-link hover:underline"
+                    >
+                      {release.deployment_count} Deploy{release.deployment_count === 1 ? "" : "s"}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground">Not deployed</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-muted-foreground">
                   {new Date(release.created_at).toLocaleString()}
                 </td>
@@ -160,6 +253,12 @@ export function ReleasesPage() {
                           type="button"
                           variant="outline"
                           size="sm"
+                          disabled={(release.deployment_count ?? 0) > 0}
+                          title={
+                            (release.deployment_count ?? 0) > 0
+                              ? "This release has Deploys, which keep its history. It cannot be deleted."
+                              : undefined
+                          }
                           onClick={() =>
                             onDelete(release.id, `${release.name} ${release.version}`)
                           }
@@ -175,11 +274,12 @@ export function ReleasesPage() {
             {!releasesQuery.isLoading && items.length === 0 && (
               <tr>
                 <td
-                  colSpan={canManage || canDeploy ? 5 : 4}
+                  colSpan={canManage || canDeploy ? 7 : 6}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
-                  No releases yet.
-                  {canManage ? " Create one to get started." : ""}
+                  {artifactId
+                    ? "No release uses this artifact yet."
+                    : `No releases yet.${canManage ? " Create one to get started." : ""}`}
                 </td>
               </tr>
             )}
@@ -213,14 +313,26 @@ export function ReleasesPage() {
         </div>
       )}
 
-      {showCreate && token && (
+      {/* Wait for the artifact so the dialog opens with its kind preselected. */}
+      {/* `?create=1` opens it too, so it needs the same permission as the button. */}
+      {showCreate && canManage && token && (!artifactId || !artifactQuery.isLoading) && (
         <CreateReleaseDialog
           token={token}
           organizationId={organizationId}
-          onClose={() => setShowCreate(false)}
+          initialArtifact={
+            filterArtifact && initialKind
+              ? {
+                  id: filterArtifact.id,
+                  kind: initialKind,
+                  name: filterArtifact.name,
+                  version: filterArtifact.version,
+                }
+              : null
+          }
+          onClose={closeCreate}
           onCreated={async () => {
-            setShowCreate(false);
-            await queryClient.invalidateQueries({ queryKey: ["releases", organizationId] });
+            closeCreate();
+            await refreshLists();
           }}
         />
       )}

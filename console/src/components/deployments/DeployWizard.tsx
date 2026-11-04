@@ -4,16 +4,23 @@ import { useQuery } from "@tanstack/react-query";
 import {
   createDeployment,
   listDeviceGroups,
+  listEndpoints,
   listDevices,
   listReleases,
   type DeploymentCreatePayload,
   type Release,
+  type RolloutPhase,
 } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { AppAddressPicker } from "@/components/fleet/AppAddressPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { parseYamlObject } from "@/lib/yaml";
+import {
+  checkEndpointPort,
+  existingEndpointFor,
+  suggestedEndpointPort,
+} from "@/components/deployments/ports";
+import { parseYamlObject, toYaml } from "@/lib/yaml";
 
 const KIND_LABELS: Record<string, string> = {
   systemd: "systemd service",
@@ -25,6 +32,58 @@ const KIND_CAPABILITY: Record<string, string> = {
   systemd: "systemd",
   docker: "docker",
   docker_compose: "docker_compose",
+};
+
+type Strategy = "immediate" | "batched" | "phased";
+
+const STRATEGIES: { value: Strategy; label: string; hint: string }[] = [
+  {
+    value: "immediate",
+    label: "Immediate",
+    hint: "All selected devices get the release at once. Fastest, but a bad release hits every device together.",
+  },
+  {
+    value: "batched",
+    label: "Batched",
+    hint: "Opens a fixed number of devices at a time; the next batch starts when the current one finishes. Use for paced waves without a failure budget.",
+  },
+  {
+    value: "phased",
+    label: "Phased",
+    hint: "Canary first, then larger shares after a soak delay. Pauses automatically if too many fail. Prefer for production fleets.",
+  },
+];
+
+const PHASED_PRESETS: Record<string, { label: string; hint: string; phases: RolloutPhase[] }> = {
+  canary: {
+    label: "Canary 1, then all",
+    hint: "One device installs first. If it succeeds, every other device follows after a 1 hour soak. Good for small fleets (up to ~10 devices).",
+    phases: [{ count: 1 }, { percent: 100, delay_seconds: 3600 }],
+  },
+  tiered: {
+    label: "1 / 10% / 100%",
+    hint: "One canary device, then 10% of the targets after a 1 hour soak, then everyone after another 24 hours. Each step only starts if the failure % stays under the limit. Good for 10+ devices.",
+    phases: [
+      { count: 1 },
+      { percent: 10, delay_seconds: 3600 },
+      { percent: 100, delay_seconds: 86400 },
+    ],
+  },
+};
+
+const DEFAULT_BATCH_SIZE = "5";
+// Only binds when a phase holds more devices than this; caps parallel artifact downloads.
+const DEFAULT_MAX_CONCURRENT = "50";
+
+const NUMBER_OR_NULL = (value: unknown): number | null => {
+  if (value == null) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Expected a number, got ${JSON.stringify(value)}.`);
+  }
+  return parsed;
 };
 
 type DeployWizardProps = {
@@ -50,7 +109,13 @@ export function DeployWizard({
   const [deviceIds, setDeviceIds] = useState<string[]>(initialDeviceId ? [initialDeviceId] : []);
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const [name, setName] = useState("");
-  const [batchSize, setBatchSize] = useState("");
+  const [strategy, setStrategy] = useState<Strategy>("immediate");
+  const [batchSize, setBatchSize] = useState(DEFAULT_BATCH_SIZE);
+  const [preset, setPreset] = useState("canary");
+  const [failureThreshold, setFailureThreshold] = useState("10");
+  const [maxConcurrent, setMaxConcurrent] = useState(DEFAULT_MAX_CONCURRENT);
+  const [pendingTimeout, setPendingTimeout] = useState("86400");
+  const [force, setForce] = useState(false);
   const [publish, setPublish] = useState(false);
   const [endpointHostname, setEndpointHostname] = useState<string | null>(null);
   const [endpointPort, setEndpointPort] = useState("");
@@ -65,6 +130,8 @@ export function DeployWizard({
       "  strategy: immediate",
     ].join("\n"),
   );
+  // Once edited by hand, the YAML is kept until the user fills it from the wizard again.
+  const [yamlEdited, setYamlEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -110,16 +177,47 @@ export function DeployWizard({
     });
   }, [selectedRelease, deviceIds, devices]);
 
+  const singleDevice = deviceIds.length === 1 && groupIds.length === 0;
+  // A systemd release declares no port to route to; only containers can be published.
+  const publishableKind = selectedRelease?.kind !== "systemd";
+  const canPublish = singleDevice && publishableKind;
+  const endpointsQuery = useQuery({
+    queryKey: ["endpoints", organizationId, deviceIds[0], token],
+    queryFn: () => listEndpoints(token, organizationId, deviceIds[0]),
+    enabled: publish && canPublish,
+  });
+  const deviceEndpoints = endpointsQuery.data ?? [];
+  // Redeploying an app that is already public keeps its address (the API reuses it too).
+  const currentEndpoint = existingEndpointFor(selectedRelease, deviceEndpoints);
+  const effectiveHostname = currentEndpoint?.hostname ?? endpointHostname;
+  const portCheck = endpointPort.trim()
+    ? checkEndpointPort(selectedRelease, Number(endpointPort), deviceEndpoints)
+    : null;
+
   function toggleId(list: string[], id: string, setList: (next: string[]) => void) {
     setList(list.includes(id) ? list.filter((value) => value !== id) : [...list, id]);
   }
 
+  function buildRollout(): DeploymentCreatePayload["rollout"] {
+    if (strategy === "batched") {
+      const size = batchSize.trim() ? Number(batchSize) : null;
+      return size && size > 0 ? { strategy: "batched", batch_size: size } : { strategy: "immediate" };
+    }
+    if (strategy === "phased") {
+      return {
+        strategy: "phased",
+        phases: PHASED_PRESETS[preset].phases,
+        ...(failureThreshold.trim() ? { failure_threshold_percent: Number(failureThreshold) } : {}),
+        ...(maxConcurrent.trim() ? { max_concurrent: Number(maxConcurrent) } : {}),
+        ...(pendingTimeout.trim() ? { pending_timeout_seconds: Number(pendingTimeout) } : {}),
+      };
+    }
+    return { strategy: "immediate" };
+  }
+
   function buildPayload(): DeploymentCreatePayload {
-    const size = batchSize.trim() ? Number(batchSize) : null;
-    const rollout =
-      size && size > 0 ? { strategy: "batched", batch_size: size } : { strategy: "immediate" };
+    const rollout = buildRollout();
     const port = endpointPort.trim() ? Number(endpointPort) : null;
-    const singleDevice = deviceIds.length === 1 && groupIds.length === 0;
     return {
       release_id: releaseId,
       name: name.trim() || null,
@@ -129,9 +227,10 @@ export function DeployWizard({
       },
       rollout,
       endpoint:
-        singleDevice && publish && endpointHostname && port
-          ? { hostname: endpointHostname, port, protocol: "http" }
+        canPublish && publish && effectiveHostname && port
+          ? { hostname: effectiveHostname, port, protocol: "http" }
           : null,
+      force,
     };
   }
 
@@ -157,12 +256,20 @@ export function DeployWizard({
       setError("Select at least one device or group.");
       return;
     }
-    if (publish && deviceIds.length === 1 && groupIds.length === 0) {
+    if (strategy === "batched" && !(Number(batchSize) > 0)) {
+      setError("Enter a batch size.");
+      return;
+    }
+    if (publish && canPublish) {
       if (!endpointPort.trim()) {
         setError("Enter the port the app listens on.");
         return;
       }
-      if (!endpointHostname) {
+      if (portCheck?.level === "error") {
+        setError(portCheck.message);
+        return;
+      }
+      if (!effectiveHostname) {
         setError("Choose an available public address.");
         return;
       }
@@ -175,6 +282,8 @@ export function DeployWizard({
       const raw = parseYamlObject(yamlText);
       const target = (raw.target as Record<string, unknown> | undefined) ?? {};
       const rolloutRaw = (raw.rollout as Record<string, unknown> | undefined) ?? {};
+      // The API trims and lowercases the strategy; match it so phased fields are kept.
+      const yamlStrategy = String(rolloutRaw.strategy ?? "immediate").trim().toLowerCase();
       const payload: DeploymentCreatePayload = {
         release_id: String(raw.release_id ?? ""),
         name: raw.name == null ? null : String(raw.name),
@@ -186,10 +295,20 @@ export function DeployWizard({
             : [],
         },
         rollout: {
-          strategy: String(rolloutRaw.strategy ?? "immediate"),
-          batch_size: rolloutRaw.batch_size == null ? null : Number(rolloutRaw.batch_size),
-          delay_seconds: rolloutRaw.delay_seconds == null ? null : Number(rolloutRaw.delay_seconds),
+          strategy: yamlStrategy,
+          batch_size: NUMBER_OR_NULL(rolloutRaw.batch_size),
+          delay_seconds: NUMBER_OR_NULL(rolloutRaw.delay_seconds),
+          ...(yamlStrategy === "phased"
+            ? {
+                phases: Array.isArray(rolloutRaw.phases) ? (rolloutRaw.phases as RolloutPhase[]) : null,
+                max_concurrent: NUMBER_OR_NULL(rolloutRaw.max_concurrent),
+                failure_threshold_percent: NUMBER_OR_NULL(rolloutRaw.failure_threshold_percent),
+                pending_timeout_seconds: NUMBER_OR_NULL(rolloutRaw.pending_timeout_seconds),
+              }
+            : {}),
         },
+        endpoint: (raw.endpoint as DeploymentCreatePayload["endpoint"]) ?? null,
+        force: raw.force === true,
       };
       if (!payload.release_id) {
         setError("YAML must include release_id.");
@@ -236,7 +355,13 @@ export function DeployWizard({
             type="button"
             size="sm"
             variant={mode === "yaml" ? "default" : "outline"}
-            onClick={() => setMode("yaml")}
+            onClick={() => {
+              // The YAML editor starts from what the wizard has chosen so far.
+              if (mode === "wizard" && !yamlEdited) {
+                setYamlText(toYaml(buildPayload()));
+              }
+              setMode("yaml");
+            }}
           >
             Advanced YAML
           </Button>
@@ -251,11 +376,25 @@ export function DeployWizard({
               id="deploy-yaml"
               className="min-h-[220px] w-full rounded-md border border-input bg-field px-3 py-2 font-mono text-sm"
               value={yamlText}
-              onChange={(event) => setYamlText(event.target.value)}
+              onChange={(event) => {
+                setYamlText(event.target.value);
+                setYamlEdited(true);
+              }}
               spellCheck={false}
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting}
+                onClick={() => {
+                  setYamlText(toYaml(buildPayload()));
+                  setYamlEdited(false);
+                }}
+              >
+                Fill from wizard
+              </Button>
               <Button type="button" disabled={submitting} onClick={() => void onDeployYaml()}>
                 {submitting ? "Deploying…" : "Deploy"}
               </Button>
@@ -280,7 +419,11 @@ export function DeployWizard({
                   id="deploy-release"
                   className="h-10 w-full rounded-md border border-input bg-field px-3 text-sm"
                   value={releaseId}
-                  onChange={(event) => setReleaseId(event.target.value)}
+                  onChange={(event) => {
+                    setReleaseId(event.target.value);
+                    // The address was picked for the old release; step 3 picks a new one.
+                    setEndpointHostname(null);
+                  }}
                 >
                   <option value="">Select a release…</option>
                   {releases.map((release) => (
@@ -334,7 +477,10 @@ export function DeployWizard({
                         <input
                           type="checkbox"
                           checked={deviceIds.includes(device.id)}
-                          onChange={() => toggleId(deviceIds, device.id, setDeviceIds)}
+                          onChange={() => {
+                            toggleId(deviceIds, device.id, setDeviceIds);
+                            setEndpointHostname(null);
+                          }}
                         />
                         {device.name}
                       </label>
@@ -376,30 +522,146 @@ export function DeployWizard({
                     <dd>{deviceIds.length}</dd>
                   </div>
                 </dl>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium" htmlFor="deploy-batch">
-                    Batch size (optional)
-                  </label>
-                  <Input
-                    id="deploy-batch"
-                    type="number"
-                    min={1}
-                    placeholder="All at once"
-                    value={batchSize}
-                    onChange={(event) => setBatchSize(event.target.value)}
-                  />
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">Rollout</legend>
+                  <div className="flex flex-wrap gap-2">
+                    {STRATEGIES.map((item) => (
+                      <Button
+                        key={item.value}
+                        type="button"
+                        size="sm"
+                        variant={strategy === item.value ? "default" : "outline"}
+                        aria-pressed={strategy === item.value}
+                        onClick={() => setStrategy(item.value)}
+                      >
+                        {item.label}
+                      </Button>
+                    ))}
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    Leave empty to deploy to every target immediately. Set a number to activate that
-                    many devices at a time.
+                    {STRATEGIES.find((item) => item.value === strategy)?.hint}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Devices apply on their next heartbeat; progress updates as they check in.
+                  </p>
+                  {strategy === "batched" && (
+                    <>
+                      <label className="block text-sm font-medium" htmlFor="deploy-batch">
+                        Batch size
+                      </label>
+                      <Input
+                        id="deploy-batch"
+                        type="number"
+                        min={1}
+                        value={batchSize}
+                        onChange={(event) => setBatchSize(event.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        The next batch starts when every device in the current one has finished.
+                        Default {DEFAULT_BATCH_SIZE}
+                        {singleDevice || (groupIds.length === 0 && deviceIds.length <= Number(batchSize))
+                          ? "; with this few devices it behaves like Immediate."
+                          : "."}
+                      </p>
+                    </>
+                  )}
+                  {strategy === "phased" && (
+                    <>
+                      <label className="block text-sm font-medium" htmlFor="deploy-preset">
+                        Phases
+                      </label>
+                      <select
+                        id="deploy-preset"
+                        className="h-10 w-full rounded-md border border-input bg-field px-3 text-sm"
+                        value={preset}
+                        onChange={(event) => setPreset(event.target.value)}
+                      >
+                        {Object.entries(PHASED_PRESETS).map(([key, item]) => (
+                          <option key={key} value={key}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-muted-foreground">{PHASED_PRESETS[preset].hint}</p>
+                      <details className="rounded-md border border-border p-3">
+                        <summary className="cursor-pointer text-sm font-medium">Advanced</summary>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                          <label className="space-y-1 text-sm">
+                            <span>Pause at failure %</span>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={failureThreshold}
+                              onChange={(event) => setFailureThreshold(event.target.value)}
+                            />
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span>Max concurrent</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              placeholder="No limit"
+                              value={maxConcurrent}
+                              onChange={(event) => setMaxConcurrent(event.target.value)}
+                            />
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span>Pending timeout (s)</span>
+                            <Input
+                              type="number"
+                              min={60}
+                              placeholder="No timeout"
+                              value={pendingTimeout}
+                              onChange={(event) => setPendingTimeout(event.target.value)}
+                            />
+                          </label>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Max concurrent (default {DEFAULT_MAX_CONCURRENT}) caps how many devices
+                          download and install at once; it only matters when a phase holds more
+                          devices than that. Clear it for no limit.
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Offline devices stay pending and are marked timed out after the timeout;
+                          they still install when they come back.
+                        </p>
+                      </details>
+                    </>
+                  )}
+                </fieldset>
+                <div className="space-y-1">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={force}
+                      onChange={(event) => setForce(event.target.checked)}
+                    />
+                    Reinstall where already installed
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Devices already running this release healthily are skipped by default, so they
+                    don't restart. Turn this on to reinstall on them too.
                   </p>
                 </div>
-                {deviceIds.length === 1 && groupIds.length === 0 && (
+                {singleDevice && !publishableKind && (
+                  <p className="text-xs text-muted-foreground">
+                    Publishing on the internet is available for Single container and Compose
+                    releases.
+                  </p>
+                )}
+                {canPublish && (
                   <div className="space-y-2 rounded-md border border-border p-3">
                     <label className="flex items-center gap-2 text-sm font-medium">
                       <input
                         type="checkbox"
                         checked={publish}
-                        onChange={(event) => setPublish(event.target.checked)}
+                        onChange={(event) => {
+                          setPublish(event.target.checked);
+                          if (event.target.checked && !endpointPort.trim()) {
+                            setEndpointPort(suggestedEndpointPort(selectedRelease));
+                          }
+                        }}
                       />
                       Publish on the internet
                     </label>
@@ -412,14 +674,38 @@ export function DeployWizard({
                           placeholder="Port the app listens on (80, 8080, …)"
                           value={endpointPort}
                           onChange={(event) => setEndpointPort(event.target.value)}
+                          aria-label="Port the app listens on"
                         />
-                        <AppAddressPicker
-                          token={token}
-                          organizationId={organizationId}
-                          deviceId={deviceIds[0]}
-                          appName={selectedRelease?.name ?? "app"}
-                          onChange={setEndpointHostname}
-                        />
+                        <p className="text-xs text-muted-foreground">
+                          The port on the device (for docker, the host side of{" "}
+                          <code>host:container</code>). Each port can only be published once per
+                          device.
+                        </p>
+                        {portCheck && (
+                          <p
+                            className={
+                              portCheck.level === "error"
+                                ? "text-xs text-destructive"
+                                : "text-xs text-muted-foreground"
+                            }
+                          >
+                            {portCheck.message}
+                          </p>
+                        )}
+                        {currentEndpoint ? (
+                          <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                            Already published at <strong>{currentEndpoint.hostname}</strong>. This
+                            Deploy keeps that address and points it at the new release.
+                          </p>
+                        ) : (
+                          <AppAddressPicker
+                            token={token}
+                            organizationId={organizationId}
+                            deviceId={deviceIds[0]}
+                            appName={selectedRelease?.name ?? "app"}
+                            onChange={setEndpointHostname}
+                          />
+                        )}
                         <p className="text-xs text-muted-foreground">
                           The address goes live once the app is healthy on the device.
                         </p>

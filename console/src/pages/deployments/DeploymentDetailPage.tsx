@@ -1,39 +1,130 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   cancelDeployment,
   getDeployment,
+  pauseDeployment,
+  resumeDeployment,
   retryFailedDeployment,
   rollbackDeployment,
+  type Deployment,
+  type DeploymentDevice,
 } from "@/api/fleet";
+import { getMyAccess } from "@/api/access";
 import { getOrganization } from "@/api/organizations";
 import { ApiError } from "@/api/http";
 import { useAuth } from "@/auth/AuthContext";
 import { AvailabilityBadge, HealthBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
-import { canManageDeployments, canRollbackDeployments } from "@/lib/permissions";
+import { LIVE_POLL_MS, LIVE_STATUSES } from "@/components/deployments/liveStatus";
+import { releasePath } from "@/components/releases/releaseArtifacts";
+import {
+  canManageDeployments,
+  canRollbackDeployments,
+  canViewDeviceLogs,
+} from "@/lib/permissions";
 
 const STATUS_LABELS: Record<string, string> = {
   in_progress: "In progress",
   completed: "Completed",
   cancelled: "Cancelled",
   failed: "Failed",
+  paused: "Paused",
   pending: "Pending",
   queued: "Queued",
-  updating: "Updating",
+  updating: "Installing",
   succeeded: "Succeeded",
   skipped: "Skipped",
+  timed_out: "Timed out",
+};
+
+const PAUSE_REASONS: Record<string, string> = {
+  failure_threshold: "failure threshold reached",
+  manual: "paused by an operator",
+};
+
+/** Open Deploys keep polling at about the heartbeat rate. */
+
+function deviceStatusLabel(row: DeploymentDevice): string {
+  if (
+    row.status === "pending" &&
+    row.activated_at &&
+    (!row.device_last_seen_at ||
+      new Date(row.device_last_seen_at).getTime() < new Date(row.activated_at).getTime())
+  ) {
+    return "Waiting for device";
+  }
+  return STATUS_LABELS[row.status] ?? row.status;
+}
+
+/** Cumulative phase sizes, as the control plane computes them (percent rounds up, min 1). */
+function phaseSizes(total: number, phases: { count?: number | null; percent?: number | null }[]) {
+  let previous = 0;
+  return phases.map((phase) => {
+    const raw = phase.count ?? Math.max(1, Math.ceil((total * (phase.percent ?? 0)) / 100));
+    previous = Math.min(total, Math.max(raw, previous));
+    return previous;
+  });
+}
+
+function formatDuration(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60000));
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+/** "Phase N of M" plus the soak time left before the next phase, for phased Deploys. */
+function phaseSummary(deployment: Deployment, now: number): string | null {
+  const phases = deployment.rollout.phases;
+  const state = deployment.rollout.state;
+  if (deployment.rollout.strategy !== "phased" || !phases?.length || state?.current_phase == null) {
+    return null;
+  }
+  const parts = [`Phase ${state.current_phase + 1} of ${phases.length}`];
+  const activated = (deployment.devices ?? []).filter((row) => row.activated_at).length;
+  const sizes = phaseSizes(deployment.counts.total - deployment.counts.skipped, phases);
+  const next = sizes.findIndex((size, index) => index > state.current_phase! && size > activated);
+  const delay = next >= 0 ? (phases[next].delay_seconds ?? 0) : 0;
+  if (deployment.status === "in_progress" && state.phase_completed_at && delay > 0) {
+    const left = new Date(state.phase_completed_at).getTime() + delay * 1000 - now;
+    if (left > 0) {
+      parts.push(`next phase in ${formatDuration(left)}`);
+    }
+  }
+  return parts.join(" · ");
+}
+
+type RollbackNotice = {
+  others: { id: string; label: string }[];
+  skipped: string[];
+  failed: string[];
 };
 
 export function DeploymentDetailPage() {
   const { organizationId = "", deploymentId = "" } = useParams();
   const { token } = useAuth();
+  const location = useLocation();
+  // Set by onRollback when the rollback split into several Deploys or skipped devices.
+  const rollbackNotice = (location.state as { rollbackNotice?: RollbackNotice } | null)
+    ?.rollbackNotice;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"cancel" | "retry" | "rollback" | null>(null);
+  const [busy, setBusy] = useState<"cancel" | "pause" | "resume" | "retry" | "rollback" | null>(
+    null,
+  );
+  // Polls with unchanged data do not re-render, so the countdown keeps its own clock.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -41,17 +132,32 @@ export function DeploymentDetailPage() {
     enabled: Boolean(token && organizationId),
   });
 
+  const accessQuery = useQuery({
+    queryKey: ["my-access", token],
+    queryFn: () => getMyAccess(token!),
+    enabled: Boolean(token),
+    retry: false,
+  });
+
   const detailQuery = useQuery({
     queryKey: ["deployment", organizationId, deploymentId, token],
     queryFn: () => getDeployment(token!, organizationId, deploymentId),
     enabled: Boolean(token && organizationId && deploymentId),
     // Health and URLs keep changing after install finishes, so keep polling at about the heartbeat rate.
-    refetchInterval: (query) => (query.state.data?.status === "in_progress" ? 5000 : 30000),
+    refetchInterval: (query) =>
+      LIVE_STATUSES.has(query.state.data?.status ?? "") ? LIVE_POLL_MS : 30000,
     refetchOnWindowFocus: true,
   });
 
   const canManage = canManageDeployments(orgQuery.data?.current_user_role);
   const canRollback = canRollbackDeployments(orgQuery.data?.current_user_role);
+  // Effective permissions cover custom roles; the role check is the fallback (same as device page).
+  const orgAccess = accessQuery.data?.organizations.find(
+    (entry) => entry.organization_id === organizationId,
+  );
+  const canLogs = orgAccess
+    ? orgAccess.permissions.includes("device.logs")
+    : canViewDeviceLogs(orgQuery.data?.current_user_role);
   const deployment = detailQuery.data;
   const releaseLabel = deployment?.release
     ? `${deployment.release.name} ${deployment.release.version}`
@@ -61,6 +167,34 @@ export function DeploymentDetailPage() {
   const healthyCount = rows.filter((row) => row.health === "healthy").length;
   const urlCount = rows.filter((row) => row.endpoint_availability !== null).length;
   const urlReadyCount = rows.filter((row) => row.endpoint_availability === "ready").length;
+  const strategy = deployment?.rollout.strategy;
+  const canPause =
+    deployment?.status === "in_progress" && (strategy === "batched" || strategy === "phased");
+  const pausedReason = deployment?.rollout.state?.paused_reason;
+  const phaseLine = deployment ? phaseSummary(deployment, now) : null;
+
+  async function onPauseOrResume(action: "pause" | "resume") {
+    if (!token || !deployment) {
+      return;
+    }
+    setBusy(action);
+    setError(null);
+    try {
+      await (action === "pause" ? pauseDeployment : resumeDeployment)(
+        token,
+        organizationId,
+        deploymentId,
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ["deployment", organizationId, deploymentId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["deployments", organizationId] });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Could not ${action} the deployment.`);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function onCancel() {
     if (!token || !deployment || !window.confirm("Cancel this deployment?")) {
@@ -105,7 +239,7 @@ export function DeploymentDetailPage() {
       !token ||
       !deployment ||
       !window.confirm(
-        "Roll back to the previous release? This starts a new Deploy for the prior desired software.",
+        "Roll back? Each device returns to the release it had before this Deploy. Devices for which this was the first install are left as is.",
       )
     ) {
       return;
@@ -113,9 +247,23 @@ export function DeploymentDetailPage() {
     setBusy("rollback");
     setError(null);
     try {
-      const created = await rollbackDeployment(token, organizationId, deploymentId);
+      const result = await rollbackDeployment(token, organizationId, deploymentId);
       await queryClient.invalidateQueries({ queryKey: ["deployments", organizationId] });
-      navigate(`/organizations/${organizationId}/deployments/${created.id}`);
+      const [first, ...others] = result.deployments;
+      const notice: RollbackNotice = {
+        others: others.map((item) => ({
+          id: item.id,
+          label: item.release ? `${item.release.name} ${item.release.version}` : item.release_id,
+        })),
+        skipped: result.skipped.map((item) => item.device_name),
+        failed: (result.failed ?? []).map(
+          (item) =>
+            `${item.device_ids.length} device${item.device_ids.length === 1 ? "" : "s"} (${item.message})`,
+        ),
+      };
+      navigate(`/organizations/${organizationId}/deployments/${first.id}`, {
+        state: { rollbackNotice: notice },
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not roll back the deployment.");
     } finally {
@@ -138,8 +286,20 @@ export function DeploymentDetailPage() {
               {deployment?.name || releaseLabel || "Deployment"}
             </h1>
             <p className="mt-2 text-muted-foreground">
-              {releaseLabel}
+              {deployment?.release ? (
+                <Link
+                  to={releasePath(organizationId, deployment.release)}
+                  className="text-link hover:underline"
+                >
+                  {releaseLabel}
+                </Link>
+              ) : (
+                releaseLabel
+              )}
               {deployment ? ` · ${STATUS_LABELS[deployment.status] ?? deployment.status}` : ""}
+              {deployment?.status === "paused" && pausedReason
+                ? ` (${PAUSE_REASONS[pausedReason] ?? pausedReason})`
+                : ""}
               {deployment?.rollback_of_deployment_id ? " · rollback" : ""}
             </p>
           </div>
@@ -164,7 +324,27 @@ export function DeploymentDetailPage() {
                 {busy === "rollback" ? "Rolling back…" : "Rollback"}
               </Button>
             )}
-            {canManage && deployment?.status === "in_progress" && (
+            {canManage && canPause && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy !== null}
+                onClick={() => void onPauseOrResume("pause")}
+              >
+                {busy === "pause" ? "Pausing…" : "Pause"}
+              </Button>
+            )}
+            {canManage && deployment?.status === "paused" && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy !== null}
+                onClick={() => void onPauseOrResume("resume")}
+              >
+                {busy === "resume" ? "Resuming…" : "Resume"}
+              </Button>
+            )}
+            {canManage && deployment && LIVE_STATUSES.has(deployment.status) && (
               <Button
                 type="button"
                 variant="outline"
@@ -178,10 +358,47 @@ export function DeploymentDetailPage() {
         </div>
       </div>
 
+      {rollbackNotice &&
+        (rollbackNotice.others.length > 0 ||
+          rollbackNotice.skipped.length > 0 ||
+          rollbackNotice.failed.length > 0) && (
+        <div className="space-y-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+          <p>Rollback started. Each device goes back to the release it had before.</p>
+          {rollbackNotice.others.length > 0 && (
+            <p>
+              Devices with a different previous release got their own rollback:{" "}
+              {rollbackNotice.others.map((item, index) => (
+                <span key={item.id}>
+                  {index > 0 ? ", " : ""}
+                  <Link
+                    to={`/organizations/${organizationId}/deployments/${item.id}`}
+                    className="text-link hover:underline"
+                  >
+                    {item.label}
+                  </Link>
+                </span>
+              ))}
+              .
+            </p>
+          )}
+          {rollbackNotice.skipped.length > 0 && (
+            <p className="text-muted-foreground">
+              Left as is (this Deploy was their first install): {rollbackNotice.skipped.join(", ")}.
+            </p>
+          )}
+          {rollbackNotice.failed.length > 0 && (
+            <p className="text-destructive">
+              Could not start the rollback for {rollbackNotice.failed.join("; ")}. Those devices were not rolled back.
+            </p>
+          )}
+        </div>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {detailQuery.isError && (
         <p className="text-sm text-destructive">Could not load this deployment.</p>
       )}
+
+      {phaseLine && <p className="text-sm font-medium">{phaseLine}</p>}
 
       {deployment && (
         <p className="text-sm text-muted-foreground">
@@ -191,6 +408,7 @@ export function DeploymentDetailPage() {
           {deployment.counts.queued > 0 ? ` · ${deployment.counts.queued} queued` : ""}
           {deployment.counts.updating > 0 ? ` · ${deployment.counts.updating} updating` : ""}
           {deployment.counts.failed > 0 ? ` · ${deployment.counts.failed} failed` : ""}
+          {deployment.counts.timed_out > 0 ? ` · ${deployment.counts.timed_out} timed out` : ""}
           {deployment.counts.cancelled > 0 ? ` · ${deployment.counts.cancelled} cancelled` : ""}
           {deployment.counts.skipped > 0 ? ` · ${deployment.counts.skipped} skipped` : ""}
         </p>
@@ -204,7 +422,7 @@ export function DeploymentDetailPage() {
               <th className="px-4 py-3 font-medium">Install</th>
               <th className="px-4 py-3 font-medium">Health</th>
               <th className="px-4 py-3 font-medium">URL</th>
-              <th className="px-4 py-3 font-medium">Error</th>
+              <th className="px-4 py-3 font-medium">Details</th>
               <th className="px-4 py-3 font-medium">Updated</th>
             </tr>
           </thead>
@@ -218,9 +436,18 @@ export function DeploymentDetailPage() {
                   >
                     {row.device_name || row.device_id}
                   </Link>
+                  {canLogs && (
+                    <Link
+                      to={`/organizations/${organizationId}/devices/${row.device_id}?tab=logs`}
+                      className="ml-2 text-xs text-link hover:underline"
+                      aria-label={`Logs for ${row.device_name || row.device_id}`}
+                    >
+                      Logs
+                    </Link>
+                  )}
                 </td>
                 <td className="px-4 py-3">
-                  {STATUS_LABELS[row.status] ?? row.status}
+                  {deviceStatusLabel(row)}
                   {row.status === "updating" && row.progress_percent != null
                     ? ` (${row.progress_percent}%)`
                     : ""}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -68,6 +69,7 @@ class NativeDeploymentProvider:
         if not device_ids:
             raise AppError("no_deploy_targets", "No devices to deploy to.", status_code=422)
 
+        deploy_rows = {row.device_id: row for row in self.deployments.list_devices(deployment_id=deployment.id)}
         for device_id in device_ids:
             row = self.software.set_desired_software(
                 organization_id=organization_id,
@@ -75,6 +77,8 @@ class NativeDeploymentProvider:
                 release=release,
                 commit=False,
             )
+            if device_id in deploy_rows:
+                deploy_rows[device_id].desired_revision = row.desired_revision
             self._notify_sync_desired(device_id=device_id, revision=row.desired_revision)
 
         self.session.flush()
@@ -85,10 +89,10 @@ class NativeDeploymentProvider:
         deployment = self.deployments.get(organization_id=organization_id, deployment_id=deployment_id)
         if deployment is None:
             raise NotFoundError("deployment_not_found", "Deployment was not found.")
-        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
+        if deployment.status not in {DeploymentStatus.IN_PROGRESS.value, DeploymentStatus.PAUSED.value}:
             raise ConflictError(
                 "deployment_not_cancellable",
-                "Only in-progress deployments can be cancelled.",
+                "Only in-progress or paused deployments can be cancelled.",
             )
 
         release = self.releases.get(organization_id=organization_id, release_id=deployment.release_id)
@@ -100,11 +104,14 @@ class NativeDeploymentProvider:
             DeploymentDeviceStatus.PENDING.value,
             DeploymentDeviceStatus.QUEUED.value,
             DeploymentDeviceStatus.UPDATING.value,
+            DeploymentDeviceStatus.TIMED_OUT.value,
         }
         # Only activated rows had desired rewritten; queued devices keep prior desired.
+        # timed_out devices still hold the release as desired and may come back online.
         undo_desired_statuses = {
             DeploymentDeviceStatus.PENDING.value,
             DeploymentDeviceStatus.UPDATING.value,
+            DeploymentDeviceStatus.TIMED_OUT.value,
         }
         for row in self.deployments.list_devices(deployment_id=deployment.id):
             if row.status not in open_statuses:
@@ -112,6 +119,15 @@ class NativeDeploymentProvider:
             should_undo = row.status in undo_desired_statuses
             row.status = DeploymentDeviceStatus.CANCELLED.value
             if not should_undo or workload_key is None:
+                continue
+            current = self.software.software.get_by_workload(
+                device_id=row.device_id, workload_key=workload_key
+            )
+            if current is None or current.desired_release_id != deployment.release_id:
+                # A newer Deploy (or rollback) owns desired now; leave it alone.
+                continue
+            if row.desired_revision is not None and current.desired_revision != row.desired_revision:
+                # Same release, but a newer write (another Deploy of it) owns desired now.
                 continue
             if row.previous_desired_release_id is not None:
                 previous = self.releases.get(
@@ -163,6 +179,7 @@ class NativeDeploymentProvider:
                 status_code=422,
             )
 
+        now = datetime.now(UTC)
         for row in failed_rows:
             software = self.software.set_desired_software(
                 organization_id=organization_id,
@@ -172,9 +189,12 @@ class NativeDeploymentProvider:
             )
             row.status = DeploymentDeviceStatus.PENDING.value
             row.last_error = None
+            row.activated_at = now
+            row.desired_revision = software.desired_revision
             self._notify_sync_desired(device_id=row.device_id, revision=software.desired_revision)
 
-        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
+        # A paused Deploy stays paused; only finished ones run again.
+        if deployment.status in {DeploymentStatus.COMPLETED.value, DeploymentStatus.FAILED.value}:
             deployment.status = DeploymentStatus.IN_PROGRESS.value
         self.session.flush()
 

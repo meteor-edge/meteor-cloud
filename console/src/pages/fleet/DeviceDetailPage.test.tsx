@@ -76,11 +76,11 @@ vi.mock("@/components/fleet/DeviceLogs", () => ({
   DeviceLogs: () => <p>logs window</p>,
 }));
 
-function renderPage() {
+function renderPage(path = "/organizations/org-1/devices/dev-1") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/organizations/org-1/devices/dev-1"]}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route
             path="/organizations/:organizationId/devices/:deviceId"
@@ -106,5 +106,12 @@ describe("DeviceDetailPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close logs" }));
     expect(screen.queryByText("logs window")).not.toBeInTheDocument();
+  });
+
+  it("opens logs directly from a ?tab=logs link", async () => {
+    renderPage("/organizations/org-1/devices/dev-1?tab=logs");
+
+    expect(await screen.findByText("logs window")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Access" })).toHaveAttribute("aria-selected", "true");
   });
 });

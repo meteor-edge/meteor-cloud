@@ -121,6 +121,13 @@ class Settings(BaseSettings):
         default="native",
         alias="DEPLOYMENT_PROVIDER",
     )
+    # Seconds between Deploy sweeps (batched delays, phased soak, pending timeouts
+    # without waiting for a heartbeat). 0 disables the sweeper.
+    deploy_tick_interval_seconds: int = Field(
+        default=60,
+        ge=0,
+        alias="DEPLOY_TICK_INTERVAL_SECONDS",
+    )
     # Deprecated alias; prefer DEPLOYMENT_PROVIDER. Kept so existing env files load.
     ota_provider: Literal["none"] = Field(default="none", alias="OTA_PROVIDER")
     # Private device network. "none" disables peer APIs; "wireguard" is the v1 transport.

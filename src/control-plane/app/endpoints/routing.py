@@ -49,4 +49,7 @@ def traefik_http_provider(
             }
         routers[name] = router
         services[name] = {"loadBalancer": {"servers": [{"url": upstream}]}}
+    if not routers:
+        # Traefik rejects empty routers/services maps and keeps serving its previous routes; {} clears them.
+        return {}
     return {"http": {"routers": routers, "services": services}}

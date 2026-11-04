@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import BinaryIO
 
 from jose import JWTError, jwt
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -29,6 +30,7 @@ from app.devices.repository import DeviceTypeRepository
 from app.devices.schemas import Page
 from app.identity.models import User
 from app.ports.storage import ObjectStorage, StoredObject, StoredObjectNotFoundError
+from app.releases.models import Release
 from app.tenancy.models import OrganizationMembership
 from app.tenancy.repository import OrganizationRepository
 
@@ -142,8 +144,9 @@ class ArtifactService:
             page=page,
             page_size=page_size,
         )
+        counts = self._release_counts([item.id for item in items])
         return Page[ArtifactResponse](
-            items=[ArtifactResponse.model_validate(item) for item in items],
+            items=[self._to_response(item, counts.get(item.id, 0)) for item in items],
             total=total,
             page=page,
             page_size=page_size,
@@ -157,7 +160,25 @@ class ArtifactService:
         """
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.read")
-        return ArtifactResponse.model_validate(self._require_artifact(organization_id, artifact_id))
+        artifact = self._require_artifact(organization_id, artifact_id)
+        return self._to_response(artifact, self._release_counts([artifact.id]).get(artifact.id, 0))
+
+    def _release_counts(self, artifact_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many releases reference each artifact, in one grouped query."""
+        if not artifact_ids:
+            return {}
+        rows = self.session.execute(
+            select(Release.artifact_id, func.count())
+            .where(Release.artifact_id.in_(artifact_ids))
+            .group_by(Release.artifact_id)
+        ).all()
+        return {artifact_id: int(count) for artifact_id, count in rows}
+
+    @staticmethod
+    def _to_response(artifact: Artifact, release_count: int) -> ArtifactResponse:
+        response = ArtifactResponse.model_validate(artifact)
+        response.release_count = release_count
+        return response
 
     # ----------------------------------------------------------------- upload
     def upload_artifact(
@@ -300,7 +321,7 @@ class ArtifactService:
             self.session.rollback()
             raise ConflictError(
                 "artifact_in_use",
-                "This artifact cannot be deleted while releases still reference it.",
+                "This artifact cannot be deleted while releases still use it. Delete those releases first.",
             ) from exc
         # Metadata is gone first so the artifact can never be listed without content.
         self._discard_object(key)

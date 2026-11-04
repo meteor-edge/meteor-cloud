@@ -3,7 +3,8 @@
 #
 #   ./installcli.sh              Install for the current user (~/.local)
 #   sudo ./installcli.sh         System-wide (/opt + /usr/local/bin)
-#   ./installcli.sh --uninstall  Remove the install (keeps credentials)
+#   ./installcli.sh --uninstall  Remove the install, credentials, and MQTT/WireGuard state
+#                                (default config locations only, not METEORCLI_CONFIG_DIR)
 
 set -euo pipefail
 
@@ -26,13 +27,14 @@ Usage:
   $0                      Install for this user (${USER_PREFIX}, ${USER_BIN})
   sudo $0                 Install system-wide (${SYSTEM_PREFIX}, ${SYSTEM_BIN})
   sudo $0 --with-service  System-wide + enable meteorcli.service (Raspberry Pi OS)
-  $0 --uninstall          Remove the install (keeps credentials)
+  $0 --uninstall          Remove the install, credentials, and MQTT/WireGuard state
+                          (default config locations; a METEORCLI_CONFIG_DIR is listed, not removed)
 
 Options:
   --prefix DIR     Virtualenv location
   --bin-dir DIR    Directory for the meteorcli symlink
   --with-service   Install and enable systemd unit (root / system install only)
-  --uninstall      Remove the venv and symlink (and unit if present)
+  --uninstall      Remove the venv, symlink, unit, and ~/.config/meteorcli (and /etc/meteorcli as root)
   -h, --help       Show this help
 EOF
 }
@@ -106,13 +108,40 @@ find_python() {
   return 1
 }
 
+remove_config_dir() {
+  local dir="$1"
+  if [[ -d "${dir}" ]]; then
+    rm -rf "${dir}"
+    echo "Removed ${dir}"
+  fi
+}
+
+bring_wg0_down() {
+  # The helper refuses to run unless it is root, so a non-root uninstall goes through
+  # its passwordless sudo rule. Failures are reported here, before the helper is removed.
+  local helper=/usr/local/libexec/meteorcli-wg
+  local -a sudo_cmd=()
+  [[ "${EUID}" -eq 0 ]] || sudo_cmd=(sudo -n)
+  if [[ -x "${helper}" ]] && "${sudo_cmd[@]}" "${helper}" down >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v wg-quick >/dev/null 2>&1 && "${sudo_cmd[@]}" wg-quick down wg0 >/dev/null 2>&1; then
+    return 0
+  fi
+  if ip link show wg0 >/dev/null 2>&1; then
+    echo "warning: could not bring the WireGuard interface wg0 down; it is still up." >&2
+  fi
+}
+
 uninstall() {
   local link="${BIN_DIR}/meteorcli"
+  local user_home=""
   if [[ "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl disable --now meteorcli.service 2>/dev/null || true
     rm -f /etc/systemd/system/meteorcli.service
     systemctl daemon-reload 2>/dev/null || true
   fi
+  bring_wg0_down
   if [[ -L "${link}" || -f "${link}" ]]; then
     rm -f "${link}"
     echo "Removed ${link}"
@@ -123,10 +152,20 @@ uninstall() {
   fi
   if [[ "${EUID}" -eq 0 ]]; then
     rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg \
-      /etc/sudoers.d/meteorcli-logs /usr/local/libexec/meteorcli-logs
-    echo "Left /etc/meteorcli in place (device credentials)."
+      /etc/sudoers.d/meteorcli-logs /usr/local/libexec/meteorcli-logs \
+      /etc/sudoers.d/meteorcli-systemd /usr/local/libexec/meteorcli-systemd
+    remove_config_dir /etc/meteorcli
+    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+      user_home="$(getent passwd "${SUDO_USER}" | cut -d: -f6 || true)"
+      if [[ -n "${user_home}" ]]; then
+        remove_config_dir "${user_home}/.config/meteorcli"
+      fi
+    fi
   else
-    echo "Left ${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli in place (device credentials)."
+    remove_config_dir "${XDG_CONFIG_HOME:-$HOME/.config}/meteorcli"
+  fi
+  if [[ -n "${METEORCLI_CONFIG_DIR:-}" && -d "${METEORCLI_CONFIG_DIR}" ]]; then
+    echo "note: METEORCLI_CONFIG_DIR=${METEORCLI_CONFIG_DIR} was not removed; it may hold a device token." >&2
   fi
 }
 
@@ -179,6 +218,10 @@ install_root_helpers() {
   # Read-only logs (journal, Docker, /var/log) for the console's Logs window and
   # `meteorcli logs`, without putting the user in the root-equivalent docker group.
   install_root_helper meteorcli-logs /etc/sudoers.d/meteorcli-logs 'read device logs'
+  # Install / enable systemd units from a Deploy. The helper copies a
+  # caller-owned .service file and runs fixed systemctl argv (not arbitrary shell).
+  install_root_helper meteorcli-systemd /etc/sudoers.d/meteorcli-systemd \
+    'install systemd units from meteorcli without `sudo meteorcli`'
 }
 
 # meteorcli.service always uses /etc/meteorcli. If the operator enrolled as a
@@ -308,7 +351,7 @@ install_meteorcli() {
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: sudo ./installcli.sh installs the meteorcli-wg and meteorcli-logs helpers (wg0 and logs without root)."
+    echo "Tip: sudo ./installcli.sh installs meteorcli-wg, meteorcli-logs, and meteorcli-systemd helpers."
     echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
   fi
 }

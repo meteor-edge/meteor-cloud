@@ -74,6 +74,8 @@ class ArtifactResponse(BaseModel):
     created_by_user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    # Releases that install this artifact; it cannot be deleted while this is above zero.
+    release_count: int = 0
 
 
 class ArtifactDownloadLinkResponse(BaseModel):

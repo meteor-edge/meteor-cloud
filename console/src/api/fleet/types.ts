@@ -50,6 +50,10 @@ export type Release = {
   version: string;
   kind: ReleaseKind;
   artifact_id: string | null;
+  /** The artifact this release installs (null for image-only docker releases). */
+  artifact?: ReleaseArtifactBrief | null;
+  /** Deploys of this release; it cannot be deleted while above zero. */
+  deployment_count?: number;
   description: string | null;
   spec: Record<string, unknown>;
   created_by_user_id: string | null;
@@ -57,7 +61,16 @@ export type Release = {
   updated_at: string;
 };
 
+export type ReleaseArtifactBrief = {
+  id: string;
+  name: string;
+  version: string;
+  type: ArtifactType;
+  file_name: string;
+};
+
 export type ReleaseListParams = {
+  artifact_id?: string;
   kind?: ReleaseKind;
   version?: string;
   search?: string;
@@ -74,6 +87,18 @@ export type ReleaseCreatePayload = {
   spec: Record<string, unknown>;
 };
 
+export type DeploymentStatus = "in_progress" | "paused" | "completed" | "cancelled" | "failed";
+
+export type DeploymentDeviceStatus =
+  | "pending"
+  | "queued"
+  | "updating"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "skipped"
+  | "timed_out";
+
 export type DeploymentCounts = {
   pending: number;
   queued: number;
@@ -82,7 +107,39 @@ export type DeploymentCounts = {
   failed: number;
   cancelled: number;
   skipped: number;
+  timed_out: number;
   total: number;
+};
+
+/** One phase of a phased rollout: exactly one of count or percent (cumulative share). */
+export type RolloutPhase = {
+  count?: number | null;
+  percent?: number | null;
+  /** Soak time after the previous phase became terminal. */
+  delay_seconds?: number | null;
+};
+
+/** Rollout engine state the control plane keeps under rollout.state. */
+export type RolloutState = {
+  current_phase?: number;
+  phase_started_at?: string | null;
+  phase_completed_at?: string | null;
+  paused_reason?: "failure_threshold" | "manual" | null;
+  paused_at?: string | null;
+};
+
+export type DeploymentRollout = {
+  strategy?: "immediate" | "batched" | "phased" | string;
+  batch_size?: number | null;
+  delay_seconds?: number | null;
+  phases?: RolloutPhase[] | null;
+  max_concurrent?: number | null;
+  failure_threshold_percent?: number | null;
+  pending_timeout_seconds?: number | null;
+  activated_device_ids?: string[];
+  batch_released_at?: string;
+  state?: RolloutState;
+  [key: string]: unknown;
 };
 
 export type DeploymentDevice = {
@@ -90,13 +147,16 @@ export type DeploymentDevice = {
   deployment_id: string;
   device_id: string;
   device_name: string | null;
-  status: string;
+  status: DeploymentDeviceStatus;
   progress_percent: number | null;
   /** Runtime health the agent reports (healthy / unhealthy / unknown); null before any report. */
   health: string | null;
   reported_at: string | null;
   /** URL state, only when this Deploy created an endpoint for the device. */
   endpoint_availability: string | null;
+  /** When desired software was written for this device; null while queued or skipped. */
+  activated_at: string | null;
+  device_last_seen_at: string | null;
   previous_desired_release_id: string | null;
   last_error: string | null;
   created_at: string;
@@ -110,8 +170,8 @@ export type Deployment = {
   release: ReleaseSummary | null;
   name: string | null;
   target: Record<string, unknown>;
-  rollout: Record<string, unknown>;
-  status: string;
+  rollout: DeploymentRollout;
+  status: DeploymentStatus;
   provider: string;
   provider_ref: string | null;
   counts: DeploymentCounts;
@@ -120,6 +180,15 @@ export type Deployment = {
   created_at: string;
   updated_at: string;
   devices?: DeploymentDevice[] | null;
+};
+
+export type RollbackResponse = {
+  /** One Deploy per previous release; the largest group comes first. */
+  deployments: Deployment[];
+  /** Devices left as is because this Deploy was their first install. */
+  skipped: { device_id: string; device_name: string; reason: string }[];
+  /** Groups whose Deploy could not be created after an earlier group was; those devices did not roll back. */
+  failed?: { release_id: string; device_ids: string[]; code: string; message: string }[];
 };
 
 export type DeploymentListParams = {
@@ -141,12 +210,18 @@ export type DeploymentCreatePayload = {
     strategy?: string;
     batch_size?: number | null;
     delay_seconds?: number | null;
+    phases?: RolloutPhase[] | null;
+    max_concurrent?: number | null;
+    failure_threshold_percent?: number | null;
+    pending_timeout_seconds?: number | null;
   };
   endpoint?: {
     hostname: string;
     port: number;
     protocol?: string;
   } | null;
+  /** Reinstall on devices that already run this release healthily, instead of skipping them. */
+  force?: boolean;
 };
 
 export type ApplicationEndpoint = {
@@ -278,6 +353,8 @@ export type Artifact = {
   created_by_user_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Releases that install this artifact; it cannot be deleted while above zero. */
+  release_count?: number;
 };
 
 export type ArtifactListParams = {

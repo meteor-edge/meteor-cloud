@@ -122,3 +122,76 @@ def test_upgrade_takes_device_shell_away_from_operators(migrations_url: str) -> 
     finally:
         engine.dispose()
     assert remaining == 0
+
+
+def test_activated_at_backfill(migrations_url: str) -> None:
+    _alembic(migrations_url, "upgrade", "head")
+    _alembic(migrations_url, "downgrade", "0023_device_logs")
+    engine = create_engine(migrations_url)
+    released_at = "2026-01-02T03:04:05+00:00"
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users (id, email, full_name, password_hash)"
+                    " VALUES ('00000000-0000-0000-0000-0000000000a1', 'mig@example.com', 'Mig', 'x');"
+                    "INSERT INTO organizations (id, name, slug, created_by_user_id)"
+                    " VALUES ('00000000-0000-0000-0000-0000000000b1', 'Mig', 'mig',"
+                    " '00000000-0000-0000-0000-0000000000a1');"
+                    "INSERT INTO releases (id, organization_id, name, version, kind)"
+                    " VALUES ('00000000-0000-0000-0000-0000000000c1',"
+                    " '00000000-0000-0000-0000-0000000000b1', 'r', '1', 'systemd');"
+                    "INSERT INTO devices (id, organization_id, name)"
+                    " SELECT ('00000000-0000-0000-0000-00000000000' || n)::uuid,"
+                    " '00000000-0000-0000-0000-0000000000b1', 'd' || n FROM generate_series(1, 4) n;"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO deployments (id, organization_id, release_id, rollout, created_at)"
+                    " VALUES ('00000000-0000-0000-0000-0000000000e1',"
+                    " '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000c1',"
+                    " CAST(:batched AS jsonb), '2026-01-01T00:00:00+00:00'),"
+                    " ('00000000-0000-0000-0000-0000000000e2',"
+                    " '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000c1',"
+                    " '{\"strategy\": \"immediate\"}', '2026-01-01T00:00:00+00:00')"
+                ),
+                {
+                    "batched": (
+                        '{"strategy": "batched", "batch_size": 1, "batch_released_at": "'
+                        + released_at
+                        + '", "activated_device_ids": ["00000000-0000-0000-0000-000000000001"]}'
+                    )
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO deployment_devices (id, deployment_id, device_id, status) VALUES"
+                    " (gen_random_uuid(), '00000000-0000-0000-0000-0000000000e1',"
+                    " '00000000-0000-0000-0000-000000000001', 'succeeded'),"
+                    " (gen_random_uuid(), '00000000-0000-0000-0000-0000000000e1',"
+                    " '00000000-0000-0000-0000-000000000002', 'queued'),"
+                    " (gen_random_uuid(), '00000000-0000-0000-0000-0000000000e2',"
+                    " '00000000-0000-0000-0000-000000000003', 'pending'),"
+                    " (gen_random_uuid(), '00000000-0000-0000-0000-0000000000e2',"
+                    " '00000000-0000-0000-0000-000000000004', 'skipped')"
+                )
+            )
+        _alembic(migrations_url, "upgrade", "head")
+        with engine.connect() as connection:
+            rows = dict(
+                connection.execute(
+                    text(
+                        "SELECT device_id::text, to_char(activated_at AT TIME ZONE 'UTC',"
+                        " 'YYYY-MM-DD HH24:MI:SS') FROM deployment_devices"
+                    )
+                ).all()
+            )
+    finally:
+        engine.dispose()
+    assert rows == {
+        "00000000-0000-0000-0000-000000000001": "2026-01-02 03:04:05",
+        "00000000-0000-0000-0000-000000000002": None,
+        "00000000-0000-0000-0000-000000000003": "2026-01-01 00:00:00",
+        "00000000-0000-0000-0000-000000000004": None,
+    }

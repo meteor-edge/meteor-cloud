@@ -46,7 +46,10 @@ Deploy status. Traefik only routes **enabled** + **ready** endpoints. Manual
 endpoints (no workload or Deploy) are `ready` when the device’s WireGuard
 session is active, otherwise `offline`.
 
-Optional on Deploy create (exactly one target device):
+Optional on Deploy create (exactly one target device, and only for `docker` or
+`docker_compose` releases; a `systemd` release returns `422 endpoint_requires_container`
+because it declares no port. Publish a systemd app by hand from the device's
+endpoints panel if it serves HTTP):
 
 ```json
 "endpoint": { "port": 80 }                                   // suggested address
@@ -56,6 +59,25 @@ Optional on Deploy create (exactly one target device):
 The URL is not marked `ready` until that workload is in-sync and healthy. If
 the process stops after install, the Deploy stays Succeeded but the URL is no
 longer `ready` (Traefik stops routing it) until the agent reports it healthy again.
+
+### Port rules
+
+The upstream is `<device WireGuard IP>:<port>`, so `port` is the port **on the
+device**. For a docker release that is the host side of `host:container`
+(`"8080:80"` → publish `8080`). The API checks, on Deploy create:
+
+| Code | When |
+|------|------|
+| `reserved_port` | The port is the device SSH port. |
+| `endpoint_port_mismatch` | Docker release whose `ports` do not publish this host port on TCP, including a release with no fixed host port (`"80"` alone, or no `ports`). |
+| `endpoint_port_loopback` | Docker binds the port to `127.0.0.1`/`::1` only; WireGuard cannot reach it. |
+| `device_port_in_use` (409) | Another workload on a target device already uses the port: a docker host binding or another app's public address. Also raised for a docker release whose host ports clash, even without publishing. Devices that skip the release (no runtime for its kind) are not checked. A docker `ports` entry may span at most 1023 host ports (`invalid_release_spec` otherwise), so every bound port is checked. |
+
+The same workload never conflicts with itself: redeploying replaces it. If
+the app already has a public address on the device, the Deploy keeps that
+address and points it at the new Deploy instead of creating a second one.
+Compose and systemd apps only declare a port through their endpoint, so a port
+they bind without one is not checked; the agent reports the bind error.
 
 ## Reverse proxy
 
