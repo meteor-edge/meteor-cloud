@@ -78,7 +78,7 @@ def test_collect_inventory_tolerates_missing_system(monkeypatch) -> None:
     assert data["mac_addresses"] == []
 
 
-def test_primary_mac_prefers_default_route(monkeypatch, tmp_path) -> None:
+def test_primary_mac_stays_wired_when_the_default_route_is_wifi(monkeypatch, tmp_path) -> None:
     net = _net_dir(
         tmp_path,
         {
@@ -93,7 +93,7 @@ def test_primary_mac_prefers_default_route(monkeypatch, tmp_path) -> None:
         "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
         "wlan0 00000000 0101A8C0 0003 0 0 100 00000000 0 0 0\n",
     )
-    assert inventory.read_mac_addresses() == ["aa:bb:cc:dd:ee:02"]
+    assert inventory.read_mac_addresses() == ["aa:bb:cc:dd:ee:01"]
 
 
 def test_primary_mac_skips_virtual_prefers_eth(monkeypatch, tmp_path) -> None:
@@ -115,15 +115,7 @@ def test_primary_mac_falls_back_to_wifi(monkeypatch, tmp_path) -> None:
     assert inventory.read_mac_addresses() == ["aa:bb:cc:dd:ee:02"]
 
 
-def test_primary_mac_ignores_virtual_default_route(monkeypatch, tmp_path) -> None:
-    net = _net_dir(
-        tmp_path,
-        {"docker0": "aa:bb:cc:dd:ee:03", "eth0": "aa:bb:cc:dd:ee:01"},
-    )
-    _patch_net(
-        monkeypatch,
-        net,
-        "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
-        "docker0 00000000 0101A8C0 0003 0 0 0 00000000 0 0 0\n",
-    )
-    assert inventory.read_mac_addresses() == ["aa:bb:cc:dd:ee:01"]
+def test_primary_mac_ignores_virtual_interfaces_only_system(monkeypatch, tmp_path) -> None:
+    net = _net_dir(tmp_path, {"docker0": "aa:bb:cc:dd:ee:03"})
+    _patch_net(monkeypatch, net, None)
+    assert inventory.read_mac_addresses() == []

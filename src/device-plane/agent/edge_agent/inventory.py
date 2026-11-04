@@ -88,23 +88,12 @@ def _iface_mac(net_dir: Path, iface: str) -> str | None:
     return None
 
 
-def _default_ipv4_iface() -> str | None:
-    """Return the interface that owns the default IPv4 route, if any."""
-    content = _read_text("/proc/net/route")
-    if not content:
-        return None
-    for line in content.splitlines()[1:]:
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] == "00000000":
-            return parts[0]
-    return None
-
-
 def read_mac_addresses() -> list[str]:
     """Return the primary NIC MAC (at most one address).
 
-    Prefers the default IPv4 route's interface, then wired names
-    (``eth*`` / ``en*`` / ``end*``), then Wi-Fi. Virtual interfaces are skipped.
+    Prefers wired names (``eth*`` / ``en*`` / ``end*``), then Wi-Fi, then the first
+    name. Virtual interfaces are skipped. Routes are not used: this MAC identifies
+    the device, so it must not change when traffic moves from Ethernet to Wi-Fi.
     """
     net_dir = _sys_class_net()
     try:
@@ -120,9 +109,6 @@ def read_mac_addresses() -> list[str]:
             macs[iface] = address
     if not macs:
         return []
-    default_iface = _default_ipv4_iface()
-    if default_iface and default_iface in macs:
-        return [macs[default_iface]]
     chosen = min(macs, key=lambda name: (_iface_preference(name), name))
     return [macs[chosen]]
 

@@ -108,12 +108,26 @@ def _build_enroll_poll_rate_limiter() -> RateLimiter:
     )
 
 
+@lru_cache
+def _build_enroll_poll_ip_rate_limiter() -> RateLimiter:
+    settings = get_settings()
+    return _redis_rate_limiter(
+        limit=settings.enrollment_poll_ip_rate_limit_requests,
+        window_seconds=settings.enrollment_poll_rate_limit_window_seconds,
+        prefix="enroll_poll_ip_rl",
+    )
+
+
 def get_enroll_request_rate_limiter() -> RateLimiter:
     return _build_enroll_request_rate_limiter()
 
 
 def get_enroll_poll_rate_limiter() -> RateLimiter:
     return _build_enroll_poll_rate_limiter()
+
+
+def get_enroll_poll_ip_rate_limiter() -> RateLimiter:
+    return _build_enroll_poll_ip_rate_limiter()
 
 
 def get_current_api_key(
@@ -169,9 +183,11 @@ def enforce_enroll_poll_rate_limit(
     request: Request,
     payload: AgentEnrollPollRequest,
     limiter: Annotated[RateLimiter, Depends(get_enroll_poll_rate_limiter)],
+    ip_limiter: Annotated[RateLimiter, Depends(get_enroll_poll_ip_rate_limiter)],
 ) -> None:
     client_host = request.client.host if request.client else "unknown"
-    if not limiter.allow(f"{client_host}:{payload.request_id}"):
+    # Per request id alone would give a new bucket to every made-up id.
+    if not ip_limiter.allow(client_host) or not limiter.allow(f"{client_host}:{payload.request_id}"):
         raise RegistrationRateLimitError()
 
 

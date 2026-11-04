@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -75,7 +76,15 @@ class EnrollmentService:
         expires_at = now + timedelta(seconds=ttl) if ttl > 0 else None
         requested_name = payload.name.strip()[:255] if payload.name else None
 
-        existing = None if identity.is_empty else self._find_active_request(api_key.organization_id, identity)
+        primary_macs = [identity.primary_mac] if identity.primary_mac else []
+
+        existing = None
+        if not identity.is_empty:
+            # Concurrent submissions for one device must not both miss the row below.
+            self.session.execute(
+                select(func.pg_advisory_xact_lock(func.hashtextextended(str(api_key.organization_id), 0)))
+            )
+            existing = self._find_reusable_request(api_key, identity)
         if existing is not None:
             request = existing
             request.api_key_id = api_key.id
@@ -83,7 +92,7 @@ class EnrollmentService:
             request.claim_secret_prefix = claim.display_prefix
             request.requested_name = requested_name
             request.serial_number = identity.serial_number
-            request.mac_addresses = identity.mac_addresses
+            request.mac_addresses = primary_macs
             request.hostname = payload.hostname
             request.os_name = payload.os_name
             request.os_version = payload.os_version
@@ -105,7 +114,7 @@ class EnrollmentService:
                 claim_secret_prefix=claim.display_prefix,
                 requested_name=requested_name,
                 serial_number=identity.serial_number,
-                mac_addresses=identity.mac_addresses,
+                mac_addresses=primary_macs,
                 hostname=payload.hostname,
                 os_name=payload.os_name,
                 os_version=payload.os_version,
@@ -133,13 +142,22 @@ class EnrollmentService:
             expires_at=request.expires_at,
         )
 
-    def _find_active_request(
+    def _find_reusable_request(
         self,
-        organization_id,
+        api_key: EnrollmentApiKey,
         identity: DeviceIdentity,
     ) -> DeviceEnrollmentRequest | None:
-        for row in self.requests.list_active_unclaimed(organization_id=organization_id):
-            if identity.matches_request(row):
+        """The unclaimed request this submission may update and rotate the secret of.
+
+        A pending row still goes to an administrator, who sees the latest key and
+        inventory. An approved row is one poll away from a device credential, so only
+        the key and hardware that were approved may reuse it; anything else starts a
+        new pending request.
+        """
+        for row in self.requests.list_active_unclaimed(organization_id=api_key.organization_id):
+            if not identity.matches_request(row):
+                continue
+            if row.status == "pending" or (row.api_key_id == api_key.id and identity.same_hardware_as_request(row)):
                 return row
         return None
 

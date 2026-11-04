@@ -31,6 +31,7 @@ dist/
 .env.local
 .env.*.local
 .env.smoke
+.meteorenv
 
 # IDE
 .idea/

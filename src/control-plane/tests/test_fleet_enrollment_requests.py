@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 from uuid import UUID
 
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
-from app.devices.models import DeviceEnrollmentRequest
+from app.devices.dependencies import get_enroll_poll_ip_rate_limiter, get_enroll_poll_rate_limiter
+from app.devices.enrollment import EnrollmentService
+from app.devices.models import DeviceEnrollmentRequest, EnrollmentApiKey
+from app.devices.rate_limit import InMemoryRateLimiter
+from app.devices.schemas import AgentEnrollRequest
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
 
@@ -318,3 +324,125 @@ def test_reuse_keeps_approved_unclaimed_status(client: TestClient, db_session: S
     )
     assert claimed.status_code == 200
     assert claimed.json()["device_token"].startswith("dev_")
+
+
+def _approved_request(client: TestClient, db_session: Session, **inventory) -> tuple:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+    first = _enroll(client, key["api_key"], **inventory)
+    approved = client.post(
+        f"/api/v1/organizations/{org.id}/enrollment-requests/{first['request_id']}/approve",
+        headers=headers,
+        json={},
+    )
+    assert approved.status_code == 200, approved.text
+    return org, headers, key, first
+
+
+def _assert_original_can_still_claim(client: TestClient, first: dict) -> None:
+    claimed = client.post(
+        "/api/v1/agent/enroll/poll",
+        json={"request_id": first["request_id"], "claim_secret": first["claim_secret"]},
+    )
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()["device_token"].startswith("dev_")
+
+
+def test_other_key_cannot_take_over_an_approved_request(client: TestClient, db_session: Session) -> None:
+    org, headers, _key, first = _approved_request(client, db_session, mac_addresses=["aa:bb:cc:dd:ee:01"])
+    other_key = _create_key(client, org.id, headers, name="Other")
+
+    other = _enroll(client, other_key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+
+    assert other["request_id"] != first["request_id"]
+    assert other["status"] == "pending"
+    still_pending = client.post(
+        "/api/v1/agent/enroll/poll",
+        json={"request_id": other["request_id"], "claim_secret": other["claim_secret"]},
+    )
+    assert still_pending.json().get("device_token") is None
+    _assert_original_can_still_claim(client, first)
+
+
+def test_changed_mac_does_not_inherit_an_approval(client: TestClient, db_session: Session) -> None:
+    _org, _headers, key, first = _approved_request(
+        client, db_session, serial_number="SN-1", mac_addresses=["aa:bb:cc:dd:ee:01"]
+    )
+
+    other = _enroll(client, key["api_key"], serial_number="SN-1", mac_addresses=["aa:bb:cc:dd:ee:02"])
+
+    assert other["request_id"] != first["request_id"]
+    assert other["status"] == "pending"
+    _assert_original_can_still_claim(client, first)
+
+
+def test_changed_serial_does_not_inherit_an_approval(client: TestClient, db_session: Session) -> None:
+    _org, _headers, key, first = _approved_request(
+        client, db_session, serial_number="SN-1", mac_addresses=["aa:bb:cc:dd:ee:01"]
+    )
+
+    other = _enroll(client, key["api_key"], serial_number="SN-2", mac_addresses=["aa:bb:cc:dd:ee:01"])
+
+    assert other["request_id"] != first["request_id"]
+    assert other["status"] == "pending"
+
+
+def test_other_key_reuses_a_pending_request_and_shows_on_it(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+    other_key = _create_key(client, org.id, headers, name="Other")
+
+    first = _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+    second = _enroll(client, other_key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+
+    assert second["request_id"] == first["request_id"]
+    listed = client.get(f"/api/v1/organizations/{org.id}/enrollment-requests", headers=headers).json()
+    items = listed["items"] if isinstance(listed, dict) else listed
+    assert [item["enrollment_key_name"] for item in items] == ["Other"]
+
+
+def test_concurrent_submissions_create_one_request(client: TestClient, db_session: Session, engine) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key_id = UUID(_create_key(client, org.id, headers)["id"])
+    db_session.commit()
+    workers = 8
+    barrier = Barrier(workers)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def submit(_: int) -> str:
+        with factory() as session:
+            api_key = session.get(EnrollmentApiKey, key_id)
+            payload = AgentEnrollRequest(mac_addresses=["aa:bb:cc:dd:ee:01"])
+            barrier.wait(timeout=10)
+            return str(EnrollmentService(session).submit_request(api_key=api_key, payload=payload).request_id)
+
+    with ThreadPoolExecutor(workers) as pool:
+        request_ids = set(pool.map(submit, range(workers)))
+
+    assert len(request_ids) == 1
+    db_session.expire_all()
+    assert db_session.query(DeviceEnrollmentRequest).count() == 1
+
+
+def test_poll_is_capped_per_ip_across_request_ids(client: TestClient) -> None:
+    client.app.dependency_overrides[get_enroll_poll_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
+    ip_limiter = InMemoryRateLimiter(limit=2, window_seconds=60)
+    client.app.dependency_overrides[get_enroll_poll_ip_rate_limiter] = lambda: ip_limiter
+
+    statuses = [
+        client.post(
+            "/api/v1/agent/enroll/poll",
+            json={"request_id": f"00000000-0000-0000-0000-00000000000{index}", "claim_secret": "clm_x"},
+        ).status_code
+        for index in range(3)
+    ]
+
+    assert statuses == [401, 401, 429]

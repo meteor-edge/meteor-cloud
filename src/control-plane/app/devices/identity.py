@@ -1,8 +1,8 @@
 """Device identity normalization and duplicate detection.
 
-Duplicate detection uses hardware serial and the primary MAC (the first
-normalized address). Device ID is the platform identifier and is not a
-hardware signal.
+Devices match on hardware serial or any shared MAC. Enrollment requests store
+and match the primary MAC (the first normalized address). Device ID is the
+platform identifier and is not a hardware signal.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class DeviceIdentity:
         macs = normalize_macs(mac_addresses)
         return cls(
             serial_number=_clean(serial_number),
-            mac_addresses=macs[:1],
+            mac_addresses=macs,
         )
 
     @property
@@ -101,6 +101,17 @@ class DeviceIdentity:
         if primary and request.mac_addresses and primary in request.mac_addresses:
             return True
         return False
+
+    def same_hardware_as_request(self, request: DeviceEnrollmentRequest) -> bool:
+        """Whether both the serial and the primary MAC agree with the request.
+
+        Stricter than ``matches_request``: an approval is for the hardware the
+        administrator reviewed, so one matching signal is not enough to inherit it.
+        """
+        if self.serial_number != request.serial_number:
+            return False
+        stored = request.mac_addresses or []
+        return self.primary_mac in stored if self.primary_mac else not stored
 
 
 @dataclass(frozen=True)
