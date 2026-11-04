@@ -167,6 +167,11 @@ class EdgeClient:
             return result
         return []
 
+    def get_network(self, *, device_token: str) -> dict[str, Any]:
+        """Fetch desired WiFi settings for this device (may include PSK)."""
+        result = self._get("/api/v1/agent/network", bearer=device_token)
+        return result if isinstance(result, dict) else {}
+
     def download_artifact(
         self,
         *,

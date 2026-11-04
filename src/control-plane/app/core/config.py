@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     app_debug: bool = Field(default=False, alias="APP_DEBUG")
     app_secret_key: str = Field(default="change-me", alias="APP_SECRET_KEY")
+    # Optional dedicated key for device secrets (WiFi PSK). Falls back to APP_SECRET_KEY.
+    device_secrets_key: str = Field(default="", alias="DEVICE_SECRETS_KEY")
 
     backend_host: str = Field(default="0.0.0.0", alias="BACKEND_HOST")
     backend_port: int = Field(default=8000, alias="BACKEND_PORT")

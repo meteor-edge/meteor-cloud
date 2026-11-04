@@ -258,6 +258,19 @@ class RegistrationService:
                     reports=reports,
                     commit=False,
                 )
+        if payload.wifi_report:
+            from app.devices.schemas import AgentWifiReport
+            from app.devices.wifi import DeviceWifiService
+
+            try:
+                wifi_report = AgentWifiReport.model_validate(payload.wifi_report)
+            except Exception:
+                wifi_report = None
+            if wifi_report is not None:
+                DeviceWifiService(self.session, settings=self.settings).apply_report(
+                    device=device,
+                    report=wifi_report,
+                )
 
         self.session.commit()
         self.session.refresh(device)

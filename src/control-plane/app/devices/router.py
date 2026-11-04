@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from app.deployments.software_dependencies import DeviceSoftwareSvc
 from app.deployments.software_schemas import DeviceSoftwareResponse
-from app.devices.dependencies import FleetSvc
+from app.devices.dependencies import FleetSvc, WifiSvc
 from app.devices.schemas import (
     DeviceCredentialResponse,
     DeviceEnrollmentRequestResponse,
@@ -23,6 +23,8 @@ from app.devices.schemas import (
     DeviceTypeResponse,
     DeviceTypeUpdateRequest,
     DeviceUpdateRequest,
+    DeviceWifiResponse,
+    DeviceWifiUpdateRequest,
     EnrollmentApiKeyCreateRequest,
     EnrollmentApiKeyCreateResponse,
     EnrollmentApiKeyResponse,
@@ -324,6 +326,42 @@ def get_device(
     service: FleetSvc,
 ) -> DeviceResponse:
     return service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.get("/devices/{device_id}/wifi", response_model=DeviceWifiResponse | None)
+def get_device_wifi(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    wifi: WifiSvc,
+) -> DeviceWifiResponse | None:
+    return wifi.get(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.put("/devices/{device_id}/wifi", response_model=DeviceWifiResponse)
+def put_device_wifi(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    payload: DeviceWifiUpdateRequest,
+    current_user: CurrentUser,
+    wifi: WifiSvc,
+) -> DeviceWifiResponse:
+    return wifi.upsert(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+        payload=payload,
+    )
+
+
+@router.delete("/devices/{device_id}/wifi", status_code=204)
+def delete_device_wifi(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    wifi: WifiSvc,
+) -> None:
+    wifi.clear(actor=current_user, organization_id=organization_id, device_id=device_id)
 
 
 @router.get("/devices/{device_id}/software", response_model=list[DeviceSoftwareResponse])

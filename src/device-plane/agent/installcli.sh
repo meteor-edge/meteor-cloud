@@ -153,7 +153,8 @@ uninstall() {
   if [[ "${EUID}" -eq 0 ]]; then
     rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg \
       /etc/sudoers.d/meteorcli-logs /usr/local/libexec/meteorcli-logs \
-      /etc/sudoers.d/meteorcli-systemd /usr/local/libexec/meteorcli-systemd
+      /etc/sudoers.d/meteorcli-systemd /usr/local/libexec/meteorcli-systemd \
+      /etc/sudoers.d/meteorcli-wifi /usr/local/libexec/meteorcli-wifi
     remove_config_dir /etc/meteorcli
     if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
       user_home="$(getent passwd "${SUDO_USER}" | cut -d: -f6 || true)"
@@ -222,6 +223,9 @@ install_root_helpers() {
   # caller-owned .service file and runs fixed systemctl argv (not arbitrary shell).
   install_root_helper meteorcli-systemd /etc/sudoers.d/meteorcli-systemd \
     'install systemd units from meteorcli without `sudo meteorcli`'
+  # Apply desired WiFi via NetworkManager without granting unrestricted sudo.
+  install_root_helper meteorcli-wifi /etc/sudoers.d/meteorcli-wifi \
+    'apply WiFi settings from meteorcli without `sudo meteorcli`'
 }
 
 # meteorcli.service always uses /etc/meteorcli. If the operator enrolled as a
@@ -351,7 +355,7 @@ install_meteorcli() {
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: sudo ./installcli.sh installs meteorcli-wg, meteorcli-logs, and meteorcli-systemd helpers."
+    echo "Tip: sudo ./installcli.sh installs meteorcli-wg, meteorcli-logs, meteorcli-systemd, and meteorcli-wifi helpers."
     echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
   fi
 }

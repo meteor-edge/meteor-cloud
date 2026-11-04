@@ -52,6 +52,7 @@ files only, so `meteorcli run` can stay unprivileged:
 - `/usr/local/libexec/meteorcli-logs` — read-only logs for the console Logs
   window and `meteorcli logs` (see [Device logs](../../../docs/fleet/logs.md))
 - `/usr/local/libexec/meteorcli-systemd` — install a Deployed `.service` unit
+- `/usr/local/libexec/meteorcli-wifi` — apply post-enroll WiFi via NetworkManager
   under `/etc/systemd/system` (does not overwrite `meteorcli.service`)
 
 When the control plane has WireGuard enabled, `run` registers this device’s

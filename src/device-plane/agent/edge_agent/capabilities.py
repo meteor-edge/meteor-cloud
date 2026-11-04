@@ -10,6 +10,7 @@ def collect_capabilities() -> dict[str, Any]:
     from runtime.compose import compose_available
     from runtime.docker import docker_available
     from runtime.systemd import systemd_available
+    from runtime.wifi import wifi_available
 
     from edge_agent.wireguard import sshd_available, wireguard_available
 
@@ -19,4 +20,5 @@ def collect_capabilities() -> dict[str, Any]:
         "docker_compose": compose_available(),
         "wireguard": wireguard_available(),
         "ssh": sshd_available(),
+        "wifi": wifi_available(),
     }

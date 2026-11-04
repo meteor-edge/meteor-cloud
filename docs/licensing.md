@@ -14,6 +14,7 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | EMQX **5.8.6** (single node) | Optional MQTT | Apache 2.0 | **Yes** | OK as shipped. Details: [MQTT → EMQX licensing](fleet/mqtt.md#emqx-version-and-licensing) |
 | Filesystem or customer S3 / R2 / GCS | Artifacts | N/A / cloud contract | **Yes** | **Preferred** production storage |
 | WireGuard / Docker | VPN / runtime | GPL family / Apache 2.0 | **Yes** | Normal host infra |
+| cryptography (PyPI) | Device secret encryption (WiFi PSK) | Apache-2.0 / BSD | **Yes** | Explicit control-plane dependency; already pulled by `python-jose[cryptography]` |
 | Prometheus / Alertmanager / node_exporter | Metrics / alerts | Apache 2.0 | **Yes** | Optional ops stack; fine |
 | Grafana / Loki / Alloy | Ops dashboards / logs | AGPLv3 | **Yes, with limits** | Optional **operator** tools on **localhost / SSH** only. Off by default. **Not** a customer-facing MeteorCloud UI feature. See [below](#grafana--loki--alloy-yes-with-limits) |
 | MinIO | S3-compatible artifacts | [AGPLv3](https://github.com/minio/minio) | **No (as default)** | Dev/lab only. Production Ansible/Helm default to **filesystem** or real S3. Do not make MinIO the commercial default |

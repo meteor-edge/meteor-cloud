@@ -22,6 +22,7 @@ from app.devices.repository import DeviceRepository, EnrollmentApiKeyRepository
 from app.devices.schemas import AgentEnrollPollRequest
 from app.devices.service import FleetService
 from app.devices.tokens import API_KEY_PREFIX, DEVICE_TOKEN_PREFIX, hash_token
+from app.devices.wifi import DeviceWifiService
 
 device_bearer_scheme = HTTPBearer(auto_error=False)
 api_key_bearer_scheme = HTTPBearer(auto_error=False)
@@ -41,6 +42,13 @@ def get_fleet_service(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> FleetService:
     return FleetService(session, settings=settings)
+
+
+def get_wifi_service(
+    session: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> DeviceWifiService:
+    return DeviceWifiService(session, settings=settings)
 
 
 def get_registration_service(
@@ -226,6 +234,7 @@ def get_current_device(
 
 
 FleetSvc = Annotated[FleetService, Depends(get_fleet_service)]
+WifiSvc = Annotated[DeviceWifiService, Depends(get_wifi_service)]
 RegistrationSvc = Annotated[RegistrationService, Depends(get_registration_service)]
 EnrollmentSvc = Annotated[EnrollmentService, Depends(get_enrollment_service)]
 CurrentDevice = Annotated[Device, Depends(get_current_device)]

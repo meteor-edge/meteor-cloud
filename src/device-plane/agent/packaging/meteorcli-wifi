@@ -1,0 +1,188 @@
+#!/usr/bin/python3 -I
+"""Root helper: apply a WiFi profile via NetworkManager (nmcli).
+
+installcli.sh installs this root-owned and grants passwordless sudo for this file
+only. JSON on stdin; JSON on stdout. No shell, fixed PATH, explicit timeouts.
+
+  {"op":"inspect"}
+  {"op":"apply","ssid":"...","psk":"...","interface":"wlan0","hidden":false}
+
+Does not delete other WiFi or Ethernet connections. On apply failure, attempts to
+reactivate the previously active connection.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from typing import Any
+
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+NMCLI = "/usr/bin/nmcli"
+TIMEOUT = 45
+SSID_RE = re.compile(r"^[\x20-\x7e]{1,32}$")
+IFACE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,31}$")
+CONN_PREFIX = "meteorcloud-"
+MAX_INPUT = 16 * 1024
+
+
+def out(payload: dict[str, Any], *, code: int = 0) -> None:
+    sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    raise SystemExit(code)
+
+
+def fail(message: str, *, code: int = 2) -> None:
+    out({"ok": False, "error": message}, code=code)
+
+
+def run(argv: list[str], *, timeout: int = TIMEOUT, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    env = {"PATH": SAFE_PATH, "LANG": "C", "LC_ALL": "C"}
+    return subprocess.run(
+        argv,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+        input=input_text,
+    )
+
+
+def validate_spec(data: dict[str, Any]) -> tuple[str, str, str, bool]:
+    ssid = data.get("ssid")
+    psk = data.get("psk")
+    iface = data.get("interface") or "wlan0"
+    hidden = bool(data.get("hidden") or False)
+    if not isinstance(ssid, str) or not SSID_RE.match(ssid):
+        fail("invalid ssid")
+    if not isinstance(psk, str) or not (8 <= len(psk) <= 63):
+        fail("invalid psk")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in psk):
+        fail("invalid psk")
+    if not isinstance(iface, str) or not IFACE_RE.match(iface):
+        fail("invalid interface")
+    extra = set(data) - {"op", "ssid", "psk", "interface", "hidden"}
+    if extra:
+        fail("unknown fields")
+    return ssid, psk, iface, hidden
+
+
+def connection_name(ssid: str) -> str:
+    # Keep nmcli connection id short and filesystem-safe.
+    safe = re.sub(r"[^A-Za-z0-9._+-]+", "-", ssid).strip("-")[:40] or "wifi"
+    return f"{CONN_PREFIX}{safe}"
+
+
+def active_connection() -> str | None:
+    proc = run([NMCLI, "-t", "-f", "NAME,DEVICE,TYPE", "connection", "show", "--active"])
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        parts = line.split(":")
+        if len(parts) >= 3 and parts[2] in {"802-11-wireless", "wifi", "802-3-ethernet", "ethernet"}:
+            return parts[0] or None
+    return None
+
+
+def inspect() -> None:
+    if not os.path.isfile(NMCLI) or not os.access(NMCLI, os.X_OK):
+        out({"ok": True, "nmcli": False, "wifi": False})
+    wifi = False
+    proc = run([NMCLI, "-t", "-f", "DEVICE,TYPE", "device", "status"])
+    if proc.returncode == 0:
+        for line in proc.stdout.splitlines():
+            if ":wifi" in line or line.endswith(":802-11-wireless"):
+                wifi = True
+                break
+    out({"ok": True, "nmcli": True, "wifi": wifi})
+
+
+def apply(ssid: str, psk: str, iface: str, hidden: bool) -> None:
+    if not os.path.isfile(NMCLI) or not os.access(NMCLI, os.X_OK):
+        fail("nmcli not available")
+    previous = active_connection()
+    name = connection_name(ssid)
+
+    # Delete only our own previous connection with this exact name (idempotent upsert).
+    run([NMCLI, "-t", "connection", "delete", "id", name], timeout=15)
+
+    add_cmd = [
+        NMCLI,
+        "connection",
+        "add",
+        "type",
+        "wifi",
+        "ifname",
+        iface,
+        "con-name",
+        name,
+        "ssid",
+        ssid,
+        "wifi-sec.key-mgmt",
+        "wpa-psk",
+        "wifi-sec.psk",
+        psk,
+        "connection.autoconnect",
+        "yes",
+    ]
+    if hidden:
+        add_cmd.extend(["wifi.hidden", "yes"])
+    added = run(add_cmd)
+    if added.returncode != 0:
+        fail((added.stderr or added.stdout or "nmcli add failed").strip()[:500])
+
+    # Restrict permissions on the connection file when present.
+    path = f"/etc/NetworkManager/system-connections/{name}.nmconnection"
+    try:
+        if os.path.isfile(path) and not os.path.islink(path):
+            os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+    up = run([NMCLI, "connection", "up", "id", name], timeout=TIMEOUT)
+    if up.returncode != 0:
+        if previous and previous != name:
+            run([NMCLI, "connection", "up", "id", previous], timeout=TIMEOUT)
+        fail((up.stderr or up.stdout or "nmcli up failed").strip()[:500])
+
+    # Brief settle; verify the connection is active.
+    time.sleep(2)
+    active = active_connection()
+    if active != name:
+        if previous and previous != name:
+            run([NMCLI, "connection", "up", "id", previous], timeout=TIMEOUT)
+        fail("wifi connection did not become active")
+
+    out({"ok": True, "connection": name, "ssid": ssid, "interface": iface, "previous": previous})
+
+
+def main() -> None:
+    raw = sys.stdin.read(MAX_INPUT + 1)
+    if len(raw) > MAX_INPUT:
+        fail("input too large")
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        fail("invalid json")
+    if not isinstance(data, dict):
+        fail("invalid json")
+    op = data.get("op")
+    if op == "inspect":
+        inspect()
+    if op == "apply":
+        ssid, psk, iface, hidden = validate_spec(data)
+        apply(ssid, psk, iface, hidden)
+    fail("unknown op")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.TimeoutExpired:
+        fail("nmcli timed out", code=3)
+    except Exception as exc:  # noqa: BLE001 — never crash the caller with a traceback as exit 1 unexplained
+        fail(str(exc)[:500], code=1)

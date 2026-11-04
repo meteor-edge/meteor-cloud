@@ -276,6 +276,40 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
 
+class DeviceWifiSettings(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Desired WiFi profile for one device (post-enroll).
+
+    ``psk_ciphertext`` is Fernet-encrypted; org APIs never return plaintext.
+    The agent reads plaintext only with its own device token.
+    """
+
+    __tablename__ = "device_wifi_settings"
+    __table_args__ = (
+        UniqueConstraint("device_id", name="uq_device_wifi_settings_device_id"),
+        Index("ix_device_wifi_settings_organization_id", "organization_id"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    device_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("devices.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ssid: Mapped[str] = mapped_column(String(32), nullable=False)
+    interface: Mapped[str] = mapped_column(String(32), nullable=False, default="wlan0")
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    psk_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    applied_ssid: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    applied_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sync_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class EnrollmentApiKey(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """An organization-scoped API key used by the CLI to submit device-initiated
     enrollment requests.

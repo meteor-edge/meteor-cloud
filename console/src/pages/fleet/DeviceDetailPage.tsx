@@ -23,6 +23,7 @@ import { DeviceMqttStatus } from "@/components/fleet/DeviceMqttStatus";
 import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceResourceMeters } from "@/components/fleet/DeviceResourceMeters";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
+import { DeviceWifiPanel } from "@/components/fleet/DeviceWifiPanel";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
@@ -317,6 +318,18 @@ export function DeviceDetailPage() {
           />
         )}
           </div>
+
+          {token && (
+            <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+              <h2 className="text-lg font-semibold">WiFi</h2>
+              <DeviceWifiPanel
+                token={token}
+                organizationId={organizationId}
+                deviceId={deviceId}
+                canManage={canManage}
+              />
+            </div>
+          )}
 
           {token && (
             <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">

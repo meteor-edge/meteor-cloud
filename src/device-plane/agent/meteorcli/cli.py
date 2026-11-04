@@ -35,6 +35,7 @@ from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
 from edge_agent.registration import register
 from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_under_systemd, service_state
+from edge_agent.network import reconcile_network
 from edge_agent.software import reconcile_software
 from meteorcli import __version__
 from meteorcli.config import (
@@ -642,6 +643,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
             logger.warning("Could not give %s back to the sudo user", paths.config_path.parent)
         if reports:
             payload["software_report"] = reports
+        try:
+            wifi_report = reconcile_network(client, device_token, paths.config_path.parent)
+        except Exception:
+            logger.exception("WiFi reconcile failed; continuing")
+            wifi_report = None
+        if wifi_report:
+            payload["wifi_report"] = wifi_report
         return payload
 
     if args.once:

@@ -20,6 +20,7 @@ from app.devices.models import (
     DeviceEnrollmentRequest,
     DeviceGroup,
     DeviceType,
+    DeviceWifiSettings,
     EnrollmentApiKey,
     RegistrationToken,
 )
@@ -424,3 +425,21 @@ class DeviceEnrollmentRequestRepository:
         self.session.add(request)
         self.session.flush()
         return request
+
+
+class DeviceWifiSettingsRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def get_for_device(self, *, device_id: uuid.UUID) -> DeviceWifiSettings | None:
+        statement = select(DeviceWifiSettings).where(DeviceWifiSettings.device_id == device_id)
+        return self.session.scalar(statement)
+
+    def upsert(self, row: DeviceWifiSettings) -> DeviceWifiSettings:
+        self.session.add(row)
+        self.session.flush()
+        return row
+
+    def delete(self, row: DeviceWifiSettings) -> None:
+        self.session.delete(row)
+        self.session.flush()

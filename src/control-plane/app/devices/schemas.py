@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.devices.status import ConnectivityStatus
@@ -335,6 +337,8 @@ class AgentHeartbeatRequest(BaseModel):
     capabilities: dict[str, Any] = Field(default_factory=dict)
     # Installed / sync status for known workloads; unknown keys are ignored.
     software_report: list[dict[str, Any]] = Field(default_factory=list)
+    # Optional WiFi apply report (additive; older agents omit it).
+    wifi_report: dict[str, Any] | None = None
 
 
 class AgentHeartbeatResponse(BaseModel):
@@ -496,3 +500,75 @@ class AgentEnrollPollResponse(BaseModel):
     heartbeat_interval_seconds: int | None = None
     mqtt: MqttConnectInfo | None = None
     rejection_reason: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Device WiFi (post-enroll network settings)
+# --------------------------------------------------------------------------- #
+_SSID_RE = re.compile(r"^[\x20-\x7e]{1,32}$")
+_IFACE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,31}$")
+
+
+class DeviceWifiUpdateRequest(BaseModel):
+    ssid: str = Field(min_length=1, max_length=32)
+    psk: str = Field(min_length=8, max_length=63)
+    interface: str = Field(default="wlan0", min_length=1, max_length=32)
+    hidden: bool = False
+
+    @field_validator("ssid")
+    @classmethod
+    def _ssid(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned or not _SSID_RE.match(cleaned):
+            raise ValueError("ssid must be 1–32 printable ASCII characters")
+        return cleaned
+
+    @field_validator("psk")
+    @classmethod
+    def _psk(cls, value: str) -> str:
+        # WPA2 PSK passphrase length; reject control characters.
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+            raise ValueError("psk must not contain control characters")
+        return value
+
+    @field_validator("interface")
+    @classmethod
+    def _iface(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not _IFACE_RE.match(cleaned):
+            raise ValueError("interface name is invalid")
+        return cleaned
+
+
+class DeviceWifiResponse(BaseModel):
+    """Org-facing WiFi settings. Never includes plaintext PSK."""
+
+    device_id: uuid.UUID
+    ssid: str
+    interface: str
+    hidden: bool
+    psk_set: bool
+    revision: int
+    applied_ssid: str | None = None
+    applied_revision: int | None = None
+    sync_status: str | None = None
+    sync_error: str | None = None
+
+
+class AgentWifiDesiredResponse(BaseModel):
+    """Device-token response; includes PSK for apply."""
+
+    configured: bool
+    ssid: str | None = None
+    psk: str | None = None
+    interface: str | None = None
+    hidden: bool | None = None
+    revision: int | None = None
+
+
+class AgentWifiReport(BaseModel):
+    revision: int
+    applied_ssid: str | None = None
+    sync_status: Literal["in_sync", "pending", "failed", "cleared"]
+    sync_error: str | None = Field(default=None, max_length=2000)
+

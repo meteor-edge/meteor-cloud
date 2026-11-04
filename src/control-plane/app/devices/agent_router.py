@@ -19,6 +19,7 @@ from app.devices.dependencies import (
     CurrentDevice,
     EnrollmentSvc,
     RegistrationSvc,
+    WifiSvc,
     enforce_enroll_poll_rate_limit,
     enforce_enroll_request_rate_limit,
     enforce_registration_rate_limit,
@@ -33,6 +34,7 @@ from app.devices.schemas import (
     AgentHeartbeatResponse,
     AgentRegisterRequest,
     AgentRegisterResponse,
+    AgentWifiDesiredResponse,
 )
 from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
 
@@ -98,6 +100,15 @@ def agent_list_software(
 ) -> list[DesiredSoftwareItem]:
     """Return current desired software for this device (MQTT wake-up / poll)."""
     return software.list_desired_for_agent(device_id=device.id)
+
+
+@router.get("/network", response_model=AgentWifiDesiredResponse)
+def agent_desired_network(
+    device: CurrentDevice,
+    wifi: WifiSvc,
+) -> AgentWifiDesiredResponse:
+    """Return desired WiFi settings for this device (includes PSK)."""
+    return wifi.desired_for_agent(device=device)
 
 
 @router.get("/artifacts/{artifact_id}/download")

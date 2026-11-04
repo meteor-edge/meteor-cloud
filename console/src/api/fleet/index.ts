@@ -11,3 +11,4 @@ export * from "@/api/fleet/releases";
 export * from "@/api/fleet/software";
 export * from "@/api/fleet/deployments";
 export * from "@/api/fleet/endpoints";
+export * from "@/api/fleet/wifi";

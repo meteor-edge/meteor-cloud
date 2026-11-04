@@ -33,6 +33,7 @@ How to use the product day to day.
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) · [Rollout strategies](fleet/deployments.md#rollout-strategies) |
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
+| Device WiFi (post-enroll) | [Device WiFi](fleet/device-wifi.md) |
 | Device logs (journal, systemd, Docker, nginx) | [Device logs](fleet/logs.md) |
 | Public app URLs | [Endpoints](fleet/endpoints.md) |
 | Operator console | [Console](console.md) |
