@@ -77,15 +77,42 @@ def connection_name(ssid: str) -> str:
     return f"{CONN_PREFIX}{safe}"
 
 
-def active_connection() -> str | None:
-    proc = run([NMCLI, "-t", "-f", "NAME,DEVICE,TYPE", "connection", "show", "--active"])
+def _unescape_nmcli(value: str) -> str:
+    # nmcli -t escapes ':' as '\:' in field values.
+    return value.replace("\\:", ":")
+
+
+def connection_on_device(iface: str) -> str | None:
+    """Return the active connection name bound to ``iface``, if any."""
+    proc = run([NMCLI, "-t", "-f", "GENERAL.CONNECTION", "device", "show", iface], timeout=15)
     if proc.returncode != 0:
         return None
     for line in proc.stdout.splitlines():
-        parts = line.split(":")
-        if len(parts) >= 3 and parts[2] in {"802-11-wireless", "wifi", "802-3-ethernet", "ethernet"}:
-            return parts[0] or None
+        if not line.startswith("GENERAL.CONNECTION:"):
+            continue
+        value = _unescape_nmcli(line.split(":", 1)[1].strip())
+        if value and value != "--":
+            return value
     return None
+
+
+def connection_is_active(name: str) -> bool:
+    """True when ``name`` appears in the active connection list (WiFi or otherwise)."""
+    proc = run([NMCLI, "-t", "-f", "NAME", "connection", "show", "--active"], timeout=15)
+    if proc.returncode != 0:
+        return False
+    for line in proc.stdout.splitlines():
+        if _unescape_nmcli(line.strip()) == name:
+            return True
+    return False
+
+
+def prepare_radio() -> None:
+    """Best-effort: unblock soft-rfkill and enable NM WiFi radio."""
+    rfkill = "/usr/sbin/rfkill"
+    if os.path.isfile(rfkill) and os.access(rfkill, os.X_OK):
+        run([rfkill, "unblock", "wifi"], timeout=10)
+    run([NMCLI, "radio", "wifi", "on"], timeout=15)
 
 
 def inspect() -> None:
@@ -104,8 +131,17 @@ def inspect() -> None:
 def apply(ssid: str, psk: str, iface: str, hidden: bool) -> None:
     if not os.path.isfile(NMCLI) or not os.access(NMCLI, os.X_OK):
         fail("nmcli not available")
-    previous = active_connection()
+    if iface.startswith("eth") or iface.startswith("en"):
+        fail("interface must be a wifi device (e.g. wlan0), not ethernet")
+
+    prepare_radio()
+    # Only remember/restore the profile that was on this wifi iface — never ethernet.
+    previous = connection_on_device(iface)
     name = connection_name(ssid)
+
+    # Already on the desired profile (e.g. retry after a false-negative verify).
+    if connection_is_active(name) and connection_on_device(iface) == name:
+        out({"ok": True, "connection": name, "ssid": ssid, "interface": iface, "previous": previous})
 
     # Delete only our own previous connection with this exact name (idempotent upsert).
     run([NMCLI, "-t", "connection", "delete", "id", name], timeout=15)
@@ -149,15 +185,24 @@ def apply(ssid: str, psk: str, iface: str, hidden: bool) -> None:
             run([NMCLI, "connection", "up", "id", previous], timeout=TIMEOUT)
         fail((up.stderr or up.stdout or "nmcli up failed").strip()[:500])
 
-    # Brief settle; verify the connection is active.
-    time.sleep(2)
-    active = active_connection()
-    if active != name:
-        if previous and previous != name:
-            run([NMCLI, "connection", "up", "id", previous], timeout=TIMEOUT)
-        fail("wifi connection did not become active")
+    # Settle, then verify THIS wifi profile — ethernet may still be the "primary" route.
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if connection_is_active(name) and connection_on_device(iface) == name:
+            out(
+                {
+                    "ok": True,
+                    "connection": name,
+                    "ssid": ssid,
+                    "interface": iface,
+                    "previous": previous,
+                }
+            )
+        time.sleep(1)
 
-    out({"ok": True, "connection": name, "ssid": ssid, "interface": iface, "previous": previous})
+    if previous and previous != name:
+        run([NMCLI, "connection", "up", "id", previous], timeout=TIMEOUT)
+    fail("wifi connection did not become active on " + iface)
 
 
 def main() -> None:
