@@ -315,7 +315,7 @@ observability-check: ## Validate Prometheus, Loki and Alertmanager config and al
 	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability:/cfg:ro \
 		$(OBS_IMAGES_ALLOY) fmt /cfg/config.alloy >/dev/null
 	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability/alertmanager:/cfg:ro --entrypoint amtool \
-		$(OBS_IMAGES_ALERTMANAGER) check-config /cfg/alertmanager.yml /cfg/alertmanager.webhook.yml
+		$(OBS_IMAGES_ALERTMANAGER) check-config /cfg/alertmanager.yml /cfg/alertmanager.webhook.yml /cfg/alertmanager.webhook-heartbeat.yml
 
 compose-smoke: ## Start the minimal production Compose stack, smoke-test it, remove it
 	IMAGE_TAG=$(IMAGE_TAG) ./scripts/compose-smoke.sh

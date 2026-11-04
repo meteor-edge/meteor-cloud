@@ -10,8 +10,8 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
-    # Watchdog always fires. Send it to a dead-man's-switch service instead of the main
-    # webhook by adding a receiver here (see docs/observability.md#watchdog).
+    # Watchdog always fires. alertmanager.webhook-heartbeat.yml sends it to a
+    # dead-man's-switch service instead (see docs/observability.md#watchdog).
     - matchers: [alertname="Watchdog"]
       receiver: "null"
 
@@ -24,4 +24,6 @@ receivers:
 
 inhibit_rules:
   - source_matchers: [alertname="ControlPlaneDown"]
-    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency"]
+    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency|UnhandledExceptions"]
+  - source_matchers: [alertname="DatabaseDown"]
+    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency|UnhandledExceptions|DeploySweeperFailing"]

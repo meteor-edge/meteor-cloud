@@ -278,11 +278,30 @@
       register: platform_alertmanager_secret
       when: observability_alert_webhook_url | length > 0
 
+    - name: Write the alert heartbeat URL
+      ansible.builtin.copy:
+        content: "{{ observability_alert_heartbeat_url }}"
+        dest: "{{ platform_root }}/secrets/alertmanager/heartbeat_url"
+        owner: "65534"
+        group: "65534"
+        mode: "0600"
+      no_log: true
+      register: platform_alertmanager_heartbeat_secret
+      when: observability_alert_webhook_url | length > 0 and observability_alert_heartbeat_url | length > 0
+
 - name: Remove a stale alert webhook URL
   ansible.builtin.file:
     path: "{{ platform_root }}/secrets/alertmanager/webhook_url"
     state: absent
   when: not (observability_enabled | bool) or observability_alert_webhook_url | length == 0
+
+- name: Remove a stale alert heartbeat URL
+  ansible.builtin.file:
+    path: "{{ platform_root }}/secrets/alertmanager/heartbeat_url"
+    state: absent
+  when: >-
+    not (observability_enabled | bool) or observability_alert_webhook_url | length == 0
+    or observability_alert_heartbeat_url | length == 0
 
 - name: Render Compose environment file
   ansible.builtin.template:

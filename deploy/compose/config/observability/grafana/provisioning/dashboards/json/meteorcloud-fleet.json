@@ -254,7 +254,7 @@
     {
       "id": 7,
       "type": "stat",
-      "title": "Deploys running",
+      "title": "Deploys running / paused",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -272,7 +272,17 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(meteorcloud_deployments{status=\"in_progress\"})"
+          "expr": "max(meteorcloud_deployments{status=\"in_progress\"})",
+          "legendFormat": "running"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(meteorcloud_deployments{status=\"paused\"})",
+          "legendFormat": "paused"
         }
       ],
       "options": {

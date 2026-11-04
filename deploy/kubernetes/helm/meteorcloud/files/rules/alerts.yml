@@ -44,6 +44,23 @@ groups:
           summary: "Control plane API is not answering scrapes"
           description: "Prometheus cannot scrape the control plane /metrics endpoint."
           runbook: "docs/observability.md#controlplanedown"
+      - alert: DatabaseDown
+        expr: max(meteorcloud_database_up) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Control plane cannot reach PostgreSQL"
+          description: "The API answers scrapes but its fleet query fails: logins, heartbeats and Deploys are failing."
+          runbook: "docs/observability.md#databasedown"
+      - alert: UnhandledExceptions
+        expr: sum(increase(meteorcloud_unhandled_exceptions_total[10m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Control plane requests are crashing"
+          description: "{{ $value | humanize }} requests ended in an unhandled exception in the last 10 minutes."
+          runbook: "docs/observability.md#unhandledexceptions"
 
   - name: meteorcloud-data-plane
     rules:
@@ -100,6 +117,23 @@ groups:
           summary: "A Deploy failed in the last hour"
           description: "{{ $value | humanize }} Deploy(s) finished as failed in the last hour."
           runbook: "docs/observability.md#deploymentfailures"
+      - alert: DeployPaused
+        expr: max(meteorcloud_deployments{status="paused"}) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A Deploy has been paused for 30 minutes"
+          description: "{{ $value | humanize }} Deploy(s) are paused, by an operator or by their failure threshold."
+          runbook: "docs/observability.md#deploypaused"
+      - alert: DeploySweeperFailing
+        expr: sum(increase(meteorcloud_deploy_sweep_ticks_total{result="error"}[15m])) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "The rollout sweeper keeps failing"
+          description: "{{ $value | humanize }} Deploy ticks failed in 15 minutes: batched and phased rollouts may be stuck."
+          runbook: "docs/observability.md#deploysweeperfailing"
       - alert: RateLimitSpike
         expr: sum(rate(meteorcloud_rate_limited_total[5m])) > 1
         for: 10m
@@ -109,6 +143,34 @@ groups:
           summary: "Agents are being rate limited"
           description: "{{ $value | humanize }} requests/s rejected by registration, enrollment or connectivity limiters."
           runbook: "docs/observability.md#ratelimitspike"
+
+  - name: meteorcloud-security
+    rules:
+      - alert: LoginFailureSpike
+        expr: sum(increase(meteorcloud_auth_logins_total{result="failure"}[10m])) > 20
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many failed console logins"
+          description: "{{ $value | humanize }} console logins failed in the last 10 minutes (possible password guessing)."
+          runbook: "docs/observability.md#loginfailurespike"
+      - alert: MqttAuthDenySpike
+        expr: sum(rate(meteorcloud_mqtt_auth_total{result="deny"}[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The MQTT broker is denying many clients"
+          description: "{{ $value | humanize }} MQTT auth decisions/s are deny (revoked devices retrying, or someone probing the broker)."
+          runbook: "docs/observability.md#mqttauthdenyspike"
+      - alert: InvalidRegistrationTokens
+        expr: sum(increase(meteorcloud_device_registrations_total{result="invalid_token"}[15m])) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many device registrations with invalid tokens"
+          description: "{{ $value | humanize }} registrations used an invalid, expired or revoked token in 15 minutes."
+          runbook: "docs/observability.md#invalidregistrationtokens"
 
   - name: meteorcloud-host
     rules:

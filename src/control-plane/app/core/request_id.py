@@ -33,6 +33,9 @@ def resolve_request_id(header_value: str | None) -> str:
 
 
 def unhandled_error_response(request_id: str | None) -> JSONResponse:
+    from app.core.metrics import UNHANDLED_EXCEPTIONS
+
+    UNHANDLED_EXCEPTIONS.inc()
     logger.exception("unhandled error", extra={"request_id": request_id})
     headers = {REQUEST_ID_HEADER: request_id} if request_id else {}
     return JSONResponse(

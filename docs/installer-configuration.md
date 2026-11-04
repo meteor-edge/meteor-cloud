@@ -139,6 +139,7 @@ export EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY='...'    # activate WireGuard
 export EDGE_PLATFORM_DATABASE_URL='postgresql+psycopg://...'   # components.postgres.enabled: false
 export EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD='...'    # observability.components.dashboards
 export EDGE_PLATFORM_ALERT_WEBHOOK_URL='https://...' # observability.components.alerting delivery
+export EDGE_PLATFORM_ALERT_HEARTBEAT_URL='https://...' # optional dead-man's-switch for the Watchdog alert (needs the webhook)
 ```
 
 Never put secrets in `installation.yaml` or commit them.

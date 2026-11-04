@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.main import create_app
+from tests.metrics_helpers import sample
 
 
 def test_metrics_endpoint_exposes_prometheus(client: TestClient) -> None:
@@ -31,9 +32,11 @@ def test_unhandled_exception_includes_request_id() -> None:
     def boom() -> None:
         raise RuntimeError("boom")
 
+    before = sample("meteorcloud_unhandled_exceptions_total")
     with TestClient(application, raise_server_exceptions=False) as test_client:
         response = test_client.get("/__test_boom", headers={"X-Request-ID": "rid-test"})
 
+    assert sample("meteorcloud_unhandled_exceptions_total") - before == 1
     assert response.status_code == 500
     assert response.headers.get("x-request-id") == "rid-test"
     assert response.json()["error"]["code"] == "internal_error"

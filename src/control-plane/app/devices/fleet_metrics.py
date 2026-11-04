@@ -3,7 +3,8 @@
 Global totals only (never per organization or device), from a few COUNT ... GROUP BY
 queries, cached in-process so frequent scrapes stay cheap. There is no background task:
 nothing runs unless something reads /metrics. If the database is unreachable the
-gauges are simply absent from that scrape; the scrape itself still succeeds.
+fleet gauges are absent from that scrape, ``meteorcloud_database_up`` reads 0, and the
+scrape itself still succeeds.
 
 With several API replicas every replica reports the same totals, so queries must
 aggregate these gauges with ``max``, not ``sum``.
@@ -29,6 +30,8 @@ from app.ports.observability import GaugeSample
 logger = logging.getLogger(__name__)
 
 WAITING_DEVICE_STATUSES = ("pending", "queued", "updating")
+# A paused Deploy (by an operator or by its failure threshold) still holds devices.
+RUNNING_DEPLOYMENT_STATUSES = ("in_progress", "paused")
 
 
 class FleetMetrics:
@@ -55,10 +58,10 @@ class FleetMetrics:
             if self._cached_at is not None and now - self._cached_at < self._cache_seconds:
                 return self._cached
             try:
-                self._cached = self._query()
+                self._cached = {**self._query(), "meteorcloud_database_up": [({}, 1)]}
             except Exception:
                 logger.warning("fleet metrics query failed", exc_info=True)
-                self._cached = {}
+                self._cached = {"meteorcloud_database_up": [({}, 0)]}
             self._cached_at = now
             return self._cached
 
@@ -80,9 +83,12 @@ class FleetMetrics:
                 )
                 or 0
             )
-            in_progress = (
-                session.scalar(select(func.count()).select_from(Deployment).where(Deployment.status == "in_progress"))
-                or 0
+            running = dict(
+                session.execute(
+                    select(Deployment.status, func.count())
+                    .where(Deployment.status.in_(RUNNING_DEPLOYMENT_STATUSES))
+                    .group_by(Deployment.status)
+                ).all()
             )
             waiting_rows = dict(
                 session.execute(
@@ -101,7 +107,9 @@ class FleetMetrics:
             ],
             "meteorcloud_devices_disabled": [({}, disabled)],
             "meteorcloud_devices_software_unhealthy": [({}, unhealthy)],
-            "meteorcloud_deployments": [({"status": "in_progress"}, in_progress)],
+            "meteorcloud_deployments": [
+                ({"status": status}, running.get(status, 0)) for status in RUNNING_DEPLOYMENT_STATUSES
+            ],
             "meteorcloud_deployment_devices": [
                 ({"status": status}, waiting_rows.get(status, 0)) for status in WAITING_DEVICE_STATUSES
             ],
@@ -118,7 +126,8 @@ class FleetMetrics:
             "meteorcloud_devices": ("Devices by connectivity state", ["state"]),
             "meteorcloud_devices_disabled": ("Devices switched off by an operator", []),
             "meteorcloud_devices_software_unhealthy": ("Devices with at least one unhealthy workload", []),
-            "meteorcloud_deployments": ("Deploys currently running", ["status"]),
+            "meteorcloud_deployments": ("Deploys currently running or paused", ["status"]),
+            "meteorcloud_database_up": ("1 when the last fleet query reached the database, else 0", []),
             "meteorcloud_deployment_devices": ("Devices waiting on a running Deploy", ["status"]),
         }
         for name, (documentation, labelnames) in gauges.items():

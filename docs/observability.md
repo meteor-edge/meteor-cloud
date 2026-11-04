@@ -62,7 +62,11 @@ Counters are summed across API replicas; fleet gauges are the same on every repl
 | | `meteorcloud_auth_logins_total` | result |
 | Deploy | `meteorcloud_deployments_created_total` | strategy |
 | | `meteorcloud_deployments_finished_total`, `meteorcloud_deployment_device_results_total` | status |
-| | `meteorcloud_deployments`, `meteorcloud_deployment_devices` | status (in progress) |
+| | `meteorcloud_deployments` | status: in_progress, paused |
+| | `meteorcloud_deployment_devices` | status (devices waiting on a running Deploy) |
+| | `meteorcloud_deploy_sweep_ticks_total` | result (background rollout sweeper) |
+| Health | `meteorcloud_database_up` | 1 or 0, from the fleet query (absent when fleet metrics are off) |
+| | `meteorcloud_unhandled_exceptions_total` | (requests that crashed, as opposed to a deliberate 5xx) |
 | MQTT (API) | `meteorcloud_mqtt_auth_total` | action, result |
 | | `meteorcloud_mqtt_messages_ingested_total`, `meteorcloud_mqtt_publish_total` | kind / result |
 | | `meteorcloud_device_commands_total` | kind, result |
@@ -137,7 +141,8 @@ observability:
 
 Put `EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD` (required only with `dashboards`; `validate`
 checks it) and, for alert delivery, `EDGE_PLATFORM_ALERT_WEBHOOK_URL` (https) in the
-environment, not in the file. `make aws-up` sizes the instance per enabled component and
+environment, not in the file. Add `EDGE_PLATFORM_ALERT_HEARTBEAT_URL` (https, needs the
+webhook) to also get a dead-man's-switch heartbeat; see [Watchdog](#watchdog). `make aws-up` sizes the instance per enabled component and
 the root disk from `metrics_retention_size`; Terraform opens no extra ports, because every
 UI stays on 127.0.0.1. See [installer-configuration.md](installer-configuration.md).
 
@@ -150,11 +155,14 @@ UI stays on 127.0.0.1. See [installer-configuration.md](installer-configuration.
 | `observability_log_retention` | `168h` |
 | `observability_metrics_retention_time`, `observability_metrics_retention_size` | `15d`, `5GB` |
 | `observability_alert_webhook_url` | `EDGE_PLATFORM_ALERT_WEBHOOK_URL` from the environment |
+| `observability_alert_heartbeat_url` | `EDGE_PLATFORM_ALERT_HEARTBEAT_URL` from the environment (needs the webhook) |
 | `observability_prometheus_url`, `observability_loki_url`, `observability_loki_push_url` | empty (bundled) |
 | `metrics_enabled`, `access_log` | `true`, empty (follows `LOG_FORMAT`) |
 
 The webhook URL is written to `<platform_root>/secrets/alertmanager/webhook_url` (mode 0600)
 and Alertmanager reads it from there. Without it, alerts are visible in Alertmanager only.
+With a heartbeat URL as well, it is written next to it (`heartbeat_url`) and Alertmanager
+uses `alertmanager.webhook-heartbeat.yml`, which sends the Watchdog there every 5 minutes.
 
 ### Reaching the UIs
 
@@ -230,6 +238,25 @@ Prometheus cannot scrape the API for 1 minute.
    which looks like this alert. Turn the alert off or the metrics back on.
 3. Check that Prometheus and the API share a network.
 
+### DatabaseDown
+
+The API answers scrapes but its fleet query has failed for 2 minutes, so logins, heartbeats
+and Deploys are failing too (API error alerts are inhibited while this fires).
+
+1. `docker compose ps postgres` (or the managed database's status page), then its logs.
+2. Check the host disk ([HostDiskFull](#hostdiskfull)): a full disk stops Postgres.
+3. Check `DATABASE_URL` and the connection limit (`too many connections` in the API logs).
+
+This alert needs `FLEET_METRICS_ENABLED=true`; with fleet metrics off the gauge is absent and
+the alert stays quiet.
+
+### UnhandledExceptions
+
+More than 5 requests crashed with an unhandled exception in 10 minutes. A crash is a bug,
+unlike a deliberate 4xx/5xx. Logs dashboard, service `backend`, message `unhandled error`:
+the stack trace and `request_id` are in the line. If a release just went out, roll back the
+image tag.
+
 ### DataPlaneDown
 
 The data plane is running (Prometheus found it) but its `/metrics` does not answer for
@@ -262,11 +289,47 @@ A Deploy ended as failed in the last hour. Open it in the console; per-device re
 which devices failed and why. Many failures across devices usually mean a bad artifact or
 image; one device usually means that device.
 
+### DeployPaused
+
+A Deploy has been paused for 30 minutes. A phased Deploy pauses itself when its failure rate
+crosses the threshold; an operator can also pause one. Open it in the console: the pause
+reason and per-device results are shown there. Fix the release and resume, or cancel it or
+roll back. Paused Deploys hold their devices, so new Deploys to those devices wait.
+
+### DeploySweeperFailing
+
+The background sweeper that advances batched and phased rollouts (delays, soak times,
+pending timeouts) failed more than 3 Deploy ticks in 15 minutes. Rollouts then only move when
+a device reports. Logs dashboard, service `backend`, message `Deploy tick failed`: the stack
+trace names the Deploy. A database problem usually comes with
+[DatabaseDown](#databasedown).
+
 ### RateLimitSpike
 
 Requests are being rate-limited at more than 1/s for 10 minutes. The Fleet dashboard shows
 which limiter. Usually a misconfigured agent loop or an enrolment script retrying; the
 access log shows the route. Raise the limits only if the traffic is legitimate.
+
+### LoginFailureSpike
+
+More than 20 console logins failed in 10 minutes. Usually someone guessing passwords, or a
+script with an old password. The access log shows the source route but never the IP; check
+the Traefik access log or the firewall for the client address, and block it there. Make sure
+admin accounts use strong passwords.
+
+### MqttAuthDenySpike
+
+The broker denied more than 0.5 client decisions per second for 10 minutes. Usually devices
+that were deleted or disabled and keep reconnecting, or a client using an old certificate or
+password. If no device was removed recently, treat it as probing: check the EMQX client list
+and restrict port 8883 at the firewall if needed.
+
+### InvalidRegistrationTokens
+
+More than 10 device registrations used an invalid, expired or revoked token in 15 minutes.
+Either an install script uses a token that was revoked or ran out of uses, or someone is
+guessing tokens. Check recent token changes in the console; if none, revoke the active
+registration tokens and issue new ones.
 
 ### HostDiskFull
 
@@ -282,5 +345,11 @@ At the trend of the last 6 hours, a filesystem fills within 24 hours. Same cause
 ### Watchdog
 
 Always firing, on purpose. If your receiver stops getting it, the alert pipeline (Prometheus
-→ Alertmanager → webhook) is broken. The bundled webhook config routes it to a null receiver;
-route it to a dead-man's-switch service if you have one.
+→ Alertmanager → webhook) is broken, or the whole host is down. Alertmanager runs on the same
+host as the platform, so only an outside service can tell you that.
+
+Set `EDGE_PLATFORM_ALERT_HEARTBEAT_URL` to a dead-man's-switch check (any service that
+expects an HTTP POST every few minutes and alerts you when it stops). Alertmanager then sends
+the Watchdog there every 5 minutes instead of to a null receiver. Set the check's grace
+period to 10–15 minutes. Without a heartbeat URL, nothing tells you when the host itself is
+down.

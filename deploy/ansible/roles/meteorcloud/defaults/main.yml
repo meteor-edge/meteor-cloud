@@ -99,6 +99,10 @@ observability_metrics_retention_size: 5GB
 # Alertmanager delivers every alert to this webhook when set (secret, from the environment).
 # Empty: alerts are only visible in Alertmanager (127.0.0.1:9093).
 observability_alert_webhook_url: "{{ EDGE_PLATFORM_ALERT_WEBHOOK_URL | default(lookup('env', 'EDGE_PLATFORM_ALERT_WEBHOOK_URL'), true) }}"
+# Dead-man's-switch URL that receives the always-firing Watchdog every 5 minutes (secret, from
+# the environment). Needs the webhook above. The heartbeat service alerts you when it stops,
+# which also covers this host going down. Empty: no heartbeat.
+observability_alert_heartbeat_url: "{{ EDGE_PLATFORM_ALERT_HEARTBEAT_URL | default(lookup('env', 'EDGE_PLATFORM_ALERT_HEARTBEAT_URL'), true) }}"
 # Use an external backend instead of a bundled one (empty = bundled service).
 observability_prometheus_url: ""
 observability_loki_url: ""

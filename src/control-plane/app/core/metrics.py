@@ -204,6 +204,11 @@ DEPLOYMENT_DEVICE_RESULTS = counter(
     ["status"],
 )
 
+# result: ok | error (one sample per Deploy the background sweeper ticks)
+DEPLOY_SWEEP_TICKS = counter(
+    "meteorcloud_deploy_sweep_ticks_total", "Deploys ticked by the background rollout sweeper", ["result"]
+)
+
 # --- Remote shell and log sessions ---------------------------------------------
 
 # kind: shell | logs
@@ -215,6 +220,13 @@ SHELL_SESSIONS = counter("meteorcloud_shell_sessions_total", "Shell/log session 
 
 # version: the running application version (one series per deploy)
 BUILD_INFO = gauge("meteorcloud_build_info", "Running MeteorCloud control-plane version", ["version"])
+
+# --- Errors ---------------------------------------------------------------------
+
+UNHANDLED_EXCEPTIONS = counter(
+    "meteorcloud_unhandled_exceptions_total",
+    "Requests that ended in an unhandled exception (a crash, not a deliberate 5xx)",
+)
 
 # --- HTTP (RED) --------------------------------------------------------------
 

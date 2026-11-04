@@ -340,6 +340,18 @@ def test_validate_rejects_plain_http_alert_webhook(tmp_path: Path, monkeypatch: 
     assert not any("ALERT_WEBHOOK_URL" in item for item in validate_configuration(config))
 
 
+def test_validate_alert_heartbeat_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _enabled_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_HEARTBEAT_URL", "https://hc.example.com/ping/x")
+    assert any("HEARTBEAT_URL needs EDGE_PLATFORM_ALERT_WEBHOOK_URL" in item for item in validate_configuration(config))
+
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
+    assert not any("HEARTBEAT_URL" in item for item in validate_configuration(config))
+
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_HEARTBEAT_URL", "http://hc.example.com/ping/x")
+    assert any("HEARTBEAT_URL must be an https" in item for item in validate_configuration(config))
+
+
 def test_validate_requires_grafana_password_only_for_dashboards(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

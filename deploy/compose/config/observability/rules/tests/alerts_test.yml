@@ -196,6 +196,171 @@ tests:
               description: "No device status, metrics or command results are reaching the control plane."
               runbook: "docs/observability.md#dataplanemqttdisconnected"
 
+  # The API answers scrapes but cannot reach PostgreSQL.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_database_up{instance="a"}'
+        values: '1 1 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: DatabaseDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: DatabaseDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Control plane cannot reach PostgreSQL"
+              description: "The API answers scrapes but its fleet query fails: logins, heartbeats and Deploys are failing."
+              runbook: "docs/observability.md#databasedown"
+  # With fleet metrics switched off the gauge is absent, which is not an outage.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="backend",instance="backend:8000"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: DatabaseDown
+        exp_alerts: []
+
+  # Repeated crashes alert; a few do not.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_unhandled_exceptions_total{instance="a"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: UnhandledExceptions
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Control plane requests are crashing"
+              description: "10 requests ended in an unhandled exception in the last 10 minutes."
+              runbook: "docs/observability.md#unhandledexceptions"
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_unhandled_exceptions_total{instance="a"}'
+        values: '0x5 3x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UnhandledExceptions
+        exp_alerts: []
+
+  # A Deploy left paused for half an hour is reported once (replicas report the same total).
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_deployments{status="paused",instance="a"}'
+        values: '1x40'
+      - series: 'meteorcloud_deployments{status="paused",instance="b"}'
+        values: '1x40'
+      - series: 'meteorcloud_deployments{status="in_progress",instance="a"}'
+        values: '3x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DeployPaused
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: DeployPaused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "A Deploy has been paused for 30 minutes"
+              description: "1 Deploy(s) are paused, by an operator or by their failure threshold."
+              runbook: "docs/observability.md#deploypaused"
+
+  # The rollout sweeper failing on every pass alerts; a one-off failure does not.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_deploy_sweep_ticks_total{result="error",instance="a"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DeploySweeperFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The rollout sweeper keeps failing"
+              description: "15 Deploy ticks failed in 15 minutes: batched and phased rollouts may be stuck."
+              runbook: "docs/observability.md#deploysweeperfailing"
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_deploy_sweep_ticks_total{result="error",instance="a"}'
+        values: '0x5 2x15'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DeploySweeperFailing
+        exp_alerts: []
+
+  # Password guessing on the console login.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_auth_logins_total{result="failure",instance="a"}'
+        values: '0+3x20'
+      - series: 'meteorcloud_auth_logins_total{result="success",instance="a"}'
+        values: '0+50x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: LoginFailureSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Many failed console logins"
+              description: "30 console logins failed in the last 10 minutes (possible password guessing)."
+              runbook: "docs/observability.md#loginfailurespike"
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_auth_logins_total{result="failure",instance="a"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: LoginFailureSpike
+        exp_alerts: []
+
+  # Sustained MQTT auth denials alert; a revoked device retrying now and then does not.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_mqtt_auth_total{action="authenticate",result="deny",instance="a"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MqttAuthDenySpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The MQTT broker is denying many clients"
+              description: "1 MQTT auth decisions/s are deny (revoked devices retrying, or someone probing the broker)."
+              runbook: "docs/observability.md#mqttauthdenyspike"
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_mqtt_auth_total{action="authenticate",result="deny",instance="a"}'
+        values: '0+6x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MqttAuthDenySpike
+        exp_alerts: []
+
+  # Many registrations with a bad token point to a leaked or guessed token.
+  - interval: 1m
+    input_series:
+      - series: 'meteorcloud_device_registrations_total{result="invalid_token",instance="a"}'
+        values: '0+2x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: InvalidRegistrationTokens
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Many device registrations with invalid tokens"
+              description: "30 registrations used an invalid, expired or revoked token in 15 minutes."
+              runbook: "docs/observability.md#invalidregistrationtokens"
+
   # The pipeline heartbeat always fires.
   - interval: 1m
     alert_rule_test:

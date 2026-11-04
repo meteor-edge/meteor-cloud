@@ -15,4 +15,7 @@ receivers:
 inhibit_rules:
   # While the API is down, its error/latency alerts are noise.
   - source_matchers: [alertname="ControlPlaneDown"]
-    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency"]
+    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency|UnhandledExceptions"]
+  # While the database is down, API errors and stuck rollouts follow from it.
+  - source_matchers: [alertname="DatabaseDown"]
+    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency|UnhandledExceptions|DeploySweeperFailing"]

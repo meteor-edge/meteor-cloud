@@ -105,6 +105,11 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
         webhook = os.environ.get("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "").strip()
         if webhook and not _is_https_url(webhook):
             errors.append("EDGE_PLATFORM_ALERT_WEBHOOK_URL must be an https:// URL with a host")
+        heartbeat = os.environ.get("EDGE_PLATFORM_ALERT_HEARTBEAT_URL", "").strip()
+        if heartbeat and not _is_https_url(heartbeat):
+            errors.append("EDGE_PLATFORM_ALERT_HEARTBEAT_URL must be an https:// URL with a host")
+        if heartbeat and not webhook:
+            errors.append("EDGE_PLATFORM_ALERT_HEARTBEAT_URL needs EDGE_PLATFORM_ALERT_WEBHOOK_URL")
 
     return errors
 

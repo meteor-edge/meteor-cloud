@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -46,7 +47,27 @@ def test_fleet_snapshot_counts_states(db_session: Session, engine) -> None:
     states = {labels["state"]: value for labels, value in snapshot["meteorcloud_devices"]}
     assert states == {"online": 2, "offline": 1, "never_seen": 1}
     assert snapshot["meteorcloud_devices_disabled"] == [({}, 1)]
-    assert snapshot["meteorcloud_deployments"] == [({"status": "in_progress"}, 0)]
+    assert snapshot["meteorcloud_deployments"] == [({"status": "in_progress"}, 0), ({"status": "paused"}, 0)]
+    assert snapshot["meteorcloud_database_up"] == [({}, 1)]
+
+
+def test_fleet_snapshot_counts_paused_deploys(client: TestClient, db_session: Session, engine) -> None:
+    from app.deployments.models import Deployment
+    from tests.test_deployment_rollout import CANARY_THEN_ALL, _devices, _phased_deploy
+    from tests.test_deployments import _setup_release
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 2, "fp")
+    body = _phased_deploy(client, org.id, headers, release, regs, phases=CANARY_THEN_ALL)
+    row = db_session.get(Deployment, uuid.UUID(body["id"]))
+    row.status = "paused"
+    db_session.commit()
+
+    snapshot = FleetMetrics(sessionmaker(bind=engine), offline_threshold_seconds=150).snapshot()
+    assert dict((labels["status"], value) for labels, value in snapshot["meteorcloud_deployments"]) == {
+        "in_progress": 0,
+        "paused": 1,
+    }
 
 
 def test_fleet_snapshot_is_cached(db_session: Session, engine) -> None:
@@ -68,12 +89,12 @@ def test_fleet_snapshot_is_cached(db_session: Session, engine) -> None:
     assert len(calls) == 2
 
 
-def test_database_error_yields_no_samples_and_scrape_succeeds() -> None:
+def test_database_error_reports_database_down_and_no_fleet_samples() -> None:
     def broken():
         raise RuntimeError("database down")
 
     fleet = FleetMetrics(broken, offline_threshold_seconds=150)
-    assert fleet.snapshot() == {}
+    assert fleet.snapshot() == {"meteorcloud_database_up": [({}, 0)]}
 
 
 def test_fleet_gauges_on_metrics_endpoint(client: TestClient, db_session: Session) -> None:
