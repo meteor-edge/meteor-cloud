@@ -65,6 +65,18 @@ install so the service finds the device token. Re-running
 `sudo ./installcli.sh --with-service` copies an existing user config into
 `/etc/meteorcli` when that dir has no `device-token` yet.
 
+**Golden image / first boot:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/meteor-edge/meteor-cloud/master/src/device-plane/agent/packaging/firstboot/install-meteorcli-firstboot.sh | sudo bash
+```
+
+See [`packaging/firstboot/`](packaging/firstboot/README.md). First-boot installs
+latest `meteorcli`, runs `request-token`, and polls with `claim` in
+`meteorcli-firstboot.service` until an administrator approves, then starts
+`meteorcli.service` and removes first-boot. The SSH session does not wait for
+approval.
+
 For local development:
 
 ```bash

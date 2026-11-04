@@ -41,6 +41,7 @@ from app.deployments import models as _deployment_models  # noqa: F401
 from app.deployments import software_models as _software_models  # noqa: F401
 from app.devices import models as _fleet_models  # noqa: F401
 from app.devices.dependencies import (
+    get_enroll_poll_ip_rate_limiter,
     get_enroll_poll_rate_limiter,
     get_enroll_request_rate_limiter,
     get_rate_limiter,
@@ -121,6 +122,9 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
         limit=10_000, window_seconds=60
     )
     application.dependency_overrides[get_enroll_poll_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
+    application.dependency_overrides[get_enroll_poll_ip_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
     application.dependency_overrides[get_connectivity_rate_limiter] = lambda: InMemoryRateLimiter(

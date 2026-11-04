@@ -123,7 +123,7 @@ Keep **one** data-plane MQTT subscriber until shared subscriptions exist.
 
 Source: [`src/device-plane/agent/`](../src/device-plane/agent/). Runtime adapters (systemd, docker, compose) live in sibling [`src/device-plane/runtime/`](../src/device-plane/runtime/) and are force-included in the wheel.
 
-**On a device:** `curl` `install-meteorcli.sh` from GitHub Releases (`latest` or `METEORCLI_VERSION=`). The tarball is agent + `runtime` + `installcli.sh` only (`make agent-dist`). SHA256SUMS is checked when `sha256sum` is present.
+**On a device:** `curl` `install-meteorcli.sh` from GitHub Releases (`latest` or `METEORCLI_VERSION=`). The tarball is agent + `runtime` + `installcli.sh` only (`make agent-dist`). SHA256SUMS is checked when `sha256sum` is present. First-boot enroll (request-token + poll until approved): `install-meteorcli-firstboot.sh` from the same release or [packaging/firstboot](../src/device-plane/agent/packaging/firstboot/README.md).
 
 **Publish:** tag `agent-v<version>` matching [`pyproject.toml`](../src/device-plane/agent/pyproject.toml); workflow [`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml). From a checkout: `./installcli.sh` in the agent directory.
 

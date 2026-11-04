@@ -48,8 +48,13 @@ jobs:
           \`\`\`bash
           curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-meteorcli.sh | bash
           \`\`\`
+          First-boot enroll (install + request-token + poll until approved):
+          \`\`\`bash
+          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-meteorcli-firstboot.sh | sudo bash
+          \`\`\`
           Pin a version with \`METEORCLI_VERSION=${ver}\`." \
             dist/meteorcli.tar.gz \
             "dist/meteorcli-${ver}.tar.gz" \
             dist/install-meteorcli.sh \
+            dist/install-meteorcli-firstboot.sh \
             dist/SHA256SUMS

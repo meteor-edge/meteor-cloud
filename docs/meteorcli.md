@@ -100,5 +100,6 @@ already runs as root and does not need that helper.
 - [Getting started](getting-started.md)
 - [Registration tokens](fleet/registration-tokens.md)
 - [Device-initiated enrollment](fleet/device-request-enrollment.md)
+- [First-boot enroll on a Pi image](../src/device-plane/agent/packaging/firstboot/README.md) (`install-meteorcli-firstboot.sh`)
 - [Heartbeat](fleet/heartbeat.md)
 - [MQTT](fleet/mqtt.md)

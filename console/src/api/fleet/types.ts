@@ -487,6 +487,9 @@ export type DeviceEnrollmentRequest = {
   rejection_reason: string | null;
   claimed_at: string | null;
   device_id: string | null;
+  enrollment_key_id: string | null;
+  enrollment_key_name: string | null;
+  enrollment_key_prefix: string | null;
   expires_at: string | null;
   created_at: string;
   updated_at: string;

@@ -1,0 +1,17 @@
+[Unit]
+Description=MeteorCloud first-boot enrollment (request-token + poll)
+Documentation=https://github.com/meteor-edge/meteor-cloud
+After=local-fs.target network-online.target
+Wants=network-online.target
+ConditionPathExists=!/etc/meteorcli/device-token
+
+[Service]
+Type=simple
+Environment=METEORCLI_CONFIG_DIR=/etc/meteorcli
+EnvironmentFile=-/etc/meteorcli-firstboot.env
+ExecStart=/usr/local/sbin/meteorcli-firstboot.sh --poll
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

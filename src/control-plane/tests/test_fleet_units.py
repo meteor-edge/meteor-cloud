@@ -79,6 +79,55 @@ def test_identity_matches_by_mac_overlap() -> None:
     assert identity.matches(device)
 
 
+def test_from_inventory_keeps_every_mac_with_the_first_as_primary() -> None:
+    identity = DeviceIdentity.from_inventory(
+        serial_number=" s1 ",
+        mac_addresses=["AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66"],
+    )
+    assert identity.serial_number == "s1"
+    assert identity.mac_addresses == ["aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"]
+    assert identity.primary_mac == "aa:bb:cc:dd:ee:ff"
+    assert identity.is_empty is False
+    assert DeviceIdentity.from_inventory(serial_number=None, mac_addresses=[]).is_empty is True
+
+
+def test_identity_matches_request_by_primary_mac() -> None:
+    from app.devices.models import DeviceEnrollmentRequest
+
+    identity = DeviceIdentity.from_inventory(
+        serial_number=None,
+        mac_addresses=["aa:bb:cc:dd:ee:01"],
+    )
+    matching = DeviceEnrollmentRequest(mac_addresses=["aa:bb:cc:dd:ee:01", "11:22:33:44:55:66"])
+    other = DeviceEnrollmentRequest(mac_addresses=["aa:bb:cc:dd:ee:02"])
+    assert identity.matches_request(matching)
+    assert not identity.matches_request(other)
+
+
+def test_device_still_matches_on_a_secondary_mac_when_the_first_changes() -> None:
+    # An older agent sends every interface sorted by name, so docker0's MAC can come first.
+    identity = DeviceIdentity.from_inventory(
+        serial_number=None,
+        mac_addresses=["02:42:00:00:00:02", "aa:bb:cc:dd:ee:01"],
+    )
+    assert identity.matches(Device(mac_addresses=["02:42:00:00:00:01", "aa:bb:cc:dd:ee:01"]))
+
+
+def test_same_hardware_needs_both_serial_and_primary_mac() -> None:
+    from app.devices.models import DeviceEnrollmentRequest
+
+    identity = DeviceIdentity.from_inventory(serial_number="s1", mac_addresses=["aa:bb:cc:dd:ee:01"])
+    mac = ["aa:bb:cc:dd:ee:01"]
+    assert identity.same_hardware_as_request(DeviceEnrollmentRequest(serial_number="s1", mac_addresses=mac))
+    assert not identity.same_hardware_as_request(
+        DeviceEnrollmentRequest(serial_number="s1", mac_addresses=["aa:bb:cc:dd:ee:02"])
+    )
+    assert not identity.same_hardware_as_request(DeviceEnrollmentRequest(serial_number="s2", mac_addresses=mac))
+    assert not identity.same_hardware_as_request(DeviceEnrollmentRequest(serial_number="s1", mac_addresses=[]))
+    serial_only = DeviceIdentity.from_inventory(serial_number="s1", mac_addresses=[])
+    assert serial_only.same_hardware_as_request(DeviceEnrollmentRequest(serial_number="s1", mac_addresses=[]))
+
+
 def test_match_existing_device_cross_organization(monkeypatch) -> None:
     import uuid
 
