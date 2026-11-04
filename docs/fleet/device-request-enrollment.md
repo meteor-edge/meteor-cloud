@@ -135,19 +135,13 @@ meteorcli run
 
 ## First-boot image
 
-Install `meteorcli` on first boot, submit `request-token`, and **keep polling
-in the background** until an administrator approves:
+Automatic on current Raspberry Pi OS (bootfs has `user-data`). Do **not**
+edit `cmdline.txt`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/meteor-edge/meteor-cloud/master/src/device-plane/agent/packaging/firstboot/install-meteorcli-firstboot.sh | sudo bash
-```
+1. Copy `.meteorenv` onto **boot** / **bootfs** (`METEOR_DOMAIN`, `METEOR_API_KEY`).
+2. Append `packages:` and `runcmd:` from
+   [`cloud-init-user-data.yaml`](../../src/device-plane/agent/packaging/firstboot/cloud-init-user-data.yaml)
+   to `user-data`.
+3. Boot the Pi. Approve the pending device in the console.
 
-Repo: [github.com/meteor-edge/meteor-cloud](https://github.com/meteor-edge/meteor-cloud).
-Files: [`packaging/firstboot/`](../../src/device-plane/agent/packaging/firstboot/README.md).
-The unit loops `meteorcli claim --wait` in the background until
-`/etc/meteorcli/device-token` exists, then starts `meteorcli.service` and
-removes first-boot (not used on later reboots). Running the first-boot script
-over SSH returns after submit; watch `journalctl -u meteorcli-firstboot -f`
-until it finishes. Put `.meteorenv` on the FAT boot partition
-(`/boot/firmware/.meteorenv`) so a flashed image can enroll without typing
-the domain and key.
+Details: [`packaging/firstboot/`](../../src/device-plane/agent/packaging/firstboot/README.md).

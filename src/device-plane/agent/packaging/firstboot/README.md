@@ -42,20 +42,33 @@ EOF
 chmod 0600 .meteorenv
 sudo ./meteorcli-firstboot.sh
 
-# Option D: empty image + boot partition (Pi Imager / any flasher).
-# After writing the OS image, copy .meteorenv onto the drive that shows
-# as "boot" / "bootfs", then let first boot download and run this installer:
+# Option D: empty image + boot partition (see numbered steps below).
 #   /boot/firmware/.meteorenv   (Bookworm+)
 #   /boot/.meteorenv            (older images)
 ```
 
-Empty-image first boot (stock Raspberry Pi OS, no meteorcli yet). Put
-`.meteorenv` on the boot volume, then use Pi Imager’s first-boot script
-or `firstrun.sh` to download the installer:
+## Empty Raspberry Pi OS image (automatic, no SSH, no cmdline)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/meteor-edge/meteor-cloud/master/src/device-plane/agent/packaging/firstboot/install-meteorcli-firstboot.sh | sudo bash -s -- --now
+Current Raspberry Pi OS (bootfs has `user-data`) runs cloud-init on first boot.
+Do **not** edit `cmdline.txt`. `.meteorenv` alone is not enough.
+
+1. Flash the OS. The laptop shows **boot** / **bootfs**.
+2. Copy `.meteorenv` onto that drive:
+
+```text
+METEOR_DOMAIN=192.168.0.118:8000
+METEOR_API_KEY=key_...
 ```
+
+Use the address the **Pi** can reach (laptop LAN IP, not `localhost`).
+3. Open `user-data` on the same drive. Keep the first line `#cloud-config`.
+   Append the `packages:` and `runcmd:` block from `cloud-init-user-data.yaml`
+   (or replace the file with that yaml).
+4. Eject, boot the Pi. Wait for network. Approve the pending device in the
+   console. No SSH.
+
+Fallback if you can already SSH: `curl …/install-meteorcli-firstboot.sh | sudo bash -s -- --now`.
+`cmdline.txt` + `firstrun.sh` is a last resort.
 
 The installer does not need the domain/key in the environment; first-boot
 reads them from the boot partition. It copies the script and unit, submits
