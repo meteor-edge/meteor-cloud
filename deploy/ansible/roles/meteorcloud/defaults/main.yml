@@ -26,6 +26,9 @@ platform_domain: ""
 acme_email: "{{ EDGE_PLATFORM_ACME_EMAIL | default(lookup('env', 'EDGE_PLATFORM_ACME_EMAIL'), true) }}"
 log_format: console
 log_level: INFO
+# Empty = app default (access log on when log_format is json).
+access_log: ""
+metrics_enabled: true
 registration_require_https: false
 docs_public_url: http://localhost:3000/docs
 
@@ -85,6 +88,25 @@ observability_enabled: false
 observability_backend: prometheus
 grafana_admin_user: admin
 grafana_admin_password: "{{ EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD'), true) }}"
+# Which observability components run (Compose profiles), comma-separated. Drop one to turn it off;
+# the platform never depends on them. metrics: prometheus + node-exporter, logs: loki + alloy,
+# alerting: alertmanager, dashboards: grafana.
+observability_components: "metrics,logs,alerting,dashboards"
+# Retention: logs (Loki) and metrics (Prometheus, by time and by size, whichever is hit first).
+observability_log_retention: 168h
+observability_metrics_retention_time: 15d
+observability_metrics_retention_size: 5GB
+# Alertmanager delivers every alert to this webhook when set (secret, from the environment).
+# Empty: alerts are only visible in Alertmanager (127.0.0.1:9093).
+observability_alert_webhook_url: "{{ EDGE_PLATFORM_ALERT_WEBHOOK_URL | default(lookup('env', 'EDGE_PLATFORM_ALERT_WEBHOOK_URL'), true) }}"
+# Dead-man's-switch URL that receives the always-firing Watchdog every 5 minutes (secret, from
+# the environment). Needs the webhook above. The heartbeat service alerts you when it stops,
+# which also covers this host going down. Empty: no heartbeat.
+observability_alert_heartbeat_url: "{{ EDGE_PLATFORM_ALERT_HEARTBEAT_URL | default(lookup('env', 'EDGE_PLATFORM_ALERT_HEARTBEAT_URL'), true) }}"
+# Use an external backend instead of a bundled one (empty = bundled service).
+observability_prometheus_url: ""
+observability_loki_url: ""
+observability_loki_push_url: ""
 
 # Other secrets
 jwt_secret: "{{ EDGE_PLATFORM_JWT_SECRET | default(lookup('env', 'EDGE_PLATFORM_JWT_SECRET'), true) }}"

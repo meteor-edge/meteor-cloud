@@ -79,9 +79,20 @@ deployment:
 secrets:
   source: environment
 
-# Optional Grafana stack (Prometheus, Loki, Alloy, node_exporter).
+# Optional ops stack (Prometheus, Alertmanager, Loki, Alloy, Grafana, node_exporter).
 # aws-up sizes the host up (usually t3.large) when this is on.
 # cloudwatch is reserved and not implemented yet.
+# Each component can be turned off on its own; the platform never depends on them.
+# Alert delivery: export EDGE_PLATFORM_ALERT_WEBHOOK_URL (https) before deploying, and
+# EDGE_PLATFORM_ALERT_HEARTBEAT_URL (https dead-man's-switch URL) to be told when alerting itself is down.
 observability:
   enabled: false
   backend: prometheus
+  # components:
+  #   metrics: true      # Prometheus + node_exporter
+  #   logs: true         # Loki + Alloy
+  #   alerting: true     # Alertmanager (needs metrics)
+  #   dashboards: true   # Grafana
+  # log_retention_hours: 168
+  # metrics_retention_days: 15
+  # metrics_retention_size: 5GB

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
+from app.core.metrics import AGENT_HEARTBEATS, DEVICE_REGISTRATIONS
 from app.devices.identity import DeviceIdentity, match_existing_device
 from app.devices.models import Device, RegistrationToken
 from app.devices.repository import DeviceRepository, RegistrationTokenRepository
@@ -39,8 +40,15 @@ class RegistrationService:
     def register(self, payload: AgentRegisterRequest) -> AgentRegisterResponse:
         try:
             return self._register(payload)
-        except Exception:
+        except Exception as exc:
             self.session.rollback()
+            if isinstance(exc, UnauthorizedError):
+                result = "invalid_token"
+            elif isinstance(exc, ConflictError):
+                result = "conflict"
+            else:
+                result = "error"
+            DEVICE_REGISTRATIONS.labels(result=result).inc()
             raise
 
     def _register(self, payload: AgentRegisterRequest) -> AgentRegisterResponse:
@@ -86,6 +94,7 @@ class RegistrationService:
 
         self.session.commit()
         self.session.refresh(device)
+        DEVICE_REGISTRATIONS.labels(result="reregistered" if match.device is not None else "created").inc()
 
         return AgentRegisterResponse(
             device_id=device.id,
@@ -260,6 +269,7 @@ class RegistrationService:
                 )
 
         self.session.commit()
+        AGENT_HEARTBEATS.inc()
         self.session.refresh(device)
         desired = [item.model_dump(mode="json") for item in software.list_desired_for_agent(device_id=device.id)]
         return AgentHeartbeatResponse(

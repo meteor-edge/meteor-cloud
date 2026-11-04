@@ -242,10 +242,22 @@
     chdir: "{{ platform_compose_dir }}"
   loop: >-
     {{ (['emqx'] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
-       + (['prometheus', 'loki', 'alloy', 'grafana'] if observability_enabled | bool else []) }}
+       + (platform_observability_services if observability_enabled | bool else []) }}
+  vars:
+    platform_observability_by_component:
+      metrics: [prometheus, node-exporter]
+      logs: [loki, alloy]
+      alerting: [alertmanager]
+      dashboards: [grafana]
+    platform_observability_services: >-
+      {{ observability_components.split(',') | map('trim') | select
+         | map('extract', platform_observability_by_component) | select('defined') | flatten }}
   when: >-
     (platform_service_config is defined and platform_service_config.changed)
     or (item == 'emqx' and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
+    or (item == 'alertmanager' and platform_alertmanager_secret is defined and platform_alertmanager_secret.changed)
+    or (item == 'alertmanager' and platform_alertmanager_heartbeat_secret is defined
+        and platform_alertmanager_heartbeat_secret.changed)
   changed_when: true
 
 - name: Create the initial administrator when configured

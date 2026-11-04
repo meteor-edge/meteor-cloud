@@ -215,11 +215,25 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_format: Literal["console", "json"] = Field(default="console", alias="LOG_FORMAT")
+    # Observability switches. The app never connects to a metrics or log system; these only
+    # control what it exposes on /metrics and writes to stdout.
+    metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
+    # Fleet gauges (devices online/offline, waiting on deploys) computed on scrape, cached.
+    fleet_metrics_enabled: bool = Field(default=True, alias="FLEET_METRICS_ENABLED")
+    fleet_metrics_cache_seconds: float = Field(default=30.0, ge=0, alias="FLEET_METRICS_CACHE_SECONDS")
+    # One JSON line per request. None (unset) = on when LOG_FORMAT=json, off otherwise.
+    access_log: bool | None = Field(default=None, alias="ACCESS_LOG")
     observability_backend: Literal["prometheus", "cloudwatch"] = Field(
         default="prometheus",
         alias="OBSERVABILITY_BACKEND",
         description="prometheus (Loki/Grafana) or cloudwatch (reserved, not implemented).",
     )
+
+    @property
+    def access_log_enabled(self) -> bool:
+        if self.access_log is not None:
+            return self.access_log
+        return self.log_format == "json"
 
     @property
     def reserved_app_names(self) -> frozenset[str]:
@@ -244,6 +258,13 @@ class Settings(BaseSettings):
                 "(timescale and clickhouse are reserved)"
             )
         return provider
+
+    @field_validator("access_log", mode="before")
+    @classmethod
+    def empty_access_log_means_default(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("log_format", mode="before")
     @classmethod

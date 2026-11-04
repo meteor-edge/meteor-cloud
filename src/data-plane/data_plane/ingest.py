@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 
 from data_plane.config import Settings
+from data_plane.metrics import INGEST_FORWARD
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,11 @@ def ingest_message(settings: Settings, *, topic: str, payload: str) -> None:
             if response.status >= 400:
                 raise RuntimeError(f"control-plane ingest HTTP {response.status}")
     except urllib.error.HTTPError as exc:
+        INGEST_FORWARD.labels(result="http_error").inc()
         logger.warning("control-plane ingest HTTP %s for %s", exc.code, topic)
+        return
     except urllib.error.URLError:
+        INGEST_FORWARD.labels(result="unreachable").inc()
         logger.warning("control-plane ingest unreachable for %s", topic)
+        return
+    INGEST_FORWARD.labels(result="ok").inc()

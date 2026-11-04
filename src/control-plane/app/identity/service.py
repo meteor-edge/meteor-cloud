@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.audit.service import AuditRecorder
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.metrics import AUTH_LOGINS
 from app.core.security import create_access_token, hash_password, verify_password
 from app.identity.models import User
 from app.identity.repository import UserRepository
@@ -74,7 +75,11 @@ class AuthenticationService:
         )
 
     def login(self, payload: UserLoginRequest) -> TokenResponse:
-        user = self.authenticate(payload)
+        try:
+            user = self.authenticate(payload)
+        except UnauthorizedError:
+            AUTH_LOGINS.labels(result="failure").inc()
+            raise
         token = self.issue_access_token(user)
         audit = AuditRecorder(self.session)
         organization_ids = [
@@ -89,6 +94,7 @@ class AuthenticationService:
                 organization_id=organization_id,
             )
         self.session.commit()
+        AUTH_LOGINS.labels(result="success").inc()
         return token
 
     def get_user_by_id(self, user_id: uuid.UUID) -> User | None:

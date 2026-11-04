@@ -1,0 +1,31 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $components := list "backend" }}
+{{- if .Values.mqtt.enabled }}{{ $components = append $components "data-plane" }}{{ end }}
+{{- range $component := $components }}
+---
+# job="{{ $component }}" matches the bundled rules and dashboards.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $fullname }}-{{ $component }}
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" $ "component" $component) | nindent 4 }}
+    {{- with $.Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ $.Release.Namespace | quote }}]
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" $component) | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ $.Values.metrics.serviceMonitor.interval }}
+      relabelings:
+        - targetLabel: job
+          replacement: {{ $component }}
+{{- end }}
+{{- end }}

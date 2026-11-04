@@ -19,6 +19,7 @@ from app.core.exceptions import UnauthorizedError
 from app.shell.service import ShellService
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
+from tests.metrics_helpers import sample
 from tests.test_deployments import _docker_web_release, _register_device, _setup_release
 
 WG_KEY_A = base64.b64encode(bytes(range(32))).decode()
@@ -299,9 +300,12 @@ def test_internal_peers_and_shell_ticket(client: TestClient, db_session: Session
     ticket = session.json()["ticket"]
     assert ticket.startswith("sh_")
     ws_path = session.json()["websocket_path"] + f"?ticket={ticket}"
+    opened_before = sample("meteorcloud_shell_sessions_total", kind="shell", result="opened")
+    active_before = sample("meteorcloud_shell_sessions_active", kind="shell")
     with client.websocket_connect(ws_path) as websocket:
         first = websocket.receive_bytes().decode("utf-8")
         assert "MeteorCloud" in first
+        assert sample("meteorcloud_shell_sessions_active", kind="shell") == active_before + 1
         websocket.send_text("pwd\n")
         echoed = websocket.receive_bytes().decode("utf-8")
         assert "pwd" in echoed
@@ -310,6 +314,8 @@ def test_internal_peers_and_shell_ticket(client: TestClient, db_session: Session
         assert "exit" in websocket.receive_bytes().decode("utf-8")
         with pytest.raises(WebSocketDisconnect):
             websocket.receive_bytes()
+    assert sample("meteorcloud_shell_sessions_total", kind="shell", result="opened") == opened_before + 1
+    assert sample("meteorcloud_shell_sessions_active", kind="shell") == active_before
 
 
 def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: Session) -> None:

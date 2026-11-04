@@ -17,6 +17,7 @@ from collections.abc import Callable
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
+from app.core.metrics import DEPLOY_SWEEP_TICKS
 from app.deployments.models import Deployment, DeploymentStatus
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,10 @@ def sweep_deployments(session: Session) -> int:
             service.tick_deployment(deployment)
             session.commit()
             ticked += 1
+            DEPLOY_SWEEP_TICKS.labels(result="ok").inc()
         except Exception:
             session.rollback()
+            DEPLOY_SWEEP_TICKS.labels(result="error").inc()
             logger.exception("Deploy tick failed for %s", deployment_id)
     return ticked
 

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.metrics import ENROLLMENT_POLLS, ENROLLMENT_REQUESTS
 from app.devices.identity import DeviceIdentity, match_existing_device
 from app.devices.models import (
     Device,
@@ -55,10 +56,13 @@ class EnrollmentService:
         payload: AgentEnrollRequest,
     ) -> AgentEnrollResponse:
         try:
-            return self._submit_request(api_key, payload)
+            response = self._submit_request(api_key, payload)
         except Exception:
             self.session.rollback()
+            ENROLLMENT_REQUESTS.labels(result="error").inc()
             raise
+        ENROLLMENT_REQUESTS.labels(result="submitted").inc()
+        return response
 
     def _submit_request(
         self,
@@ -128,10 +132,13 @@ class EnrollmentService:
     # -------------------------------------------------------------- poll
     def poll(self, payload: AgentEnrollPollRequest) -> AgentEnrollPollResponse:
         try:
-            return self._poll(payload)
-        except Exception:
+            response = self._poll(payload)
+        except Exception as exc:
             self.session.rollback()
+            ENROLLMENT_POLLS.labels(status="unauthorized" if isinstance(exc, UnauthorizedError) else "error").inc()
             raise
+        ENROLLMENT_POLLS.labels(status=response.status).inc()
+        return response
 
     def _poll(self, payload: AgentEnrollPollRequest) -> AgentEnrollPollResponse:
         request = self.requests.get_by_id(payload.request_id)

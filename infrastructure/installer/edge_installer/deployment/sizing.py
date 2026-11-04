@@ -24,7 +24,11 @@ _CONTAINER_MIB: dict[str, int] = {
     "minio": 200,
     "data_plane": 150,
     "emqx": 400,
-    "observability": 900,
+    # Observability, per component (prometheus+node-exporter, loki+alloy, alertmanager, grafana).
+    "observability_metrics": 400,
+    "observability_logs": 350,
+    "observability_alerting": 50,
+    "observability_dashboards": 150,
     "git_build": 500,
 }
 
@@ -73,7 +77,7 @@ def workload_units(config: InstallationConfig) -> list[str]:
     if config.components.redis.enabled:
         units.append("redis")
     if config.observability.enabled:
-        units.append("observability")
+        units.extend(f"observability_{name}" for name in config.observability.components.enabled_names())
     if config.deployment.image_source == "git":
         units.append("git_build")
     return units
@@ -92,8 +96,21 @@ def estimate_disk_gb(config: InstallationConfig) -> int:
     if config.deployment.image_source == "git":
         disk += 10
     if config.observability.enabled:
-        disk += 10
+        components = config.observability.components
+        if components.metrics:
+            disk += _size_gb(config.observability.metrics_retention_size) + 2  # TSDB WAL and compaction
+        if components.logs:
+            # Loki chunks: about 5 GiB per 7 days of retention on a single host.
+            disk += 5 * -(-config.observability.log_retention_hours // 168)
+        disk += 3  # images
     return disk
+
+
+def _size_gb(size: str) -> int:
+    """``5GB`` / ``512MB`` (the metrics_retention_size format) in whole GiB, rounded up."""
+    if size.endswith("GB"):
+        return int(size[:-2])
+    return -(-int(size[:-2]) // 1024)
 
 
 def recommend_host_size(config: InstallationConfig) -> HostSize:
@@ -106,10 +123,11 @@ def recommend_host_size(config: InstallationConfig) -> HostSize:
             break
     if config.services.cloud_app.enabled and chosen.endswith(".micro"):
         chosen = family[1]  # never put the API on a 1 GiB host
-    # Docker build and the Grafana stack need headroom the working-set sum misses.
+    # Docker build, Grafana and Loki need headroom the working-set sum misses
+    # (query spikes); Prometheus or Alertmanager alone fit the working-set estimate.
     if "git_build" in reasons:
         chosen = _at_least(family, chosen, family[2])
-    if "observability" in reasons:
+    if "observability_dashboards" in reasons or "observability_logs" in reasons:
         chosen = _at_least(family, chosen, family[3])
     return HostSize(
         instance_type=chosen,
