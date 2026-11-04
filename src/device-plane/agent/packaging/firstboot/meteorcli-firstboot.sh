@@ -10,6 +10,13 @@
 # Copy to the device as /usr/local/sbin/meteorcli-firstboot.sh (see README.md).
 set -euo pipefail
 
+# systemd services do not set HOME; with set -u, ${HOME} would abort.
+if [[ -z "${HOME:-}" ]]; then
+  HOME="$(getent passwd "$(id -un)" | cut -d: -f6 || true)"
+  HOME="${HOME:-/root}"
+  export HOME
+fi
+
 CONFIG_DIR="${METEORCLI_CONFIG_DIR:-/etc/meteorcli}"
 TOKEN_FILE="${CONFIG_DIR}/device-token"
 CLAIM_FILE="${CONFIG_DIR}/claim-secret"
@@ -20,6 +27,7 @@ UNIT_PATH="${METEOR_FIRSTBOOT_UNIT:-/etc/systemd/system/meteorcli-firstboot.serv
 INSTALLED_SCRIPT="${METEOR_FIRSTBOOT_SCRIPT:-/usr/local/sbin/meteorcli-firstboot.sh}"
 POLL_MODE=0
 export METEORCLI_CONFIG_DIR="${CONFIG_DIR}"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:${PATH}"
 
 if [[ "${EUID}" -ne 0 && -z "${METEOR_FIRSTBOOT_ALLOW_NONROOT:-}" ]]; then
   echo "error: meteorcli-firstboot.sh must run as root (it writes ${CONFIG_DIR})." >&2
@@ -211,7 +219,9 @@ load_dot_meteorenv() {
       fi
     fi
   fi
-  candidates+=("${HOME}/.meteorenv")
+  if [[ -n "${HOME:-}" ]]; then
+    candidates+=("${HOME}/.meteorenv")
+  fi
   load_meteorenv_candidates "${candidates[@]}"
 }
 
@@ -366,7 +376,22 @@ ask_on_this_terminal() {
 
 prompt_if_missing() {
   if [[ "${POLL_MODE}" -eq 1 ]]; then
-    if [[ -z "${METEOR_DOMAIN:-}" || -z "${METEOR_API_KEY:-}" ]]; then
+    local i
+    for i in $(seq 1 36); do
+      if ! meteor_var_empty "${METEOR_DOMAIN:-}" && ! meteor_var_empty "${METEOR_API_KEY:-}"; then
+        break
+      fi
+      log "Credentials not ready yet (${i}/36); re-reading boot partition and ${ENV_FILE}…"
+      load_dot_meteorenv
+      if [[ -f "${ENV_FILE}" ]]; then
+        load_meteor_kv_file "${ENV_FILE}" || true
+      fi
+      load_boot_meteorenv
+      if meteor_var_empty "${METEOR_DOMAIN:-}" || meteor_var_empty "${METEOR_API_KEY:-}"; then
+        sleep 5
+      fi
+    done
+    if meteor_var_empty "${METEOR_DOMAIN:-}" || meteor_var_empty "${METEOR_API_KEY:-}"; then
       echo "error: METEOR_DOMAIN and METEOR_API_KEY must be set (${ENV_FILE}, .meteorenv, or the boot partition) for background poll." >&2
       exit 1
     fi
@@ -385,9 +410,33 @@ prompt_if_missing() {
   log "API key is set (not printed)"
 }
 
-ensure_meteorcli() {
+find_meteorcli() {
+  local p
   if command -v meteorcli >/dev/null 2>&1; then
-    log "meteorcli already installed: $(command -v meteorcli) ($(meteorcli --version 2>/dev/null || echo unknown))"
+    command -v meteorcli
+    return 0
+  fi
+  for p in /usr/local/bin/meteorcli /usr/bin/meteorcli /opt/meteorcli/bin/meteorcli; do
+    if [[ -x "${p}" ]]; then
+      printf '%s\n' "${p}"
+      return 0
+    fi
+  done
+  for p in /home/*/.local/bin/meteorcli; do
+    if [[ -x "${p}" ]]; then
+      printf '%s\n' "${p}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_meteorcli() {
+  local bin
+  if bin="$(find_meteorcli)"; then
+    PATH="$(dirname "${bin}"):${PATH}"
+    export PATH
+    log "meteorcli already installed: ${bin} ($(meteorcli --version 2>/dev/null || echo unknown)); skipping install"
     return 0
   fi
   log "meteorcli not found; installing latest from"
@@ -440,6 +489,8 @@ ConditionPathExists=!/etc/meteorcli/device-token
 [Service]
 Type=simple
 Environment=METEORCLI_CONFIG_DIR=/etc/meteorcli
+Environment=HOME=/root
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 EnvironmentFile=-/etc/meteorcli-firstboot.env
 ExecStart=/usr/local/sbin/meteorcli-firstboot.sh --poll
 Restart=on-failure
@@ -531,12 +582,19 @@ handoff_poll_to_background() {
 }
 
 if [[ "${POLL_MODE}" -eq 1 ]]; then
-  log "MeteorCloud first-boot enrollment (background poll)"
+  log "MeteorCloud first-boot enrollment (background; resumes if already partly done)"
   log "Config dir: ${CONFIG_DIR}"
+  step "1/5 Domain and API key"
   prompt_if_missing
+  log "Server=${METEOR_DOMAIN}  name=${METEOR_NAME:-$(hostname)}  API key is set (not printed)"
+  persist_firstboot_env
+  step "2/5 Network"
   wait_for_network
+  step "3/5 Install meteorcli"
   ensure_meteorcli
+  step "4/5 Save config and request-token"
   configure_meteorcli
+  step "5/5 Poll until an admin approves"
   poll_until_enrolled
   start_agent_service
   exit 0

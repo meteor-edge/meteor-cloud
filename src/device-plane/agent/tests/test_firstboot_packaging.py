@@ -16,12 +16,20 @@ def test_firstboot_script_is_valid_bash() -> None:
         script = FIRSTBOOT / name
         assert script.is_file()
         subprocess.run(["bash", "-n", str(script)], check=True)
+    subprocess.run(["bash", "-n", str(FIRSTBOOT / "firstrun.sh")], check=True)
 
 
 def test_firstboot_installer_points_at_repo() -> None:
     installer = (FIRSTBOOT / "install-meteorcli-firstboot.sh").read_text(encoding="utf-8")
     assert "https://github.com/meteor-edge/meteor-cloud" in installer
     assert "install-meteorcli-firstboot.sh" in installer
+    assert "[1/4] Fetching first-boot files" in installer
+    assert "domain:   MISSING" in installer
+    assert "journalctl -u meteorcli-firstboot -n 40" in installer
+    cloud = (FIRSTBOOT / "cloud-init-user-data.yaml").read_text(encoding="utf-8")
+    assert cloud.lstrip().startswith("#cloud-config")
+    assert "install-meteorcli-firstboot.sh" in cloud
+    assert "runcmd:" in cloud
 
 
 def test_firstboot_unit_polls_until_token() -> None:
@@ -29,6 +37,7 @@ def test_firstboot_unit_polls_until_token() -> None:
     assert "Type=simple" in unit
     assert "ExecStart=/usr/local/sbin/meteorcli-firstboot.sh --poll" in unit
     assert "ConditionPathExists=!/etc/meteorcli/device-token" in unit
+    assert "Environment=HOME=/root" in unit
     script = (FIRSTBOOT / "meteorcli-firstboot.sh").read_text(encoding="utf-8")
     assert "meteorcli request-token" in script
     assert "meteorcli claim --wait" in script
@@ -192,7 +201,8 @@ esac
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith("METEOR") and key not in {"INVOCATION_ID", "SUDO_USER"}
+        if not key.startswith("METEOR")
+        and key not in {"INVOCATION_ID", "SUDO_USER", "HOME"}
     }
     env.update(
         {
@@ -218,6 +228,7 @@ esac
     assert result.returncode == 0, result.stdout + "\n" + result.stderr
     combined = result.stdout + result.stderr
     assert "Loaded enrollment settings from" in combined
+    assert "already installed" in combined
     assert "key_from_boot" not in combined
     assert (config_dir / "device-token").read_text(encoding="utf-8") == "dev_test_token"
     assert "request-token" in calls_log.read_text(encoding="utf-8")
@@ -233,3 +244,80 @@ esac
     assert not unit_path.exists()
     assert not env_file.exists()
     assert (config_dir / ".enrolled").is_file()
+
+
+def test_poll_resumes_from_existing_claim_without_new_request(tmp_path: Path) -> None:
+    boot = tmp_path / "boot"
+    boot.mkdir()
+    (boot / ".meteorenv").write_text(
+        "METEOR_DOMAIN=192.168.0.118:8000\nMETEOR_API_KEY=key_from_boot\n",
+        encoding="utf-8",
+    )
+    config_dir = tmp_path / "etc" / "meteorcli"
+    config_dir.mkdir(parents=True)
+    (config_dir / "claim-secret").write_text(
+        '{"request_id":"req-1","claim_secret":"clm_test"}',
+        encoding="utf-8",
+    )
+    env_file = tmp_path / "etc" / "meteorcli-firstboot.env"
+    unit_path = tmp_path / "unit.service"
+    installed = tmp_path / "meteorcli-firstboot.sh"
+    shutil.copy(FIRSTBOOT / "meteorcli-firstboot.sh", installed)
+    installed.chmod(0o755)
+    stub_bin = tmp_path / "stub-bin"
+    calls_log = config_dir / "meteorcli-calls.log"
+    _write_executable(stub_bin / "curl", "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(
+        stub_bin / "systemctl",
+        "#!/usr/bin/env bash\nexit 0\n",
+    )
+    _write_executable(
+        stub_bin / "meteorcli",
+        f"""#!/usr/bin/env bash
+cmd="${{1:-}}"
+shift || true
+echo "$cmd $*" >> "{calls_log}"
+case "$cmd" in
+  --version) echo "meteorcli-stub 0"; exit 0 ;;
+  config|test) exit 0 ;;
+  request-token) echo "should-not-request" >> "{calls_log}"; exit 1 ;;
+  claim)
+    printf '%s' 'dev_resumed' > "{config_dir}/device-token"
+    rm -f "{config_dir}/claim-secret"
+    exit 0
+    ;;
+  *) exit 0 ;;
+esac
+""",
+    )
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("METEOR")
+        and key not in {"INVOCATION_ID", "SUDO_USER", "HOME"}
+    }
+    env.update(
+        {
+            "PATH": f"{stub_bin}{os.pathsep}{env.get('PATH', '')}",
+            "METEORCLI_CONFIG_DIR": str(config_dir),
+            "METEOR_FIRSTBOOT_ENV": str(env_file),
+            "METEOR_FIRSTBOOT_UNIT": str(unit_path),
+            "METEOR_FIRSTBOOT_SCRIPT": str(installed),
+            "METEOR_FIRSTBOOT_ALLOW_NONROOT": "1",
+            "METEOR_BOOT_DIR": str(boot),
+            "METEOR_WAIT_SECONDS": "1",
+        }
+    )
+    result = subprocess.run(
+        ["bash", str(installed), "--poll"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + "\n" + result.stderr
+    calls = calls_log.read_text(encoding="utf-8")
+    assert "claim" in calls
+    assert "request-token" not in calls
+    assert (config_dir / "device-token").read_text(encoding="utf-8") == "dev_resumed"

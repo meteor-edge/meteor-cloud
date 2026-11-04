@@ -8,6 +8,8 @@ ConditionPathExists=!/etc/meteorcli/device-token
 [Service]
 Type=simple
 Environment=METEORCLI_CONFIG_DIR=/etc/meteorcli
+Environment=HOME=/root
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 EnvironmentFile=-/etc/meteorcli-firstboot.env
 ExecStart=/usr/local/sbin/meteorcli-firstboot.sh --poll
 Restart=on-failure
