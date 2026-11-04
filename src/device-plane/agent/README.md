@@ -44,8 +44,9 @@ and brings `wg0` down when the helper is present).
 
 `meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
 and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`).
-`sudo ./installcli.sh` installs root-owned helpers and passwordless sudo for those
-files only, so `meteorcli run` can stay unprivileged:
+`sudo ./installcli.sh` installs `wireguard-tools` when needed, plus root-owned
+helpers and passwordless sudo for those files only, so `meteorcli run` can stay
+unprivileged:
 
 - `/usr/local/libexec/meteorcli-wg` — create `wg0` (meteorcli's own `wg0.conf`
   keys only; no `PostUp`/`PreUp` hooks)

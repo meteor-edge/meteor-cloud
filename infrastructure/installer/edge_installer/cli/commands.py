@@ -39,15 +39,10 @@ def run_init(*, output: Path, console: Console) -> None:
 
 def run_validate(*, config_path: Path, console: Console) -> None:
     try:
-        config = load_configuration(config_path)
-        errors = validate_configuration(config) + validate_dependencies(config)
-        profile = config.aws.profile if config.aws else None
-        errors.extend(validate_aws_credentials(profile))
-        if errors:
-            console.print("[red]Configuration is invalid:[/red]")
-            for item in errors:
-                console.print(f"  - {item}")
-            raise SystemExit(1)
+        # Same checks as apply/plan (including EC2 SSH key match when AWS CLI is present).
+        from edge_installer.config.validation import ensure_valid
+
+        ensure_valid(load_configuration(config_path))
     except ConfigurationError as exc:
         console.print(f"[red]{exc.message}[/red]")
         raise SystemExit(1) from exc
