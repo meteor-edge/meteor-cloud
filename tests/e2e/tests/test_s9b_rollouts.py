@@ -14,6 +14,8 @@ def test_rollout_checks_are_skipped_with_fewer_than_five_devices() -> None:
         "rollout.pause_resume",
         "rollout.failure_threshold_rollback",
         "rollout.batched",
+        "rollout.skip_already_installed",
+        "rollout.publish_installed",
         "rollout.pending_timeout",
     ]
     report = Report(env_name="ci", run_id="r")

@@ -13,6 +13,7 @@ from datetime import datetime
 
 from e2e.suite.framework import Fail, NotSupported, check, expect, wait_for
 from e2e.suite.s4_onboarding import onboard, start_agent_and_wait_online
+from e2e.suite.s7_apps import endpoint_row, payload_matches, public_body, require_public
 
 STAGE = "9b rollouts"
 FLEET = (2, 3, 4)
@@ -42,10 +43,10 @@ def fleet_release(ctx, version: str, *, command: str | None = None) -> dict:
     }, expect=(201,))
 
 
-def create_deploy(ctx, release: dict, rollout: dict, device_ids: list[str] | None = None) -> dict:
+def create_deploy(ctx, release: dict, rollout: dict, device_ids: list[str] | None = None, **extra) -> dict:
     return ctx.admin().call("POST", ctx.org_path("/deployments"), json_body={
         "release_id": release["id"], "name": f"e2e-{ctx.run_id}-{rollout['strategy']}-v{release['version']}",
-        "target": {"device_ids": device_ids or fleet_ids(ctx)}, "rollout": rollout,
+        "target": {"device_ids": device_ids or fleet_ids(ctx)}, "rollout": rollout, **extra,
     }, expect=(201,))
 
 
@@ -93,6 +94,38 @@ def wait_versions(ctx, indexes, version: str, *, timeout: float = 180) -> dict[s
 
 def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def started_at(ctx, index: int, container: str = CONTAINER) -> str:
+    """Changes only when the container is recreated or restarted, so it proves a reinstall."""
+    return ctx.sh(ctx.device(index), f"docker inspect -f '{{{{.State.StartedAt}}}}' {container}").stdout.strip()
+
+
+def software_row(ctx, index: int, release: dict) -> dict | None:
+    device_id = ctx.data["devices"][index]["id"]
+    software = ctx.admin().call("GET", ctx.org_path(f"/devices/{device_id}/software"))
+    return next((item for item in software if item["desired_release_id"] == release["id"]), None)
+
+
+def wait_health(ctx, indexes, release: dict, health: str = "healthy", *, timeout: float = 240) -> None:
+    def probe():
+        found = [software_row(ctx, index, release) for index in indexes]
+        return all(item and item["sync_status"] == "in_sync" and item["health"] == health for item in found)
+
+    wait_for(probe, timeout=timeout, interval=5, what=f"devices to report {health}")
+
+
+def expect_reinstalled(ctx, index: int, release: dict, version: str, before: str, **extra) -> dict:
+    """A Deploy to one device goes through a real install and replaces its container."""
+    device_id = ctx.data["devices"][index]["id"]
+    created = create_deploy(ctx, release, {"strategy": "immediate"}, [device_id], **extra)
+    expect(rows(created)[device_id]["status"] == "pending", f"row {rows(created)[device_id]}")
+    wait_status(ctx, created["id"], "completed", timeout=420)
+    wait_versions(ctx, [index], version)
+    wait_health(ctx, [index], release)
+    after = started_at(ctx, index)
+    expect(after != before, f"container was not reinstalled: started at {before} both times")
+    return {"deployment_id": created["id"], "started_before": before, "started_after": after}
 
 
 def require_fleet(ctx) -> None:
@@ -233,7 +266,87 @@ def batched(ctx):
     expect("state" not in created["rollout"], f"batched rollout got state {created['rollout'].get('state')}")
     done = wait_status(ctx, created["id"], "completed", timeout=600)
     versions = wait_versions(ctx, FLEET, "4")
+    ctx.data["fleet_release_v4"] = release
     return {"deployment_id": created["id"], "counts": done["counts"], "versions": versions}
+
+
+@check("rollout.skip_already_installed", STAGE,
+       "Redeploying skips healthy devices with no restart; force, a stopped container and an edited spec reinstall",
+       needs=("rollout.batched",))
+def skip_already_installed(ctx):
+    release = ctx.data["fleet_release_v4"]
+    forced, stopped, edited = FLEET
+    wait_health(ctx, FLEET, release)
+    before = {index: started_at(ctx, index) for index in FLEET}
+    revisions = {index: software_row(ctx, index, release)["desired_revision"] for index in FLEET}
+
+    skipped = create_deploy(ctx, release, {"strategy": "immediate"})
+    expect(skipped["status"] == "completed" and skipped["counts"]["skipped"] == 3,
+           f"redeploy: {skipped['status']} {skipped['counts']}")
+    reasons = [row.get("last_error") or "" for row in skipped["devices"]]
+    expect(all("Already installed" in reason for reason in reasons), f"skip reasons {reasons}")
+    # Longer than a heartbeat: the agents have seen desired software and left the app alone.
+    time.sleep(75)
+    after = {index: started_at(ctx, index) for index in FLEET}
+    expect(after == before, f"a skipped device restarted its container: {before} -> {after}")
+    now = {index: software_row(ctx, index, release)["desired_revision"] for index in FLEET}
+    expect(now == revisions, f"desired revision changed on skipped devices: {revisions} -> {now}")
+    expect(all(running_version(ctx, index) == "4" for index in FLEET), "a skipped device stopped serving version 4")
+
+    force = expect_reinstalled(ctx, forced, release, "4", before[forced], force=True)
+    expect(started_at(ctx, stopped) == before[stopped], "force on one device restarted another")
+
+    ctx.sh(ctx.device(stopped), f"docker stop {CONTAINER}")
+    wait_health(ctx, [stopped], release, "unhealthy")
+    repaired = expect_reinstalled(ctx, stopped, release, "4", before[stopped])
+
+    spec = {**release["spec"], "env": {**release["spec"]["env"], "E2E_EDITED": ctx.run_id}}
+    ctx.admin().call("PATCH", ctx.org_path(f"/releases/{release['id']}"), json_body={"spec": spec})
+    applied = expect_reinstalled(ctx, edited, release, "4", before[edited])
+    env = ctx.sh(ctx.device(edited), f"docker inspect -f '{{{{json .Config.Env}}}}' {CONTAINER}").stdout
+    expect(f"E2E_EDITED={ctx.run_id}" in env, "the edited spec did not reach the container")
+    return {"skipped_deployment_id": skipped["id"], "skipped_counts": skipped["counts"], "started_at": before,
+            "forced": force, "stopped_container": repaired, "edited_spec": applied}
+
+
+@check("rollout.publish_installed", STAGE,
+       "An app already installed is published with no restart and serves on its public URL",
+       needs=("rollout.skip_already_installed",))
+def publish_installed(ctx):
+    require_public(ctx)
+    # Device 1 keeps its tunnel to the end of the suite; the fleet devices have none.
+    info = ctx.data["devices"][0]
+    expect(info.get("wg_address"), "device 1 has no WireGuard address")
+    container, port = "e2e-publish", 8083
+    release = ctx.admin().call("POST", ctx.org_path("/releases"), json_body={
+        "name": f"e2e-publish-{ctx.run_id}", "version": "1", "kind": "docker",
+        "artifact_id": ctx.data["image_artifact"]["id"],
+        "spec": {"container_name": container, "ports": [f"{port}:8080"],
+                 "env": {"RUN_ID": ctx.run_id, "DEVICE_ID": info["id"], "VERSION": "1"}},
+    }, expect=(201,))
+    installed = create_deploy(ctx, release, {"strategy": "immediate"}, [info["id"]])
+    wait_status(ctx, installed["id"], "completed", timeout=420)
+    wait_health(ctx, [0], release)
+    before = started_at(ctx, 0, container)
+
+    hostname = ctx.app_hostname("installed")
+    published = create_deploy(ctx, release, {"strategy": "immediate"}, [info["id"]],
+                              endpoint={"hostname": hostname, "port": port, "protocol": "http"})
+    expect(published["status"] == "completed" and rows(published)[info["id"]]["status"] == "skipped",
+           f"publish: {published['status']} {published['counts']}")
+    endpoint = wait_for(lambda: (r := endpoint_row(ctx, hostname)) and r["availability"] == "ready" and r,
+                        timeout=240, what=f"endpoint {hostname} ready")
+    try:
+        body = wait_for(
+            lambda: (b := public_body(ctx, hostname))
+            and payload_matches(b, run_id=ctx.run_id, device_id=info["id"], version="1") and b,
+            timeout=900, interval=15, what=f"https://{hostname}/ to serve the installed app")
+        after = started_at(ctx, 0, container)
+        expect(after == before, f"publishing restarted the container: {before} -> {after}")
+    finally:
+        ctx.admin().call("DELETE", ctx.org_path(f"/endpoints/{endpoint['id']}"), expect=(204,))
+    return {"deployment_id": published["id"], "url": f"https://{hostname}/", "response": json.loads(body),
+            "started_at": before}
 
 
 @check("rollout.pending_timeout", STAGE,

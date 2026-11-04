@@ -11,7 +11,7 @@ meteorcloud-testenv up
   terraform   control plane EC2 (+ dedicated WireGuard gateway), N device EC2s,
               DNS <env>.<domain> and *.<env>.<domain>, Traefik DNS-01 role
   ansible     site.yml (cloud_app + vpn) and device.yml, run twice (2nd: changed=0)
-  suite       72 checks in 13 stages -> report.json + summary.txt
+  suite       74 checks in 13 stages -> report.json + summary.txt
 ```
 
 | Command | What it does |
@@ -84,7 +84,7 @@ dependent check is `not_supported` too.
 | 7b device logs | The device lists its log sources on demand (the deployed container marked deployed); a journal search finds a line written on the device; a followed log streams a new line and stops when the session closes; the container's log opens; the log certificate forces the helper command; the helper refuses a source it does not list |
 | 8 update | v2 replaces v1; the same public URL serves v2 |
 | 9 fleet and tenancy | Device 2 onboards; second hostname routes to device 2 and the first still to device 1, with no proxy file changes; devices cannot reach each other; another organization cannot read, shell into, publish or revoke this organization's resources; revoking device 2 removes its peer and route |
-| 9b rollouts | Needs `E2E_DEVICE_COUNT=5` (otherwise `not_supported`): devices 3-5 onboard as a fleet; phased canary, then the rest only after the 90 s soak; Pause holds the next phase and Resume finishes it; a crashing release pauses on the failure threshold, rollback restores the canary, the original then refuses resume / retry-failed, and cancelling it keeps the rollback's release; batched activates the first two targets, then the third; a device with its agent stopped times out by the background sweep, and its late report still records success |
+| 9b rollouts | Needs `E2E_DEVICE_COUNT=5` (otherwise `not_supported`): devices 3-5 onboard as a fleet; phased canary, then the rest only after the 90 s soak; Pause holds the next phase and Resume finishes it; a crashing release pauses on the failure threshold, rollback restores the canary, the original then refuses resume / retry-failed, and cancelling it keeps the rollback's release; batched activates the first two targets, then the third; redeploying the same release skips healthy devices with no container restart, while `force`, a stopped container and an edited spec reinstall; an already installed app is published with no restart and serves on its public URL; a device with its agent stopped times out by the background sweep, and its late report still records success |
 | 9c rollout kinds | On the 9b fleet: a **systemd** unit rolls out in 10% / 50% / 100% phases (1, 2, 3 devices, one wave at a time) and is then replaced through a canary; `max_concurrent: 1` never has two devices installing; a **docker compose** app rolls out with a phase that adds no devices skipped together with its 30-minute delay; a sweep returns 0 while another replica holds the sweep lock, two sweeps at once both return, and a free sweep ticks the in-progress Deploy |
 | 10 cleanup | Deleting the endpoint removes the route; workload removal (no product API today: `not_supported`) |
 
