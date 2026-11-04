@@ -123,6 +123,8 @@ class DeploymentCreate(BaseModel):
     rollout: DeployRollout = Field(default_factory=DeployRollout)
     name: str | None = Field(default=None, max_length=255)
     endpoint: EndpointSpec | None = None
+    # Reinstall on devices that already run this release healthily, instead of skipping them.
+    force: bool = False
 
     @field_validator("name")
     @classmethod

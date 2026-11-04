@@ -88,6 +88,7 @@ describe("DeployWizard", () => {
     await user.click(screen.getByRole("button", { name: "Deploy" }));
 
     expect(createDeployment).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createDeployment).mock.calls[0][2].force).toBe(false);
     expect(vi.mocked(createDeployment).mock.calls[0][2].rollout).toEqual({
       strategy: "phased",
       phases: [
@@ -257,6 +258,13 @@ describe("DeployWizard", () => {
       port: 8080,
       protocol: "http",
     });
+  });
+
+  it("sends force when reinstalling is ticked", async () => {
+    const user = await openReview();
+    await user.click(screen.getByRole("checkbox", { name: "Reinstall where already installed" }));
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+    expect(vi.mocked(createDeployment).mock.calls[0][2].force).toBe(true);
   });
 
   it("does not offer publishing for a systemd release", async () => {

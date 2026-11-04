@@ -43,7 +43,7 @@ from app.deployments.schemas import (
     RollbackResponse,
     RollbackSkippedDevice,
 )
-from app.deployments.software_models import SoftwareHealth, SoftwareSyncStatus
+from app.deployments.software_models import DeviceSoftware, SoftwareHealth, SoftwareSyncStatus
 from app.deployments.software_repository import DeviceSoftwareRepository
 from app.deployments.software_service import DeviceSoftwareService
 from app.devices.models import Device
@@ -79,6 +79,25 @@ _KIND_CAPABILITY: dict[str, str] = {
     ReleaseKind.DOCKER.value: "docker",
     ReleaseKind.DOCKER_COMPOSE.value: "docker_compose",
 }
+
+
+ALREADY_INSTALLED_REASON = "Already installed and healthy. Use force to reinstall."
+
+
+def _already_installed(software: DeviceSoftware | None, release: Release) -> bool:
+    """Whether a new Deploy of this release would only reinstall what the device runs.
+
+    Unhealthy or failed devices are not skipped, because a reinstall may repair them. The spec
+    is compared too: a release's spec can be edited in place, and the edit has to reach devices.
+    """
+    return (
+        software is not None
+        and software.desired_release_id == release.id
+        and software.installed_release_id == release.id
+        and software.sync_status == SoftwareSyncStatus.IN_SYNC.value
+        and software.health == SoftwareHealth.HEALTHY.value
+        and software.desired_spec == release.spec
+    )
 
 
 class DeploymentService:
@@ -390,12 +409,20 @@ class DeploymentService:
         self.deployments.create(deployment)
 
         deploy_ids: list[uuid.UUID] = []
+        already_installed_ids: list[uuid.UUID] = []
         for device in devices:
             existing = self.software_rows.get_by_workload(
                 device_id=device.id, workload_key=workload_key
             )
             previous_desired = existing.desired_release_id if existing else None
-            if self.device_supports_kind(device, release.kind):
+            if not self.device_supports_kind(device, release.kind):
+                status = DeploymentDeviceStatus.SKIPPED.value
+                last_error = f"Device lacks {cap_name} capability."
+            elif not payload.force and _already_installed(existing, release):
+                status = DeploymentDeviceStatus.SKIPPED.value
+                last_error = ALREADY_INSTALLED_REASON
+                already_installed_ids.append(device.id)
+            else:
                 # Progressive rollouts start queued; the engine picks the first wave below.
                 status = (
                     DeploymentDeviceStatus.QUEUED.value
@@ -404,9 +431,6 @@ class DeploymentService:
                 )
                 last_error = None
                 deploy_ids.append(device.id)
-            else:
-                status = DeploymentDeviceStatus.SKIPPED.value
-                last_error = f"Device lacks {cap_name} capability."
             self.deployments.create_device(
                 DeploymentDevice(
                     deployment_id=deployment.id,
@@ -448,7 +472,9 @@ class DeploymentService:
         self.session.flush()
 
         if payload.endpoint is not None:
-            if len(deploy_ids) != 1:
+            # An app that is already installed can still be published, without a reinstall.
+            endpoint_device_ids = deploy_ids + already_installed_ids
+            if len(endpoint_device_ids) != 1:
                 raise ValidationAppError(
                     "endpoint_requires_one_device",
                     "A public URL can only be attached when the Deploy targets exactly one device.",
@@ -457,7 +483,7 @@ class DeploymentService:
                 actor=actor,
                 organization_id=organization_id,
                 deployment_id=deployment.id,
-                device_id=deploy_ids[0],
+                device_id=endpoint_device_ids[0],
                 release=release,
                 spec=payload.endpoint,
             )
@@ -490,6 +516,8 @@ class DeploymentService:
                 "deployed_count": len(activate_ids),
                 "queued_count": len(deploy_ids) - len(activate_ids),
                 "skipped_count": len(all_device_ids) - len(deploy_ids),
+                "already_installed_count": len(already_installed_ids),
+                "force": payload.force,
                 "name": deployment.name,
                 "provider": deployment.provider,
                 "provider_ref": deployment.provider_ref,

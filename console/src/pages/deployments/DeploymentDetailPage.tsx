@@ -422,7 +422,7 @@ export function DeploymentDetailPage() {
               <th className="px-4 py-3 font-medium">Install</th>
               <th className="px-4 py-3 font-medium">Health</th>
               <th className="px-4 py-3 font-medium">URL</th>
-              <th className="px-4 py-3 font-medium">Error</th>
+              <th className="px-4 py-3 font-medium">Details</th>
               <th className="px-4 py-3 font-medium">Updated</th>
             </tr>
           </thead>

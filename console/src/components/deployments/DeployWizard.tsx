@@ -115,6 +115,7 @@ export function DeployWizard({
   const [failureThreshold, setFailureThreshold] = useState("10");
   const [maxConcurrent, setMaxConcurrent] = useState(DEFAULT_MAX_CONCURRENT);
   const [pendingTimeout, setPendingTimeout] = useState("86400");
+  const [force, setForce] = useState(false);
   const [publish, setPublish] = useState(false);
   const [endpointHostname, setEndpointHostname] = useState<string | null>(null);
   const [endpointPort, setEndpointPort] = useState("");
@@ -229,6 +230,7 @@ export function DeployWizard({
         canPublish && publish && effectiveHostname && port
           ? { hostname: effectiveHostname, port, protocol: "http" }
           : null,
+      force,
     };
   }
 
@@ -306,6 +308,7 @@ export function DeployWizard({
             : {}),
         },
         endpoint: (raw.endpoint as DeploymentCreatePayload["endpoint"]) ?? null,
+        force: raw.force === true,
       };
       if (!payload.release_id) {
         setError("YAML must include release_id.");
@@ -627,6 +630,20 @@ export function DeployWizard({
                     </>
                   )}
                 </fieldset>
+                <div className="space-y-1">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={force}
+                      onChange={(event) => setForce(event.target.checked)}
+                    />
+                    Reinstall where already installed
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Devices already running this release healthily are skipped by default, so they
+                    don't restart. Turn this on to reinstall on them too.
+                  </p>
+                </div>
                 {singleDevice && !publishableKind && (
                   <p className="text-xs text-muted-foreground">
                     Publishing on the internet is available for Single container and Compose

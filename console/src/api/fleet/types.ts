@@ -220,6 +220,8 @@ export type DeploymentCreatePayload = {
     port: number;
     protocol?: string;
   } | null;
+  /** Reinstall on devices that already run this release healthily, instead of skipping them. */
+  force?: boolean;
 };
 
 export type ApplicationEndpoint = {

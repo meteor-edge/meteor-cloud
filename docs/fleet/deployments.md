@@ -9,7 +9,8 @@ With the default **native** provider, MeteorCloud writes **desired** software on
 each target and agents apply it (`systemd`, `docker`, `docker_compose` — see
 [Releases](releases.md)). Optional MQTT `sync_desired` wakes them to poll sooner.
 Devices that reported they lack the release runtime (e.g.
-`capabilities.systemd: false`) are marked **skipped**. Rollout may be
+`capabilities.systemd: false`) are marked **skipped**, and so are devices that
+[already run the release](#already-installed-devices). Rollout may be
 `immediate`, `batched` (`batch_size`, optional `delay_seconds`) or `phased`
 (canary and percentage phases with a soak time and a failure budget, see
 [Rollout strategies](#rollout-strategies)). Use **Retry failed** and
@@ -71,6 +72,24 @@ At least one of `device_ids`, `group_ids`, or `device_type_ids` is required.
 Disabled devices are skipped. Empty expansion after filters returns `422`.
 
 Responses include `provider` (e.g. `native`) and optional `provider_ref` (vendor id).
+
+### Already installed devices
+
+A Deploy skips a device that already runs the release, so an up-to-date device
+does not restart. It is skipped when its last report shows this release desired
+and installed, in sync and healthy, and the release spec has not been edited
+since the device received it. The row is marked **skipped** with the reason, and
+a Deploy where every device is skipped completes straight away.
+
+Other devices install as usual. That includes unhealthy, failed or still
+installing devices, and any other release, even one that uses the same artifact
+(the artifact is not downloaded again if the device still has it).
+
+To reinstall anyway, for example to repair a device, send `"force": true` or tick
+**Reinstall where already installed** in the Deploy wizard. Skipped devices do not
+count towards rollout waves or the failure budget, and Rollback leaves them alone.
+
+With `endpoint`, an already installed app is published without a reinstall.
 
 ### Cancel
 
