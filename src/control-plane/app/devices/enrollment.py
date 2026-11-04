@@ -23,6 +23,7 @@ from app.devices.models import (
     DeviceEnrollmentRequest,
     EnrollmentApiKey,
 )
+from app.devices.naming import default_device_name, unique_device_name
 from app.devices.repository import (
     DeviceEnrollmentRequestRepository,
     DeviceRepository,
@@ -280,16 +281,17 @@ class EnrollmentService:
         return device, generated.plaintext
 
     def _resolve_name(self, request: DeviceEnrollmentRequest, identity: DeviceIdentity) -> str:
-        candidate = (
-            request.assigned_name
-            or request.requested_name
-            or request.hostname
-            or identity.serial_number
-            or (identity.mac_addresses[0] if identity.mac_addresses else None)
+        if request.assigned_name:
+            return request.assigned_name.strip()[:255]
+        return unique_device_name(
+            default_device_name(
+                requested_name=request.requested_name,
+                hostname=request.hostname,
+                serial_number=identity.serial_number,
+                mac_addresses=identity.mac_addresses,
+            ),
+            taken=self.devices.taken_names(organization_id=request.organization_id),
         )
-        if candidate:
-            return candidate.strip()[:255]
-        return "unnamed-device"
 
     def _apply_inventory(self, device: Device, request: DeviceEnrollmentRequest, identity: DeviceIdentity) -> None:
         device.serial_number = identity.serial_number

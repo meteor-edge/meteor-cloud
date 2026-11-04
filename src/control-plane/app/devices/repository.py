@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import Select, String, asc, cast, desc, func, or_, select
+from sqlalchemy import Row, Select, String, asc, cast, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.devices.models import (
@@ -213,6 +213,18 @@ class DeviceRepository:
         """Resolve a device by its credential hash across all organizations."""
         statement = select(Device).where(Device.credential_hash == credential_hash)
         return self.session.scalar(statement)
+
+    def taken_names(self, *, organization_id: uuid.UUID) -> set[str]:
+        """Casefolded names of the organization's devices."""
+        names = self.session.scalars(select(Device.name).where(Device.organization_id == organization_id))
+        return {name.casefold() for name in names}
+
+    def list_identities(self, *, organization_id: uuid.UUID) -> list[Row]:
+        """Each device's id, name, serial and MACs, without loading whole rows."""
+        statement = select(Device.id, Device.name, Device.serial_number, Device.mac_addresses).where(
+            Device.organization_id == organization_id
+        )
+        return list(self.session.execute(statement).all())
 
     def list_candidates_for_identity(
         self,

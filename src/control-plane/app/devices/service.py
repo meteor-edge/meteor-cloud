@@ -28,6 +28,7 @@ from app.devices.models import (
     EnrollmentApiKey,
     RegistrationToken,
 )
+from app.devices.naming import default_device_name, unique_device_name
 from app.devices.repository import (
     DeviceEnrollmentRequestRepository,
     DeviceGroupRepository,
@@ -687,10 +688,54 @@ class FleetService:
     ) -> list[DeviceEnrollmentRequestResponse]:
         membership = self._require_membership(organization_id, actor.id)
         self._require(membership, "device.read")
+        rows = self.enrollment_requests.list(organization_id=organization_id, status=status)
+        suggested = self._suggested_names(organization_id, rows)
         return [
-            DeviceEnrollmentRequestResponse.model_validate(item)
-            for item in self.enrollment_requests.list(organization_id=organization_id, status=status)
+            DeviceEnrollmentRequestResponse.model_validate(item).model_copy(
+                update={"suggested_name": suggested.get(item.id)}
+            )
+            for item in rows
         ]
+
+    def _suggested_names(
+        self, organization_id: uuid.UUID, rows: list[DeviceEnrollmentRequest]
+    ) -> dict[uuid.UUID, str]:
+        """A name per unclaimed request: a re-enrolling device keeps its own, others get distinct defaults."""
+        unclaimed = sorted(
+            (row for row in rows if row.status in {"pending", "approved"} and row.claimed_at is None),
+            key=lambda row: row.created_at,
+        )
+        if not unclaimed:
+            return {}
+        known = self.devices.list_identities(organization_id=organization_id)
+        taken = {device.name.casefold() for device in known}
+        taken.update(row.assigned_name.casefold() for row in unclaimed if row.assigned_name)
+        names_by_id = {device.id: device.name for device in known}
+        ids_by_serial = {device.serial_number: device.id for device in known if device.serial_number}
+        ids_by_mac = {mac: device.id for device in known for mac in device.mac_addresses or []}
+        suggested: dict[uuid.UUID, str] = {}
+        for row in unclaimed:
+            if row.assigned_name:
+                suggested[row.id] = row.assigned_name
+                continue
+            matches = {ids_by_mac[mac] for mac in row.mac_addresses or [] if mac in ids_by_mac}
+            if row.serial_number in ids_by_serial:
+                matches.add(ids_by_serial[row.serial_number])
+            if len(matches) == 1:
+                suggested[row.id] = names_by_id[matches.pop()]
+                continue
+            name = unique_device_name(
+                default_device_name(
+                    requested_name=row.requested_name,
+                    hostname=row.hostname,
+                    serial_number=row.serial_number,
+                    mac_addresses=row.mac_addresses or [],
+                ),
+                taken=taken,
+            )
+            taken.add(name.casefold())
+            suggested[row.id] = name
+        return suggested
 
     def approve_enrollment_request(
         self,

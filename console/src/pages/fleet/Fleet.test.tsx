@@ -818,6 +818,97 @@ describe("API keys", () => {
     expect(await screen.findByText(/awaiting device/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
   });
+
+  function pendingWithSuggestion(id: string, suggested_name: string) {
+    return {
+      id,
+      organization_id: "org-1",
+      status: "pending" as const,
+      claim_secret_prefix: "clm_abcdef",
+      requested_name: null,
+      assigned_name: null,
+      suggested_name,
+      device_type_id: null,
+      device_group_id: null,
+      serial_number: null,
+      mac_addresses: ["aa:bb:cc:dd:a1:b2"],
+      hostname: "raspberrypi",
+      os_name: null,
+      os_version: null,
+      kernel_version: null,
+      architecture: null,
+      cpu_model: null,
+      cpu_cores: null,
+      memory_mb: null,
+      reviewed_by_user_id: null,
+      reviewed_at: null,
+      rejection_reason: null,
+      claimed_at: null,
+      device_id: null,
+      enrollment_key_id: "key-1",
+      enrollment_key_name: "Field techs",
+      enrollment_key_prefix: "key_abcdef",
+      expires_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  it("pre-fills the suggested name so approving takes one click", async () => {
+    const user = userEvent.setup();
+    const request = pendingWithSuggestion("req-1", "raspberrypi-a1b2");
+    vi.mocked(fleetApi.listEnrollmentRequests).mockResolvedValue([request]);
+    vi.mocked(fleetApi.approveEnrollmentRequest).mockResolvedValue(request);
+
+    renderApp(["/organizations/org-1/api-keys"]);
+    expect(await screen.findByText("raspberrypi-a1b2")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /^approve$/i }));
+    const dialog = screen.getByRole("dialog", { name: /approve device/i });
+    expect(within(dialog).getByLabelText(/^name$/i)).toHaveValue("raspberrypi-a1b2");
+    expect(screen.getByText(/rename it later/i)).toBeInTheDocument();
+    expect(screen.queryByText(/already has this name/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /confirm approval/i }));
+
+    await waitFor(() => {
+      expect(fleetApi.approveEnrollmentRequest).toHaveBeenCalledWith(
+        "token-123",
+        "org-1",
+        "req-1",
+        expect.objectContaining({ name: "raspberrypi-a1b2" }),
+      );
+    });
+  });
+
+  it("warns about a typed name another device has, but still allows it", async () => {
+    const user = userEvent.setup();
+    const request = pendingWithSuggestion("req-1", "raspberrypi-a1b2");
+    vi.mocked(fleetApi.listEnrollmentRequests).mockResolvedValue([request]);
+    vi.mocked(fleetApi.approveEnrollmentRequest).mockResolvedValue(request);
+    vi.mocked(fleetApi.listDevices).mockResolvedValue({
+      items: [{ name: "Lobby" } as fleetApi.Device],
+      total: 1,
+      page: 1,
+      page_size: 100,
+    });
+
+    renderApp(["/organizations/org-1/api-keys"]);
+    await user.click(await screen.findByRole("button", { name: /^approve$/i }));
+    const dialog = screen.getByRole("dialog", { name: /approve device/i });
+    const name = within(dialog).getByLabelText(/^name$/i);
+    await user.clear(name);
+    await user.type(name, "lobby");
+    expect(await screen.findByText(/already has this name/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /confirm approval/i }));
+
+    await waitFor(() => {
+      expect(fleetApi.approveEnrollmentRequest).toHaveBeenCalledWith(
+        "token-123",
+        "org-1",
+        "req-1",
+        expect.objectContaining({ name: "lobby" }),
+      );
+    });
+  });
 });
 
 describe("MQTT test", () => {
