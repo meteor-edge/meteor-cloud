@@ -52,7 +52,8 @@ def inspect_container_health(runner, container_name: str) -> ContainerHealth:
     if result.returncode != 0:
         return ContainerHealth(MISSING, f"{subject} not found")
     running, status, exit_code, health = ((result.stdout or "").strip().split("|") + ["", "", "", ""])[:4]
-    if running.lower() != "true":
+    # Docker reports a crash-looping container as Running=true with status "restarting".
+    if running.lower() != "true" or status == "restarting":
         detail = ", ".join(part for part in (status, f"exit {exit_code}" if exit_code else "") if part)
         return ContainerHealth(UNHEALTHY, f"{subject} is not running" + (f" ({detail})" if detail else ""))
     if health == "unhealthy":

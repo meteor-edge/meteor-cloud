@@ -2,23 +2,72 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import sys
+import zipfile
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
+from pathlib import Path
+from typing import Any
 
+
+# Host `make seed` must talk to Compose on localhost, not Docker DNS or AWS.
+# Apply before importing Settings / SessionLocal (they cache DATABASE_URL).
+def _apply_host_seed_env() -> None:
+    env_file = Path(__file__).resolve().parents[3] / "deploy" / "compose" / ".env"
+    if env_file.is_file():
+        for raw in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key and key not in os.environ:
+                os.environ[key] = value.strip().strip("'\"")
+    for key in ("OBJECT_STORAGE_ENDPOINT_URL", "DATABASE_URL", "REDIS_URL"):
+        current = os.environ.get(key, "")
+        rewritten = (
+            current.replace("://minio:", "://127.0.0.1:")
+            .replace("@postgres:", "@127.0.0.1:")
+            .replace("://redis:", "://127.0.0.1:")
+        )
+        if rewritten != current:
+            os.environ[key] = rewritten
+
+
+if "pytest" not in sys.modules:
+    _apply_host_seed_env()
+
+# isort: off
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters import object_storage as build_object_storage
+from app.artifacts.models import Artifact, ArtifactType
+from app.artifacts.repository import ArtifactRepository
+from app.artifacts.schemas import ArtifactCreate
+from app.artifacts.service import ArtifactService
 from app.authorization.seed import seed_authorization_catalog
 from app.core.config import get_settings
 from app.core.database import SessionLocal
+from app.core.exceptions import AppError, ConflictError
 from app.core.logging import configure_logging
 from app.core.security import hash_password
 from app.devices.models import Device, DeviceGroup, DeviceMqttCredential, DeviceType
 from app.devices.tokens import hash_token
+from app.identity.models import User
 from app.identity.repository import UserRepository
-from app.tenancy.models import OrganizationRole
+from app.ports.storage import ObjectStorage
+from app.releases.kinds import ReleaseKind
+from app.releases.repository import ReleaseRepository
+from app.releases.schemas import ReleaseCreate
+from app.releases.service import ReleaseService
+from app.tenancy.models import Organization, OrganizationRole
 from app.tenancy.repository import MembershipRepository, OrganizationRepository
+# isort: on
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +136,342 @@ SEED_DEVICE_GROUPS = (
     },
 )
 
+# Same workload key per kind so good/fail Deploys replace each other on a device.
+_SYSTEMD_UNIT = "seed-systemd.service"
+_DOCKER_CONTAINER = "seed-nginx"
+_COMPOSE_PROJECT = "seed-compose"
 
-def seed(session: Session) -> None:
+_SYSTEMD_OK_UNIT = b"""[Unit]
+Description=MeteorCloud seed demo (ok)
+[Service]
+Type=simple
+ExecStart=/bin/sleep infinity
+Restart=no
+[Install]
+WantedBy=multi-user.target
+"""
+
+_SYSTEMD_FAIL_UNIT = b"""[Unit]
+Description=MeteorCloud seed demo (fail)
+[Service]
+Type=oneshot
+ExecStart=/bin/false
+RemainAfterExit=no
+[Install]
+WantedBy=multi-user.target
+"""
+
+_COMPOSE_OK_YAML = """services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+"""
+
+_COMPOSE_OK_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>MeteorCloud seed</title></head>
+<body><h1>seed-compose 1.0.0-ok</h1></body>
+</html>
+"""
+
+_COMPOSE_FAIL_YAML = """services:
+  web:
+    image: busybox:1.36
+    command: ["false"]
+    restart: "no"
+"""
+
+
+@dataclass(frozen=True)
+class _SeedRelease:
+    name: str
+    version: str
+    kind: ReleaseKind
+    description: str
+    spec: dict[str, Any]
+    artifact_type: ArtifactType | None = None
+    file_name: str | None = None
+    content_type: str | None = None
+    content: bytes | None = None
+
+
+# Fixed entry timestamp so every seed run builds byte-identical zips (same SHA-256).
+_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+
+def _compose_zip(compose_yaml: str, extra: dict[str, str] | None = None) -> bytes:
+    buffer = BytesIO()
+    entries = {"docker-compose.yml": compose_yaml, **(extra or {})}
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path, body in entries.items():
+            info = zipfile.ZipInfo(path, date_time=_ZIP_EPOCH)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, body)
+    return buffer.getvalue()
+
+
+def _demo_releases() -> tuple[_SeedRelease, ...]:
+    return (
+        _SeedRelease(
+            name="seed-systemd",
+            version="1.0.0-ok",
+            kind=ReleaseKind.SYSTEMD,
+            description="Stays active. Use to test a successful systemd Deploy.",
+            spec={"unit_name": _SYSTEMD_UNIT, "start": True},
+            artifact_type=ArtifactType.SYSTEMD,
+            file_name=_SYSTEMD_UNIT,
+            content_type="text/plain",
+            content=_SYSTEMD_OK_UNIT,
+        ),
+        _SeedRelease(
+            name="seed-systemd",
+            version="1.0.0-fail",
+            kind=ReleaseKind.SYSTEMD,
+            description="Exits immediately. Use to test a failing systemd Deploy.",
+            spec={"unit_name": _SYSTEMD_UNIT, "start": True},
+            artifact_type=ArtifactType.SYSTEMD,
+            file_name=_SYSTEMD_UNIT,
+            content_type="text/plain",
+            content=_SYSTEMD_FAIL_UNIT,
+        ),
+        _SeedRelease(
+            name="seed-docker",
+            version="1.0.0-ok",
+            kind=ReleaseKind.DOCKER,
+            description="Pulls nginx:alpine. Use to test a successful Docker Deploy.",
+            spec={
+                "container_name": _DOCKER_CONTAINER,
+                "image": "nginx:alpine",
+                "ports": ["8080:80"],
+                "restart": "unless-stopped",
+            },
+        ),
+        _SeedRelease(
+            name="seed-docker",
+            version="1.0.0-fail",
+            kind=ReleaseKind.DOCKER,
+            description="busybox that exits. Use to test a failing Docker Deploy.",
+            spec={
+                "container_name": _DOCKER_CONTAINER,
+                "image": "busybox:1.36",
+                "command": "false",
+                "restart": "no",
+            },
+        ),
+        _SeedRelease(
+            name="seed-compose",
+            version="1.0.0-ok",
+            kind=ReleaseKind.DOCKER_COMPOSE,
+            description="Nginx + static HTML zip. Use to test a successful Compose Deploy.",
+            spec={"project_name": _COMPOSE_PROJECT},
+            artifact_type=ArtifactType.DOCKER_COMPOSE,
+            file_name="seed-compose-ok.zip",
+            content_type="application/zip",
+            content=_compose_zip(_COMPOSE_OK_YAML, {"html/index.html": _COMPOSE_OK_HTML}),
+        ),
+        _SeedRelease(
+            name="seed-compose",
+            version="1.0.0-fail",
+            kind=ReleaseKind.DOCKER_COMPOSE,
+            description="Compose service that exits. Use to test a failing Compose Deploy.",
+            spec={"project_name": _COMPOSE_PROJECT},
+            artifact_type=ArtifactType.DOCKER_COMPOSE,
+            file_name="seed-compose-fail.zip",
+            content_type="application/zip",
+            content=_compose_zip(_COMPOSE_FAIL_YAML),
+        ),
+    )
+
+
+def _sync_seed_artifact_bytes(
+    session: Session,
+    storage: ObjectStorage,
+    artifact: Artifact,
+    *,
+    content: bytes,
+    content_type: str | None,
+) -> bool:
+    """Make storage and the DB row match the seed content for an existing artifact.
+
+    Re-uploads when the object is missing or the stored checksum differs from the
+    seed bytes (older seeds built non-deterministic zips, so devices got
+    ``checksum_mismatch``), then updates ``checksum_sha256`` and ``size_bytes``.
+
+    Returns False when the artifact cannot be used for a seed release: it was not created
+    by the seed (a user upload with the same name and version is never overwritten), or
+    its content could not be checked or restored. A later seed run retries the repair.
+    """
+    if not (artifact.metadata_ or {}).get("seeded"):
+        logger.warning(
+            "Artifact %s %s exists but was not created by the seed; leaving it unchanged",
+            artifact.name,
+            artifact.version,
+        )
+        return False
+    expected = hashlib.sha256(content).hexdigest()
+    try:
+        present = storage.exists(artifact.storage_key)
+    except Exception:
+        logger.warning("Could not check storage for %s %s", artifact.name, artifact.version)
+        return False
+    if present and artifact.checksum_sha256 == expected and artifact.size_bytes == len(content):
+        return True
+    try:
+        storage.put(artifact.storage_key, BytesIO(content), content_type=content_type)
+    except Exception:
+        logger.warning("Could not restore artifact content %s %s", artifact.name, artifact.version)
+        return False
+    artifact.checksum_sha256 = expected
+    artifact.size_bytes = len(content)
+    session.flush()
+    logger.info(
+        "%s artifact content %s %s",
+        "Repaired" if present else "Restored missing",
+        artifact.name,
+        artifact.version,
+    )
+    return True
+
+
+def _seed_demo_software(
+    session: Session,
+    *,
+    actor: User,
+    organization: Organization,
+    storage: ObjectStorage | None,
+) -> None:
+    """Upload demo artifacts and create good/fail releases. Idempotent; storage is optional."""
+    resolved = storage
+    if resolved is None:
+        try:
+            resolved = build_object_storage(get_settings())
+        except Exception:
+            logger.warning(
+                "Object storage is not available; seeding image-only docker releases only"
+            )
+            resolved = None
+
+    artifact_svc = ArtifactService(session, resolved) if resolved is not None else None
+    artifact_repo = ArtifactRepository(session)
+    release_svc = ReleaseService(session)
+    release_repo = ReleaseRepository(session)
+    seeded: list[str] = []
+
+    for item in _demo_releases():
+        artifact_id = None
+        if item.content is not None:
+            if artifact_svc is None or item.artifact_type is None:
+                logger.warning(
+                    "Skipping %s %s: needs an artifact and object storage is unavailable",
+                    item.name,
+                    item.version,
+                )
+                continue
+            existing_artifact = artifact_repo.find_duplicate(
+                organization_id=organization.id,
+                device_type_id=None,
+                type=item.artifact_type,
+                name=item.name,
+                version=item.version,
+            )
+            if existing_artifact is None:
+                try:
+                    uploaded = artifact_svc.upload_artifact(
+                        actor=actor,
+                        organization_id=organization.id,
+                        payload=ArtifactCreate(
+                            name=item.name,
+                            version=item.version,
+                            type=item.artifact_type,
+                            description=item.description,
+                            metadata={"seeded": True},
+                        ),
+                        data=BytesIO(item.content),
+                        file_name=item.file_name,
+                        content_type=item.content_type,
+                    )
+                    artifact_id = uploaded.id
+                    logger.info("Created artifact %s %s", item.name, item.version)
+                except ConflictError:
+                    existing_artifact = artifact_repo.find_duplicate(
+                        organization_id=organization.id,
+                        device_type_id=None,
+                        type=item.artifact_type,
+                        name=item.name,
+                        version=item.version,
+                    )
+                    artifact_id = existing_artifact.id if existing_artifact else None
+                    if existing_artifact is not None and not _sync_seed_artifact_bytes(
+                        session,
+                        resolved,
+                        existing_artifact,
+                        content=item.content,
+                        content_type=item.content_type,
+                    ):
+                        logger.warning("Skipping release %s %s", item.name, item.version)
+                        continue
+                except AppError as exc:
+                    if exc.status_code == 503 or exc.code in {"storage_unavailable", "artifact_empty"}:
+                        logger.warning(
+                            "Skipping remaining file artifacts (%s %s): %s",
+                            item.name,
+                            item.version,
+                            exc.message,
+                        )
+                        artifact_svc = None
+                        continue
+                    raise
+            else:
+                artifact_id = existing_artifact.id
+                if not _sync_seed_artifact_bytes(
+                    session,
+                    resolved,
+                    existing_artifact,
+                    content=item.content,
+                    content_type=item.content_type,
+                ):
+                    logger.warning("Skipping release %s %s", item.name, item.version)
+                    continue
+                logger.info("Artifact already exists: %s %s", item.name, item.version)
+
+        existing_release = release_repo.find_duplicate(
+            organization_id=organization.id,
+            kind=item.kind,
+            name=item.name,
+            version=item.version,
+        )
+        if existing_release is not None:
+            logger.info("Release already exists: %s %s", item.name, item.version)
+            seeded.append(f"{item.name} {item.version}")
+            continue
+        try:
+            created = release_svc.create_release(
+                actor=actor,
+                organization_id=organization.id,
+                payload=ReleaseCreate(
+                    name=item.name,
+                    version=item.version,
+                    kind=item.kind,
+                    artifact_id=artifact_id,
+                    description=item.description,
+                    spec=item.spec,
+                ),
+            )
+            logger.info("Created release %s %s (%s)", created.name, created.version, created.kind.value)
+            seeded.append(f"{created.name} {created.version}")
+        except ConflictError:
+            logger.info("Release already exists: %s %s", item.name, item.version)
+            seeded.append(f"{item.name} {item.version}")
+
+    if seeded:
+        logger.info("Demo releases: %s", ", ".join(seeded))
+
+
+def seed(session: Session, *, storage: ObjectStorage | None = None) -> None:
     seed_authorization_catalog(session)
     users = UserRepository(session)
     organizations = OrganizationRepository(session)
@@ -303,6 +686,12 @@ def seed(session: Session) -> None:
         )
         logger.info("Created device %s", item["name"])
 
+    _seed_demo_software(
+        session,
+        actor=created_users["owner@example.com"],
+        organization=organization,
+        storage=storage,
+    )
     session.commit()
 
 

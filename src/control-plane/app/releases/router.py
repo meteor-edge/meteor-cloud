@@ -24,6 +24,7 @@ def list_releases(
     kind: Annotated[ReleaseKind | None, Query()] = None,
     version: Annotated[str | None, Query(max_length=64)] = None,
     search: Annotated[str | None, Query(max_length=120)] = None,
+    artifact_id: Annotated[uuid.UUID | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> Page[ReleaseResponse]:
@@ -33,6 +34,7 @@ def list_releases(
         kind=kind,
         version=version,
         search=search,
+        artifact_id=artifact_id,
         page=page,
         page_size=page_size,
     )

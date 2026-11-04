@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,7 @@ from app.artifacts.repository import ArtifactRepository
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.exceptions import ConflictError, NotFoundError
+from app.deployments.models import Deployment
 from app.devices.schemas import Page
 from app.identity.models import User
 from app.releases.kinds import (
@@ -49,6 +51,7 @@ class ReleaseService:
         kind: ReleaseKind | None = None,
         version: str | None = None,
         search: str | None = None,
+        artifact_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Page[ReleaseResponse]:
@@ -59,11 +62,13 @@ class ReleaseService:
             kind=kind,
             version=version,
             search=search,
+            artifact_id=artifact_id,
             page=page,
             page_size=page_size,
         )
+        counts = self._deployment_counts([item.id for item in items])
         return Page[ReleaseResponse](
-            items=[ReleaseResponse.model_validate(item) for item in items],
+            items=[self._to_response(item, counts.get(item.id, 0)) for item in items],
             total=total,
             page=page,
             page_size=page_size,
@@ -72,7 +77,25 @@ class ReleaseService:
     def get_release(self, *, actor: User, organization_id: uuid.UUID, release_id: uuid.UUID) -> ReleaseResponse:
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.read")
-        return ReleaseResponse.model_validate(self._require_release(organization_id, release_id))
+        release = self._require_release(organization_id, release_id)
+        return self._to_response(release, self._deployment_counts([release.id]).get(release.id, 0))
+
+    def _deployment_counts(self, release_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many Deploys each release has, in one grouped query."""
+        if not release_ids:
+            return {}
+        rows = self.session.execute(
+            select(Deployment.release_id, func.count())
+            .where(Deployment.release_id.in_(release_ids))
+            .group_by(Deployment.release_id)
+        ).all()
+        return {release_id: int(count) for release_id, count in rows}
+
+    @staticmethod
+    def _to_response(release: Release, deployment_count: int) -> ReleaseResponse:
+        response = ReleaseResponse.model_validate(release)
+        response.deployment_count = deployment_count
+        return response
 
     def create_release(
         self,
@@ -208,5 +231,5 @@ class ReleaseService:
             self.session.rollback()
             raise ConflictError(
                 "release_in_use",
-                "This release cannot be deleted while deployments or software still reference it.",
+                "This release cannot be deleted while Deploys or device software still use it.",
             ) from exc

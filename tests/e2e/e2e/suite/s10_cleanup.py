@@ -49,7 +49,7 @@ def routed_hostnames(ctx) -> set[str]:
         " headers={'X-Routing-Internal-Token': os.environ.get('ROUTING_INTERNAL_TOKEN')"
         " or os.environ['CONNECTIVITY_INTERNAL_TOKEN']})\n"
         "doc = json.loads(urllib.request.urlopen(req, timeout=10).read())\n"
-        "print(json.dumps([r['rule'] for r in doc['http']['routers'].values()]))\n"
+        "print(json.dumps([r['rule'] for r in doc.get('http', {}).get('routers', {}).values()]))\n"
     )
     return {rule.split("`")[1] for rule in data if "`" in rule}
 

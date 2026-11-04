@@ -58,6 +58,18 @@ class ReleaseUpdate(BaseModel):
         return value.strip() or None
 
 
+class ReleaseArtifactBrief(BaseModel):
+    """The artifact a release installs, so the UI can link the two without another request."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    version: str
+    type: str
+    file_name: str
+
+
 class ReleaseResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,6 +79,9 @@ class ReleaseResponse(BaseModel):
     version: str
     kind: ReleaseKind
     artifact_id: uuid.UUID | None
+    artifact: ReleaseArtifactBrief | None = None
+    # Deploys of this release; it cannot be deleted while it has any.
+    deployment_count: int = 0
     description: str | None
     spec: dict[str, Any]
     created_by_user_id: uuid.UUID | None

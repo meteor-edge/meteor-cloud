@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import {
   deleteDevice,
@@ -61,9 +61,12 @@ export function DeviceDetailPage() {
   const [rotatedToken, setRotatedToken] = useState<string | null>(null);
   const [pingResult, setPingResult] = useState<string | null>(null);
   const [pinging, setPinging] = useState(false);
-  const [activeTab, setActiveTab] = useState<DeviceTab>("overview");
+  const [searchParams] = useSearchParams();
+  // `?tab=logs` (e.g. from a Deploy row) lands on Access with logs open: the user asked for them.
+  const logsRequested = searchParams.get("tab") === "logs";
+  const [activeTab, setActiveTab] = useState<DeviceTab>(logsRequested ? "access" : "overview");
   // Logs are listed on the device over SSH, so nothing is asked until the user opens them.
-  const [logsOpen, setLogsOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(logsRequested);
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -127,6 +130,19 @@ export function DeviceDetailPage() {
     onError: (err: unknown) =>
       setError(err instanceof ApiError ? err.message : "Could not rotate credential."),
   });
+
+  const permissionsKnown = !orgQuery.isLoading && !accessQuery.isLoading;
+  const deviceLoaded = Boolean(deviceQuery.data);
+  useEffect(() => {
+    if (!logsRequested || !deviceLoaded || !permissionsKnown) return;
+    if (!canLogs) {
+      // Direct link without the logs permission: don't strand the user on an empty tab.
+      setLogsOpen(false);
+      setActiveTab((tab) => (tab === "access" && !canShell ? "overview" : tab));
+      return;
+    }
+    document.getElementById("device-logs")?.scrollIntoView?.({ block: "start" });
+  }, [logsRequested, deviceLoaded, permissionsKnown, canLogs, canShell]);
 
   if (deviceQuery.isLoading) {
     return <p className="text-muted-foreground">Loading device…</p>;

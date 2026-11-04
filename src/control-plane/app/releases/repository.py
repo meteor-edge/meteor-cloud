@@ -45,10 +45,13 @@ class ReleaseRepository:
         kind: ReleaseKind | None = None,
         version: str | None = None,
         search: str | None = None,
+        artifact_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Release], int]:
         statement = select(Release).where(Release.organization_id == organization_id)
+        if artifact_id is not None:
+            statement = statement.where(Release.artifact_id == artifact_id)
         if kind is not None:
             statement = statement.where(Release.kind == kind)
         if version:

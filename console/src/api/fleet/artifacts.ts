@@ -38,6 +38,17 @@ export function listArtifacts(
   );
 }
 
+/** One artifact's metadata, including how many releases use it. */
+export function getArtifact(
+  token: string,
+  organizationId: string,
+  artifactId: string,
+): Promise<Artifact> {
+  return apiRequest<Artifact>(`/api/v1/organizations/${organizationId}/artifacts/${artifactId}`, {
+    token,
+  });
+}
+
 /** Delete artifact metadata and request content cleanup; reject on API, network, or parsing errors. */
 export function deleteArtifact(
   token: string,

@@ -49,6 +49,24 @@ def _setup_release(client: TestClient, db_session: Session):
     return org, headers, token, release
 
 
+def _docker_web_release(
+    client: TestClient, org_id, headers, *, name: str = "camera-agent", ports: tuple[str, ...] = ("80:80",)
+) -> dict:
+    """An image-pull docker release; only container kinds can be published on the internet."""
+    created = client.post(
+        f"/api/v1/organizations/{org_id}/releases",
+        headers=headers,
+        json={
+            "name": name,
+            "version": "1.0.0",
+            "kind": "docker",
+            "spec": {"container_name": name, "image": "nginx:alpine", "ports": list(ports)},
+        },
+    )
+    assert created.status_code == 201, created.text
+    return created.json()
+
+
 def _register_device(client: TestClient, token: str, *, name: str, mac: str) -> dict:
     return client.post(
         "/api/v1/agent/register",
@@ -454,7 +472,8 @@ def test_deploy_detail_shows_runtime_health(client: TestClient, db_session: Sess
 
 
 def test_deploy_detail_shows_endpoint_availability(client: TestClient, db_session: Session) -> None:
-    org, headers, token, release = _setup_release(client, db_session)
+    org, headers, token, _ = _setup_release(client, db_session)
+    release = _docker_web_release(client, org.id, headers)
     reg = _register_device(client, token, name="edge-url", mac="aa:bb:cc:dd:ee:42")
     created = client.post(
         f"/api/v1/organizations/{org.id}/deployments",
@@ -498,3 +517,300 @@ def test_deploy_detail_loads_software_rows_in_one_query(client: TestClient, db_s
     assert len(detail.json()["devices"]) == 3
     software_selects = [sql for sql in statements if sql.startswith("SELECT") and "FROM device_software" in sql]
     assert len(software_selects) == 1
+
+
+def _phased(client: TestClient, org, headers: dict, release: dict, device_ids: list[str], **rollout) -> dict:
+    response = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={
+            "release_id": release["id"],
+            "target": {"device_ids": device_ids},
+            "rollout": {
+                "strategy": "phased",
+                "phases": [{"count": 1}, {"percent": 100, "delay_seconds": 3600}],
+                **rollout,
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _action(client: TestClient, org, headers: dict, deployment_id: str, action: str):
+    return client.post(f"/api/v1/organizations/{org.id}/deployments/{deployment_id}/{action}", headers=headers)
+
+
+def test_pause_and_resume_phased_deploy(client: TestClient, db_session: Session) -> None:
+    from app.audit.models import AuditEvent
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [_register_device(client, token, name=f"pz-{index}", mac=f"aa:bb:cc:70:00:0{index}") for index in range(3)]
+    body = _phased(client, org, headers, release, [reg["device_id"] for reg in regs])
+
+    paused = _action(client, org, headers, body["id"], "pause")
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["status"] == "paused"
+    assert paused.json()["rollout"]["state"]["paused_reason"] == "manual"
+    assert paused.json()["rollout"]["state"]["paused_at"]
+
+    # Activated devices keep reporting while paused; nothing new is activated.
+    canary = next(reg for reg in regs if reg["device_id"] == body["rollout"]["activated_device_ids"][0])
+    _report(client, canary, release, health="healthy")
+    detail = client.get(f"/api/v1/organizations/{org.id}/deployments/{body['id']}", headers=headers).json()
+    assert detail["status"] == "paused"
+    assert detail["counts"]["succeeded"] == 1
+    assert detail["counts"]["queued"] == 2
+
+    assert _action(client, org, headers, body["id"], "pause").status_code == 409
+
+    resumed = _action(client, org, headers, body["id"], "resume")
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["status"] == "in_progress"
+    assert "paused_reason" not in resumed.json()["rollout"]["state"]
+    assert _action(client, org, headers, body["id"], "resume").status_code == 409
+
+    actions = {
+        row.action: row.metadata_
+        for row in db_session.query(AuditEvent).filter(AuditEvent.organization_id == org.id).all()
+    }
+    assert actions["deployment.pause"]["reason"] == "manual"
+    assert actions["deployment.resume"]["reason"] == "manual"
+
+
+def test_resume_runs_a_tick_immediately(client: TestClient, db_session: Session) -> None:
+    from uuid import UUID
+
+    from app.deployments.models import Deployment
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [_register_device(client, token, name=f"pr-{index}", mac=f"aa:bb:cc:71:00:0{index}") for index in range(3)]
+    body = _phased(client, org, headers, release, [reg["device_id"] for reg in regs])
+    canary = next(reg for reg in regs if reg["device_id"] == body["rollout"]["activated_device_ids"][0])
+    _report(client, canary, release, health="healthy")
+    assert _action(client, org, headers, body["id"], "pause").status_code == 200
+
+    row = db_session.get(Deployment, UUID(body["id"]))
+    db_session.refresh(row)
+    rollout = dict(row.rollout)
+    rollout["state"] = {**rollout["state"], "phase_completed_at": "2020-01-01T00:00:00+00:00"}
+    row.rollout = rollout
+    db_session.commit()
+
+    resumed = _action(client, org, headers, body["id"], "resume").json()
+    assert resumed["counts"]["queued"] == 0
+    assert resumed["counts"]["pending"] == 2
+
+
+def test_pause_and_resume_wrong_state_and_strategy(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="pw-0", mac="aa:bb:cc:72:00:01")
+    immediate = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={"release_id": release["id"], "target": {"device_ids": [reg["device_id"]]}},
+    ).json()
+    not_pausable = _action(client, org, headers, immediate["id"], "pause")
+    assert not_pausable.status_code == 409
+    assert not_pausable.json()["error"]["code"] == "deployment_not_pausable"
+    assert _action(client, org, headers, immediate["id"], "resume").status_code == 409
+
+    _report(client, reg, release, health="healthy")
+    assert _action(client, org, headers, immediate["id"], "pause").status_code == 409
+
+    viewer = create_user(db_session, email="viewer-pause@example.com")
+    add_member(db_session, org, viewer, OrganizationRole.VIEWER)
+    phased = _phased(client, org, headers, release, [reg["device_id"]])
+    denied = _action(client, org, auth_header(client, "viewer-pause@example.com"), phased["id"], "pause")
+    assert denied.status_code == 403
+
+
+def test_cancel_while_paused(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [_register_device(client, token, name=f"pc-{index}", mac=f"aa:bb:cc:73:00:0{index}") for index in range(3)]
+    body = _phased(client, org, headers, release, [reg["device_id"] for reg in regs])
+    assert _action(client, org, headers, body["id"], "pause").status_code == 200
+
+    cancelled = _action(client, org, headers, body["id"], "cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["counts"]["cancelled"] == 3
+    assert _action(client, org, headers, body["id"], "resume").status_code == 409
+
+    canary = body["rollout"]["activated_device_ids"][0]
+    software = client.get(f"/api/v1/organizations/{org.id}/devices/{canary}/software", headers=headers).json()
+    assert software[0]["sync_status"] == "cancelled"
+
+
+def test_rollback_while_paused_only_targets_activated(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [_register_device(client, token, name=f"pb-{index}", mac=f"aa:bb:cc:74:00:0{index}") for index in range(3)]
+    device_ids = [reg["device_id"] for reg in regs]
+    client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={"release_id": release["id"], "target": {"device_ids": device_ids}},
+    )
+    for reg in regs:
+        _report(client, reg, release, health="healthy")
+
+    artifact = client.post(
+        f"/api/v1/organizations/{org.id}/artifacts",
+        headers=headers,
+        data={"name": "camera-agent", "version": "3.0", "type": "systemd"},
+        files={"file": ("camera-agent.service", UNIT, "text/plain")},
+    ).json()
+    release2 = client.post(
+        f"/api/v1/organizations/{org.id}/releases",
+        headers=headers,
+        json={
+            "name": "camera-agent",
+            "version": "3.0.0",
+            "kind": "systemd",
+            "artifact_id": artifact["id"],
+            "spec": {"unit_name": "camera-agent.service"},
+        },
+    ).json()
+    body = _phased(client, org, headers, release2, device_ids, failure_threshold_percent=10)
+    canary = next(reg for reg in regs if reg["device_id"] == body["rollout"]["activated_device_ids"][0])
+    _report(client, canary, release2, health="unhealthy", last_error="crash")
+    detail = client.get(f"/api/v1/organizations/{org.id}/deployments/{body['id']}", headers=headers).json()
+    assert detail["status"] == "paused"
+    assert detail["rollout"]["state"]["paused_reason"] == "failure_threshold"
+
+    rolled = _action(client, org, headers, body["id"], "rollback")
+    assert rolled.status_code == 201, rolled.text
+    assert rolled.json()["deployments"][0]["release_id"] == release["id"]
+    assert rolled.json()["deployments"][0]["target"]["device_ids"] == [canary["device_id"]]
+    # Resuming or retrying the original would write the rolled-back release again.
+    for action in ("resume", "retry-failed"):
+        refused = _action(client, org, headers, body["id"], action)
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["error"]["code"] == "deployment_rolled_back"
+
+
+def test_retry_failed_keeps_paused_deploy_paused(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [_register_device(client, token, name=f"pf-{index}", mac=f"aa:bb:cc:75:00:0{index}") for index in range(2)]
+    body = _phased(client, org, headers, release, [reg["device_id"] for reg in regs], failure_threshold_percent=10)
+    canary = next(reg for reg in regs if reg["device_id"] == body["rollout"]["activated_device_ids"][0])
+    response = client.post(
+        "/api/v1/agent/heartbeat",
+        headers={"Authorization": f"Bearer {canary['device_token']}"},
+        json={
+            "software_report": [
+                {"workload_key": "camera-agent.service", "sync_status": "failed", "health": "unhealthy"}
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+    retried = _action(client, org, headers, body["id"], "retry-failed")
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["status"] == "paused"
+    assert retried.json()["counts"]["pending"] == 1
+
+
+def test_sweeper_times_out_silent_devices_and_advances_batched_delay(
+    client: TestClient, db_session: Session
+) -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import UUID
+
+    from app.deployments.models import Deployment, DeploymentDevice
+    from app.deployments.sweeper import sweep_deployments
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [_register_device(client, token, name=f"sw-{index}", mac=f"aa:bb:cc:76:00:0{index}") for index in range(4)]
+    phased = _phased(
+        client,
+        org,
+        headers,
+        release,
+        [regs[0]["device_id"], regs[1]["device_id"]],
+        pending_timeout_seconds=60,
+    )
+    batched = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={
+            "release_id": release["id"],
+            "target": {"device_ids": [regs[2]["device_id"], regs[3]["device_id"]]},
+            "rollout": {"strategy": "batched", "batch_size": 1, "delay_seconds": 600},
+        },
+    ).json()
+    batched_first = next(reg for reg in regs if reg["device_id"] == batched["rollout"]["activated_device_ids"][0])
+    _report(client, batched_first, release, health="healthy")
+
+    old = datetime.now(UTC) - timedelta(hours=1)
+    db_session.expire_all()
+    for row in db_session.query(DeploymentDevice).filter(DeploymentDevice.deployment_id == UUID(phased["id"])):
+        if row.activated_at is not None:
+            row.activated_at = old
+    batched_row = db_session.get(Deployment, UUID(batched["id"]))
+    batched_row.rollout = {**batched_row.rollout, "batch_released_at": old.isoformat()}
+    db_session.commit()
+
+    assert sweep_deployments(db_session) == 2
+
+    get = lambda deployment_id: client.get(  # noqa: E731
+        f"/api/v1/organizations/{org.id}/deployments/{deployment_id}", headers=headers
+    ).json()
+    swept = get(phased["id"])
+    assert swept["counts"]["timed_out"] == 1
+    # The canary timed out without reporting; the soak delay then holds the next phase.
+    assert swept["counts"]["queued"] == 1
+    assert swept["rollout"]["state"]["phase_completed_at"]
+    advanced = get(batched["id"])
+    assert advanced["counts"]["queued"] == 0
+    assert advanced["counts"]["pending"] == 1
+    assert advanced["counts"]["succeeded"] == 1
+
+
+def test_sweeper_runs_on_one_replica_and_releases_its_lock(
+    client: TestClient, db_session: Session, engine
+) -> None:
+    from sqlalchemy import text
+    from sqlalchemy.orm import sessionmaker
+
+    from app.deployments.sweeper import SWEEP_LOCK_KEY, sweep_once
+
+    org, headers, token, release = _setup_release(client, db_session)
+    reg = _register_device(client, token, name="sw-lock", mac="aa:bb:cc:77:00:01")
+    _phased(client, org, headers, release, [reg["device_id"]])
+    factory = sessionmaker(bind=engine)
+
+    with engine.connect() as other_replica:
+        assert other_replica.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": SWEEP_LOCK_KEY})
+        assert sweep_once(engine, factory) == 0
+        other_replica.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": SWEEP_LOCK_KEY})
+        other_replica.commit()
+
+    assert sweep_once(engine, factory) == 1
+    with engine.connect() as other_replica:
+        assert other_replica.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": SWEEP_LOCK_KEY})
+        other_replica.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": SWEEP_LOCK_KEY})
+        other_replica.commit()
+
+
+def test_sweeper_failure_on_one_deploy_does_not_stop_the_others(
+    client: TestClient, db_session: Session, monkeypatch
+) -> None:
+    from uuid import UUID
+
+    from app.deployments.service import DeploymentService
+    from app.deployments.sweeper import sweep_deployments
+
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = [_register_device(client, token, name=f"sf-{index}", mac=f"aa:bb:cc:78:00:0{index}") for index in range(2)]
+    # Deploys are swept in id order, so the failing one runs first.
+    bodies = [_phased(client, org, headers, release, [reg["device_id"]]) for reg in regs]
+    first = min(bodies, key=lambda body: body["id"])
+    original = DeploymentService.tick_deployment
+
+    def flaky_tick(self, deployment):
+        if deployment.id == UUID(first["id"]):
+            raise RuntimeError("boom")
+        return original(self, deployment)
+
+    monkeypatch.setattr(DeploymentService, "tick_deployment", flaky_tick)
+    assert sweep_deployments(db_session) == 1

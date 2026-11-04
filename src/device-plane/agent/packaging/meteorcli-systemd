@@ -1,0 +1,132 @@
+#!/usr/bin/python3 -I
+"""Root helper that installs a systemd .service unit the agent already downloaded.
+
+installcli.sh installs this root-owned and grants passwordless sudo for this file
+only, so ``meteorcli run`` as the device user can Deploy systemd releases without
+running the whole CLI as root. The helper copies a caller-owned unit file into
+``/etc/systemd/system``, then runs fixed ``systemctl`` argv. It does not parse
+ExecStart: a systemd Deploy is root-equivalent by design (same as docker).
+
+  meteorcli-systemd apply UNIT.service SRC [--no-start]
+  meteorcli-systemd restart UNIT.service
+
+UNIT must be a ``.service`` name. ``meteorcli.service`` cannot be overwritten.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+UNIT_DIR = "/etc/systemd/system"
+PROTECTED = frozenset({"meteorcli.service"})
+UNIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:\\-]{0,199}\.service$")
+MAX_UNIT_BYTES = 256 * 1024
+
+
+def fail(message: str) -> None:
+    print(f"meteorcli-systemd: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def unit_name(value: str) -> str:
+    if not UNIT.match(value) or value in PROTECTED:
+        fail("invalid unit name")
+    return value
+
+
+def read_caller_unit(path: str) -> bytes:
+    """Read the unit as the caller could: no symlinks, a regular file the caller owns."""
+    caller = int(os.environ.get("SUDO_UID", os.getuid()))
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        fail("cannot open unit file")
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != caller:
+            fail("unit file must be a regular file owned by the caller")
+        data = handle.read(MAX_UNIT_BYTES + 1)
+    if len(data) > MAX_UNIT_BYTES:
+        fail("unit file too large")
+    if b"[Service]" not in data:
+        fail("unit file must contain a [Service] section")
+    return data
+
+
+def write_unit(name: str, data: bytes) -> None:
+    os.makedirs(UNIT_DIR, mode=0o755, exist_ok=True)
+    dest = os.path.join(UNIT_DIR, name)
+    if os.path.islink(dest):
+        fail("unit path is a symlink")
+    # A unique temp file (O_EXCL, never follows a symlink), so overlapping applies of the
+    # same unit cannot share it. The suffix is not ".service", so systemd ignores leftovers.
+    fd, tmp = tempfile.mkstemp(dir=UNIT_DIR, prefix=f".{name}.", suffix=".meteorcli.tmp")
+    try:
+        try:
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                if written <= 0:
+                    fail("unit write failed")
+                view = view[written:]
+            os.fchmod(fd, 0o644)
+        finally:
+            os.close(fd)
+        os.replace(tmp, dest)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def systemctl(*args: str) -> None:
+    result = subprocess.run(["systemctl", *args], check=False, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or f"exit {result.returncode}"
+        fail(f"systemctl {' '.join(args)} failed: {detail}")
+
+
+def apply(name: str, src: str, *, start: bool) -> None:
+    write_unit(name, read_caller_unit(src))
+    systemctl("daemon-reload")
+    systemctl("enable", name)
+    if start:
+        systemctl("restart", name)
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        fail("must run as root (via sudo)")
+    os.environ["PATH"] = SAFE_PATH
+    if not argv:
+        fail("missing command")
+    command, rest = argv[0], argv[1:]
+    if command == "apply" and 2 <= len(rest) <= 3:
+        name = unit_name(rest[0])
+        start = True
+        if len(rest) == 3:
+            if rest[2] != "--no-start":
+                fail("unsupported option")
+            start = False
+        apply(name, rest[1], start=start)
+        return 0
+    if command == "restart" and len(rest) == 1:
+        systemctl("restart", unit_name(rest[0]))
+        return 0
+    fail("unsupported command")
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except subprocess.TimeoutExpired:
+        fail("systemctl timed out")

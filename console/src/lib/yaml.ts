@@ -1,4 +1,9 @@
-import { load as loadYaml } from "js-yaml";
+import { dump as dumpYaml, load as loadYaml } from "js-yaml";
+
+/** Serialize a plain object as YAML (the Deploy wizard's YAML preview). */
+export function toYaml(value: Record<string, unknown>): string {
+  return dumpYaml(value, { lineWidth: -1, noRefs: true });
+}
 
 /** Parse YAML or JSON into a plain object. Throws with a readable message. */
 export function parseYamlObject(text: string): Record<string, unknown> {

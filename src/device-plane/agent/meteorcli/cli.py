@@ -42,6 +42,7 @@ from meteorcli.config import (
     chown_config_dir,
     default_config_dir,
     derive_api_base,
+    lan_host_missing_port,
     persist_connection,
     resolve_server_url,
 )
@@ -146,11 +147,27 @@ def _cmd_config(args: argparse.Namespace) -> int:
         )
         return 2
 
-    persist_connection(paths, domain=domain, api_base=api_base, http=args.http)
+    _config, dropped = persist_connection(paths, domain=domain, api_base=api_base, http=args.http)
     if api_key:
         write_secret(paths.api_key_path, api_key)
     _finish_config_write(paths)
+    server = resolve_server_url(_config)
     print(f"Configuration saved under {paths.config_path.parent}")
+    if server:
+        print(f"API:            {server}")
+    # Judge the URL that was saved: --api-base wins over --domain, so hint on that flag.
+    if server and lan_host_missing_port(server):
+        flag, value = ("--api-base", server) if api_base else ("--domain", domain or server)
+        print(
+            f"hint: laptop `make dev` listens on port 8000, not 80. "
+            f"Use '{PROG} config {flag} {value.rstrip('/')}:8000 …'",
+            file=sys.stderr,
+        )
+    if dropped:
+        print(
+            "Cleared previous enrollment "
+            f"({', '.join(dropped)}); register again on this server."
+        )
     print(f"Next: verify with '{PROG} test'.")
     return 0
 
@@ -514,6 +531,12 @@ def _cmd_test(args: argparse.Namespace) -> int:
         health = client.health()
     except AgentApiError as error:
         print(f"error: cannot reach {server}: {error.message}", file=sys.stderr)
+        if error.status == 404 and lan_host_missing_port(server):
+            print(
+                f"hint: that URL is port 80. Laptop `make dev` is :8000 — "
+                f"re-run '{PROG} config --domain <ip>:8000 --api-key …'",
+                file=sys.stderr,
+            )
         return 1
 
     print(f"API base:       {server}")
@@ -611,6 +634,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {"capabilities": collect_capabilities()}
         reports = reconcile_software(client, device_token, artifacts_dir)
+        # Under sudo, files this pass downloaded are root-owned; hand them back so a later
+        # unprivileged run (and the meteorcli-systemd helper's owner check) can use them.
+        try:
+            chown_config_dir(paths.config_path.parent)
+        except OSError:
+            logger.warning("Could not give %s back to the sudo user", paths.config_path.parent)
         if reports:
             payload["software_report"] = reports
         return payload

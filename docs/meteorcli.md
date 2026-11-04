@@ -49,7 +49,11 @@ directory the service reads.
 
 Env overrides: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`, `METEORCLI_TOKEN`, `METEORCLI_CONFIG_DIR`.
 
-`--domain` is the **API host** (no `api.` subdomain). IP/localhost uses HTTP; names default to HTTPS unless `--http` or `--api-base` / `METEORCLI_SERVER` is set.
+`--domain` is the **API host** (no `api.` subdomain). IP/localhost uses HTTP; names default to HTTPS unless `--http` or `--api-base` / `METEORCLI_SERVER` is set. For laptop `make dev`, include the control-plane port: `--domain 192.168.0.118:8000`. A bare IP is port 80 and will 404.
+
+Changing `--domain` to a different server clears the previous device token and `mqtt.json` (those pointed at the old cloud). Re-register on the new API.
+
+Uninstall (`./installcli.sh --uninstall`) removes the install **and** stored credentials (`~/.config/meteorcli` or `/etc/meteorcli`), so a later install does not keep talking to a previous MQTT broker.
 
 ## Configure
 
@@ -86,6 +90,10 @@ meteorcli run --once                    # one heartbeat (allowed even if the ser
 ```
 
 `meteorcli run` is not a daemon. If `meteorcli.service` is already active, it exits instead of starting a second copy. Stop the unit first (`sudo systemctl stop meteorcli`) when you need a foreground session.
+
+Foreground `meteorcli run` is unprivileged. systemd Deploys go through
+`meteorcli-systemd` (installed by `sudo ./installcli.sh`). `meteorcli.service`
+already runs as root and does not need that helper.
 
 ## Related
 

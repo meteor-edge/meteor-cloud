@@ -4,6 +4,7 @@ import type {
   DeploymentCreatePayload,
   DeploymentListParams,
   Page,
+  RollbackResponse,
 } from "@/api/fleet/types";
 
 function buildQuery(params: DeploymentListParams): string {
@@ -62,6 +63,28 @@ export function cancelDeployment(
   );
 }
 
+export function pauseDeployment(
+  token: string,
+  organizationId: string,
+  deploymentId: string,
+): Promise<Deployment> {
+  return apiRequest<Deployment>(
+    `/api/v1/organizations/${organizationId}/deployments/${deploymentId}/pause`,
+    { method: "POST", token },
+  );
+}
+
+export function resumeDeployment(
+  token: string,
+  organizationId: string,
+  deploymentId: string,
+): Promise<Deployment> {
+  return apiRequest<Deployment>(
+    `/api/v1/organizations/${organizationId}/deployments/${deploymentId}/resume`,
+    { method: "POST", token },
+  );
+}
+
 export function retryFailedDeployment(
   token: string,
   organizationId: string,
@@ -77,8 +100,8 @@ export function rollbackDeployment(
   token: string,
   organizationId: string,
   deploymentId: string,
-): Promise<Deployment> {
-  return apiRequest<Deployment>(
+): Promise<RollbackResponse> {
+  return apiRequest<RollbackResponse>(
     `/api/v1/organizations/${organizationId}/deployments/${deploymentId}/rollback`,
     { method: "POST", token },
   );

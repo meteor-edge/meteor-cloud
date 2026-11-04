@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
-from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -15,7 +15,7 @@ from app.adapters import deployment_provider as resolve_deployment_provider
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import get_settings
-from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.core.exceptions import AppError, ConflictError, NotFoundError, ValidationAppError
 from app.deployments.models import (
     Deployment,
     DeploymentDevice,
@@ -23,6 +23,13 @@ from app.deployments.models import (
     DeploymentStatus,
 )
 from app.deployments.repository import DeploymentRepository
+from app.deployments.rollout import (
+    PAUSE_MANUAL,
+    RolloutConfig,
+    RolloutRow,
+    config_from_rollout,
+    plan_tick,
+)
 from app.deployments.schemas import (
     DeploymentCounts,
     DeploymentCreate,
@@ -32,20 +39,39 @@ from app.deployments.schemas import (
     DeployTarget,
     EndpointSpec,
     ReleaseBrief,
+    RollbackFailedGroup,
+    RollbackResponse,
+    RollbackSkippedDevice,
 )
-from app.deployments.software_models import SoftwareSyncStatus
+from app.deployments.software_models import DeviceSoftware, SoftwareHealth, SoftwareSyncStatus
 from app.deployments.software_repository import DeviceSoftwareRepository
 from app.deployments.software_service import DeviceSoftwareService
 from app.devices.models import Device
 from app.devices.repository import DeviceRepository
 from app.devices.schemas import Page
 from app.endpoints.models import ApplicationEndpoint
+from app.endpoints.repository import EndpointRepository
 from app.identity.models import User
 from app.ports.deployment import DeploymentProvider
-from app.releases.kinds import ReleaseKind, workload_key_from_spec
+from app.releases.kinds import ReleaseKind, docker_host_ports, workload_key_from_spec
 from app.releases.models import Release
 from app.releases.repository import ReleaseRepository
 from app.tenancy.models import OrganizationMembership
+
+logger = logging.getLogger(__name__)
+
+_KIND_LABELS = {
+    ReleaseKind.SYSTEMD.value: "systemd service",
+    ReleaseKind.DOCKER.value: "Single container",
+    ReleaseKind.DOCKER_COMPOSE.value: "Compose application",
+}
+
+
+def _kind_value(kind: Any) -> str:
+    return kind.value if hasattr(kind, "value") else str(kind)
+
+
+_CANCELLABLE_STATUSES = frozenset({DeploymentStatus.IN_PROGRESS.value, DeploymentStatus.PAUSED.value})
 
 # Capability flag required for each release kind (when the device has reported caps).
 _KIND_CAPABILITY: dict[str, str] = {
@@ -53,6 +79,25 @@ _KIND_CAPABILITY: dict[str, str] = {
     ReleaseKind.DOCKER.value: "docker",
     ReleaseKind.DOCKER_COMPOSE.value: "docker_compose",
 }
+
+
+ALREADY_INSTALLED_REASON = "Already installed and healthy. Use force to reinstall."
+
+
+def _already_installed(software: DeviceSoftware | None, release: Release) -> bool:
+    """Whether a new Deploy of this release would only reinstall what the device runs.
+
+    Unhealthy or failed devices are not skipped, because a reinstall may repair them. The spec
+    is compared too: a release's spec can be edited in place, and the edit has to reach devices.
+    """
+    return (
+        software is not None
+        and software.desired_release_id == release.id
+        and software.installed_release_id == release.id
+        and software.sync_status == SoftwareSyncStatus.IN_SYNC.value
+        and software.health == SoftwareHealth.HEALTHY.value
+        and software.desired_spec == release.spec
+    )
 
 
 class DeploymentService:
@@ -109,6 +154,19 @@ class DeploymentService:
         if deployment is None:
             raise NotFoundError("deployment_not_found", "Deployment was not found.")
         return deployment
+
+    def _require_not_rolled_back(self, deployment: Deployment) -> None:
+        """Resume/retry would write the release again onto devices a rollback restored."""
+        rolled_back = self.session.scalar(
+            select(Deployment.id)
+            .where(Deployment.rollback_of_deployment_id == deployment.id)
+            .limit(1)
+        )
+        if rolled_back is not None:
+            raise ConflictError(
+                "deployment_rolled_back",
+                "This deployment was rolled back; create a new deployment instead.",
+            )
 
     def device_supports_kind(self, device: Device, kind: ReleaseKind | str) -> bool:
         """False only when the device has reported capabilities and lacks the kind's runtime."""
@@ -186,6 +244,7 @@ class DeploymentService:
             failed=raw.get(DeploymentDeviceStatus.FAILED.value, 0),
             cancelled=raw.get(DeploymentDeviceStatus.CANCELLED.value, 0),
             skipped=raw.get(DeploymentDeviceStatus.SKIPPED.value, 0),
+            timed_out=raw.get(DeploymentDeviceStatus.TIMED_OUT.value, 0),
         )
         counts.total = (
             counts.pending
@@ -195,6 +254,7 @@ class DeploymentService:
             + counts.failed
             + counts.cancelled
             + counts.skipped
+            + counts.timed_out
         )
         return counts
 
@@ -206,11 +266,11 @@ class DeploymentService:
             kind=release.kind,
         )
 
-    def _device_name_map(self, device_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    def _device_map(self, device_ids: list[uuid.UUID]) -> dict[uuid.UUID, Device]:
         if not device_ids:
             return {}
         rows = self.session.scalars(select(Device).where(Device.id.in_(device_ids))).all()
-        return {row.id: row.name for row in rows}
+        return {row.id: row for row in rows}
 
     def _to_response(
         self,
@@ -224,7 +284,7 @@ class DeploymentService:
         devices_payload: list[DeploymentDeviceResponse] | None = None
         if include_devices:
             rows = self.deployments.list_devices(deployment_id=deployment.id)
-            names = self._device_name_map([row.device_id for row in rows])
+            devices = self._device_map([row.device_id for row in rows])
             workload_key = (
                 workload_key_from_spec(release.kind, release.spec) if release is not None else None
             )
@@ -244,17 +304,20 @@ class DeploymentService:
             devices_payload = []
             for row in rows:
                 software_row = software_rows.get(row.device_id)
+                device = devices.get(row.device_id)
                 devices_payload.append(
                     DeploymentDeviceResponse(
                         id=row.id,
                         deployment_id=row.deployment_id,
                         device_id=row.device_id,
-                        device_name=names.get(row.device_id),
+                        device_name=device.name if device else None,
+                        device_last_seen_at=device.last_seen_at if device else None,
                         status=row.status,
                         progress_percent=software_row.progress_percent if software_row else None,
                         health=software_row.health if software_row else None,
                         reported_at=software_row.reported_at if software_row else None,
                         endpoint_availability=endpoint_availability.get(row.device_id),
+                        activated_at=row.activated_at,
                         previous_desired_release_id=row.previous_desired_release_id,
                         # A crash after install is reported on the software row, not this one.
                         last_error=(
@@ -306,10 +369,25 @@ class DeploymentService:
             device_type_ids=payload.target.device_type_ids,
         )
         all_device_ids = [device.id for device in devices]
-        rollout = payload.rollout.model_dump()
+        rollout = payload.rollout.to_record()
+        progressive = rollout.get("strategy") in {"batched", "phased"}
         workload_key = workload_key_from_spec(release.kind, release.spec)
         kind_value = release.kind.value if hasattr(release.kind, "value") else str(release.kind)
         cap_name = _KIND_CAPABILITY.get(kind_value, kind_value)
+        if payload.endpoint is not None and kind_value == ReleaseKind.SYSTEMD.value:
+            # A systemd release declares no port to check or route to; publish containers only.
+            raise ValidationAppError(
+                "endpoint_requires_container",
+                "Only Single container and Compose releases can be published on the internet.",
+            )
+        self._reject_kind_change(release=release, workload_key=workload_key, devices=devices)
+        # Devices without the release's runtime are skipped and bind nothing.
+        self._reject_port_conflicts(
+            release=release,
+            workload_key=workload_key,
+            devices=[device for device in devices if self.device_supports_kind(device, release.kind)],
+            endpoint_port=payload.endpoint.port if payload.endpoint is not None else None,
+        )
 
         # MeteorCloud always records Deploy history; the provider only executes it.
         deployment = Deployment(
@@ -331,18 +409,28 @@ class DeploymentService:
         self.deployments.create(deployment)
 
         deploy_ids: list[uuid.UUID] = []
+        already_installed_ids: list[uuid.UUID] = []
         for device in devices:
             existing = self.software_rows.get_by_workload(
                 device_id=device.id, workload_key=workload_key
             )
             previous_desired = existing.desired_release_id if existing else None
-            if self.device_supports_kind(device, release.kind):
-                status = DeploymentDeviceStatus.PENDING.value
-                last_error = None
-                deploy_ids.append(device.id)
-            else:
+            if not self.device_supports_kind(device, release.kind):
                 status = DeploymentDeviceStatus.SKIPPED.value
                 last_error = f"Device lacks {cap_name} capability."
+            elif not payload.force and _already_installed(existing, release):
+                status = DeploymentDeviceStatus.SKIPPED.value
+                last_error = ALREADY_INSTALLED_REASON
+                already_installed_ids.append(device.id)
+            else:
+                # Progressive rollouts start queued; the engine picks the first wave below.
+                status = (
+                    DeploymentDeviceStatus.QUEUED.value
+                    if progressive
+                    else DeploymentDeviceStatus.PENDING.value
+                )
+                last_error = None
+                deploy_ids.append(device.id)
             self.deployments.create_device(
                 DeploymentDevice(
                     deployment_id=deployment.id,
@@ -354,26 +442,39 @@ class DeploymentService:
             )
         self.session.flush()
 
-        activate_ids = self._initial_batch(deploy_ids, rollout)
+        now = datetime.now(UTC)
+        rows = self.deployments.list_devices(deployment_id=deployment.id)
+        state: dict[str, Any] | None = None
+        config = config_from_rollout(rollout, len(deploy_ids)) if progressive else None
+        if config is not None:
+            # Target order, so batched keeps picking the first batch_size devices.
+            position = {device_id: index for index, device_id in enumerate(all_device_ids)}
+            ordered = sorted(rows, key=lambda row: position.get(row.device_id, len(position)))
+            plan = plan_tick(self._rollout_rows(deployment, ordered, config), {}, config, now)
+            activate_ids = plan.ids_to_activate
+            state = plan.new_state
+        else:
+            activate_ids = list(deploy_ids)
         activate_set = set(activate_ids)
-        if rollout.get("strategy") == "batched":
-            for row in self.deployments.list_devices(deployment_id=deployment.id):
-                if (
-                    row.status == DeploymentDeviceStatus.PENDING.value
-                    and row.device_id not in activate_set
-                ):
-                    row.status = DeploymentDeviceStatus.QUEUED.value
+        for row in rows:
+            if row.device_id in activate_set:
+                row.status = DeploymentDeviceStatus.PENDING.value
+                row.activated_at = now
         rollout = {
             **rollout,
             "activated_device_ids": [str(value) for value in activate_ids],
-            "batch_released_at": datetime.now(UTC).isoformat(),
+            "batch_released_at": now.isoformat(),
         }
+        if state is not None and rollout.get("strategy") == "phased":
+            rollout["state"] = state
         deployment.rollout = rollout
         flag_modified(deployment, "rollout")
         self.session.flush()
 
         if payload.endpoint is not None:
-            if len(deploy_ids) != 1:
+            # An app that is already installed can still be published, without a reinstall.
+            endpoint_device_ids = deploy_ids + already_installed_ids
+            if len(endpoint_device_ids) != 1:
                 raise ValidationAppError(
                     "endpoint_requires_one_device",
                     "A public URL can only be attached when the Deploy targets exactly one device.",
@@ -382,7 +483,7 @@ class DeploymentService:
                 actor=actor,
                 organization_id=organization_id,
                 deployment_id=deployment.id,
-                device_id=deploy_ids[0],
+                device_id=endpoint_device_ids[0],
                 release=release,
                 spec=payload.endpoint,
             )
@@ -415,6 +516,8 @@ class DeploymentService:
                 "deployed_count": len(activate_ids),
                 "queued_count": len(deploy_ids) - len(activate_ids),
                 "skipped_count": len(all_device_ids) - len(deploy_ids),
+                "already_installed_count": len(already_installed_ids),
+                "force": payload.force,
                 "name": deployment.name,
                 "provider": deployment.provider,
                 "provider_ref": deployment.provider_ref,
@@ -424,16 +527,85 @@ class DeploymentService:
         self.session.commit()
         return self._to_response(deployment, include_devices=True)
 
-    def _published_container_ports(self, spec: dict[str, Any]) -> list[int]:
-        ports: list[int] = []
-        for item in spec.get("ports") or []:
-            right = str(item).rsplit(":", 1)[-1]
-            number = right.split("/", 1)[0]
-            try:
-                ports.append(int(number))
-            except ValueError:
+    def _reject_kind_change(self, *, release: Release, workload_key: str, devices: list[Device]) -> None:
+        """Refuse replacing a workload with a release of another kind under the same name.
+
+        A container named ``web`` and a Compose project ``web`` share the workload key, so the
+        new Deploy would silently take over the other app (and rollback would cross kinds).
+        """
+        kind_value = _kind_value(release.kind)
+        clashes: list[str] = []
+        for device in devices:
+            existing = self.software_rows.get_by_workload(device_id=device.id, workload_key=workload_key)
+            if existing is not None and _kind_value(existing.kind) != kind_value:
+                existing_kind = _kind_value(existing.kind)
+                clashes.append(f"{device.name} ({_KIND_LABELS.get(existing_kind, existing_kind)})")
+        if clashes:
+            shown = ", ".join(clashes[:5]) + (f" and {len(clashes) - 5} more" if len(clashes) > 5 else "")
+            raise ConflictError(
+                "workload_kind_mismatch",
+                f"'{workload_key}' already runs as a different kind on {shown}. A "
+                f"{_KIND_LABELS.get(kind_value, kind_value)} release cannot replace it; give the "
+                "release a different name (unit, container or project name).",
+            )
+
+    def _ports_used_by_other_workloads(
+        self, *, device_id: uuid.UUID, workload_key: str
+    ) -> dict[tuple[int, str], str]:
+        """Device ports already claimed by other workloads: docker bindings and public addresses.
+
+        Compose and systemd apps only declare ports through an endpoint, so a port they bind
+        without one is invisible here; the agent then reports the bind error on install.
+        """
+        used: dict[tuple[int, str], str] = {}
+        for row in self.software_rows.list_for_device(device_id=device_id):
+            if row.workload_key == workload_key:
+                continue  # the same workload is replaced, not run alongside
+            kind = row.kind.value if hasattr(row.kind, "value") else str(row.kind)
+            if kind != ReleaseKind.DOCKER.value:
                 continue
-        return ports
+            for binding in docker_host_ports(dict(row.desired_spec or {})):
+                used.setdefault((binding.port, binding.protocol), row.workload_key)
+        for endpoint in EndpointRepository(self.session).list_for_device(device_id=device_id):
+            if not endpoint.enabled or (workload_key and endpoint.workload_key == workload_key):
+                continue
+            owner = endpoint.workload_key or "a manually published app"
+            used.setdefault((endpoint.port, "tcp"), f"{owner} (public address {endpoint.hostname})")
+        return used
+
+    def _reject_port_conflicts(
+        self,
+        *,
+        release: Release,
+        workload_key: str,
+        devices: list[Device],
+        endpoint_port: int | None,
+    ) -> None:
+        """Refuse a Deploy that would bind a device port another workload already uses.
+
+        Two workloads on one port means the second one fails to start (docker) or the public
+        address routes to the wrong app, so it is caught here instead of on the device.
+        """
+        kind_value = release.kind.value if hasattr(release.kind, "value") else str(release.kind)
+        wanted: set[tuple[int, str]] = set()
+        if kind_value == ReleaseKind.DOCKER.value:
+            wanted |= {(b.port, b.protocol) for b in docker_host_ports(dict(release.spec or {}))}
+        if endpoint_port is not None:
+            wanted.add((endpoint_port, "tcp"))
+        if not wanted:
+            return
+        problems: list[str] = []
+        for device in devices:
+            used = self._ports_used_by_other_workloads(device_id=device.id, workload_key=workload_key)
+            for port, protocol in sorted(wanted & used.keys()):
+                problems.append(f"port {port}/{protocol} on {device.name} is used by {used[(port, protocol)]}")
+        if problems:
+            shown = "; ".join(problems[:5]) + (f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
+            raise ConflictError(
+                "device_port_in_use",
+                f"{release.name} {release.version} would clash with software already on the device: "
+                f"{shown}. Use a different port or replace that workload first.",
+            )
 
     def _attach_endpoint(
         self,
@@ -448,16 +620,53 @@ class DeploymentService:
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "endpoint.create")
         kind_value = release.kind.value if hasattr(release.kind, "value") else str(release.kind)
-        published = self._published_container_ports(dict(release.spec or {}))
-        if kind_value == ReleaseKind.DOCKER.value and published and spec.port not in published:
-            raise ValidationAppError(
-                "endpoint_port_mismatch",
-                "Endpoint port must match a published container port on this docker release.",
-            )
+        if kind_value == ReleaseKind.DOCKER.value:
+            # The tunnel connects to <device WireGuard IP>:<port>, so the port is the host side.
+            bindings = [b for b in docker_host_ports(dict(release.spec or {})) if b.protocol == "tcp"]
+            match = next((b for b in bindings if b.port == spec.port), None)
+            if match is None:
+                # Without a fixed TCP host binding nothing on the device listens on the port.
+                listed = ", ".join(str(b.port) for b in bindings)
+                raise ValidationAppError(
+                    "endpoint_port_mismatch",
+                    f"Endpoint port must be a host port this docker release publishes ({listed})."
+                    if bindings
+                    else "This docker release publishes no fixed TCP host port, so nothing on the "
+                    "device listens on the endpoint port. Add a ports entry such as \"8080:80\".",
+                )
+            if match is not None and match.loopback_only:
+                raise ValidationAppError(
+                    "endpoint_port_loopback",
+                    f"Port {spec.port} is bound to {match.host_ip} only, so the public address "
+                    "cannot reach it. Publish it on all interfaces (e.g. \"8080:80\").",
+                )
         from app.endpoints.schemas import EndpointCreate
         from app.endpoints.service import EndpointService
 
         endpoints = EndpointService(self.session)
+        workload_key = workload_key_from_spec(release.kind, release.spec)
+        # Redeploying an app that already has a public address keeps that address.
+        # Prefer an enabled row, then the hostname, so the console and the API pick the same one.
+        current = min(
+            (
+                row
+                for row in EndpointRepository(self.session).list_for_device(device_id=device_id)
+                if row.organization_id == organization_id and row.workload_key == workload_key
+            ),
+            key=lambda row: (not row.enabled, row.hostname),
+            default=None,
+        )
+        if current is not None:
+            endpoints.reattach_endpoint(
+                actor=actor,
+                organization_id=organization_id,
+                row=current,
+                deployment_id=deployment_id,
+                port=spec.port,
+                protocol=spec.protocol,
+                hostname=spec.hostname,
+            )
+            return
         hostname = spec.hostname or endpoints.suggest_hostname(
             actor=actor, organization_id=organization_id, device_id=device_id, app=release.name
         ).hostname
@@ -470,19 +679,10 @@ class DeploymentService:
                 port=spec.port,
                 protocol=spec.protocol,
                 deployment_id=deployment_id,
-                workload_key=workload_key_from_spec(release.kind, release.spec),
+                workload_key=workload_key,
             ),
             commit=False,
         )
-
-    @staticmethod
-    def _initial_batch(deploy_ids: list[uuid.UUID], rollout: dict) -> list[uuid.UUID]:
-        if not deploy_ids:
-            return []
-        if rollout.get("strategy") != "batched":
-            return list(deploy_ids)
-        batch_size = int(rollout.get("batch_size") or len(deploy_ids))
-        return list(deploy_ids[: max(1, batch_size)])
 
     def list_deployments(
         self,
@@ -535,14 +735,14 @@ class DeploymentService:
         self.authz.require(membership, "deployment.cancel")
         provider = self._provider_or_404()
         deployment = self._require_deployment(organization_id, deployment_id)
-        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
+        if deployment.status not in _CANCELLABLE_STATUSES:
             raise ConflictError(
                 "deployment_not_cancellable",
-                "Only in-progress deployments can be cancelled.",
+                "Only in-progress or paused deployments can be cancelled.",
             )
         provider.cancel(organization_id=organization_id, deployment_id=deployment_id)
         self.session.refresh(deployment)
-        if deployment.status == DeploymentStatus.IN_PROGRESS.value:
+        if deployment.status in _CANCELLABLE_STATUSES:
             # Providers that only talk to a vendor still leave local history to us.
             open_statuses = {
                 DeploymentDeviceStatus.PENDING.value,
@@ -565,6 +765,91 @@ class DeploymentService:
         self.session.commit()
         return self._to_response(deployment, include_devices=True)
 
+    def pause_deployment(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        deployment_id: uuid.UUID,
+    ) -> DeploymentResponse:
+        """Stop activating new devices; activated devices keep installing and reporting."""
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "deployment.cancel")
+        self._provider_or_404()
+        self._require_deployment(organization_id, deployment_id)
+        deployment = self._lock_deployment(deployment_id)
+        assert deployment is not None
+        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
+            raise ConflictError(
+                "deployment_not_pausable",
+                "Only in-progress deployments can be paused.",
+            )
+        if (deployment.rollout or {}).get("strategy") not in {"batched", "phased"}:
+            raise ConflictError(
+                "deployment_not_pausable",
+                "Only batched or phased deployments can be paused.",
+            )
+        rollout = dict(deployment.rollout or {})
+        rollout["state"] = {
+            **(rollout.get("state") or {}),
+            "paused_reason": PAUSE_MANUAL,
+            "paused_at": datetime.now(UTC).isoformat(),
+        }
+        deployment.rollout = rollout
+        flag_modified(deployment, "rollout")
+        deployment.status = DeploymentStatus.PAUSED.value
+        self.session.flush()
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="deployment.pause",
+            resource_type="deployment",
+            resource_id=deployment.id,
+            metadata={"reason": PAUSE_MANUAL},
+        )
+        self.session.commit()
+        return self._to_response(deployment, include_devices=True)
+
+    def resume_deployment(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        deployment_id: uuid.UUID,
+    ) -> DeploymentResponse:
+        """Clear the pause and tick at once; the failure threshold is checked again."""
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "deployment.create")
+        self._provider_or_404()
+        self._require_deployment(organization_id, deployment_id)
+        deployment = self._lock_deployment(deployment_id)
+        assert deployment is not None
+        if deployment.status != DeploymentStatus.PAUSED.value:
+            raise ConflictError(
+                "deployment_not_paused",
+                "Only paused deployments can be resumed.",
+            )
+        self._require_not_rolled_back(deployment)
+        rollout = dict(deployment.rollout or {})
+        state = dict(rollout.get("state") or {})
+        reason = state.pop("paused_reason", None)
+        state.pop("paused_at", None)
+        rollout["state"] = state
+        deployment.rollout = rollout
+        flag_modified(deployment, "rollout")
+        deployment.status = DeploymentStatus.IN_PROGRESS.value
+        deployment = self.tick_deployment(deployment)
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="deployment.resume",
+            resource_type="deployment",
+            resource_id=deployment.id,
+            metadata={"reason": reason, "status": deployment.status},
+        )
+        self.session.commit()
+        return self._to_response(deployment, include_devices=True)
+
     def retry_failed(
         self,
         *,
@@ -575,7 +860,10 @@ class DeploymentService:
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "deployment.create")
         provider = self._provider_or_404()
-        deployment = self._require_deployment(organization_id, deployment_id)
+        self._require_deployment(organization_id, deployment_id)
+        deployment = self._lock_deployment(deployment_id)
+        assert deployment is not None
+        self._require_not_rolled_back(deployment)
         failed = [
             row
             for row in self.deployments.list_devices(deployment_id=deployment.id)
@@ -611,147 +899,243 @@ class DeploymentService:
         actor: User,
         organization_id: uuid.UUID,
         deployment_id: uuid.UUID,
-    ) -> DeploymentResponse:
+    ) -> RollbackResponse:
+        """Return every device that got this Deploy to the release it had before it.
+
+        Devices are grouped by their own previous release (one rollback Deploy per group), so a
+        fleet with mixed history never lands on a version a device did not have. Devices with no
+        previous release (this Deploy was a first install) are skipped: there is nothing to go
+        back to, and installing another device's previous release would be wrong.
+        """
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "deployment.rollback")
         self._provider_or_404()
-        original = self._require_deployment(organization_id, deployment_id)
+        self._require_deployment(organization_id, deployment_id)
+        # Lock first: a concurrent resume or tick must not activate devices after targets are read.
+        original = self._lock_deployment(deployment_id)
+        assert original is not None
+        # Paused is allowed: activated devices may already run the bad release.
         if original.status == DeploymentStatus.IN_PROGRESS.value:
             raise ConflictError(
                 "deployment_still_in_progress",
-                "Cancel or wait for the deployment to finish before rolling back.",
+                "Cancel, pause, or wait for the deployment to finish before rolling back.",
             )
 
-        previous_ids = [
-            row.previous_desired_release_id
+        # Only devices that received this release; queued devices never changed.
+        activated_rows = [
+            row
             for row in self.deployments.list_devices(deployment_id=original.id)
-            if row.previous_desired_release_id is not None
-            and row.status != DeploymentDeviceStatus.SKIPPED.value
+            if row.activated_at is not None and row.status != DeploymentDeviceStatus.SKIPPED.value
         ]
-        if not previous_ids:
+        groups: dict[uuid.UUID, list[uuid.UUID]] = {}
+        no_previous: list[uuid.UUID] = []
+        for row in activated_rows:
+            if row.previous_desired_release_id is None:
+                no_previous.append(row.device_id)
+            else:
+                groups.setdefault(row.previous_desired_release_id, []).append(row.device_id)
+        if not groups:
             raise ValidationAppError(
                 "no_previous_release",
                 "No previous desired release is recorded for this deployment.",
             )
-        previous_release_id = Counter(previous_ids).most_common(1)[0][0]
-        previous = self._require_release(organization_id, previous_release_id)
 
-        resolved = [
-            uuid.UUID(value)
-            for value in (original.target or {}).get("resolved_device_ids") or []
+        # Validate every group before creating any Deploy, so a refusal leaves nothing half done.
+        releases = {release_id: self._require_release(organization_id, release_id) for release_id in groups}
+        all_ids = [device_id for ids in groups.values() for device_id in ids] + no_previous
+        devices_by_id = {
+            device.id: device
+            for device in self.session.scalars(
+                select(Device).where(Device.organization_id == organization_id, Device.id.in_(all_ids))
+            ).all()
+        }
+        for release_id, device_ids in groups.items():
+            release = releases[release_id]
+            targets = [devices_by_id[device_id] for device_id in device_ids if device_id in devices_by_id]
+            key = workload_key_from_spec(release.kind, release.spec)
+            self._reject_kind_change(release=release, workload_key=key, devices=targets)
+            self._reject_port_conflicts(release=release, workload_key=key, devices=targets, endpoint_port=None)
+
+        base_name = f"Rollback of {original.name or str(original.id)[:8]}"
+        # Largest group first: the console opens that one when there are several.
+        ordered = sorted(groups.items(), key=lambda item: (-len(item[1]), str(item[0])))
+        created: list[DeploymentResponse] = []
+        failed: list[RollbackFailedGroup] = []
+        for release_id, device_ids in ordered:
+            release = releases[release_id]
+            name = base_name if len(ordered) == 1 else f"{base_name} → {release.name} {release.version}"
+            try:
+                created.append(
+                    self.create_deployment(
+                        actor=actor,
+                        organization_id=organization_id,
+                        payload=DeploymentCreate(
+                            release_id=release.id,
+                            name=name[:255],
+                            target=DeployTarget(device_ids=device_ids),
+                            rollout=DeployRollout(strategy="immediate"),
+                        ),
+                        rollback_of_deployment_id=original.id,
+                    )
+                )
+            except Exception as exc:
+                # create_deployment commits each group, so earlier groups are already applied.
+                # With nothing applied yet the error is the answer; otherwise report it per group.
+                if not created:
+                    raise
+                self.session.rollback()
+                logger.exception("rollback group for release %s failed", release_id)
+                failed.append(
+                    RollbackFailedGroup(
+                        release_id=release_id,
+                        device_ids=device_ids,
+                        code=exc.code if isinstance(exc, AppError) else "internal_error",
+                        message=exc.message if isinstance(exc, AppError) else "Could not create this rollback.",
+                    )
+                )
+        skipped = [
+            RollbackSkippedDevice(
+                device_id=device_id,
+                device_name=devices_by_id[device_id].name if device_id in devices_by_id else str(device_id),
+                reason="No previous release: this Deploy was its first install, so it was left as is.",
+            )
+            for device_id in no_previous
         ]
-        if not resolved:
-            resolved = [
-                row.device_id
-                for row in self.deployments.list_devices(deployment_id=original.id)
-                if row.status != DeploymentDeviceStatus.SKIPPED.value
-            ]
+        return RollbackResponse(deployments=created, skipped=skipped, failed=failed)
 
-        payload = DeploymentCreate(
-            release_id=previous.id,
-            name=f"Rollback of {original.name or str(original.id)[:8]}",
-            target=DeployTarget(device_ids=resolved),
-            rollout=DeployRollout(strategy="immediate"),
+    def _lock_deployment(self, deployment_id: uuid.UUID) -> Deployment | None:
+        """Re-load the row with SELECT ... FOR UPDATE so concurrent ticks serialize."""
+        return self.session.scalar(
+            select(Deployment)
+            .where(Deployment.id == deployment_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        return self.create_deployment(
-            actor=actor,
-            organization_id=organization_id,
-            payload=payload,
-            rollback_of_deployment_id=original.id,
-        )
+
+    def tick_deployment(self, deployment: Deployment) -> Deployment:
+        """Advance the rollout and refresh status under a row lock (API replicas race)."""
+        self.session.flush()
+        locked = self._lock_deployment(deployment.id)
+        if locked is None or locked.status != DeploymentStatus.IN_PROGRESS.value:
+            return locked or deployment
+        self._advance_rollout(locked)
+        self.refresh_deployment_status(locked)
+        self.session.flush()
+        return locked
 
     def refresh_deployment_status(self, deployment: Deployment) -> None:
         """Mark deployment completed/failed when every device is terminal."""
         if deployment.status != DeploymentStatus.IN_PROGRESS.value:
             return
-        self.maybe_advance_batched_rollout(deployment)
         counts = self._counts(deployment.id)
         open_count = counts.pending + counts.queued + counts.updating
         if open_count > 0:
             return
-        if counts.failed > 0 and counts.succeeded == 0 and counts.cancelled == 0 and counts.skipped == 0:
+        # timed_out counts like failed: the device never confirmed the release.
+        failed = counts.failed + counts.timed_out
+        if failed > 0 and counts.succeeded == 0 and counts.cancelled == 0 and counts.skipped == 0:
             deployment.status = DeploymentStatus.FAILED.value
-        elif counts.cancelled > 0 and counts.succeeded == 0 and counts.failed == 0:
+        elif counts.cancelled > 0 and counts.succeeded == 0 and failed == 0:
             deployment.status = DeploymentStatus.CANCELLED.value
         else:
             # Succeeded and/or skipped (and no open rows) counts as completed.
             deployment.status = DeploymentStatus.COMPLETED.value
 
-    def maybe_advance_batched_rollout(self, deployment: Deployment) -> None:
-        """When the current batch is terminal, activate the next batch of devices."""
+    def _rollout_rows(
+        self, deployment: Deployment, rows: list[DeploymentDevice], config: RolloutConfig
+    ) -> list[RolloutRow]:
+        """Engine view of the rows: device last_seen_at and current health when needed."""
+        last_seen: dict[uuid.UUID, datetime | None] = {}
+        if config.order_by_last_seen:
+            last_seen = {
+                device_id: device.last_seen_at
+                for device_id, device in self._device_map([row.device_id for row in rows]).items()
+            }
+        unhealthy: set[uuid.UUID] = set()
+        if config.failure_threshold_percent is not None:
+            release = self.releases.get(
+                organization_id=deployment.organization_id, release_id=deployment.release_id
+            )
+            if release is not None:
+                software = self.software_rows.by_device_for_workload(
+                    device_ids=[
+                        row.device_id
+                        for row in rows
+                        if row.status == DeploymentDeviceStatus.SUCCEEDED.value
+                    ],
+                    workload_key=workload_key_from_spec(release.kind, release.spec),
+                )
+                unhealthy = {
+                    device_id
+                    for device_id, item in software.items()
+                    if item.health == SoftwareHealth.UNHEALTHY.value
+                    and item.desired_release_id == deployment.release_id
+                }
+        return [
+            RolloutRow(
+                device_id=row.device_id,
+                status=row.status,
+                activated_at=row.activated_at,
+                last_seen_at=last_seen.get(row.device_id),
+                unhealthy=row.device_id in unhealthy,
+            )
+            for row in rows
+        ]
+
+    def _advance_rollout(self, deployment: Deployment) -> None:
+        """One engine step for batched/phased Deploys: timeouts, pause, next activations."""
         rollout = dict(deployment.rollout or {})
-        if rollout.get("strategy") != "batched":
-            return
-        if deployment.status != DeploymentStatus.IN_PROGRESS.value:
-            return
-
-        activated = {str(value) for value in (rollout.get("activated_device_ids") or [])}
+        strategy = rollout.get("strategy")
         rows = self.deployments.list_devices(deployment_id=deployment.id)
-        open_statuses = {
-            DeploymentDeviceStatus.PENDING.value,
-            DeploymentDeviceStatus.UPDATING.value,
-        }
-        open_activated = [
-            row
-            for row in rows
-            if str(row.device_id) in activated and row.status in open_statuses
-        ]
-        if open_activated:
+        total = sum(1 for row in rows if row.status != DeploymentDeviceStatus.SKIPPED.value)
+        config = config_from_rollout(rollout, total)
+        if config is None:
             return
+        state = dict(rollout.get("state") or {})
+        if strategy == "batched":
+            # Batched keeps no state; its delay counts from the last batch release.
+            state = {"phase_started_at": rollout.get("batch_released_at")}
+        now = datetime.now(UTC)
+        plan = plan_tick(self._rollout_rows(deployment, rows, config), state, config, now)
 
-        delay = int(rollout.get("delay_seconds") or 0)
-        if delay > 0:
-            released_raw = rollout.get("batch_released_at")
-            if released_raw:
-                try:
-                    released_at = datetime.fromisoformat(str(released_raw))
-                    if released_at.tzinfo is None:
-                        released_at = released_at.replace(tzinfo=UTC)
-                    if datetime.now(UTC) < released_at + timedelta(seconds=delay):
-                        return
-                except ValueError:
-                    pass
+        by_device = {row.device_id: row for row in rows}
+        for device_id in plan.ids_to_time_out:
+            row = by_device[device_id]
+            row.status = DeploymentDeviceStatus.TIMED_OUT.value
+            row.last_error = (
+                f"No report within {config.pending_timeout_seconds} seconds of activation."
+            )
+        if plan.pause_reason is not None:
+            deployment.status = DeploymentStatus.PAUSED.value
 
-        waiting = [
-            row
-            for row in rows
-            if str(row.device_id) not in activated
-            and row.status == DeploymentDeviceStatus.QUEUED.value
-        ]
-        if not waiting:
-            return
-
-        batch_size = int(rollout.get("batch_size") or 1)
-        next_batch = waiting[: max(1, batch_size)]
-        next_ids = [row.device_id for row in next_batch]
-        if not next_ids:
-            return
-
-        try:
-            provider = self._provider_or_404()
-        except NotFoundError:
-            return
-
-        for row in next_batch:
-            row.status = DeploymentDeviceStatus.PENDING.value
-            row.last_error = None
-
-        provider.deploy(
-            organization_id=deployment.organization_id,
-            deployment_id=deployment.id,
-            release_id=deployment.release_id,
-            device_ids=next_ids,
-            rollout=rollout,
-            created_by_user_id=deployment.created_by_user_id or uuid.UUID(int=0),
-        )
-        activated.update(str(device_id) for device_id in next_ids)
-        rollout = {
-            **rollout,
-            "activated_device_ids": sorted(activated),
-            "batch_released_at": datetime.now(UTC).isoformat(),
-        }
-        deployment.rollout = rollout
-        flag_modified(deployment, "rollout")
+        if plan.ids_to_activate:
+            try:
+                provider = self._provider_or_404()
+            except NotFoundError:
+                self.session.flush()
+                return
+            for device_id in plan.ids_to_activate:
+                row = by_device[device_id]
+                row.status = DeploymentDeviceStatus.PENDING.value
+                row.last_error = None
+                row.activated_at = now
+            provider.deploy(
+                organization_id=deployment.organization_id,
+                deployment_id=deployment.id,
+                release_id=deployment.release_id,
+                device_ids=list(plan.ids_to_activate),
+                rollout=rollout,
+                created_by_user_id=deployment.created_by_user_id or uuid.UUID(int=0),
+            )
+            rollout["activated_device_ids"] = sorted(
+                str(row.device_id) for row in rows if row.activated_at is not None
+            )
+            rollout["batch_released_at"] = now.isoformat()
+        if strategy == "phased":
+            rollout["state"] = plan.new_state
+        if rollout != deployment.rollout:
+            deployment.rollout = rollout
+            flag_modified(deployment, "rollout")
         self.session.flush()
 
     def sync_progress_from_software(
@@ -784,13 +1168,32 @@ class DeploymentService:
             device_id=device_id,
             release_id=row.desired_release_id,
         )
+        # Lock touched Deploys in id order before writing their rows, so two
+        # heartbeats (or a heartbeat and a tick) cannot deadlock on each other.
+        for deployment_id in sorted({progress.deployment_id for progress in open_rows}):
+            self._lock_deployment(deployment_id)
         touched_deployments: dict[uuid.UUID, Deployment] = {}
         for progress in open_rows:
-            progress.status = mapped
-            progress.last_error = row.last_error
             deployment = self.deployments.get(
                 organization_id=organization_id, deployment_id=progress.deployment_id
             )
+            status = mapped
+            if (
+                deployment is not None
+                and (deployment.rollout or {}).get("strategy") == "phased"
+                and row.sync_status == SoftwareSyncStatus.IN_SYNC.value
+                and row.health == SoftwareHealth.UNHEALTHY.value
+            ):
+                # Installed but stopped or crashing: a failure for the phased budget.
+                status = DeploymentDeviceStatus.FAILED.value
+            if progress.status == DeploymentDeviceStatus.TIMED_OUT.value and status not in {
+                DeploymentDeviceStatus.SUCCEEDED.value,
+                DeploymentDeviceStatus.FAILED.value,
+            }:
+                # A late device may still finish, but never goes back to pending.
+                continue
+            progress.status = status
+            progress.last_error = row.last_error
             if deployment is not None:
                 touched_deployments[deployment.id] = deployment
 
@@ -806,5 +1209,5 @@ class DeploymentService:
         # Flush so status aggregates see the updated deployment_devices rows.
         if open_rows:
             self.session.flush()
-        for deployment in touched_deployments.values():
-            self.refresh_deployment_status(deployment)
+        for deployment_id in sorted(touched_deployments):
+            self.tick_deployment(touched_deployments[deployment_id])

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Enum, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.releases.kinds import ReleaseKind
+
+if TYPE_CHECKING:
+    from app.artifacts.models import Artifact
 
 
 class Release(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -40,6 +43,8 @@ class Release(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("artifacts.id", ondelete="RESTRICT"),
         nullable=True,
     )
+    # Loaded with the release so lists show which file each release installs.
+    artifact: Mapped[Artifact | None] = relationship("Artifact", lazy="selectin")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     spec: Mapped[dict[str, Any]] = mapped_column(
         JSONB,

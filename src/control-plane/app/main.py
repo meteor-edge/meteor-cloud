@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,6 +23,7 @@ from app.core.logging import configure_logging
 from app.core.metrics import MetricsMiddleware, metrics_response
 from app.core.request_id import RequestIdMiddleware
 from app.deployments.router import router as deployments_router
+from app.deployments.sweeper import run_sweeper
 from app.devices.agent_router import router as agent_router
 from app.devices.router import router as fleet_router
 from app.endpoints.router import router as endpoints_router
@@ -41,7 +44,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level, settings.log_format)
     logger.info("Starting %s (%s)", settings.app_name, settings.app_env)
     start_mqtt_runtime(settings)
+    sweeper: asyncio.Task[None] | None = None
+    if settings.deploy_tick_interval_seconds > 0 and settings.deployment_provider == "native":
+        sweeper = asyncio.create_task(run_sweeper(settings.deploy_tick_interval_seconds))
     yield
+    if sweeper is not None:
+        sweeper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweeper
     stop_mqtt_runtime()
     logger.info("Shutting down %s", settings.app_name)
 

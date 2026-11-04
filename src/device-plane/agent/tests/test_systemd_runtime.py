@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from runtime.systemd import SystemdAdapter, SystemdError, systemd_available
+from runtime.systemd import SYSTEMD_HELPER, SystemdAdapter, SystemdError, systemd_available
 
 
 class FakeRunner:
@@ -72,3 +72,52 @@ def test_apply_raises_on_systemctl_failure(tmp_path: Path) -> None:
 def test_systemd_available_false_without_systemctl(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("runtime.systemd.shutil.which", lambda _name: None)
     assert systemd_available() is False
+
+
+def test_apply_uses_helper_when_not_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("runtime.systemd.os.geteuid", lambda: 1000)
+    monkeypatch.setattr("runtime.systemd.systemd_helper_installed", lambda: True)
+    unit_file = tmp_path / "seed-systemd.service"
+    unit_file.write_text("[Service]\nExecStart=/bin/true\n", encoding="utf-8")
+    runner = FakeRunner()
+    adapter = SystemdAdapter(runner=runner)
+
+    adapter.apply(unit_name="seed-systemd.service", unit_file=unit_file, start=True)
+
+    assert runner.calls == [
+        ["sudo", "-n", SYSTEMD_HELPER, "apply", "seed-systemd.service", str(unit_file)]
+    ]
+
+
+def test_apply_without_start_passes_no_start_to_helper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("runtime.systemd.os.geteuid", lambda: 1000)
+    monkeypatch.setattr("runtime.systemd.systemd_helper_installed", lambda: True)
+    unit_file = tmp_path / "cam.service"
+    unit_file.write_text("[Service]\n", encoding="utf-8")
+    runner = FakeRunner()
+    adapter = SystemdAdapter(runner=runner)
+
+    adapter.apply(unit_name="cam.service", unit_file=unit_file, start=False)
+
+    assert runner.calls[0][-1] == "--no-start"
+
+
+def test_apply_without_helper_explains_installcli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("runtime.systemd.os.geteuid", lambda: 1000)
+    monkeypatch.setattr("runtime.systemd.systemd_helper_installed", lambda: False)
+    unit_file = tmp_path / "cam.service"
+    unit_file.write_text("[Service]\n", encoding="utf-8")
+    adapter = SystemdAdapter(runner=FakeRunner())
+    with pytest.raises(SystemdError, match="sudo ./installcli.sh"):
+        adapter.apply(unit_name="cam.service", unit_file=unit_file)
+
+
+def test_recover_uses_helper_when_not_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("runtime.systemd.os.geteuid", lambda: 1000)
+    monkeypatch.setattr("runtime.systemd.systemd_helper_installed", lambda: True)
+    runner = FakeRunner()
+    adapter = SystemdAdapter(runner=runner)
+    adapter.recover(unit_name="cam.service")
+    assert runner.calls == [
+        ["sudo", "-n", SYSTEMD_HELPER, "restart", "cam.service"]
+    ]

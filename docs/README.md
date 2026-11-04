@@ -31,7 +31,7 @@ How to use the product day to day.
 | MQTT connectivity | [MQTT](fleet/mqtt.md) |
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
 | Releases (software versions) | [Releases](fleet/releases.md) |
-| Deployments (send a release) | [Deployments](fleet/deployments.md) |
+| Deployments (send a release) | [Deployments](fleet/deployments.md) · [Rollout strategies](fleet/deployments.md#rollout-strategies) |
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
 | Device logs (journal, systemd, Docker, nginx) | [Device logs](fleet/logs.md) |
 | Public app URLs | [Endpoints](fleet/endpoints.md) |
@@ -48,6 +48,7 @@ Commands and APIs you look up while working.
 | MQTT ↔ control-plane contract | [`contracts/mqtt-http.md`](../contracts/mqtt-http.md) |
 | Architecture & providers | [Architecture](architecture.md) |
 | Bundled infra licenses (Postgres, Redis, EMQX, MinIO, …) | [Licensing](licensing.md) |
+| Planned work (not implemented yet) | [Future plans](future-plans.md) |
 
 ## Deploy and operate
 

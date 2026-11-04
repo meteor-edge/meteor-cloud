@@ -166,7 +166,12 @@ make seed
 ```
 
 `make seed` is safe to rerun. It creates the development users and organization, plus a small
-demo fleet with device types, groups, and online/offline/never-seen devices.
+demo fleet with device types, groups, and online/offline/never-seen devices. It also uploads
+demo artifacts and creates good/fail releases for systemd, Docker, and Compose so you can
+exercise Deploy, health, and rollback locally (see [Getting started](getting-started.md)).
+Host seed loads `deploy/compose/.env` and talks to MinIO/Postgres on `127.0.0.1` (not
+Docker DNS or AWS). If a release fails with `artifact_content_missing`, re-run `make seed`
+so missing object bytes are restored.
 
 See [Identity and organizations](identity-and-organizations.md) for auth and tenant details.
 
@@ -198,6 +203,7 @@ Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed
 | `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
 | `DEPLOYMENT_PROVIDER` | Who *executes* Deploys: `native` (default), `none`, or `mender` (stub until adapter exists). Releases/UI stay in MeteorCloud |
 | `OTA_PROVIDER` | Deprecated; prefer `DEPLOYMENT_PROVIDER` |
+| `DEPLOY_TICK_INTERVAL_SECONDS` | Seconds between background Deploy sweeps (batched delays, phased soak, pending timeouts). Default `60`; `0` disables |
 | `IDENTITY_PROVIDER` | Member sign-in account directory (`local` only: PostgreSQL users) |
 
 HTTP JSON between planes is documented in [`contracts/mqtt-http.md`](../contracts/mqtt-http.md).

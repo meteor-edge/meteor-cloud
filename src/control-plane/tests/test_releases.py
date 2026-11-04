@@ -246,3 +246,66 @@ def test_operator_cannot_create_releases(client: TestClient, db_session: Session
 
     denied = _create_systemd_release(client, org.id, ops_headers, artifact_id=artifact["id"])
     assert denied.status_code == 403
+
+
+def test_releases_and_artifacts_show_their_link(client: TestClient, db_session: Session) -> None:
+    org, headers = _owner_setup(client, db_session)
+    artifact = _upload_systemd(client, org.id, headers).json()
+    unused = _upload_systemd(client, org.id, headers, name="spare", version="1.0").json()
+    for version in ("1.2.0", "1.3.0"):
+        created = _create_systemd_release(client, org.id, headers, artifact_id=artifact["id"], version=version)
+        assert created.status_code == 201, created.text
+
+    release = client.get(f"/api/v1/organizations/{org.id}/releases", headers=headers).json()["items"][0]
+    assert release["artifact"] == {
+        "id": artifact["id"],
+        "name": "camera-agent",
+        "version": "1.0",
+        "type": "systemd",
+        "file_name": "camera-agent.service",
+    }
+
+    by_artifact = client.get(
+        f"/api/v1/organizations/{org.id}/releases", headers=headers, params={"artifact_id": artifact["id"]}
+    ).json()
+    assert by_artifact["total"] == 2
+    none_for_unused = client.get(
+        f"/api/v1/organizations/{org.id}/releases", headers=headers, params={"artifact_id": unused["id"]}
+    ).json()
+    assert none_for_unused["total"] == 0
+
+    counts = {
+        item["id"]: item["release_count"]
+        for item in client.get(f"/api/v1/organizations/{org.id}/artifacts", headers=headers).json()["items"]
+    }
+    assert counts == {artifact["id"]: 2, unused["id"]: 0}
+    detail = client.get(f"/api/v1/organizations/{org.id}/artifacts/{artifact['id']}", headers=headers).json()
+    assert detail["release_count"] == 2
+
+
+def test_release_reports_its_deploy_count(client: TestClient, db_session: Session) -> None:
+    from tests.test_deployments import _register_device
+
+    org, headers = _owner_setup(client, db_session)
+    artifact = _upload_systemd(client, org.id, headers).json()
+    release = _create_systemd_release(client, org.id, headers, artifact_id=artifact["id"]).json()
+    token = client.post(
+        f"/api/v1/organizations/{org.id}/registration-tokens", headers=headers, json={"name": "Bootstrap"}
+    ).json()["token"]
+    device = _register_device(client, token, name="edge-count", mac="aa:bb:cc:dd:40:01")
+    for _ in range(2):
+        created = client.post(
+            f"/api/v1/organizations/{org.id}/deployments",
+            headers=headers,
+            json={"release_id": release["id"], "target": {"device_ids": [device["device_id"]]}},
+        )
+        assert created.status_code == 201, created.text
+
+    listed = client.get(f"/api/v1/organizations/{org.id}/releases", headers=headers).json()
+    assert listed["items"][0]["deployment_count"] == 2
+    detail = client.get(f"/api/v1/organizations/{org.id}/releases/{release['id']}", headers=headers).json()
+    assert detail["deployment_count"] == 2
+    deploys = client.get(
+        f"/api/v1/organizations/{org.id}/deployments", headers=headers, params={"release_id": release["id"]}
+    ).json()
+    assert deploys["total"] == 2

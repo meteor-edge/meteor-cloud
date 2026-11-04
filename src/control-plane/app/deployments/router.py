@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.deployments.dependencies import DeploymentSvc
-from app.deployments.schemas import DeploymentCreate, DeploymentResponse
+from app.deployments.schemas import DeploymentCreate, DeploymentResponse, RollbackResponse
 from app.devices.schemas import Page
 from app.identity.dependencies import CurrentUser
 
@@ -80,6 +80,34 @@ def cancel_deployment(
     )
 
 
+@router.post("/{deployment_id}/pause", response_model=DeploymentResponse)
+def pause_deployment(
+    organization_id: uuid.UUID,
+    deployment_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: DeploymentSvc,
+) -> DeploymentResponse:
+    return service.pause_deployment(
+        actor=current_user,
+        organization_id=organization_id,
+        deployment_id=deployment_id,
+    )
+
+
+@router.post("/{deployment_id}/resume", response_model=DeploymentResponse)
+def resume_deployment(
+    organization_id: uuid.UUID,
+    deployment_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: DeploymentSvc,
+) -> DeploymentResponse:
+    return service.resume_deployment(
+        actor=current_user,
+        organization_id=organization_id,
+        deployment_id=deployment_id,
+    )
+
+
 @router.post("/{deployment_id}/retry-failed", response_model=DeploymentResponse)
 def retry_failed_deployment(
     organization_id: uuid.UUID,
@@ -94,13 +122,13 @@ def retry_failed_deployment(
     )
 
 
-@router.post("/{deployment_id}/rollback", response_model=DeploymentResponse, status_code=201)
+@router.post("/{deployment_id}/rollback", response_model=RollbackResponse, status_code=201)
 def rollback_deployment(
     organization_id: uuid.UUID,
     deployment_id: uuid.UUID,
     current_user: CurrentUser,
     service: DeploymentSvc,
-) -> DeploymentResponse:
+) -> RollbackResponse:
     return service.rollback_deployment(
         actor=current_user,
         organization_id=organization_id,

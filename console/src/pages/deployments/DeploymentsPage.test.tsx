@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { listDeployments } from "@/api/fleet";
 import { DeploymentsPage } from "@/pages/deployments/DeploymentsPage";
 
 vi.mock("@/auth/AuthContext", () => ({
@@ -59,16 +60,17 @@ vi.mock("@/api/fleet", async () => {
       page: 1,
       page_size: 20,
     })),
+    getRelease: vi.fn(async () => ({ id: "rel-1", name: "camera-agent", version: "1.2.0" })),
   };
 });
 
-function renderPage() {
+function renderPage(path = "/organizations/org-1/deployments") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/organizations/org-1/deployments"]}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route
             path="/organizations/:organizationId/deployments"
@@ -90,5 +92,20 @@ describe("DeploymentsPage", () => {
     expect(await screen.findByText("Plant A rollout")).toBeInTheDocument();
     expect(screen.getByText(/1\/3 succeeded/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^deploy$/i })).toBeInTheDocument();
+  });
+
+  it("links each Deploy to its release", async () => {
+    renderPage();
+    expect(await screen.findByRole("link", { name: "camera-agent 1.2.0" })).toHaveAttribute(
+      "href",
+      "/organizations/org-1/releases?search=camera-agent",
+    );
+  });
+
+  it("filters to one release's Deploys", async () => {
+    renderPage("/organizations/org-1/deployments?release_id=rel-1");
+    expect(await screen.findByText(/deploys of release/i)).toBeInTheDocument();
+    expect(vi.mocked(listDeployments).mock.calls[0][2]).toMatchObject({ release_id: "rel-1" });
+    expect(await screen.findByText("camera-agent 1.2.0", { selector: "strong" })).toBeInTheDocument();
   });
 });
