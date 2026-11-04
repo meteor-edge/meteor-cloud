@@ -11,6 +11,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_PREFIX="/opt/meteorcli"
 SYSTEM_BIN="/usr/local/bin"
+# cloud-init / systemd often run with HOME unset; keep set -u happy.
+HOME="${HOME:-$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)}"
+HOME="${HOME:-/root}"
 USER_PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}/meteorcli"
 USER_BIN="${HOME}/.local/bin"
 
