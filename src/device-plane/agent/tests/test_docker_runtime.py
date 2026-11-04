@@ -129,11 +129,12 @@ def test_compose_zip_missing_file(tmp_path: Path) -> None:
 
 def test_docker_available_false_without_binary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("runtime.docker.shutil.which", lambda _name: None)
+    monkeypatch.setattr("runtime.docker.Path.is_file", lambda self: False)
     assert docker_available() is False
 
 
 def test_compose_available_false_without_docker(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("runtime.compose.shutil.which", lambda _name: None)
+    monkeypatch.setattr("runtime.docker.resolve_docker_bin", lambda: None)
     assert compose_available() is False
 
 

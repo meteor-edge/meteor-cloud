@@ -32,7 +32,9 @@ aws sts get-caller-identity
 
 ## SSH key pair
 
-Create in the target region:
+`aws.ssh_key_name` (EC2 key pair in the region) and `aws.ssh_private_key_path` (local PEM) **must be the same key**. `make aws-up` checks that before Terraform when the AWS CLI is available; a mismatch used to create the instance and then fail at SSH.
+
+Create a pair in the target region (AWS returns the private key **once**):
 
 ```bash
 aws ec2 create-key-pair \
@@ -43,15 +45,22 @@ aws ec2 create-key-pair \
 chmod 600 ~/.ssh/edge-platform.pem
 ```
 
+Or import a PEM you already have:
+
+```bash
+aws ec2 import-key-pair \
+  --region eu-central-1 \
+  --key-name edge-platform-local \
+  --public-key-material "$(ssh-keygen -y -f ~/.ssh/edge-platform.pem | base64 -w0)"
+```
+
 Reference in `installation.yaml`:
 
 ```yaml
 aws:
-  ssh_key_name: edge-platform
+  ssh_key_name: edge-platform          # or edge-platform-local after import
   ssh_private_key_path: ~/.ssh/edge-platform.pem
 ```
-
-Ensure the PEM file is non-empty. AWS only returns the private key once at creation.
 
 ## IAM permissions
 

@@ -314,9 +314,13 @@ class DeviceSoftwareService:
 
     def apply_capabilities(self, *, device_id: uuid.UUID, capabilities: dict[str, Any]) -> None:
         """Store agent-reported capabilities on the device metadata (best-effort)."""
+        from sqlalchemy.orm.attributes import flag_modified
+
         device = self.session.get(Device, device_id)
         if device is None:
             return
         meta = dict(device.metadata_ or {})
         meta["capabilities"] = capabilities
         device.metadata_ = meta
+        # JSONB: force dirty so a heartbeat that only flips booleans always persists.
+        flag_modified(device, "metadata_")

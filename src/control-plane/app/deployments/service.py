@@ -475,6 +475,15 @@ class DeploymentService:
             # An app that is already installed can still be published, without a reinstall.
             endpoint_device_ids = deploy_ids + already_installed_ids
             if len(endpoint_device_ids) != 1:
+                # Capability skips empty deploy_ids; do not blame "exactly one device".
+                capable = [d for d in devices if self.device_supports_kind(d, release.kind)]
+                if devices and not capable:
+                    raise ValidationAppError(
+                        "endpoint_requires_capable_device",
+                        f"None of the selected devices can run this {kind_value} release "
+                        f"(need {cap_name} on the device). Install the runtime, let the agent "
+                        "heartbeat, then try again.",
+                    )
                 raise ValidationAppError(
                     "endpoint_requires_one_device",
                     "A public URL can only be attached when the Deploy targets exactly one device.",

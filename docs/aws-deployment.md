@@ -113,12 +113,12 @@ VPN (optional): UDP 51820 -> WireGuard on the host, or on the dedicated gateway 
 ## Limitations
 
 - Single EC2 instance (for clusters use the [Helm chart](kubernetes.md))
-- MQTT is off with the installer defaults; enable it by running the playbooks with your own inventory ([Deployment](deployment.md))
 - Local Terraform state
-- VPN shares the cloud_app host
-- No automatic DNS management
+- VPN defaults to the cloud_app host (`services.vpn.placement: same_host`; use `dedicated` for a second EC2)
 - No zero-downtime upgrades
 - Git builds on EC2 (slower than registry pulls)
+
+With the example `installation.yaml`, `cloud_app`, bundled MQTT (EMQX on TCP 8883), and WireGuard (UDP 51820) are enabled. `ARGS='--route53'` creates/updates `<domain>`, `*.<domain>`, and `wg.<domain>` (existing A records for those names are overwritten).
 
 ## Related docs
 

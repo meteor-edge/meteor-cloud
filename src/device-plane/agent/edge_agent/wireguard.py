@@ -491,7 +491,11 @@ def sync_connectivity(
     in between, the tunnel is kept up from the local config.
     """
     if not wireguard_available():
-        logger.info("WireGuard tools not installed; skipping device tunnel")
+        logger.info(
+            "WireGuard tools not installed (need wg + wg-quick); "
+            "skipping device tunnel — on Debian/Raspberry Pi OS: "
+            "sudo apt install wireguard-tools, or re-run sudo ./installcli.sh"
+        )
         return None
     directory = wireguard_dir(config_dir)
     if state is not None and not state.due():

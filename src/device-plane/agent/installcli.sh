@@ -207,6 +207,23 @@ EOF
   fi
 }
 
+install_host_packages() {
+  # WireGuard tunnel needs wg + wg-quick on PATH. Root installs pull them in;
+  # a user-only install only prints a tip (no apt without sudo).
+  [[ "${EUID}" -eq 0 ]] || return 0
+  if command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "Installing wireguard-tools (wg, wg-quick)…"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq wireguard-tools
+    return 0
+  fi
+  echo "warning: install wireguard-tools (wg + wg-quick) so meteorcli can bring up the device tunnel." >&2
+}
+
 install_root_helpers() {
   [[ "${EUID}" -eq 0 ]] || return 0
   # Creating wg0 needs CAP_NET_ADMIN. meteorcli run stays unprivileged and
@@ -341,8 +358,12 @@ install_meteorcli() {
   if [[ "${WITH_SERVICE}" -eq 1 ]]; then
     install_service
   fi
+  install_host_packages
   install_root_helpers
   if [[ "${EUID}" -eq 0 ]]; then
+    if ! command -v wg >/dev/null 2>&1 || ! command -v wg-quick >/dev/null 2>&1; then
+      echo "warning: wg/wg-quick still missing; device WireGuard will stay off until wireguard-tools is installed." >&2
+    fi
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
@@ -351,7 +372,7 @@ install_meteorcli() {
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: sudo ./installcli.sh installs meteorcli-wg, meteorcli-logs, and meteorcli-systemd helpers."
+    echo "Tip: sudo ./installcli.sh installs wireguard-tools, meteorcli-wg, meteorcli-logs, and meteorcli-systemd."
     echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
   fi
 }

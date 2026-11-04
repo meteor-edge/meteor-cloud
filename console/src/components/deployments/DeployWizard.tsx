@@ -273,6 +273,18 @@ export function DeployWizard({
         setError("Choose an available public address.");
         return;
       }
+      // Same trap as the API: the only selected device is capability-skipped → no publish target.
+      if (
+        deviceIds.length === 1 &&
+        skippedDevices.length === 1 &&
+        skippedDevices[0]?.id === deviceIds[0]
+      ) {
+        const need = selectedRelease ? KIND_CAPABILITY[selectedRelease.kind] : "runtime";
+        setError(
+          `${skippedDevices[0].name} reported no ${need} support. Install that runtime on the device, wait for a heartbeat, then deploy again.`,
+        );
+        return;
+      }
     }
     await submitPayload(buildPayload());
   }

@@ -17,6 +17,16 @@ def test_firstboot_script_is_valid_bash() -> None:
         assert script.is_file()
         subprocess.run(["bash", "-n", str(script)], check=True)
     subprocess.run(["bash", "-n", str(FIRSTBOOT / "firstrun.sh")], check=True)
+    firstboot = (FIRSTBOOT / "meteorcli-firstboot.sh").read_text(encoding="utf-8")
+    assert "wireguard-tools" in firstboot
+
+
+def test_installcli_installs_wireguard_tools() -> None:
+    installcli = Path(__file__).resolve().parents[1] / "installcli.sh"
+    text = installcli.read_text(encoding="utf-8")
+    subprocess.run(["bash", "-n", str(installcli)], check=True)
+    assert "install_host_packages" in text
+    assert "wireguard-tools" in text
 
 
 def test_firstboot_installer_points_at_repo() -> None:
