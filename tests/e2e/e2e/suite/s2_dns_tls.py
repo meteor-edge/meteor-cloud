@@ -28,7 +28,9 @@ def platform_record(ctx):
 def wildcard_record(ctx):
     _require_domain(ctx)
     found = {}
-    for name in (ctx.app_hostname("dnsprobe"), f"dnsprobe.device.org.{ctx.cfg.apps_base_domain}"):
+    # No organization exists yet at this stage; the wildcard answers for any name.
+    domain = ctx.cfg.apps_base_domain
+    for name in (f"e2e-{ctx.run_id}-dnsprobe.org.{domain}", f"dnsprobe.device.org.{domain}"):
         found[name] = sorted(wait_for(lambda n=name: resolve_ipv4(n) == {ctx.cp.address} and resolve_ipv4(n),
                                       timeout=600, interval=10, what=f"{name} -> {ctx.cp.address}"))
     return {"addresses": found}

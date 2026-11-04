@@ -43,6 +43,20 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
 
+class OrganizationPreviousSlug(Base):
+    """A slug an organization renamed away from: public addresses may still use it, so others can't take it."""
+
+    __tablename__ = "organization_previous_slugs"
+    __table_args__ = (Index("ix_organization_previous_slugs_organization_id", "organization_id"),)
+
+    slug: Mapped[str] = mapped_column(String(100), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+
 class OrganizationMembership(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Membership of a user in an organization."""
 

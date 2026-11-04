@@ -4,6 +4,7 @@ import { Check, Loader2, X } from "lucide-react";
 
 import { checkHostname, suggestHostname } from "@/api/fleet";
 import { Input } from "@/components/ui/input";
+import { useDebounced } from "@/lib/useDebounced";
 
 type AppAddressPickerProps = {
   token: string;
@@ -16,15 +17,6 @@ type AppAddressPickerProps = {
 };
 
 const CHECK_DELAY_MS = 400;
-
-function useDebounced(value: string, delay: number): string {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delay);
-    return () => window.clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
-}
 
 function Status({ state, message }: { state: "checking" | "ok" | "bad"; message: string }) {
   if (state === "checking") {
@@ -59,7 +51,7 @@ export function AppAddressPicker({
     queryKey: ["hostname-suggestion", organizationId, deviceId, app, token],
     queryFn: () => suggestHostname(token, organizationId, deviceId, app),
   });
-  const domain = suggestion.data?.apps_domain ?? "";
+  const domain = suggestion.data?.custom_domain ?? "";
   const label = useDebounced(custom.trim().toLowerCase(), CHECK_DELAY_MS);
   const customHostname = label && domain ? `${label}.${domain}` : "";
   const check = useQuery({

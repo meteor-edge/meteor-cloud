@@ -6,13 +6,25 @@ A public address for one app on one device. Two forms, both under
 | Form | Example | Who picks it |
 |------|---------|--------------|
 | **Suggested** `<app>.<device>.<org>.<domain>` | `shop.kiosk-12.acme.meteor-edge.com` | the platform, from the app (release), device and organization names; a number is added (`shop-2`) while it is taken |
-| **Custom** `<name>.<domain>` | `shop.meteor-edge.com` | the user; first come, first served, checked before saving |
+| **Custom** `<name>.<org>.<domain>` | `shop.acme.meteor-edge.com` | the user; checked before saving |
 
-The organization is part of a suggested address, so suggestions never collide
-between organizations, and an organization can only use addresses that end in
-one of **its own** devices and its own organization name. Custom names are
-shared by everyone; reserved names (`www`, `api`, `admin`, `console`, …, plus
-`APPS_RESERVED_NAMES`) are refused.
+The organization is part of every address, so names never collide between
+organizations: an organization can only use addresses that end in its own
+organization name (and, for suggested addresses, one of **its own** devices).
+"Taken" means another endpoint in your organization already has that address.
+An organization whose slug is reserved (`www`, `api`, `admin`, `console`, …, plus
+`APPS_RESERVED_NAMES`) can't use custom names, only suggested addresses.
+
+**Short names.** A single-company install can set `APPS_ALLOW_SHORT_NAMES=true`
+(Helm: `connectivity.apps.allowShortNames`) to also allow `<name>.<domain>`.
+These are first come, first served across all organizations, and reserved names
+are refused. It is off by default. Endpoints that already have a short name keep
+it either way; the rule applies when an address is created or changed.
+
+An organization's addresses don't change when its slug is renamed: they keep
+working under the old slug, and new addresses must use the new one. The old slug
+stays reserved so no other organization can publish under it. The same
+organization can rename back to it, and it is freed when the organization is deleted.
 
 One address per app port: two apps on the same device need different ports.
 Upstream addresses are **derived** from the device’s WireGuard IP; clients
@@ -33,10 +45,11 @@ Requires `endpoint.read`. Create/update/delete need the matching
 | `PATCH` | `/api/v1/organizations/{org}/endpoints/{id}` |
 | `DELETE` | `/api/v1/organizations/{org}/endpoints/{id}` |
 
-`hostname-suggestion` returns `{apps_domain, hostname, available}`.
+`hostname-suggestion` returns `{apps_domain, custom_domain, hostname, available}`;
+`custom_domain` is the domain a custom name goes under.
 `hostname-check` returns `{hostname, available, reason, message}` with
 `reason` one of `available`, `taken`, `reserved`, `invalid`, `not_yours`
-(an `app.device.org` address of another device or organization). Pass
+(an address of another device or organization). Pass
 `endpoint_id` when renaming so the endpoint's own address counts as available.
 
 Create body: `{ "device_id", "hostname", "port", "protocol": "http" }`.
@@ -53,7 +66,7 @@ endpoints panel if it serves HTTP):
 
 ```json
 "endpoint": { "port": 80 }                                   // suggested address
-"endpoint": { "hostname": "shop.meteor-edge.com", "port": 80 } // custom address
+"endpoint": { "hostname": "shop.acme.meteor-edge.com", "port": 80 } // custom address
 ```
 
 The URL is not marked `ready` until that workload is in-sync and healthy. If
@@ -87,9 +100,9 @@ next poll drops the route.
 
 DNS: one wildcard `*.<APPS_BASE_DOMAIN>` to the gateway; it answers for every
 depth, so it covers both forms. Certificates (Traefik DNS-01, resolver
-`letsencrypt-dns`): one wildcard `*.<domain>` for custom names and one
-`*.<device>.<org>.<domain>` per device with published apps, requested the
-first time a route needs it (a minute or two). Let's Encrypt allows about 50 new
+`letsencrypt-dns`): one wildcard `*.<org>.<domain>` per organization with custom
+names, one `*.<device>.<org>.<domain>` per device with published apps, and
+`*.<domain>` if short names are used, requested the first time a route needs it (a minute or two). Let's Encrypt allows about 50 new
 certificates per registered domain per week (renewals excluded); ask for a
 higher limit before onboarding more devices than that per week. Credentials via
 env only.

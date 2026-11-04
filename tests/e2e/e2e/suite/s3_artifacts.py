@@ -33,6 +33,7 @@ def admin_org(ctx):
     api = ctx.admin()
     org = api.call("POST", "/api/v1/organizations", json_body={"name": f"E2E {ctx.run_id} A"}, expect=(201,))
     ctx.data["org_id"] = org["id"]
+    ctx.data["org_slug"] = org["slug"]
     return {"organization_id": org["id"], "slug": org.get("slug")}
 
 

@@ -5,7 +5,7 @@ Creates, through the same public API and meteorcli the suite uses:
   - every device host registered as demo-device-N, online, with its WireGuard tunnel up
   - the demo-app docker artifact, releases 1.0.0 and 2.0.0, deployed to demo-device-1 at the
     suggested address https://demo-app.demo-device-1.<org>.<env>.<domain>
-  - hello 1.0.0 on demo-device-2 at a custom address, https://hello.<env>.<domain>
+  - hello 1.0.0 on demo-device-2 at a custom address, https://hello.<org>.<env>.<domain>
 """
 
 from __future__ import annotations
@@ -106,6 +106,7 @@ def seed(cfg: Config, state: State, secrets: dict[str, str], say: Callable[[str]
     org = api.call("POST", "/api/v1/organizations", expect=(201,),
                    json_body={"name": ORG_NAME, "description": "Seeded demo data: devices, releases, a public app"})
     ctx.data["org_id"] = org["id"]
+    ctx.data["org_slug"] = org["slug"]
 
     email = f"demo@{cfg.fqdn or 'example.com'}"
     # The account outlives a deleted organization, and an existing account keeps its password.
@@ -166,10 +167,10 @@ def seed(cfg: Config, state: State, secrets: dict[str, str], say: Callable[[str]
 
 
 def _available_custom_name(ctx: Context, index: int, names: tuple[str, ...]) -> str:
-    """The first custom <name>.<apps domain> the platform reports as available."""
+    """The first custom <name>.<org>.<apps domain> the platform reports as available."""
     device_id = ctx.data["devices"][index]["id"]
     for name in names:
-        hostname = f"{name}.{ctx.cfg.apps_base_domain}"
+        hostname = f"{name}.{ctx.data['org_slug']}.{ctx.cfg.apps_base_domain}"
         result = ctx.admin().call("GET", ctx.org_path(
             f"/endpoints/hostname-check?device_id={device_id}&hostname={hostname}"))
         if result["available"]:

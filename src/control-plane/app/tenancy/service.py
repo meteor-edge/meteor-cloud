@@ -28,6 +28,8 @@ from app.tenancy.schemas import (
     slugify,
 )
 
+_SLUG_PREVIOUSLY_USED = "Another organization used this slug before, so it can't be reused."
+
 
 class OrganizationService:
     def __init__(self, session: Session, identity: IdentityDirectory) -> None:
@@ -56,6 +58,8 @@ class OrganizationService:
                 "organization_slug_exists",
                 "An organization with this slug already exists.",
             )
+        if self.organizations.get_previous_slug(slug) is not None:
+            raise ConflictError("organization_slug_exists", _SLUG_PREVIOUSLY_USED)
 
         organization = self.organizations.create(
             name=payload.name,
@@ -119,7 +123,10 @@ class OrganizationService:
                     "organization_slug_exists",
                     "An organization with this slug already exists.",
                 )
-            organization.slug = payload.slug
+            previous = self.organizations.get_previous_slug(payload.slug)
+            if previous is not None and previous.organization_id != organization.id:
+                raise ConflictError("organization_slug_exists", _SLUG_PREVIOUSLY_USED)
+            self.organizations.change_slug(organization, payload.slug)
 
         self.organizations.update(organization)
         self.session.commit()

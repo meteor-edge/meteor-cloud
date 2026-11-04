@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import base64
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.exceptions import ValidationAppError
+from app.endpoints.models import ApplicationEndpoint
 from app.endpoints.validation import (
     HostnameRejected,
     dns_label,
@@ -23,10 +26,15 @@ DOMAIN = "meteor-edge.com"
 WG_KEY = base64.b64encode(bytes(range(64, 96))).decode()
 
 
-def _reason(hostname: str, *, org: str = "acme", device: str = "Kiosk 12") -> str:
+def _reason(hostname: str, *, org: str = "acme", device: str = "Kiosk 12", short: bool = False) -> str:
     try:
         validate_hostname(
-            hostname, apps_base_domain=DOMAIN, org_slug=org, device_name=device, reserved=frozenset({"my"})
+            hostname,
+            apps_base_domain=DOMAIN,
+            org_slug=org,
+            device_name=device,
+            reserved=frozenset({"my"}),
+            allow_short_names=short,
         )
     except HostnameRejected as exc:
         return exc.reason
@@ -47,12 +55,14 @@ def test_dns_label_and_suggestion() -> None:
     ("hostname", "reason"),
     [
         ("shop.kiosk-12.acme.meteor-edge.com", "available"),
-        ("shop.meteor-edge.com", "available"),
+        ("shop.acme.meteor-edge.com", "available"),
+        ("www.acme.meteor-edge.com", "available"),
+        ("shop.globex.meteor-edge.com", "not_yours"),
+        ("shop.meteor-edge.com", "invalid"),
         ("shop.kiosk-12.globex.meteor-edge.com", "not_yours"),
         ("shop.other-device.acme.meteor-edge.com", "not_yours"),
         ("www.meteor-edge.com", "reserved"),
         ("my.meteor-edge.com", "reserved"),
-        ("a.b.meteor-edge.com", "invalid"),
         ("a.b.c.d.meteor-edge.com", "invalid"),
         ("shop.example.com", "invalid"),
         ("-shop.meteor-edge.com", "invalid"),
@@ -63,15 +73,32 @@ def test_hostname_rules(hostname: str, reason: str) -> None:
     assert _reason(hostname) == reason
 
 
+def test_short_names_need_the_setting() -> None:
+    assert _reason("shop.meteor-edge.com", short=True) == "available"
+    assert _reason("www.meteor-edge.com", short=True) == "reserved"
+    assert _reason("my.meteor-edge.com", short=True) == "reserved"
+    # Organization addresses work the same with the setting on.
+    assert _reason("shop.acme.meteor-edge.com", short=True) == "available"
+    assert _reason("shop.globex.meteor-edge.com", short=True) == "not_yours"
+
+
+@pytest.mark.parametrize("org", ["api", "www", "my"])
+def test_reserved_organization_slug_cannot_have_custom_names(org: str) -> None:
+    assert _reason(f"shop.{org}.meteor-edge.com", org=org) == "reserved"
+    # Its suggested addresses are unchanged.
+    assert _reason(f"shop.kiosk-12.{org}.meteor-edge.com", org=org) == "available"
+
+
 def test_rejections_are_validation_errors() -> None:
     with pytest.raises(ValidationAppError):
         validate_hostname("www.meteor-edge.com", apps_base_domain=DOMAIN, org_slug="acme", device_name="k")
 
 
-def test_certificate_per_device_or_domain() -> None:
+def test_certificate_per_device_organization_or_domain() -> None:
     assert (
         tls_domain("shop.kiosk-12.acme.meteor-edge.com", apps_base_domain=DOMAIN) == "*.kiosk-12.acme.meteor-edge.com"
     )
+    assert tls_domain("shop.acme.meteor-edge.com", apps_base_domain=DOMAIN) == "*.acme.meteor-edge.com"
     assert tls_domain("shop.meteor-edge.com", apps_base_domain=DOMAIN) == "*.meteor-edge.com"
 
 
@@ -85,7 +112,12 @@ def test_suggestion_check_and_create(client: TestClient, db_session: Session) ->
     )
     assert suggestion.status_code == 200, suggestion.text
     expected = f"web-shop.kiosk-12.{org.slug}.{DOMAIN}"
-    assert suggestion.json() == {"apps_domain": DOMAIN, "hostname": expected, "available": True}
+    assert suggestion.json() == {
+        "apps_domain": DOMAIN,
+        "custom_domain": f"{org.slug}.{DOMAIN}",
+        "hostname": expected,
+        "available": True,
+    }
 
     def check(hostname: str) -> dict:
         response = client.get(
@@ -95,7 +127,9 @@ def test_suggestion_check_and_create(client: TestClient, db_session: Session) ->
         return response.json()
 
     assert check(expected)["available"] is True
-    assert check(f"shop.{DOMAIN}")["available"] is True
+    assert check(f"shop.{org.slug}.{DOMAIN}")["available"] is True
+    assert check(f"shop.{DOMAIN}")["reason"] == "invalid"
+    assert check(f"shop.someone-else.{DOMAIN}")["reason"] == "not_yours"
     assert check(f"www.{DOMAIN}")["reason"] == "reserved"
     assert check(f"shop.kiosk-12.someone-else.{DOMAIN}")["reason"] == "not_yours"
 
@@ -104,9 +138,15 @@ def test_suggestion_check_and_create(client: TestClient, db_session: Session) ->
     )
     assert created.status_code == 201, created.text
     custom = client.post(
-        base, headers=headers, json={"device_id": device["device_id"], "hostname": f"shop.{DOMAIN}", "port": 8080}
+        base,
+        headers=headers,
+        json={"device_id": device["device_id"], "hostname": f"shop.{org.slug}.{DOMAIN}", "port": 8080},
     )
     assert custom.status_code == 201, custom.text
+    short = client.post(
+        base, headers=headers, json={"device_id": device["device_id"], "hostname": f"shop.{DOMAIN}", "port": 8081}
+    )
+    assert short.status_code == 422
 
     taken = check(expected)
     assert taken == {
@@ -136,39 +176,106 @@ def test_suggestion_check_and_create(client: TestClient, db_session: Session) ->
     assert foreign.status_code == 422
 
 
-def test_custom_name_taken_across_organizations(client: TestClient, db_session: Session) -> None:
-    org, headers, token, _release = _setup_release(client, db_session)
-    device = _register_device(client, token, name="pi", mac="aa:bb:cc:dd:10:02")
-    assert (
-        client.post(
-            f"/api/v1/organizations/{org.id}/endpoints",
-            headers=headers,
-            json={"device_id": device["device_id"], "hostname": f"shop.{DOMAIN}", "port": 80},
-        ).status_code
-        == 201
-    )
-
+def _second_org_device(client: TestClient, db_session: Session) -> tuple[dict, dict, dict]:
     other_owner = create_user(db_session, email="globex@example.com")
     other_org, _ = create_org_with_owner(db_session, other_owner, name="Globex", slug="globex")
     other_headers = auth_header(client, "globex@example.com")
     other_token = client.post(
         f"/api/v1/organizations/{other_org.id}/registration-tokens", headers=other_headers, json={"name": "t"}
     ).json()["token"]
-    other_device = _register_device(client, other_token, name="pi", mac="aa:bb:cc:dd:10:03")
+    return other_org, other_headers, _register_device(client, other_token, name="pi", mac="aa:bb:cc:dd:10:03")
+
+
+def test_same_custom_name_in_two_organizations(client: TestClient, db_session: Session) -> None:
+    org, headers, token, _release = _setup_release(client, db_session)
+    device = _register_device(client, token, name="pi", mac="aa:bb:cc:dd:10:02")
+    assert (
+        client.post(
+            f"/api/v1/organizations/{org.id}/endpoints",
+            headers=headers,
+            json={"device_id": device["device_id"], "hostname": f"shop.{org.slug}.{DOMAIN}", "port": 80},
+        ).status_code
+        == 201
+    )
+
+    other_org, other_headers, other_device = _second_org_device(client, db_session)
+    base = f"/api/v1/organizations/{other_org.id}/endpoints"
+    # Another organization's address isn't reported as taken: it isn't theirs to ask about.
+    foreign = client.get(
+        f"{base}/hostname-check",
+        headers=other_headers,
+        params={"device_id": other_device["device_id"], "hostname": f"shop.{org.slug}.{DOMAIN}"},
+    ).json()
+    assert foreign["reason"] == "not_yours"
+    own = client.get(
+        f"{base}/hostname-check",
+        headers=other_headers,
+        params={"device_id": other_device["device_id"], "hostname": f"shop.globex.{DOMAIN}"},
+    ).json()
+    assert own["available"] is True
+    suggestion = client.get(
+        f"{base}/hostname-suggestion",
+        headers=other_headers,
+        params={"device_id": other_device["device_id"], "app": "shop"},
+    ).json()
+    assert suggestion["hostname"] == f"shop.pi.globex.{DOMAIN}"
+    assert suggestion["custom_domain"] == f"globex.{DOMAIN}"
+    assert suggestion["available"] is True
+
+
+def test_short_names_when_allowed_are_shared_by_all_organizations(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "apps_allow_short_names", True)
+    org, headers, token, _release = _setup_release(client, db_session)
+    device = _register_device(client, token, name="pi", mac="aa:bb:cc:dd:10:02")
+    base = f"/api/v1/organizations/{org.id}/endpoints"
+    suggestion = client.get(
+        f"{base}/hostname-suggestion", headers=headers, params={"device_id": device["device_id"], "app": "shop"}
+    ).json()
+    assert suggestion["custom_domain"] == DOMAIN
+    created = client.post(
+        base, headers=headers, json={"device_id": device["device_id"], "hostname": f"shop.{DOMAIN}", "port": 80}
+    )
+    assert created.status_code == 201, created.text
+
+    other_org, other_headers, other_device = _second_org_device(client, db_session)
     result = client.get(
         f"/api/v1/organizations/{other_org.id}/endpoints/hostname-check",
         headers=other_headers,
         params={"device_id": other_device["device_id"], "hostname": f"shop.{DOMAIN}"},
     ).json()
     assert result["reason"] == "taken"
-    # The suggested address never collides across organizations: the org is part of it.
-    suggestion = client.get(
-        f"/api/v1/organizations/{other_org.id}/endpoints/hostname-suggestion",
-        headers=other_headers,
-        params={"device_id": other_device["device_id"], "app": "shop"},
+
+
+def test_existing_short_name_keeps_working(client: TestClient, db_session: Session) -> None:
+    """Endpoints created before names had to include the organization aren't broken by edits or redeploys."""
+    org, headers, token, _release = _setup_release(client, db_session)
+    device = _register_device(client, token, name="pi", mac="aa:bb:cc:dd:10:06")
+    base = f"/api/v1/organizations/{org.id}/endpoints"
+    endpoint = client.post(
+        base,
+        headers=headers,
+        json={"device_id": device["device_id"], "hostname": f"old.{org.slug}.{DOMAIN}", "port": 80},
     ).json()
-    assert suggestion["hostname"] == f"shop.pi.globex.{DOMAIN}"
-    assert suggestion["available"] is True
+    legacy = f"old.{DOMAIN}"
+    row = db_session.get(ApplicationEndpoint, uuid.UUID(endpoint["id"]))
+    row.hostname = legacy
+    db_session.commit()
+
+    own = client.get(
+        f"{base}/hostname-check",
+        headers=headers,
+        params={"device_id": device["device_id"], "hostname": legacy, "endpoint_id": endpoint["id"]},
+    ).json()
+    assert own["available"] is True
+    same = client.patch(f"{base}/{endpoint['id']}", headers=headers, json={"hostname": legacy, "port": 81})
+    assert same.status_code == 200, same.text
+    assert same.json()["hostname"] == legacy
+    other_short = client.patch(f"{base}/{endpoint['id']}", headers=headers, json={"hostname": f"new.{DOMAIN}"})
+    assert other_short.status_code == 422
+    moved = client.patch(f"{base}/{endpoint['id']}", headers=headers, json={"hostname": f"new.{org.slug}.{DOMAIN}"})
+    assert moved.status_code == 200, moved.text
 
 
 def test_deploy_without_hostname_uses_suggestion(client: TestClient, db_session: Session) -> None:
@@ -191,7 +298,7 @@ def test_deploy_without_hostname_uses_suggestion(client: TestClient, db_session:
     assert [e["hostname"] for e in listed] == [f"camera-agent.pi-deploy.{org.slug}.{DOMAIN}"]
 
 
-def test_routing_requests_one_certificate_per_device(client: TestClient, db_session: Session) -> None:
+def test_routing_requests_one_certificate_per_device_or_organization(client: TestClient, db_session: Session) -> None:
     org, headers, token, _release = _setup_release(client, db_session)
     device = _register_device(client, token, name="Router Pi", mac="aa:bb:cc:dd:10:05")
     client.post(
@@ -203,7 +310,7 @@ def test_routing_requests_one_certificate_per_device(client: TestClient, db_sess
     for hostname, port in (
         (f"a.router-pi.{org.slug}.{DOMAIN}", 80),
         (f"b.router-pi.{org.slug}.{DOMAIN}", 81),
-        (f"friendly.{DOMAIN}", 82),
+        (f"friendly.{org.slug}.{DOMAIN}", 82),
     ):
         response = client.post(
             base, headers=headers, json={"device_id": device["device_id"], "hostname": hostname, "port": port}
@@ -216,5 +323,5 @@ def test_routing_requests_one_certificate_per_device(client: TestClient, db_sess
     assert certificates == {
         f"Host(`a.router-pi.{org.slug}.{DOMAIN}`)": f"*.router-pi.{org.slug}.{DOMAIN}",
         f"Host(`b.router-pi.{org.slug}.{DOMAIN}`)": f"*.router-pi.{org.slug}.{DOMAIN}",
-        f"Host(`friendly.{DOMAIN}`)": f"*.{DOMAIN}",
+        f"Host(`friendly.{org.slug}.{DOMAIN}`)": f"*.{org.slug}.{DOMAIN}",
     }
