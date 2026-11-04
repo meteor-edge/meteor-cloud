@@ -47,20 +47,84 @@ def read_serial_number() -> str | None:
     return None
 
 
+_VIRTUAL_IFACE_PREFIXES = (
+    "lo",
+    "docker",
+    "veth",
+    "br-",
+    "cni",
+    "flannel",
+    "virbr",
+    "wg",
+    "tun",
+    "tap",
+)
+_WIRED_IFACE_PREFIXES = ("eth", "en", "end")
+_WIFI_IFACE_PREFIXES = ("wlan", "wl")
+
+
+def _sys_class_net() -> Path:
+    return Path("/sys/class/net")
+
+
+def _is_virtual_iface(name: str) -> bool:
+    if name == "lo":
+        return True
+    return name.startswith(_VIRTUAL_IFACE_PREFIXES)
+
+
+def _iface_preference(name: str) -> int:
+    if name.startswith(_WIRED_IFACE_PREFIXES):
+        return 0
+    if name.startswith(_WIFI_IFACE_PREFIXES):
+        return 1
+    return 2
+
+
+def _iface_mac(net_dir: Path, iface: str) -> str | None:
+    address = _read_text(str(net_dir / iface / "address"))
+    if address and address != "00:00:00:00:00:00":
+        return address
+    return None
+
+
+def _default_ipv4_iface() -> str | None:
+    """Return the interface that owns the default IPv4 route, if any."""
+    content = _read_text("/proc/net/route")
+    if not content:
+        return None
+    for line in content.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "00000000":
+            return parts[0]
+    return None
+
+
 def read_mac_addresses() -> list[str]:
-    macs: list[str] = []
-    net_dir = Path("/sys/class/net")
+    """Return the primary NIC MAC (at most one address).
+
+    Prefers the default IPv4 route's interface, then wired names
+    (``eth*`` / ``en*`` / ``end*``), then Wi-Fi. Virtual interfaces are skipped.
+    """
+    net_dir = _sys_class_net()
     try:
-        interfaces = sorted(p.name for p in net_dir.iterdir())
+        interfaces = [p.name for p in net_dir.iterdir()]
     except OSError:
-        return macs
+        return []
+    macs: dict[str, str] = {}
     for iface in interfaces:
-        if iface == "lo":
+        if _is_virtual_iface(iface):
             continue
-        address = _read_text(str(net_dir / iface / "address"))
-        if address and address != "00:00:00:00:00:00":
-            macs.append(address)
-    return macs
+        address = _iface_mac(net_dir, iface)
+        if address:
+            macs[iface] = address
+    if not macs:
+        return []
+    default_iface = _default_ipv4_iface()
+    if default_iface and default_iface in macs:
+        return [macs[default_iface]]
+    chosen = min(macs, key=lambda name: (_iface_preference(name), name))
+    return [macs[chosen]]
 
 
 def read_cpu() -> tuple[str | None, int | None]:

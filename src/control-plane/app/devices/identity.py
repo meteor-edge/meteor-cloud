@@ -1,7 +1,8 @@
 """Device identity normalization and duplicate detection.
 
-Duplicate detection uses hardware serial and overlapping normalized MAC
-addresses. Device ID is the platform identifier and is not a hardware signal.
+Duplicate detection uses hardware serial and the primary MAC (the first
+normalized address). Device ID is the platform identifier and is not a
+hardware signal.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from app.devices.models import Device
+from app.devices.models import Device, DeviceEnrollmentRequest
 
 _MAC_CLEAN = re.compile(r"[^0-9a-f]")
 
@@ -65,10 +66,19 @@ class DeviceIdentity:
         serial_number: str | None,
         mac_addresses: list[str] | None,
     ) -> DeviceIdentity:
+        macs = normalize_macs(mac_addresses)
         return cls(
             serial_number=_clean(serial_number),
-            mac_addresses=normalize_macs(mac_addresses),
+            mac_addresses=macs[:1],
         )
+
+    @property
+    def primary_mac(self) -> str | None:
+        return self.mac_addresses[0] if self.mac_addresses else None
+
+    @property
+    def is_empty(self) -> bool:
+        return self.serial_number is None and self.primary_mac is None
 
     def matches(self, device: Device) -> bool:
         """Return whether this identity refers to the same physical device."""
@@ -77,6 +87,19 @@ class DeviceIdentity:
         if self.mac_addresses and device.mac_addresses:
             if set(self.mac_addresses) & set(device.mac_addresses):
                 return True
+        return False
+
+    def matches_request(self, request: DeviceEnrollmentRequest) -> bool:
+        """Match an enrollment request on serial or primary MAC.
+
+        The incoming primary MAC may equal any stored address so older
+        multi-MAC pending rows still collapse onto one request.
+        """
+        if self.serial_number and request.serial_number and self.serial_number == request.serial_number:
+            return True
+        primary = self.primary_mac
+        if primary and request.mac_addresses and primary in request.mac_addresses:
+            return True
         return False
 
 

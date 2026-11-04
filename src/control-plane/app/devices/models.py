@@ -26,7 +26,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -346,6 +346,11 @@ class DeviceEnrollmentRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("enrollment_api_keys.id", ondelete="SET NULL"),
         nullable=True,
     )
+    enrollment_key: Mapped[EnrollmentApiKey | None] = relationship(
+        EnrollmentApiKey,
+        foreign_keys="DeviceEnrollmentRequest.api_key_id",
+        lazy="joined",
+    )
 
     status: Mapped[str] = mapped_column(
         String(16),
@@ -426,6 +431,18 @@ class DeviceEnrollmentRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    @property
+    def enrollment_key_id(self) -> uuid.UUID | None:
+        return self.api_key_id
+
+    @property
+    def enrollment_key_name(self) -> str | None:
+        return self.enrollment_key.name if self.enrollment_key is not None else None
+
+    @property
+    def enrollment_key_prefix(self) -> str | None:
+        return self.enrollment_key.key_prefix if self.enrollment_key is not None else None
 
 
 class DeviceMqttCredential(Base, TimestampMixin):

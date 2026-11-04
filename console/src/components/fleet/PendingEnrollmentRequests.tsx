@@ -19,6 +19,14 @@ function isActiveEnrollmentRequest(entry: DeviceEnrollmentRequest): boolean {
   return entry.status === "pending" || (entry.status === "approved" && entry.claimed_at == null);
 }
 
+function primaryMac(addresses: string[]): string | null {
+  return addresses[0] ?? null;
+}
+
+function enrollmentKeyLabel(entry: DeviceEnrollmentRequest): string {
+  return entry.enrollment_key_name || entry.enrollment_key_prefix || "Revoked/deleted key";
+}
+
 type PendingEnrollmentRequestsProps = {
   organizationId: string;
   token: string;
@@ -113,6 +121,7 @@ export function PendingEnrollmentRequests({
               <th className="px-4 py-3 font-semibold">Name</th>
               <th className="px-4 py-3 font-semibold">Hostname</th>
               <th className="px-4 py-3 font-semibold">MAC address</th>
+              <th className="px-4 py-3 font-semibold">Enrollment key</th>
               <th className="px-4 py-3 font-semibold">Architecture</th>
               <th className="px-4 py-3 font-semibold">Requested</th>
               <th className="px-4 py-3 font-semibold whitespace-nowrap">Status</th>
@@ -126,9 +135,8 @@ export function PendingEnrollmentRequests({
                   {entry.assigned_name ?? entry.requested_name ?? "—"}
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">{entry.hostname ?? "—"}</td>
-                <td className="px-4 py-3 font-mono text-xs">
-                  {entry.mac_addresses.length ? entry.mac_addresses.join(", ") : "—"}
-                </td>
+                <td className="px-4 py-3 font-mono text-xs">{primaryMac(entry.mac_addresses) ?? "—"}</td>
+                <td className="px-4 py-3 text-muted-foreground">{enrollmentKeyLabel(entry)}</td>
                 <td className="px-4 py-3 text-muted-foreground">{entry.architecture ?? "—"}</td>
                 <td className="px-4 py-3 text-muted-foreground">
                   {formatDateTime(entry.created_at)}
@@ -176,7 +184,7 @@ export function PendingEnrollmentRequests({
               <tr>
                 <td
                   className="px-4 py-6 text-center text-muted-foreground"
-                  colSpan={canManage ? 7 : 6}
+                  colSpan={canManage ? 8 : 7}
                 >
                   No pending enrollment requests.
                 </td>

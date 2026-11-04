@@ -416,6 +416,9 @@ class DeviceEnrollmentRequestResponse(BaseModel):
     rejection_reason: str | None
     claimed_at: datetime | None
     device_id: uuid.UUID | None
+    enrollment_key_id: uuid.UUID | None = None
+    enrollment_key_name: str | None = None
+    enrollment_key_prefix: str | None = None
     expires_at: datetime | None
     created_at: datetime
     updated_at: datetime

@@ -61,8 +61,13 @@ def test_submit_request_then_approve_then_claim(client: TestClient, db_session: 
     )
     assert pending.status_code == 200
     assert len(pending.json()) == 1
-    assert pending.json()[0]["id"] == request_id
-    assert "claim_secret" not in pending.json()[0]
+    listed_request = pending.json()[0]
+    assert listed_request["id"] == request_id
+    assert "claim_secret" not in listed_request
+    assert listed_request["enrollment_key_id"] == key["id"]
+    assert listed_request["enrollment_key_name"] == "Field techs"
+    assert listed_request["enrollment_key_prefix"] == key["key_prefix"]
+    assert listed_request["mac_addresses"] == ["aa:bb:cc:dd:ee:ff"]
 
     poll_pending = client.post(
         "/api/v1/agent/enroll/poll",
@@ -222,3 +227,94 @@ def test_invalid_api_key_rejected(client: TestClient) -> None:
     )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "invalid_api_key"
+
+
+def _enroll(client: TestClient, api_key: str, **inventory) -> dict:
+    response = client.post(
+        "/api/v1/agent/enroll/request",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json=inventory,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_duplicate_submit_reuses_pending_row(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+
+    first = _enroll(client, key["api_key"], name="edge-01", mac_addresses=["aa:bb:cc:dd:ee:01"])
+    second = _enroll(
+        client,
+        key["api_key"],
+        name="edge-01-retry",
+        mac_addresses=["AA:BB:CC:DD:EE:01", "11:22:33:44:55:66"],
+    )
+    assert second["request_id"] == first["request_id"]
+    assert second["claim_secret"] != first["claim_secret"]
+
+    rows = db_session.query(DeviceEnrollmentRequest).all()
+    assert len(rows) == 1
+    assert rows[0].mac_addresses == ["aa:bb:cc:dd:ee:01"]
+    assert rows[0].requested_name == "edge-01-retry"
+
+    stale = client.post(
+        "/api/v1/agent/enroll/poll",
+        json={"request_id": first["request_id"], "claim_secret": first["claim_secret"]},
+    )
+    assert stale.status_code == 401
+
+
+def test_different_primary_macs_create_separate_requests(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+
+    first = _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+    second = _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:02"])
+    assert first["request_id"] != second["request_id"]
+    assert db_session.query(DeviceEnrollmentRequest).count() == 2
+
+
+def test_blank_identity_is_not_deduped(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+
+    first = _enroll(client, key["api_key"], name="a")
+    second = _enroll(client, key["api_key"], name="b")
+    assert first["request_id"] != second["request_id"]
+    assert db_session.query(DeviceEnrollmentRequest).count() == 2
+
+
+def test_reuse_keeps_approved_unclaimed_status(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+    first = _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+
+    approved = client.post(
+        f"/api/v1/organizations/{org.id}/enrollment-requests/{first['request_id']}/approve",
+        headers=headers,
+        json={},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["enrollment_key_name"] == "Field techs"
+
+    retry = _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+    assert retry["request_id"] == first["request_id"]
+    assert retry["status"] == "approved"
+    assert retry["claim_secret"] != first["claim_secret"]
+    assert db_session.query(DeviceEnrollmentRequest).count() == 1
+
+    claimed = client.post(
+        "/api/v1/agent/enroll/poll",
+        json={"request_id": retry["request_id"], "claim_secret": retry["claim_secret"]},
+    )
+    assert claimed.status_code == 200
+    assert claimed.json()["device_token"].startswith("dev_")

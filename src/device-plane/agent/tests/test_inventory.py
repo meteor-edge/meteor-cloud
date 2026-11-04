@@ -2,7 +2,33 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from edge_agent import inventory
+
+
+def _net_dir(tmp_path: Path, ifaces: dict[str, str]) -> Path:
+    net = tmp_path / "net"
+    net.mkdir()
+    for name, mac in ifaces.items():
+        iface = net / name
+        iface.mkdir()
+        (iface / "address").write_text(mac + "\n")
+    return net
+
+
+def _patch_net(monkeypatch, net: Path, route: str | None) -> None:
+    monkeypatch.setattr(inventory, "_sys_class_net", lambda: net)
+
+    def read_text(path: str) -> str | None:
+        if path == "/proc/net/route":
+            return route
+        try:
+            return Path(path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+
+    monkeypatch.setattr(inventory, "_read_text", read_text)
 
 
 def test_collect_inventory_has_all_keys() -> None:
@@ -50,3 +76,54 @@ def test_collect_inventory_tolerates_missing_system(monkeypatch) -> None:
     data = inventory.collect_inventory()
     assert data["os_name"] is None
     assert data["mac_addresses"] == []
+
+
+def test_primary_mac_prefers_default_route(monkeypatch, tmp_path) -> None:
+    net = _net_dir(
+        tmp_path,
+        {
+            "eth0": "aa:bb:cc:dd:ee:01",
+            "wlan0": "aa:bb:cc:dd:ee:02",
+            "docker0": "aa:bb:cc:dd:ee:03",
+        },
+    )
+    _patch_net(
+        monkeypatch,
+        net,
+        "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
+        "wlan0 00000000 0101A8C0 0003 0 0 100 00000000 0 0 0\n",
+    )
+    assert inventory.read_mac_addresses() == ["aa:bb:cc:dd:ee:02"]
+
+
+def test_primary_mac_skips_virtual_prefers_eth(monkeypatch, tmp_path) -> None:
+    net = _net_dir(
+        tmp_path,
+        {
+            "docker0": "aa:bb:cc:dd:ee:03",
+            "wlan0": "aa:bb:cc:dd:ee:02",
+            "eth0": "aa:bb:cc:dd:ee:01",
+        },
+    )
+    _patch_net(monkeypatch, net, None)
+    assert inventory.read_mac_addresses() == ["aa:bb:cc:dd:ee:01"]
+
+
+def test_primary_mac_falls_back_to_wifi(monkeypatch, tmp_path) -> None:
+    net = _net_dir(tmp_path, {"wlan0": "aa:bb:cc:dd:ee:02", "docker0": "aa:bb:cc:dd:ee:03"})
+    _patch_net(monkeypatch, net, None)
+    assert inventory.read_mac_addresses() == ["aa:bb:cc:dd:ee:02"]
+
+
+def test_primary_mac_ignores_virtual_default_route(monkeypatch, tmp_path) -> None:
+    net = _net_dir(
+        tmp_path,
+        {"docker0": "aa:bb:cc:dd:ee:03", "eth0": "aa:bb:cc:dd:ee:01"},
+    )
+    _patch_net(
+        monkeypatch,
+        net,
+        "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
+        "docker0 00000000 0101A8C0 0003 0 0 0 00000000 0 0 0\n",
+    )
+    assert inventory.read_mac_addresses() == ["aa:bb:cc:dd:ee:01"]

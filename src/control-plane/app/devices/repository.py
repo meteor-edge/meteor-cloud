@@ -400,7 +400,20 @@ class DeviceEnrollmentRequestRepository:
         if status is not None:
             statement = statement.where(DeviceEnrollmentRequest.status == status)
         statement = statement.order_by(DeviceEnrollmentRequest.created_at.desc())
-        return list(self.session.scalars(statement).all())
+        return list(self.session.scalars(statement).unique().all())
+
+    def list_active_unclaimed(self, *, organization_id: uuid.UUID) -> list[DeviceEnrollmentRequest]:
+        """Pending or approved requests that have not yet claimed a device token."""
+        statement = (
+            select(DeviceEnrollmentRequest)
+            .where(
+                DeviceEnrollmentRequest.organization_id == organization_id,
+                DeviceEnrollmentRequest.claimed_at.is_(None),
+                DeviceEnrollmentRequest.status.in_(("pending", "approved")),
+            )
+            .order_by(DeviceEnrollmentRequest.created_at.asc())
+        )
+        return list(self.session.scalars(statement).unique().all())
 
     def create(self, request: DeviceEnrollmentRequest) -> DeviceEnrollmentRequest:
         self.session.add(request)

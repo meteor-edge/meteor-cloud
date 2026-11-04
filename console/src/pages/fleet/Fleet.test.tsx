@@ -492,7 +492,7 @@ describe("Add device flow", () => {
         device_type_id: null,
         device_group_id: null,
         serial_number: null,
-        mac_addresses: [],
+        mac_addresses: ["aa:bb:cc:dd:ee:01", "11:22:33:44:55:66"],
         hostname: "edge-01",
         os_name: "Ubuntu",
         os_version: null,
@@ -506,6 +506,9 @@ describe("Add device flow", () => {
         rejection_reason: null,
         claimed_at: null,
         device_id: null,
+        enrollment_key_id: "key-1",
+        enrollment_key_name: "Field techs",
+        enrollment_key_prefix: "key_abcdef",
         expires_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -517,6 +520,10 @@ describe("Add device flow", () => {
       await screen.findByRole("heading", { name: /pending enrollment requests/i }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("edge-01").length).toBeGreaterThan(0);
+    expect(screen.getByRole("columnheader", { name: /enrollment key/i })).toBeInTheDocument();
+    expect(screen.getByText("Field techs")).toBeInTheDocument();
+    expect(screen.getByText("aa:bb:cc:dd:ee:01")).toBeInTheDocument();
+    expect(screen.queryByText("11:22:33:44:55:66")).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /requested/i })).toBeInTheDocument();
   });
 });
@@ -774,6 +781,9 @@ describe("API keys", () => {
       rejection_reason: null,
       claimed_at: null,
       device_id: null,
+      enrollment_key_id: "key-1",
+      enrollment_key_name: "Field techs",
+      enrollment_key_prefix: "key_abcdef",
       expires_at: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

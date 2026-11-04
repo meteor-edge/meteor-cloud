@@ -79,6 +79,31 @@ def test_identity_matches_by_mac_overlap() -> None:
     assert identity.matches(device)
 
 
+def test_from_inventory_keeps_primary_mac_only() -> None:
+    identity = DeviceIdentity.from_inventory(
+        serial_number=" s1 ",
+        mac_addresses=["AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66"],
+    )
+    assert identity.serial_number == "s1"
+    assert identity.mac_addresses == ["aa:bb:cc:dd:ee:ff"]
+    assert identity.primary_mac == "aa:bb:cc:dd:ee:ff"
+    assert identity.is_empty is False
+    assert DeviceIdentity.from_inventory(serial_number=None, mac_addresses=[]).is_empty is True
+
+
+def test_identity_matches_request_by_primary_mac() -> None:
+    from app.devices.models import DeviceEnrollmentRequest
+
+    identity = DeviceIdentity.from_inventory(
+        serial_number=None,
+        mac_addresses=["aa:bb:cc:dd:ee:01"],
+    )
+    matching = DeviceEnrollmentRequest(mac_addresses=["aa:bb:cc:dd:ee:01", "11:22:33:44:55:66"])
+    other = DeviceEnrollmentRequest(mac_addresses=["aa:bb:cc:dd:ee:02"])
+    assert identity.matches_request(matching)
+    assert not identity.matches_request(other)
+
+
 def test_match_existing_device_cross_organization(monkeypatch) -> None:
     import uuid
 

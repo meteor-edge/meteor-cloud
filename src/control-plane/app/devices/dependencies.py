@@ -19,6 +19,7 @@ from app.devices.models import Device, EnrollmentApiKey
 from app.devices.rate_limit import RateLimiter
 from app.devices.registration import RegistrationService
 from app.devices.repository import DeviceRepository, EnrollmentApiKeyRepository
+from app.devices.schemas import AgentEnrollPollRequest
 from app.devices.service import FleetService
 from app.devices.tokens import API_KEY_PREFIX, DEVICE_TOKEN_PREFIX, hash_token
 
@@ -166,10 +167,11 @@ def enforce_enroll_request_rate_limit(
 
 def enforce_enroll_poll_rate_limit(
     request: Request,
+    payload: AgentEnrollPollRequest,
     limiter: Annotated[RateLimiter, Depends(get_enroll_poll_rate_limiter)],
 ) -> None:
     client_host = request.client.host if request.client else "unknown"
-    if not limiter.allow(client_host):
+    if not limiter.allow(f"{client_host}:{payload.request_id}"):
         raise RegistrationRateLimitError()
 
 
