@@ -327,6 +327,7 @@ export function DeviceDetailPage() {
                 organizationId={organizationId}
                 deviceId={deviceId}
                 canManage={canManage}
+                networkLinks={device.network_links}
               />
             </div>
           )}

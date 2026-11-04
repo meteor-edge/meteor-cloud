@@ -416,6 +416,12 @@ export type Device = {
   mqtt_status_at: string | null;
   mqtt_metrics: Record<string, unknown> | null;
   mqtt_metrics_at: string | null;
+  network_links?: Array<{
+    name: string;
+    type: string;
+    state: string;
+    connection?: string | null;
+  }> | null;
 };
 
 export type DeviceCredential = {

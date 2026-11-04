@@ -1081,6 +1081,7 @@ class FleetService:
             mqtt_status_at=device.mqtt_status_at,
             mqtt_metrics=device.mqtt_metrics,
             mqtt_metrics_at=device.mqtt_metrics_at,
+            network_links=device.network_links,
         )
 
     def _mqtt_configured(self, device_id: uuid.UUID) -> bool:

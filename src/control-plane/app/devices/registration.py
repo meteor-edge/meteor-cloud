@@ -9,6 +9,7 @@ are never logged.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,32 @@ from app.devices.status import connectivity_status
 from app.devices.tokens import generate_device_token, hash_token
 from app.mqtt.credentials import issue_mqtt_credentials, mqtt_config_version
 from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
+
+_LINK_TYPES = frozenset({"ethernet", "wifi"})
+_MAX_LINKS = 16
+
+
+def _sanitize_network_links(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep a bounded, typed snapshot of host ethernet/wifi links for the console."""
+    links: list[dict[str, Any]] = []
+    for item in raw[:_MAX_LINKS]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:32]
+        link_type = str(item.get("type") or "").strip().lower()[:16]
+        state = str(item.get("state") or "").strip()[:64]
+        connection = str(item.get("connection") or "").strip()[:120] or None
+        if not name or link_type not in _LINK_TYPES:
+            continue
+        links.append(
+            {
+                "name": name,
+                "type": link_type,
+                "state": state or "unknown",
+                "connection": connection,
+            }
+        )
+    return links
 
 
 class RegistrationService:
@@ -271,6 +298,8 @@ class RegistrationService:
                     device=device,
                     report=wifi_report,
                 )
+        if payload.network_links is not None:
+            device.network_links = _sanitize_network_links(payload.network_links)
 
         self.session.commit()
         self.session.refresh(device)

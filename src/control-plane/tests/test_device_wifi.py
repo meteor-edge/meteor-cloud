@@ -163,6 +163,43 @@ def test_wifi_report_ignores_stale_revision(client: TestClient, db_session: Sess
     assert got["sync_status"] == "in_sync"
 
 
+def test_heartbeat_stores_network_links(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    reg = _register(client, org.id, headers, name="pi-1", mac_addresses=["aa:bb:cc:dd:ee:01"])
+    client.post(
+        "/api/v1/agent/heartbeat",
+        headers={"Authorization": f"Bearer {reg['device_token']}"},
+        json={
+            "network_links": [
+                {
+                    "name": "eth0",
+                    "type": "ethernet",
+                    "state": "connected",
+                    "connection": "Wired connection 1",
+                },
+                {
+                    "name": "wlan0",
+                    "type": "wifi",
+                    "state": "connected",
+                    "connection": "meteorcloud-Lab",
+                },
+                {"name": "lo", "type": "loopback", "state": "connected"},
+            ]
+        },
+    )
+    device = client.get(
+        f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}",
+        headers=headers,
+    ).json()
+    links = device["network_links"]
+    assert len(links) == 2
+    assert links[0]["name"] == "eth0"
+    assert links[0]["type"] == "ethernet"
+    assert links[1]["type"] == "wifi"
+
+
 def test_wifi_clear(client: TestClient, db_session: Session) -> None:
     owner = create_user(db_session, email="owner@example.com")
     org, _ = create_org_with_owner(db_session, owner)

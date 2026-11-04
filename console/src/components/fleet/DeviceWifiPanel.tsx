@@ -12,11 +12,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+export type DeviceNetworkLink = {
+  name: string;
+  type: string;
+  state: string;
+  connection?: string | null;
+};
+
 type DeviceWifiPanelProps = {
   token: string;
   organizationId: string;
   deviceId: string;
   canManage?: boolean;
+  /** Last heartbeat snapshot of ethernet/wifi links (from the device record). */
+  networkLinks?: DeviceNetworkLink[] | null;
 };
 
 function syncLabel(row: DeviceWifiSettings | null | undefined) {
@@ -29,11 +38,18 @@ function syncLabel(row: DeviceWifiSettings | null | undefined) {
 }
 
 /** Post-enroll WiFi desired state. PSK is write-only in the console. */
+function linkLabel(link: DeviceNetworkLink) {
+  const kind = link.type === "wifi" ? "WiFi" : link.type === "ethernet" ? "Ethernet" : link.type;
+  const conn = link.connection ? ` · ${link.connection}` : "";
+  return `${link.name} (${kind}) — ${link.state}${conn}`;
+}
+
 export function DeviceWifiPanel({
   token,
   organizationId,
   deviceId,
   canManage = false,
+  networkLinks = null,
 }: DeviceWifiPanelProps) {
   const queryClient = useQueryClient();
   const [ssid, setSsid] = useState("");
@@ -99,6 +115,8 @@ export function DeviceWifiPanel({
 
   const row = query.data;
 
+  const links = networkLinks?.filter((link) => link.type === "ethernet" || link.type === "wifi") ?? [];
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
@@ -106,9 +124,28 @@ export function DeviceWifiPanel({
         cloud-init. Prefer Ethernet while changing WiFi so the agent can report success or revert.
       </p>
 
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Connected interfaces
+        </p>
+        {links.length === 0 ? (
+          <p className="mt-1 text-sm text-muted-foreground">
+            No link report yet (needs a recent agent heartbeat).
+          </p>
+        ) : (
+          <ul className="mt-1 space-y-1 text-sm">
+            {links.map((link) => (
+              <li key={`${link.type}:${link.name}`}>{linkLabel(link)}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Cloud WiFi status
+          </p>
           <p className="mt-1 text-sm">{syncLabel(row)}</p>
         </div>
         <div>

@@ -255,6 +255,7 @@ class DeviceResponse(BaseModel):
     mqtt_status_at: datetime | None = None
     mqtt_metrics: dict[str, Any] | None = None
     mqtt_metrics_at: datetime | None = None
+    network_links: list[dict[str, Any]] | None = None
 
 
 class DeviceUpdateRequest(BaseModel):
@@ -339,6 +340,8 @@ class AgentHeartbeatRequest(BaseModel):
     software_report: list[dict[str, Any]] = Field(default_factory=list)
     # Optional WiFi apply report (additive; older agents omit it).
     wifi_report: dict[str, Any] | None = None
+    # Optional host link snapshot: ethernet/wifi name, type, state, connection.
+    network_links: list[dict[str, Any]] | None = None
 
 
 class AgentHeartbeatResponse(BaseModel):

@@ -274,6 +274,8 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # Last agent-reported host links: [{name, type, state, connection}, …] (ethernet/wifi).
+    network_links: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
 
 
 class DeviceWifiSettings(Base, UUIDPrimaryKeyMixin, TimestampMixin):

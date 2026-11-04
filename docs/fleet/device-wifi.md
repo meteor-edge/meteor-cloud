@@ -6,12 +6,24 @@ Post-enroll WiFi for a device that already reaches the control plane. This is
 First boot still uses Raspberry Pi Imager, cloud-init, or Ethernet. MeteorCloud
 cannot push WiFi before the agent can talk to the API.
 
+## Who should set WiFi?
+
+| Situation | Who |
+|-----------|-----|
+| First boot / golden image | **Customer / imaging** (Raspberry Pi Imager: SSID + **WiFi country**) |
+| Device already enrolled, move to a new site SSID | **MeteorCloud** device WiFi settings (this feature) |
+| One-off lab Pi | Either; Imager is simpler |
+
+Cloud WiFi is an operator convenience for **post-enroll** changes. It is not a
+replacement for correct image setup (country / rfkill / first network).
+
 ## Operator flow
 
 1. Enroll the device (any path that gets `meteorcli` online).
 2. Open **Devices → device → Network → WiFi**.
-3. Set SSID, PSK, optional interface (`wlan0`) and hidden flag. Save.
-4. The agent fetches desired WiFi on heartbeat (or sooner if MQTT `sync_network`
+3. Confirm **Connected interfaces** (ethernet / wifi from the last heartbeat).
+4. Set SSID, PSK, optional interface (`wlan0`) and hidden flag. Save.
+5. The agent fetches desired WiFi on heartbeat (or sooner if MQTT `sync_network`
    is delivered) and applies it with the `meteorcli-wifi` helper.
 
 Prefer keeping Ethernet connected while changing WiFi so the agent can report
