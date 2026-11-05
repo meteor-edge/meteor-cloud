@@ -158,10 +158,12 @@ class Settings(BaseSettings):
         default=60,
         alias="CONNECTIVITY_RATE_LIMIT_WINDOW_SECONDS",
     )
-    # Public app hostnames: <app>.<device>.<org>.{APPS_BASE_DOMAIN} (suggested) or <name>.{APPS_BASE_DOMAIN}
+    # Public app hostnames: <app>.<device>.<org>.{APPS_BASE_DOMAIN} (suggested) or <name>.<org>.{APPS_BASE_DOMAIN}
     # (custom). APPS_RESERVED_NAMES: comma-separated names that already exist under that domain.
+    # APPS_ALLOW_SHORT_NAMES: also allow <name>.{APPS_BASE_DOMAIN}, shared by all organizations.
     apps_base_domain: str = Field(default="meteor-edge.com", alias="APPS_BASE_DOMAIN")
     apps_reserved_names: str = Field(default="", alias="APPS_RESERVED_NAMES")
+    apps_allow_short_names: bool = Field(default=False, alias="APPS_ALLOW_SHORT_NAMES")
     routing_internal_token: str = Field(default="", alias="ROUTING_INTERNAL_TOKEN")
     # Browser SSH. "echo" is for tests only.
     shell_provider: Literal["ssh_gateway", "echo", "none"] = Field(default="none", alias="SHELL_PROVIDER")

@@ -39,7 +39,7 @@ certificate for it over HTTP (port 80 must be open). Operators open
 `https://<domain>`. Devices register at `https://<domain>/api`.
 
 **`*.<domain>`: apps (`cloud_app`).** One wildcard covers every app address, at
-any depth: custom names (`shop.fleet.example.com`) and suggested ones
+any depth: custom names (`shop.acme.fleet.example.com`) and suggested ones
 (`shop.kiosk-12.acme.fleet.example.com`). Records that already exist, such as
 `www`, win over the wildcard; list them in `APPS_RESERVED_NAMES` so no app can
 claim them. Certificates for apps are issued over DNS (`_acme-challenge` TXT

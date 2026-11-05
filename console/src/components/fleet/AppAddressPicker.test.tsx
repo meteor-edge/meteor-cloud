@@ -15,7 +15,8 @@ import { checkHostname, suggestHostname } from "@/api/fleet";
 const suggestMock = vi.mocked(suggestHostname);
 const checkMock = vi.mocked(checkHostname);
 const DOMAIN = "demo.meteor-edge.com";
-const SUGGESTED = `shop.kiosk-1.acme.${DOMAIN}`;
+const CUSTOM_DOMAIN = `acme.${DOMAIN}`;
+const SUGGESTED = `shop.kiosk-1.${CUSTOM_DOMAIN}`;
 
 function renderPicker(onChange = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -37,7 +38,12 @@ describe("AppAddressPicker", () => {
   beforeEach(() => {
     suggestMock.mockReset();
     checkMock.mockReset();
-    suggestMock.mockResolvedValue({ apps_domain: DOMAIN, hostname: SUGGESTED, available: true });
+    suggestMock.mockResolvedValue({
+      apps_domain: DOMAIN,
+      custom_domain: CUSTOM_DOMAIN,
+      hostname: SUGGESTED,
+      available: true,
+    });
   });
 
   it("offers the suggested app.device.org address", async () => {
@@ -49,7 +55,7 @@ describe("AppAddressPicker", () => {
 
   it("checks a custom name and only accepts it when available", async () => {
     checkMock.mockImplementation(async (_t, _o, _d, hostname) =>
-      hostname === `taken.${DOMAIN}`
+      hostname === `taken.${CUSTOM_DOMAIN}`
         ? {
             hostname,
             available: false,
@@ -69,6 +75,6 @@ describe("AppAddressPicker", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "hello");
     expect(await screen.findByText("Available.")).toBeInTheDocument();
-    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(`hello.${DOMAIN}`));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(`hello.${CUSTOM_DOMAIN}`));
   });
 });

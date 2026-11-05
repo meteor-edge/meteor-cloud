@@ -129,7 +129,12 @@ export type HostnameCheck = {
   message: string;
 };
 
-export type HostnameSuggestion = { apps_domain: string; hostname: string; available: boolean };
+export type HostnameSuggestion = {
+  apps_domain: string;
+  custom_domain: string;
+  hostname: string;
+  available: boolean;
+};
 
 export function suggestHostname(
   token: string,

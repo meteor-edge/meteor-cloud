@@ -42,7 +42,7 @@ def traefik_http_provider(
             "entryPoints": ["websecure"] if use_tls else ["web"],
         }
         if use_tls:
-            # One wildcard per device (*.<device>.<org>.<domain>) or *.<domain> for custom names.
+            # One wildcard per device (*.<device>.<org>.<domain>) or organization (*.<org>.<domain>).
             router["tls"] = {
                 "certResolver": "letsencrypt-dns",
                 "domains": [{"main": tls_domain(endpoint.hostname, apps_base_domain=settings.apps_base_domain)}],

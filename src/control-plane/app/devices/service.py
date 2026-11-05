@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,6 +29,7 @@ from app.devices.models import (
     EnrollmentApiKey,
     RegistrationToken,
 )
+from app.devices.naming import default_device_name, unique_device_name
 from app.devices.repository import (
     DeviceEnrollmentRequestRepository,
     DeviceGroupRepository,
@@ -687,10 +689,64 @@ class FleetService:
     ) -> list[DeviceEnrollmentRequestResponse]:
         membership = self._require_membership(organization_id, actor.id)
         self._require(membership, "device.read")
+        rows = self.enrollment_requests.list(organization_id=organization_id, status=status)
+        # A status filter must not hide requests that already hold a name.
+        all_rows = rows
+        if status is not None:
+            all_rows = self.enrollment_requests.list(organization_id=organization_id, status=None)
+        suggested = self._suggested_names(organization_id, all_rows)
         return [
-            DeviceEnrollmentRequestResponse.model_validate(item)
-            for item in self.enrollment_requests.list(organization_id=organization_id, status=status)
+            DeviceEnrollmentRequestResponse.model_validate(item).model_copy(
+                update={"suggested_name": suggested.get(item.id)}
+            )
+            for item in rows
         ]
+
+    def _suggested_names(
+        self, organization_id: uuid.UUID, rows: list[DeviceEnrollmentRequest]
+    ) -> dict[uuid.UUID, str]:
+        """A name per unclaimed request: a re-enrolling device keeps its own, others get distinct defaults."""
+        unclaimed = sorted(
+            (row for row in rows if row.status in {"pending", "approved"} and row.claimed_at is None),
+            key=lambda row: row.created_at,
+        )
+        if not unclaimed:
+            return {}
+        known = self.devices.list_identities(organization_id=organization_id)
+        taken = {device.name.casefold() for device in known}
+        taken.update(row.assigned_name.casefold() for row in unclaimed if row.assigned_name)
+        names_by_id = {device.id: device.name for device in known}
+        ids_by_serial: dict[str, set[uuid.UUID]] = defaultdict(set)
+        ids_by_mac: dict[str, set[uuid.UUID]] = defaultdict(set)
+        for device in known:
+            if device.serial_number:
+                ids_by_serial[device.serial_number].add(device.id)
+            for mac in device.mac_addresses or []:
+                ids_by_mac[mac].add(device.id)
+        suggested: dict[uuid.UUID, str] = {}
+        for row in unclaimed:
+            if row.assigned_name:
+                suggested[row.id] = row.assigned_name
+                continue
+            matches = set(ids_by_serial.get(row.serial_number, ()))
+            for mac in row.mac_addresses or []:
+                matches |= ids_by_mac.get(mac, set())
+            # Several matches: the claim will be refused as ambiguous, so there is no name to keep.
+            if len(matches) == 1:
+                suggested[row.id] = names_by_id[matches.pop()]
+                continue
+            name = unique_device_name(
+                default_device_name(
+                    requested_name=row.requested_name,
+                    hostname=row.hostname,
+                    serial_number=row.serial_number,
+                    mac_addresses=row.mac_addresses or [],
+                ),
+                taken=taken,
+            )
+            taken.add(name.casefold())
+            suggested[row.id] = name
+        return suggested
 
     def approve_enrollment_request(
         self,
@@ -780,6 +836,7 @@ class FleetService:
         actor: User,
         organization_id: uuid.UUID,
         search: str | None = None,
+        name: str | None = None,
         device_type_id: uuid.UUID | None = None,
         device_group_id: uuid.UUID | None = None,
         architecture: str | None = None,
@@ -803,6 +860,7 @@ class FleetService:
         devices, total = self.devices.list_paginated(
             organization_id=organization_id,
             search=search,
+            name=name,
             device_type_id=device_type_id,
             device_group_id=device_group_id,
             allowed_group_ids=allowed_group_ids,

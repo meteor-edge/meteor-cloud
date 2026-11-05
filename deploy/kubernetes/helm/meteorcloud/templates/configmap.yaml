@@ -45,6 +45,7 @@ data:
   {{- end }}
   APPS_BASE_DOMAIN: {{ .Values.connectivity.apps.baseDomain | quote }}
   APPS_RESERVED_NAMES: {{ .Values.connectivity.apps.reservedNames | quote }}
+  APPS_ALLOW_SHORT_NAMES: {{ .Values.connectivity.apps.allowShortNames | quote }}
   CACHE_PROVIDER: {{ .Values.cache.provider | quote }}
   OBJECT_STORAGE_PROVIDER: {{ .Values.objectStorage.provider | quote }}
   OBJECT_STORAGE_PATH: /data/artifacts

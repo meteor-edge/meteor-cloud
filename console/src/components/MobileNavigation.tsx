@@ -116,9 +116,6 @@ export function MobileNavigation() {
                         <NavLink to={`${organizationPath}/deployments`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("deployments"))}>
                           Deployments
                         </NavLink>
-                        <NavLink to={`${organizationPath}/endpoints`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("endpoints"))}>
-                          Endpoints
-                        </NavLink>
                       </MobileSubnav>
                       {(canManageMembers(role) || canReadTeams(role)) && (
                         <>

@@ -399,6 +399,8 @@ class DeviceEnrollmentRequestResponse(BaseModel):
     claim_secret_prefix: str
     requested_name: str | None
     assigned_name: str | None
+    # What the device will be called unless an administrator picks a name (list responses, unclaimed requests).
+    suggested_name: str | None = None
     device_type_id: uuid.UUID | None
     device_group_id: uuid.UUID | None
     serial_number: str | None

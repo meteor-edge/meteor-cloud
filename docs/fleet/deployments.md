@@ -53,7 +53,7 @@ Device-group scoped operators can only target devices in their groups.
   },
   "rollout": { "strategy": "immediate" },
   "endpoint": {
-    "hostname": "shop.meteor-edge.com",
+    "hostname": "shop.acme.meteor-edge.com",
     "port": 80
   }
 }

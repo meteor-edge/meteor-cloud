@@ -167,7 +167,7 @@ def test_disabled_device_or_revoked_credential_drops_peer_and_routes(client: Tes
     created = client.post(
         f"/api/v1/organizations/{org.id}/endpoints",
         headers=headers,
-        json={"device_id": reg["device_id"], "hostname": "pump.meteor-edge.com", "port": 80},
+        json={"device_id": reg["device_id"], "hostname": f"pump.{org.slug}.meteor-edge.com", "port": 80},
     )
     assert created.status_code == 201, created.text
     assert len(client.get("/internal/routing/traefik", headers=ROUTING).json()["http"]["routers"]) == 1
@@ -457,14 +457,14 @@ def test_endpoint_cannot_publish_ssh_port(client: TestClient, db_session: Sessio
     created = client.post(
         f"/api/v1/organizations/{org.id}/endpoints",
         headers=headers,
-        json={"device_id": reg["device_id"], "hostname": "ssh.meteor-edge.com", "port": 22},
+        json={"device_id": reg["device_id"], "hostname": f"ssh.{org.slug}.meteor-edge.com", "port": 22},
     )
     assert created.status_code == 422
     assert created.json()["error"]["code"] == "reserved_port"
     web = client.post(
         f"/api/v1/organizations/{org.id}/endpoints",
         headers=headers,
-        json={"device_id": reg["device_id"], "hostname": "web.meteor-edge.com", "port": 80},
+        json={"device_id": reg["device_id"], "hostname": f"web.{org.slug}.meteor-edge.com", "port": 80},
     ).json()
     moved = client.patch(f"/api/v1/organizations/{org.id}/endpoints/{web['id']}", headers=headers, json={"port": 22})
     assert moved.status_code == 422

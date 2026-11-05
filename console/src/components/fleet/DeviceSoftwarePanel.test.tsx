@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeviceSoftware } from "@/api/fleet";
+import type { ApplicationEndpoint, DeviceSoftware } from "@/api/fleet";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 
 vi.mock("@/api/fleet", async () => {
@@ -11,12 +11,14 @@ vi.mock("@/api/fleet", async () => {
   return {
     ...actual,
     listDeviceSoftware: vi.fn(),
+    listEndpoints: vi.fn(),
   };
 });
 
-import { listDeviceSoftware } from "@/api/fleet";
+import { listDeviceSoftware, listEndpoints } from "@/api/fleet";
 
 const listMock = vi.mocked(listDeviceSoftware);
+const endpointsMock = vi.mocked(listEndpoints);
 
 function renderPanel(props: { deviceOnline?: boolean; onViewLogs?: () => void } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -53,9 +55,70 @@ function inSyncRow(overrides: Partial<DeviceSoftware> = {}): DeviceSoftware {
   };
 }
 
+function endpoint(overrides: Partial<ApplicationEndpoint> = {}): ApplicationEndpoint {
+  return {
+    id: "ep-1",
+    organization_id: "org-1",
+    device_id: "dev-1",
+    deployment_id: null,
+    device_software_id: null,
+    workload_key: "app",
+    hostname: "shop.acme.example.com",
+    protocol: "http",
+    port: 80,
+    enabled: true,
+    availability: "ready",
+    public_url: "https://shop.acme.example.com",
+    upstream_url: null,
+    created_at: "2026-10-16T12:00:00Z",
+    updated_at: "2026-10-16T12:00:00Z",
+    ...overrides,
+  };
+}
+
 describe("DeviceSoftwarePanel", () => {
   beforeEach(() => {
     listMock.mockReset();
+    endpointsMock.mockReset();
+    endpointsMock.mockResolvedValue([]);
+  });
+
+  it("links to the app when its address is available", async () => {
+    listMock.mockResolvedValue([inSyncRow()]);
+    endpointsMock.mockResolvedValue([endpoint()]);
+    renderPanel();
+    const link = await screen.findByRole("link", { name: "shop.acme.example.com" });
+    expect(link).toHaveAttribute("href", "https://shop.acme.example.com");
+    expect(link).toHaveAttribute("target", "_blank");
+  });
+
+  it("matches an address by software row when it has no workload key", async () => {
+    listMock.mockResolvedValue([inSyncRow()]);
+    endpointsMock.mockResolvedValue([endpoint({ workload_key: null, device_software_id: "sw-1" })]);
+    renderPanel();
+    expect(await screen.findByRole("link", { name: "shop.acme.example.com" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["not ready", { availability: "offline" }],
+    ["disabled", { enabled: false }],
+    ["for another app", { workload_key: "other" }],
+  ])("shows no link for an address that is %s", async (_label, overrides) => {
+    listMock.mockResolvedValue([inSyncRow()]);
+    endpointsMock.mockResolvedValue([endpoint(overrides)]);
+    renderPanel();
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    await waitFor(() => expect(endpointsMock).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(screen.queryByRole("link", { name: "shop.acme.example.com" })).not.toBeInTheDocument();
+  });
+
+  it("still lists software when addresses cannot be loaded", async () => {
+    listMock.mockResolvedValue([inSyncRow()]);
+    endpointsMock.mockRejectedValue(new Error("forbidden"));
+    renderPanel();
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    expect(screen.getByText("app")).toBeInTheDocument();
   });
 
   it("shows empty state when no software is assigned", async () => {

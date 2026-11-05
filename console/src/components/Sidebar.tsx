@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CircuitBoard,
-  Globe,
   HardDrive,
   House,
   Layers,
@@ -277,7 +276,7 @@ export function Sidebar() {
                 <NavSection
                   icon={Rocket}
                   label="Software"
-                  active={["releases", "deployments", "endpoints"].some(isPage)}
+                  active={["releases", "deployments"].some(isPage)}
                   collapsed={collapsed}
                   onExpand={() => setCollapsed(false)}
                 >
@@ -290,13 +289,6 @@ export function Sidebar() {
                     active={isPage("deployments")}
                   >
                     Deployments
-                  </SubLink>
-                  <SubLink
-                    to={`${orgPath}/endpoints`}
-                    icon={Globe}
-                    active={isPage("endpoints")}
-                  >
-                    Endpoints
                   </SubLink>
                 </NavSection>
                 {(showMembers || showTeams) && (

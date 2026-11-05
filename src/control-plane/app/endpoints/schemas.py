@@ -72,6 +72,8 @@ class HostnameCheckResponse(BaseModel):
 
 class HostnameSuggestionResponse(BaseModel):
     apps_domain: str
+    # Where a custom name goes: <org>.<apps domain>, or <apps domain> when short names are allowed.
+    custom_domain: str
     hostname: str
     available: bool
 
