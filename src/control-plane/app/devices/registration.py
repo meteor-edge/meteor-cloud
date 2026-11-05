@@ -126,6 +126,7 @@ class RegistrationService:
         return token
 
     def _resolve_name(self, payload: AgentRegisterRequest, identity: DeviceIdentity, organization_id) -> str:
+        self.devices.lock_names(organization_id=organization_id)
         return unique_device_name(
             default_device_name(
                 requested_name=payload.name,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -689,7 +690,11 @@ class FleetService:
         membership = self._require_membership(organization_id, actor.id)
         self._require(membership, "device.read")
         rows = self.enrollment_requests.list(organization_id=organization_id, status=status)
-        suggested = self._suggested_names(organization_id, rows)
+        # A status filter must not hide requests that already hold a name.
+        all_rows = rows
+        if status is not None:
+            all_rows = self.enrollment_requests.list(organization_id=organization_id, status=None)
+        suggested = self._suggested_names(organization_id, all_rows)
         return [
             DeviceEnrollmentRequestResponse.model_validate(item).model_copy(
                 update={"suggested_name": suggested.get(item.id)}
@@ -711,16 +716,22 @@ class FleetService:
         taken = {device.name.casefold() for device in known}
         taken.update(row.assigned_name.casefold() for row in unclaimed if row.assigned_name)
         names_by_id = {device.id: device.name for device in known}
-        ids_by_serial = {device.serial_number: device.id for device in known if device.serial_number}
-        ids_by_mac = {mac: device.id for device in known for mac in device.mac_addresses or []}
+        ids_by_serial: dict[str, set[uuid.UUID]] = defaultdict(set)
+        ids_by_mac: dict[str, set[uuid.UUID]] = defaultdict(set)
+        for device in known:
+            if device.serial_number:
+                ids_by_serial[device.serial_number].add(device.id)
+            for mac in device.mac_addresses or []:
+                ids_by_mac[mac].add(device.id)
         suggested: dict[uuid.UUID, str] = {}
         for row in unclaimed:
             if row.assigned_name:
                 suggested[row.id] = row.assigned_name
                 continue
-            matches = {ids_by_mac[mac] for mac in row.mac_addresses or [] if mac in ids_by_mac}
-            if row.serial_number in ids_by_serial:
-                matches.add(ids_by_serial[row.serial_number])
+            matches = set(ids_by_serial.get(row.serial_number, ()))
+            for mac in row.mac_addresses or []:
+                matches |= ids_by_mac.get(mac, set())
+            # Several matches: the claim will be refused as ambiguous, so there is no name to keep.
             if len(matches) == 1:
                 suggested[row.id] = names_by_id[matches.pop()]
                 continue
@@ -825,6 +836,7 @@ class FleetService:
         actor: User,
         organization_id: uuid.UUID,
         search: str | None = None,
+        name: str | None = None,
         device_type_id: uuid.UUID | None = None,
         device_group_id: uuid.UUID | None = None,
         architecture: str | None = None,
@@ -848,6 +860,7 @@ class FleetService:
         devices, total = self.devices.list_paginated(
             organization_id=organization_id,
             search=search,
+            name=name,
             device_type_id=device_type_id,
             device_group_id=device_group_id,
             allowed_group_ids=allowed_group_ids,

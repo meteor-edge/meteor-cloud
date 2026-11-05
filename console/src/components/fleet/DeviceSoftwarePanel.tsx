@@ -51,6 +51,8 @@ export function DeviceSoftwarePanel({
     queryKey: ["endpoints", organizationId, deviceId, token],
     queryFn: () => listEndpoints(token, organizationId, deviceId),
     enabled: Boolean(token && organizationId && deviceId),
+    // Like the device page: availability changes on the server while this stays open.
+    refetchInterval: 15_000,
   });
 
   const items = softwareQuery.data ?? [];

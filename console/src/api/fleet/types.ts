@@ -433,6 +433,8 @@ export type Page<T> = {
 
 export type DeviceListParams = {
   search?: string;
+  /** Exact name, ignoring case. */
+  name?: string;
   device_type_id?: string;
   device_group_id?: string;
   architecture?: string;

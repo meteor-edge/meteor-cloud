@@ -25,6 +25,8 @@ An organization's addresses don't change when its slug is renamed: they keep
 working under the old slug, and new addresses must use the new one. The old slug
 stays reserved so no other organization can publish under it. The same
 organization can rename back to it, and it is freed when the organization is deleted.
+Slugs left before this was added (migration `0026`) were not recorded, so they aren't
+reserved. New slugs can have at most 63 characters, the length of one DNS label.
 
 One address per app port: two apps on the same device need different ports.
 Upstream addresses are **derived** from the device’s WireGuard IP; clients

@@ -7,6 +7,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -67,6 +68,7 @@ def test_dns_label_and_suggestion() -> None:
         ("shop.example.com", "invalid"),
         ("-shop.meteor-edge.com", "invalid"),
         ("meteor-edge.com", "invalid"),
+        (f"{'a' * 63}.{'b' * 63}.{'c' * 63}.{'d' * 63}.meteor-edge.com", "invalid"),
     ],
 )
 def test_hostname_rules(hostname: str, reason: str) -> None:
@@ -325,3 +327,57 @@ def test_routing_requests_one_certificate_per_device_or_organization(client: Tes
         f"Host(`b.router-pi.{org.slug}.{DOMAIN}`)": f"*.router-pi.{org.slug}.{DOMAIN}",
         f"Host(`friendly.{org.slug}.{DOMAIN}`)": f"*.{org.slug}.{DOMAIN}",
     }
+
+
+def test_address_longer_than_dns_allows_is_rejected() -> None:
+    long_org = "o" * 63
+    device = "d" * 63
+    domain = f"{'x' * 63}.{DOMAIN}"
+    hostname = f"{'a' * 63}.{device}.{long_org}.{domain}"
+    with pytest.raises(HostnameRejected) as rejected:
+        validate_hostname(hostname, apps_base_domain=domain, org_slug=long_org, device_name=device)
+    assert rejected.value.reason == "invalid"
+    assert "253" in rejected.value.message
+
+
+def test_own_address_only_counts_on_its_own_device(client: TestClient, db_session: Session) -> None:
+    org, headers, token, _release = _setup_release(client, db_session)
+    device = _register_device(client, token, name="pi", mac="aa:bb:cc:dd:10:07")
+    other = _register_device(client, token, name="pi-2", mac="aa:bb:cc:dd:10:08")
+    base = f"/api/v1/organizations/{org.id}/endpoints"
+    hostname = f"own.{org.slug}.{DOMAIN}"
+    endpoint = client.post(
+        base, headers=headers, json={"device_id": device["device_id"], "hostname": hostname, "port": 80}
+    ).json()
+
+    def check(device_id: str) -> dict:
+        return client.get(
+            f"{base}/hostname-check",
+            headers=headers,
+            params={"device_id": device_id, "hostname": hostname, "endpoint_id": endpoint["id"]},
+        ).json()
+
+    assert check(device["device_id"])["available"] is True
+    assert check(other["device_id"])["reason"] == "taken"
+
+
+def test_redeploy_keeps_short_address_however_it_is_spelled(client: TestClient, db_session: Session) -> None:
+    org, headers, token, _ = _setup_release(client, db_session)
+    release = _docker_web_release(client, org.id, headers)
+    device = _register_device(client, token, name="pi", mac="aa:bb:cc:dd:10:09")
+    deployments = f"/api/v1/organizations/{org.id}/deployments"
+    body = {"release_id": release["id"], "target": {"device_ids": [device["device_id"]]}}
+    first = client.post(
+        deployments, headers=headers, json={**body, "endpoint": {"hostname": f"old.{org.slug}.{DOMAIN}", "port": 80}}
+    )
+    assert first.status_code == 201, first.text
+    row = db_session.scalar(select(ApplicationEndpoint))
+    row.hostname = f"old.{DOMAIN}"
+    db_session.commit()
+
+    again = client.post(
+        deployments, headers=headers, json={**body, "endpoint": {"hostname": f"Old.{DOMAIN}.", "port": 80}}
+    )
+    assert again.status_code == 201, again.text
+    db_session.expire_all()
+    assert db_session.scalar(select(ApplicationEndpoint)).hostname == f"old.{DOMAIN}"

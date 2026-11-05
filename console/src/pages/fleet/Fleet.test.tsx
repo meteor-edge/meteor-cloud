@@ -898,6 +898,12 @@ describe("API keys", () => {
     await user.clear(name);
     await user.type(name, "lobby");
     expect(await screen.findByText(/already has this name/i)).toBeInTheDocument();
+    // Debounced: only the finished name is looked up, not each prefix.
+    const lookedUp = vi
+      .mocked(fleetApi.listDevices)
+      .mock.calls.map(([, , params]) => params?.name)
+      .filter(Boolean);
+    expect(lookedUp).toEqual(["lobby"]);
     await user.click(screen.getByRole("button", { name: /confirm approval/i }));
 
     await waitFor(() => {

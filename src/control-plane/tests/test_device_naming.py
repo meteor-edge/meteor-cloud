@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.devices.models import Device
 from app.devices.naming import default_device_name, unique_device_name
 from tests.conftest import auth_header, create_org_with_owner, create_user
 from tests.test_deployments import _register_device, _setup_release
@@ -26,7 +29,9 @@ from tests.test_deployments import _register_device, _setup_release
         (None, "", None, [], "device"),
     ],
 )
-def test_default_name(requested, hostname, serial, macs, expected) -> None:
+def test_default_name(
+    requested: str | None, hostname: str | None, serial: str | None, macs: list[str], expected: str
+) -> None:
     name = default_device_name(requested_name=requested, hostname=hostname, serial_number=serial, mac_addresses=macs)
     assert name == expected
 
@@ -155,3 +160,40 @@ def test_renaming_a_device_keeps_its_public_address(client: TestClient, db_sessi
     renamed = client.patch(f"{base}/devices/{device['device_id']}", headers=headers, json={"name": "Lobby"})
     assert renamed.status_code == 200, renamed.text
     assert client.get(f"{base}/endpoints/{created.json()['id']}", headers=headers).json()["hostname"] == address
+
+
+def test_status_filter_still_counts_names_held_by_other_requests(client: TestClient, db_session: Session) -> None:
+    org, headers, key = _org_with_key(client, db_session)
+    approved = _submit(client, key, hostname="other", mac_addresses=["aa:bb:cc:dd:00:0b"])
+    _approve(client, org, headers, approved["request_id"], name="kiosk")
+    pending = _submit(client, key, hostname="kiosk", mac_addresses=["aa:bb:cc:dd:00:0c"])
+    rows = client.get(
+        f"/api/v1/organizations/{org.id}/enrollment-requests", headers=headers, params={"status": "pending"}
+    ).json()
+    assert [(row["id"], row["suggested_name"]) for row in rows] == [(pending["request_id"], "kiosk-2")]
+
+
+def test_ambiguous_hardware_gets_no_existing_device_name(client: TestClient, db_session: Session) -> None:
+    org, headers, key = _org_with_key(client, db_session)
+    first = _submit(client, key, hostname="first", serial_number="S1", mac_addresses=["aa:bb:cc:dd:00:0d"])
+    _approve(client, org, headers, first["request_id"])
+    second = _submit(client, key, hostname="second", serial_number="S2", mac_addresses=["aa:bb:cc:dd:00:0e"])
+    _approve(client, org, headers, second["request_id"])
+    first_id = _claim(client, first)["device_id"]
+    second_id = _claim(client, second)["device_id"]
+    # Two devices now report the same serial, which a claim refuses as ambiguous.
+    device = db_session.get(Device, UUID(second_id))
+    device.serial_number = "S1"
+    db_session.commit()
+    assert first_id != second_id
+
+    request = _submit(client, key, hostname="third", serial_number="S1", mac_addresses=["aa:bb:cc:dd:00:0f"])
+    assert _suggestions(client, org, headers)[request["request_id"]] == "third"
+
+
+def test_device_list_filters_by_exact_name(client: TestClient, db_session: Session) -> None:
+    org, headers, token, _release = _setup_release(client, db_session)
+    for index, name in enumerate(("Lobby", "Lobby 2", "Old lobby")):
+        _register_device(client, token, name=name, mac=f"aa:bb:cc:dd:01:0{index}")
+    listed = client.get(f"/api/v1/organizations/{org.id}/devices", headers=headers, params={"name": "lobby"}).json()
+    assert [item["name"] for item in listed["items"]] == ["Lobby"]

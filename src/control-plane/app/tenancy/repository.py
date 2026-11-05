@@ -46,6 +46,10 @@ class OrganizationRepository:
         statement = select(Organization).where(Organization.slug == slug)
         return self.session.scalar(statement)
 
+    def lock_slugs(self) -> None:
+        """Until commit, stop another transaction taking or leaving a slug between our checks and our write."""
+        self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("organization-slugs", 0))))
+
     def get_previous_slug(self, slug: str) -> OrganizationPreviousSlug | None:
         return self.session.get(OrganizationPreviousSlug, slug)
 

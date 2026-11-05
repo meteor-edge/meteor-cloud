@@ -214,6 +214,10 @@ class DeviceRepository:
         statement = select(Device).where(Device.credential_hash == credential_hash)
         return self.session.scalar(statement)
 
+    def lock_names(self, *, organization_id: uuid.UUID) -> None:
+        """Until commit, stop another transaction choosing a name in this organization (same key as enrollment)."""
+        self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(str(organization_id), 0))))
+
     def taken_names(self, *, organization_id: uuid.UUID) -> set[str]:
         """Casefolded names of the organization's devices."""
         names = self.session.scalars(select(Device.name).where(Device.organization_id == organization_id))
@@ -266,6 +270,7 @@ class DeviceRepository:
         *,
         organization_id: uuid.UUID,
         search: str | None,
+        name: str | None = None,
         device_type_id: uuid.UUID | None,
         device_group_id: uuid.UUID | None,
         architecture: str | None,
@@ -274,6 +279,8 @@ class DeviceRepository:
         status: str | None,
     ) -> Select:
         statement = select(Device).where(Device.organization_id == organization_id)
+        if name:
+            statement = statement.where(func.lower(Device.name) == name.lower())
         if search:
             pattern = f"%{search.lower()}%"
             statement = statement.where(
@@ -308,6 +315,7 @@ class DeviceRepository:
         *,
         organization_id: uuid.UUID,
         search: str | None = None,
+        name: str | None = None,
         device_type_id: uuid.UUID | None = None,
         device_group_id: uuid.UUID | None = None,
         allowed_group_ids: list[uuid.UUID] | None = None,
@@ -324,6 +332,7 @@ class DeviceRepository:
         statement = self._base_query(
             organization_id=organization_id,
             search=search,
+            name=name,
             device_type_id=device_type_id,
             device_group_id=device_group_id,
             architecture=architecture,

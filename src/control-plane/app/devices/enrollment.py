@@ -283,6 +283,7 @@ class EnrollmentService:
     def _resolve_name(self, request: DeviceEnrollmentRequest, identity: DeviceIdentity) -> str:
         if request.assigned_name:
             return request.assigned_name.strip()[:255]
+        self.devices.lock_names(organization_id=request.organization_id)
         return unique_device_name(
             default_device_name(
                 requested_name=request.requested_name,

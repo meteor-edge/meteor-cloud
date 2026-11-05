@@ -18,6 +18,7 @@ _RESERVED_HOSTS = frozenset(
         "wg", "www",
     }
 )
+_MAX_HOSTNAME_LENGTH = 253
 _BLOCKED_NETWORKS = (
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("169.254.0.0/16"),
@@ -32,6 +33,10 @@ class HostnameRejected(ValidationAppError):
     def __init__(self, reason: str, message: str) -> None:
         super().__init__("invalid_hostname", message)
         self.reason = reason
+
+
+def normalize_hostname(hostname: str) -> str:
+    return hostname.strip().lower().rstrip(".")
 
 
 def normalize_domain(apps_base_domain: str) -> str:
@@ -65,7 +70,9 @@ def custom_name_domain(*, org_slug: str, apps_base_domain: str, allow_short_name
 def parse_hostname(hostname: str, *, apps_base_domain: str, reserved: frozenset[str] = frozenset()) -> list[str]:
     """Labels in front of the apps domain: [name] (short), [name, org] (custom) or [app, device, org] (suggested)."""
     domain = normalize_domain(apps_base_domain)
-    value = hostname.strip().lower().rstrip(".")
+    value = normalize_hostname(hostname)
+    if len(value) > _MAX_HOSTNAME_LENGTH:
+        raise HostnameRejected("invalid", f"The address can have at most {_MAX_HOSTNAME_LENGTH} characters.")
     if not value.endswith(f".{domain}"):
         raise HostnameRejected("invalid", f"The address must end in .{domain}.")
     labels = value[: -len(domain) - 1].split(".")
@@ -113,7 +120,7 @@ def validate_hostname(
             raise HostnameRejected(
                 "not_yours", f"An app.device.organization address must end in .{device}.{org}.{domain}."
             )
-    return hostname.strip().lower().rstrip(".")
+    return normalize_hostname(hostname)
 
 
 def tls_domain(hostname: str, *, apps_base_domain: str) -> str:

@@ -241,3 +241,23 @@ def test_deleting_an_organization_frees_its_previous_slugs(client: TestClient, d
     assert client.delete(f"/api/v1/organizations/{organization.id}", headers=headers).status_code == 204
     created = client.post("/api/v1/organizations", headers=headers, json={"name": "Acme", "slug": "acme"})
     assert created.status_code == 201, created.text
+
+
+def test_new_slugs_fit_one_dns_label(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    organization, _ = create_org_with_owner(db_session, owner, slug="a" * 70)
+    headers = auth_header(client, "owner@example.com")
+
+    too_long = client.post("/api/v1/organizations", headers=headers, json={"name": "Long", "slug": "b" * 64})
+    assert too_long.status_code == 422
+    assert too_long.json()["error"]["code"] == "organization_slug_too_long"
+    assert _rename(client, headers, organization.id, "c" * 64).status_code == 422
+    # A slug from a long name is cut to fit, without a trailing hyphen.
+    derived = client.post("/api/v1/organizations", headers=headers, json={"name": "d" * 62 + " " + "e" * 9})
+    assert derived.status_code == 201, derived.text
+    assert derived.json()["slug"] == "d" * 62
+    # An organization that already has a longer slug can still save its settings.
+    same = client.patch(
+        f"/api/v1/organizations/{organization.id}", headers=headers, json={"slug": "a" * 70, "name": "Renamed"}
+    )
+    assert same.status_code == 200, same.text

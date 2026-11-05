@@ -88,12 +88,12 @@ export function PendingEnrollmentRequests({
   const namesakesQuery = useQuery({
     queryKey: ["devices", organizationId, "name", typedName, token],
     queryFn: () =>
-      listDevices(token, organizationId, { search: typedName, sort: "name", page_size: 100 }),
+      listDevices(token, organizationId, { name: typedName, page_size: 1 }),
     enabled: checkName,
   });
   const nameInUse =
     checkName &&
-    ((namesakesQuery.data?.items ?? []).some((device) => sameName(device.name, typedName)) ||
+    ((namesakesQuery.data?.total ?? 0) > 0 ||
       activeRequests.some(
         (entry) => entry.id !== approveId && sameName(displayName(entry), typedName),
       ));
