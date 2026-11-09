@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from app.artifacts.dependencies import ArtifactSvc
 from app.artifacts.models import Artifact, ArtifactType
-from app.artifacts.schemas import ArtifactCreate, ArtifactDownloadLinkResponse, ArtifactResponse
+from app.artifacts.schemas import ArtifactCreate, ArtifactDownloadLinkResponse, ArtifactResponse, ArtifactUpdate
 from app.devices.schemas import Page
 from app.identity.dependencies import CurrentUser
 from app.ports.storage import StoredObject
@@ -59,6 +59,7 @@ def upload_artifact(
     device_type_id: Annotated[str | None, Form()] = None,
     description: Annotated[str | None, Form()] = None,
     metadata: Annotated[str | None, Form(description="JSON object")] = None,
+    published: Annotated[bool, Form(description="OS images only: list it in Meteor Imager")] = False,
 ) -> ArtifactResponse:
     """Validate multipart metadata and upload the file for an owner or admin.
 
@@ -76,6 +77,7 @@ def upload_artifact(
             device_type_id=device_type_id or None,
             description=description,
             metadata=parsed_metadata,
+            published=published,
         )
     except json.JSONDecodeError as exc:
         raise RequestValidationError(
@@ -106,6 +108,20 @@ def get_artifact(
 ) -> ArtifactResponse:
     """Return artifact metadata after checking organization membership."""
     return service.get_artifact(actor=current_user, organization_id=organization_id, artifact_id=artifact_id)
+
+
+@router.patch("/{artifact_id}", response_model=ArtifactResponse)
+def update_artifact(
+    organization_id: uuid.UUID,
+    artifact_id: uuid.UUID,
+    payload: ArtifactUpdate,
+    current_user: CurrentUser,
+    service: ArtifactSvc,
+) -> ArtifactResponse:
+    """Show or hide an OS image in Meteor Imager (owner or admin)."""
+    return service.update_artifact(
+        actor=current_user, organization_id=organization_id, artifact_id=artifact_id, payload=payload
+    )
 
 
 @router.delete("/{artifact_id}", status_code=204)

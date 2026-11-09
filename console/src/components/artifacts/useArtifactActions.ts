@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 
-import { deleteArtifact, downloadArtifact, type Artifact } from "@/api/fleet";
+import { deleteArtifact, downloadArtifact, setArtifactPublished, type Artifact } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 
 /** Download/delete handlers shared by every artifact list. */
@@ -42,5 +42,24 @@ export function useArtifactActions(
     }
   }
 
-  return { onDownload, onDelete, refresh };
+  async function onTogglePublished(artifact: Artifact) {
+    const published = !artifact.published;
+    if (
+      published &&
+      !window.confirm(
+        `Show ${artifact.name} ${artifact.version} in Meteor Imager? Anyone who can reach this server can download it without signing in.`,
+      )
+    ) {
+      return;
+    }
+    onError(null);
+    try {
+      await setArtifactPublished(token!, organizationId, artifact.id, published);
+      await refresh();
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : "Could not change Meteor Imager visibility.");
+    }
+  }
+
+  return { onDownload, onDelete, onTogglePublished, refresh };
 }

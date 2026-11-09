@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters import metrics_backend
 from app.api.rest.health import router as health_router
+from app.artifacts.public_router import router as public_os_images_router
 from app.artifacts.router import router as artifacts_router
 from app.audit.router import router as audit_router
 from app.authorization.router import router as authorization_router
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     application.include_router(organizations_router)
     application.include_router(fleet_router)
     application.include_router(artifacts_router)
+    application.include_router(public_os_images_router)
     application.include_router(releases_router)
     application.include_router(deployments_router)
     application.include_router(endpoints_router)

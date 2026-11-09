@@ -9,6 +9,8 @@ export type ArtifactUploadPayload = {
   type: ArtifactType;
   device_type_id?: string | null;
   description?: string | null;
+  /** OS images only: list it in Meteor Imager (public, no login). */
+  published?: boolean;
 };
 
 /** Encode filters, omitting null, undefined, and empty strings; include '?' only when needed. */
@@ -46,6 +48,20 @@ export function getArtifact(
 ): Promise<Artifact> {
   return apiRequest<Artifact>(`/api/v1/organizations/${organizationId}/artifacts/${artifactId}`, {
     token,
+  });
+}
+
+/** Show or hide an OS image in Meteor Imager (public list and download, no login). */
+export function setArtifactPublished(
+  token: string,
+  organizationId: string,
+  artifactId: string,
+  published: boolean,
+): Promise<Artifact> {
+  return apiRequest<Artifact>(`/api/v1/organizations/${organizationId}/artifacts/${artifactId}`, {
+    method: "PATCH",
+    token,
+    body: { published },
   });
 }
 
@@ -89,6 +105,9 @@ export function uploadArtifact(
   }
   if (payload.description) {
     form.set("description", payload.description);
+  }
+  if (payload.published) {
+    form.set("published", "true");
   }
   form.set("file", payload.file, payload.file.name);
 

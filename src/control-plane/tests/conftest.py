@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 # Ensure metadata includes domain models.
 from app.artifacts import models as _artifact_models  # noqa: F401
-from app.artifacts.dependencies import get_object_storage
+from app.artifacts.dependencies import get_object_storage, get_public_os_image_rate_limiter
 from app.audit import models as _audit_models  # noqa: F401
 from app.authorization import models as _authorization_models  # noqa: F401
 from app.authorization.roles import get_system_role_id
@@ -128,6 +128,9 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
         limit=10_000, window_seconds=60
     )
     application.dependency_overrides[get_connectivity_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
+    application.dependency_overrides[get_public_os_image_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
     with TestClient(application) as test_client:

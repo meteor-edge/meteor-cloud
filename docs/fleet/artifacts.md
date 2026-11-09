@@ -54,14 +54,15 @@ organization (case-insensitive). Uploading it again returns
 
 ## API
 
-Reading requires organization membership. Uploading and deleting require the
-**owner** or **admin** role.
+Reading requires organization membership. Uploading, changing and deleting require
+the **owner** or **admin** role.
 
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET` | `/api/v1/organizations/{org}/artifacts` | Filters: `type`, `device_type_id`, `version` (substring), `search`, `page`, `page_size` |
-| `POST` | `/api/v1/organizations/{org}/artifacts` | `multipart/form-data`: `file`, `name`, `version`, `type` (default `os_image`), optional `device_type_id`, `description`, `metadata` (JSON string) |
+| `POST` | `/api/v1/organizations/{org}/artifacts` | `multipart/form-data`: `file`, `name`, `version`, `type` (default `os_image`), optional `device_type_id`, `description`, `metadata` (JSON string), `published` (OS images only) |
 | `GET` | `/api/v1/organizations/{org}/artifacts/{id}` | |
+| `PATCH` | `/api/v1/organizations/{org}/artifacts/{id}` | JSON `{"published": true}`: show or hide an OS image in [Meteor Imager](#meteor-imager-public-os-images) |
 | `DELETE` | `/api/v1/organizations/{org}/artifacts/{id}` | Removes the row, then the stored object |
 | `GET` | `/api/v1/organizations/{org}/artifacts/{id}/download` | Bearer auth; streams the file |
 | `POST` | `/api/v1/organizations/{org}/artifacts/{id}/download-link` | Returns `url` and a short-lived `ticket` for browser downloads |
@@ -71,6 +72,28 @@ Types: `os_image`, `firmware`, `docker_compose`, `systemd`, `configuration`, `ot
 
 Downloads include `Content-Length`, `Content-Disposition`, and
 `X-Checksum-SHA256` headers.
+
+## Meteor Imager (public OS images)
+
+[Meteor Imager](https://github.com/meteor-edge/meteor-imager) is a desktop and CLI tool
+that writes an OS image to an SD card and adds Wi-Fi and enrollment settings to its boot
+partition. It lists and downloads images **without signing in**, so only OS images an
+owner or admin marked **Show in Meteor Imager** (`published`) are served. The imager asks
+for the MeteorCloud domain, enrollment API key and Wi-Fi after the image is chosen and
+writes them to the card; it never sends them to these routes.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/v1/os-images` | No auth. Published OS images of every organization on this server, newest first: `id`, `name`, `version`, `description`, `device_type` (name), `file_name`, `size_bytes`, `checksum_sha256`, `download_url` |
+| `GET` | `/api/v1/os-images/{id}/download` | No auth. Streams the image from storage (MinIO, S3 or filesystem) with `Content-Length` and `X-Checksum-SHA256`. Unpublished or unknown IDs return 404 |
+
+Both routes are rate-limited per source IP: `PUBLIC_OS_IMAGE_RATE_LIMIT_REQUESTS`
+(default 60) per `PUBLIC_OS_IMAGE_RATE_LIMIT_WINDOW_SECONDS` (default 60).
+
+Publish only images that are safe to share: anyone who can reach the server can download
+them. On a multi-organization server every organization's published images appear in one
+list (organization IDs are not shown). Only `os_image` artifacts can be published; the
+database enforces it.
 
 ## Limitations
 
@@ -85,5 +108,7 @@ Downloads include `Content-Length`, `Content-Disposition`, and
 
 - **Artifacts** in the organization menu lists everything, with filters for type,
   device type, and version.
+- The **Meteor Imager** column (OS images) and the upload checkbox **Show in Meteor
+  Imager** control which images the public list serves.
 - **Devices → Device Types → (type) → Artifacts** shows a device type's OS images
   and other artifacts, with upload, download, and delete.
