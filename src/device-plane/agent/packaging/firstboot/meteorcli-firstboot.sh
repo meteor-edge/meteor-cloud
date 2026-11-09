@@ -27,7 +27,16 @@ UNIT_PATH="${METEOR_FIRSTBOOT_UNIT:-/etc/systemd/system/meteorcli-firstboot.serv
 INSTALLED_SCRIPT="${METEOR_FIRSTBOOT_SCRIPT:-/usr/local/sbin/meteorcli-firstboot.sh}"
 POLL_MODE=0
 export METEORCLI_CONFIG_DIR="${CONFIG_DIR}"
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:${PATH}"
+# cloud-init / systemd may start us with a short PATH; add the standard dirs
+# (meteorcli lands in /usr/local/bin) without shadowing what the caller set.
+for _dir in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin; do
+  case ":${PATH:-}:" in
+    *":${_dir}:"*) ;;
+    *) PATH="${PATH:+${PATH}:}${_dir}" ;;
+  esac
+done
+unset _dir
+export PATH
 
 if [[ "${EUID}" -ne 0 && -z "${METEOR_FIRSTBOOT_ALLOW_NONROOT:-}" ]]; then
   echo "error: meteorcli-firstboot.sh must run as root (it writes ${CONFIG_DIR})." >&2
