@@ -114,6 +114,10 @@ test-cloud-e2e: ## Terraform+Ansible AWS deploy, same MQTT tests, always destroy
 observability: ## Start the development stack plus Prometheus, Loki, and Grafana
 	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
+	@if echo ",$(OBS_PROFILES)," | grep -q ',dashboards,'; then \
+		grep -qE '^[[:space:]]*GRAFANA_ADMIN_PASSWORD=[^[:space:]#]+' $(ENV_FILE) \
+			|| { echo "Set GRAFANA_ADMIN_PASSWORD in $(ENV_FILE) (required for Grafana / dashboards)."; exit 1; }; \
+	fi
 	COMPOSE_PROFILES="$(ENV_PROFILES),$(OBS_PROFILES)" $(OBS_COMPOSE) up --build -d
 	@echo ""
 	@echo "Observability stack is starting (profiles: $(OBS_PROFILES)):"
@@ -121,7 +125,7 @@ observability: ## Start the development stack plus Prometheus, Loki, and Grafana
 	@echo "  API:        http://localhost:8000"
 	@echo "  Metrics:    http://localhost:8000/metrics"
 	@echo "  Prometheus: http://localhost:9090"
-	@echo "  Grafana:    http://localhost:3001  (set GRAFANA_ADMIN_USER/PASSWORD)"
+	@echo "  Grafana:    http://127.0.0.1:3001  (GRAFANA_ADMIN_USER / GRAFANA_ADMIN_PASSWORD from $(ENV_FILE))"
 
 stop: ## Stop the full development stack (unified and split Compose projects)
 	-GRAFANA_ADMIN_PASSWORD=$${GRAFANA_ADMIN_PASSWORD:-unused} $(OBS_COMPOSE) down --remove-orphans
