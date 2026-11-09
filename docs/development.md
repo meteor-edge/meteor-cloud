@@ -77,7 +77,8 @@ Telemetry is **PostgreSQL last-value** on `Device` (`TELEMETRY_PROVIDER=postgres
 Stop with:
 
 ```bash
-make stop
+make stop                 # unified + split Compose projects
+make down                 # same as stop when there is no selfhost inventory
 make stop-control-plane
 make stop-data-plane
 make stop-console

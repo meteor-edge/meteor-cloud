@@ -5,7 +5,7 @@ Run MeteorCloud on your **laptop** for testing and development, open the console
 | | Laptop (this page) | Production |
 | --- | --- | --- |
 | Command | `make dev` | `make up` on the VM |
-| Stop | `make stop` | `make down` |
+| Stop | `make stop` (or `make down` with no selfhost inventory) | `make down` |
 | Login | `owner@example.com` / `dev-password-123` (`make seed`) | printed at the end; `~/.meteorcloud/secrets.env` |
 | Guide | this page · [Development](development.md) | [Install quickstart](install-quickstart.md) |
 
