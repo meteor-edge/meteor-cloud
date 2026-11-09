@@ -205,4 +205,6 @@ def test_publishing_still_needs_a_device_that_can_run_the_app(client: TestClient
     )
 
     assert response.status_code == 422, response.text
-    assert response.json()["error"]["code"] == "endpoint_requires_one_device"
+    err = response.json()["error"]
+    assert err["code"] == "endpoint_requires_capable_device"
+    assert "docker" in err["message"]

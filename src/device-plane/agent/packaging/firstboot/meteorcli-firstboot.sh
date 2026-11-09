@@ -443,9 +443,9 @@ ensure_meteorcli() {
   log "  ${INSTALL_URL}"
   export DEBIAN_FRONTEND=noninteractive
   if command -v apt-get >/dev/null 2>&1; then
-    log "apt-get update / install curl python3 python3-venv python3-pip ca-certificates…"
+    log "apt-get update / install curl python3 python3-venv python3-pip ca-certificates wireguard-tools…"
     apt-get update -qq
-    apt-get install -y -qq curl python3 python3-venv python3-pip ca-certificates
+    apt-get install -y -qq curl python3 python3-venv python3-pip ca-certificates wireguard-tools
   fi
   log "Downloading and running install-meteorcli.sh --with-service (this can take a few minutes)…"
   curl -fsSL "${INSTALL_URL}" | bash -s -- --with-service

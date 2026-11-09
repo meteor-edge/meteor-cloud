@@ -65,8 +65,9 @@ once their tunnel goes quiet (about 3 minutes) and reconnect. See
 
 - **`make aws-up ARGS='--route53'`** asks for the domain, finds the public Route53 zone
   that contains it, and Terraform creates `<domain>`, `*.<domain>`, and
-  `wg.<domain>`. Or set `platform.domain` and `aws.dns_zone_id` in
-  `installation.yaml`.
+  `wg.<domain>` (overwrites an existing A record for the same name so a leftover
+  or renamed domain does not block apply). Or set `platform.domain` and
+  `aws.dns_zone_id` in `installation.yaml`.
 - **`make up`** asks for the domain. With `--route53` and the AWS CLI it creates
   the missing records in the matching public hosted zone, and stops if a name
   already points elsewhere; otherwise it prints them.

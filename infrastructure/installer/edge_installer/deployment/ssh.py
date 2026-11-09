@@ -54,14 +54,21 @@ def verify_ssh_auth(
         command.extend(["-o", option])
     command.extend([f"{username}@{host}", "echo ready"])
 
+    last_detail = ""
     while time.monotonic() < deadline:
         result = run_command(command, stream=False)
         if result.returncode == 0:
             logger.info("Server is ready.")
             return
+        last_detail = (result.stderr or result.stdout or "").strip()
         time.sleep(5)
+    hint = (
+        f" Last SSH output: {last_detail}"
+        if last_detail
+        else " Check that aws.ssh_private_key_path matches aws.ssh_key_name."
+    )
     raise SshConnectionError(
-        f"Unable to authenticate to {username}@{host}",
+        f"Unable to authenticate to {username}@{host}.{hint}",
         stage="ssh_auth",
     )
 
