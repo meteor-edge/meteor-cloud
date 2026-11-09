@@ -18,6 +18,17 @@ type AppAddressPickerProps = {
 
 const CHECK_DELAY_MS = 400;
 
+/** The app name as one DNS label, to start the custom name from. */
+function appLabel(appName: string): string {
+  return appName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 63)
+    .replace(/-+$/, "");
+}
+
 function Status({ state, message }: { state: "checking" | "ok" | "bad"; message: string }) {
   if (state === "checking") {
     return (
@@ -44,7 +55,9 @@ export function AppAddressPicker({
   onChange,
 }: AppAddressPickerProps) {
   const [mode, setMode] = useState<"suggested" | "custom">("suggested");
-  const [custom, setCustom] = useState("");
+  // Follows the app name until the user edits it.
+  const [edited, setEdited] = useState<string | null>(null);
+  const custom = edited ?? appLabel(appName);
   const app = useDebounced(appName.trim() || "app", CHECK_DELAY_MS);
 
   const suggestion = useQuery({
@@ -114,7 +127,7 @@ export function AppAddressPicker({
               placeholder="shop"
               value={custom}
               onFocus={() => setMode("custom")}
-              onChange={(event) => setCustom(event.target.value)}
+              onChange={(event) => setEdited(event.target.value)}
             />
             <span className="break-all font-mono text-xs text-muted-foreground">
               .{domain || "…"}

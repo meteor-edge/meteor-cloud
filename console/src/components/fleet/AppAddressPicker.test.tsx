@@ -68,6 +68,7 @@ describe("AppAddressPicker", () => {
     await screen.findByText(SUGGESTED);
     const input = screen.getByRole("textbox", { name: /custom name/i });
 
+    await userEvent.clear(input);
     await userEvent.type(input, "taken");
     expect(await screen.findByText(/already in use/i)).toBeInTheDocument();
     await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(null));
@@ -76,5 +77,23 @@ describe("AppAddressPicker", () => {
     await userEvent.type(input, "hello");
     expect(await screen.findByText("Available.")).toBeInTheDocument();
     await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(`hello.${CUSTOM_DOMAIN}`));
+  });
+
+  it("starts the custom name from the app name and checks it before accepting it", async () => {
+    checkMock.mockResolvedValue({
+      hostname: `shop.${CUSTOM_DOMAIN}`,
+      available: false,
+      reason: "taken",
+      message: "This address is already in use.",
+    });
+    const onChange = renderPicker();
+    await screen.findByText(SUGGESTED);
+    const input = screen.getByRole("textbox", { name: /custom name/i });
+    expect(input).toHaveValue("shop");
+
+    await userEvent.click(screen.getAllByRole("radio")[1]);
+    expect(await screen.findByText(/already in use/i)).toBeInTheDocument();
+    expect(checkMock).toHaveBeenCalledWith("t", "org-1", "dev-1", `shop.${CUSTOM_DOMAIN}`);
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(null));
   });
 });
