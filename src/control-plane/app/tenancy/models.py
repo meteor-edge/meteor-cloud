@@ -27,7 +27,7 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Tenant organization."""
 
     __tablename__ = "organizations"
-    # As created by migration 0002: a unique constraint plus a plain index.
+    # A unique constraint plus a plain index (the schema has always had both).
     __table_args__ = (
         UniqueConstraint("slug", name="organizations_slug_key"),
         Index("ix_organizations_slug", "slug"),
@@ -77,7 +77,7 @@ class OrganizationMembership(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     role_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("roles.id", ondelete="RESTRICT"),
+        ForeignKey("roles.id", ondelete="RESTRICT", name="fk_organization_memberships_role_id_roles"),
         nullable=False,
         index=True,
     )
