@@ -8,11 +8,6 @@ from pathlib import Path
 from rich.console import Console
 
 from edge_installer.config.loader import load_configuration
-from edge_installer.config.validation import (
-    validate_aws_credentials,
-    validate_configuration,
-    validate_dependencies,
-)
 from edge_installer.deployment.dns import dns_records
 from edge_installer.deployment.prepare import prepare_apply
 from edge_installer.deployment.service import PlatformDeploymentService
