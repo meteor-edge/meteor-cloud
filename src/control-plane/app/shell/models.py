@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, String
+from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,7 +43,7 @@ class DeviceShellSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
-    ticket_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    ticket_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -64,6 +64,7 @@ class DeviceShellSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
+        UniqueConstraint("ticket_hash", name="uq_device_shell_sessions_ticket_hash"),
         Index("ix_device_shell_sessions_device_id", "device_id"),
         Index("ix_device_shell_sessions_organization_id", "organization_id"),
     )

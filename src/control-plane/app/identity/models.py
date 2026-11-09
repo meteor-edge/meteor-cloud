@@ -12,7 +12,7 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Registered platform user."""
 
     __tablename__ = "users"
-    # As created by migration 0002: a unique constraint plus a plain index.
+    # A unique constraint plus a plain index (the schema has always had both).
     __table_args__ = (
         UniqueConstraint("email", name="users_email_key"),
         Index("ix_users_email", "email"),

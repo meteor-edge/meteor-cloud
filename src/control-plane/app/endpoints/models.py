@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,8 +43,8 @@ class ApplicationEndpoint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
     workload_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    hostname: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    protocol: Mapped[str] = mapped_column(String(16), nullable=False, default="http")
+    hostname: Mapped[str] = mapped_column(String(255), nullable=False)
+    protocol: Mapped[str] = mapped_column(String(16), nullable=False, default="http", server_default="http")
     port: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     availability: Mapped[str] = mapped_column(
@@ -56,6 +56,7 @@ class ApplicationEndpoint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint("port >= 1 AND port <= 65535", name="ck_application_endpoints_port"),
+        UniqueConstraint("hostname", name="uq_application_endpoints_hostname"),
         Index("ix_application_endpoints_organization_id", "organization_id"),
         Index("ix_application_endpoints_device_id", "device_id"),
         Index(
