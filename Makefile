@@ -105,8 +105,12 @@ observability: ## Start the development stack plus Prometheus, Loki, and Grafana
 	@echo "  Prometheus: http://localhost:9090"
 	@echo "  Grafana:    http://localhost:3001  (set GRAFANA_ADMIN_USER/PASSWORD)"
 
-stop: ## Stop the full development stack
-	$(OBS_COMPOSE) down 2>/dev/null || $(COMPOSE) down
+stop: ## Stop the full development stack (unified and split Compose projects)
+	-GRAFANA_ADMIN_PASSWORD=$${GRAFANA_ADMIN_PASSWORD:-unused} $(OBS_COMPOSE) down --remove-orphans
+	-$(COMPOSE) down --remove-orphans
+	-$(CP_COMPOSE) down --remove-orphans
+	-$(DP_COMPOSE) down --remove-orphans
+	-$(CONSOLE_COMPOSE) down --remove-orphans
 
 stop-control-plane: ## Stop the control-plane Compose project
 	$(CP_COMPOSE) down
@@ -125,8 +129,13 @@ up: ## Install on this VM (PLATFORM_DOMAIN=example.com)
 
 install-selfhost: up
 
-down: ## Stop MeteorCloud on this VM (keeps data; ARGS=--destroy-data to wipe)
-	$(ANSIBLE_DIR)/install-selfhost.sh --down $(ARGS)
+down: ## Stop VM install, or local Compose when no selfhost inventory (ARGS=--destroy-data wipes VM data)
+	@if [ -f $(ANSIBLE_DIR)/inventory/selfhost/hosts.yml ]; then \
+		$(ANSIBLE_DIR)/install-selfhost.sh --down $(ARGS); \
+	else \
+		echo "No selfhost inventory; stopping local development Compose (same as make stop)."; \
+		$(MAKE) --no-print-directory stop; \
+	fi
 
 aws-up: ## Create a new AWS EC2 and deploy (Terraform + Ansible). ARGS='--route53' creates the DNS records, '--demo' seeds Demo Organization.
 	@test -f $(CONFIG) || (echo "Missing $(CONFIG). Copy from infrastructure/installer/edge_installer/config/examples/installation.yaml" && exit 1)

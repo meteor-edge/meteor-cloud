@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 from app.authorization.models import Role
 from app.authorization.roles import get_system_role_id
 from app.identity.models import User
-from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole, Team, TeamMember
+from app.tenancy.models import (
+    Organization,
+    OrganizationMembership,
+    OrganizationPreviousSlug,
+    OrganizationRole,
+    Team,
+    TeamMember,
+)
 
 
 class OrganizationRepository:
@@ -38,6 +45,21 @@ class OrganizationRepository:
     def get_by_slug(self, slug: str) -> Organization | None:
         statement = select(Organization).where(Organization.slug == slug)
         return self.session.scalar(statement)
+
+    def lock_slugs(self) -> None:
+        """Until commit, stop another transaction taking or leaving a slug between our checks and our write."""
+        self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("organization-slugs", 0))))
+
+    def get_previous_slug(self, slug: str) -> OrganizationPreviousSlug | None:
+        return self.session.get(OrganizationPreviousSlug, slug)
+
+    def change_slug(self, organization: Organization, slug: str) -> None:
+        """Rename, keeping the old slug reserved for this organization; taking one back frees that record."""
+        previous = self.get_previous_slug(slug)
+        if previous is not None:
+            self.session.delete(previous)
+        self.session.add(OrganizationPreviousSlug(slug=organization.slug, organization_id=organization.id))
+        organization.slug = slug
 
     def get_for_user(
         self,

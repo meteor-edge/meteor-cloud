@@ -28,6 +28,17 @@ from app.tenancy.schemas import (
     slugify,
 )
 
+_SLUG_PREVIOUSLY_USED = "Another organization used this slug before, so it can't be reused."
+_MAX_SLUG_LENGTH = 63
+
+
+def _require_slug_fits_dns_label(slug: str) -> None:
+    """Public addresses use the slug as one DNS label; cut short, two organizations could share a namespace."""
+    if len(slug) > _MAX_SLUG_LENGTH:
+        raise ValidationAppError(
+            "organization_slug_too_long", f"The slug can have at most {_MAX_SLUG_LENGTH} characters."
+        )
+
 
 class OrganizationService:
     def __init__(self, session: Session, identity: IdentityDirectory) -> None:
@@ -45,17 +56,21 @@ class OrganizationService:
         actor: User,
         payload: OrganizationCreateRequest,
     ) -> OrganizationResponse:
-        slug = payload.slug or slugify(payload.name)
+        slug = payload.slug or slugify(payload.name)[:_MAX_SLUG_LENGTH].strip("-")
         if not slug:
             raise ConflictError(
                 "organization_slug_exists",
                 "A valid slug could not be derived from the organization name.",
             )
+        _require_slug_fits_dns_label(slug)
+        self.organizations.lock_slugs()
         if self.organizations.get_by_slug(slug) is not None:
             raise ConflictError(
                 "organization_slug_exists",
                 "An organization with this slug already exists.",
             )
+        if self.organizations.get_previous_slug(slug) is not None:
+            raise ConflictError("organization_slug_exists", _SLUG_PREVIOUSLY_USED)
 
         organization = self.organizations.create(
             name=payload.name,
@@ -113,13 +128,18 @@ class OrganizationService:
         if payload.description is not None:
             organization.description = payload.description
         if payload.slug is not None and payload.slug != organization.slug:
+            _require_slug_fits_dns_label(payload.slug)
+            self.organizations.lock_slugs()
             existing = self.organizations.get_by_slug(payload.slug)
             if existing is not None and existing.id != organization.id:
                 raise ConflictError(
                     "organization_slug_exists",
                     "An organization with this slug already exists.",
                 )
-            organization.slug = payload.slug
+            previous = self.organizations.get_previous_slug(payload.slug)
+            if previous is not None and previous.organization_id != organization.id:
+                raise ConflictError("organization_slug_exists", _SLUG_PREVIOUSLY_USED)
+            self.organizations.change_slug(organization, payload.slug)
 
         self.organizations.update(organization)
         self.session.commit()

@@ -265,7 +265,7 @@ Manual gateway check:
 All DNS records are listed in [DNS records](../dns.md). SSH needs none of its
 own. App URLs need one **wildcard**
 `*.<APPS_BASE_DOMAIN>` A/AAAA (or CNAME) to the gateway. It covers custom names
-(`shop.meteor-edge.com`) and suggested ones (`shop.kiosk-12.acme.meteor-edge.com`).
+(`shop.acme.meteor-edge.com`) and suggested ones (`shop.kiosk-12.acme.meteor-edge.com`).
 Records that already exist under the domain (for example `www`) take precedence;
 list them in `APPS_RESERVED_NAMES`.
 
