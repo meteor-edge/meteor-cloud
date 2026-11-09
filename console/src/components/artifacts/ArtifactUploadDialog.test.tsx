@@ -33,6 +33,18 @@ async function beginUpload(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("ArtifactUploadDialog", () => {
+  it("sends published for an OS image only when the Meteor Imager box is ticked", async () => {
+    vi.mocked(uploadArtifact).mockResolvedValue({ id: "a" } as Artifact);
+    const { user } = setup();
+    await user.click(screen.getByRole("checkbox", { name: /Show in Meteor Imager/ }));
+    await beginUpload(user);
+    await waitFor(() => expect(uploadArtifact).toHaveBeenCalled());
+    expect(vi.mocked(uploadArtifact).mock.calls[0][2]).toMatchObject({
+      type: "os_image",
+      published: true,
+    });
+  });
+
   it("requires a file before calling the upload API", async () => {
     const { user } = setup();
     await user.type(screen.getByLabelText("Name"), "OS");

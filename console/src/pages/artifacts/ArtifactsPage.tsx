@@ -72,7 +72,11 @@ export function ArtifactsPage() {
   });
 
   const canManage = canManageArtifacts(orgQuery.data?.current_user_role);
-  const { onDownload, onDelete, refresh } = useArtifactActions(token, organizationId, setError);
+  const { onDownload, onDelete, onTogglePublished, refresh } = useArtifactActions(
+    token,
+    organizationId,
+    setError,
+  );
   const deviceTypeNames = useMemo(
     () => new Map((typesQuery.data ?? []).map((item) => [item.id, item.name])),
     [typesQuery.data],
@@ -145,6 +149,7 @@ export function ArtifactsPage() {
         canManage={canManage}
         onDownload={onDownload}
         onDelete={onDelete}
+        onTogglePublished={onTogglePublished}
         showType={!type}
         deviceTypeNames={deviceTypeNames}
         organizationId={organizationId}

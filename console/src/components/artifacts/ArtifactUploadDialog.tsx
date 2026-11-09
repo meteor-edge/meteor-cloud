@@ -47,6 +47,7 @@ export function ArtifactUploadDialog({
   const [type, setType] = useState<ArtifactType>(defaultType);
   const [deviceTypeId, setDeviceTypeId] = useState(fixedDeviceType?.id ?? "");
   const [description, setDescription] = useState("");
+  const [published, setPublished] = useState(false);
   const [progress, setProgress] = useState<UploadProgressState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -105,6 +106,7 @@ export function ArtifactUploadDialog({
           type,
           device_type_id: deviceTypeId || null,
           description: description || null,
+          published: type === "os_image" && published,
         },
         { onProgress, signal: abortRef.current.signal },
       );
@@ -235,6 +237,24 @@ export function ArtifactUploadDialog({
             disabled={uploading}
           />
         </div>
+
+        {type === "os_image" && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={published}
+              onChange={(event) => setPublished(event.target.checked)}
+              disabled={uploading}
+            />
+            <span>
+              Show in Meteor Imager
+              <span className="block text-xs text-muted-foreground">
+                Anyone who can reach this server can list and download the image without signing in.
+              </span>
+            </span>
+          </label>
+        )}
 
         {progress && file && <UploadProgress fileName={file.name} state={progress} />}
 

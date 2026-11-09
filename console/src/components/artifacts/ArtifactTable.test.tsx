@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -60,5 +60,33 @@ describe("ArtifactTable release links", () => {
       "/organizations/org-1/releases?create=1&artifact_id=art-1",
     );
     expect(screen.getAllByRole("button", { name: /^Delete/ })[0]).toBeEnabled();
+  });
+});
+
+describe("ArtifactTable Meteor Imager column", () => {
+  it("shows a switch for OS images only and reports toggles", () => {
+    const onTogglePublished = vi.fn();
+    const image = artifact({ id: "art-2", type: "os_image", name: "rpi-os", published: true });
+    render(
+      <MemoryRouter>
+        <ArtifactTable
+          artifacts={[artifact({}), image]}
+          canManage
+          onDownload={vi.fn()}
+          onDelete={vi.fn()}
+          onTogglePublished={onTogglePublished}
+        />
+      </MemoryRouter>,
+    );
+    const toggle = screen.getByRole("checkbox", { name: "Show rpi-os 1.0 in Meteor Imager" });
+    expect(toggle).toBeChecked();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    fireEvent.click(toggle);
+    expect(onTogglePublished).toHaveBeenCalledWith(image);
+  });
+
+  it("hides the column when no handler is given", () => {
+    renderTable([artifact({ type: "os_image" })]);
+    expect(screen.queryByText("Meteor Imager")).not.toBeInTheDocument();
   });
 });

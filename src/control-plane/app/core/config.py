@@ -71,6 +71,16 @@ class Settings(BaseSettings):
         alias="REGISTRATION_RATE_LIMIT_WINDOW_SECONDS",
     )
 
+    # Public OS image list and download (Meteor Imager), per source IP.
+    public_os_image_rate_limit_requests: int = Field(
+        default=60,
+        alias="PUBLIC_OS_IMAGE_RATE_LIMIT_REQUESTS",
+    )
+    public_os_image_rate_limit_window_seconds: int = Field(
+        default=60,
+        alias="PUBLIC_OS_IMAGE_RATE_LIMIT_WINDOW_SECONDS",
+    )
+
     # Device-initiated enrollment (request -> approve -> claim).
     enrollment_request_rate_limit_requests: int = Field(
         default=5,

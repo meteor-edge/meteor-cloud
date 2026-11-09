@@ -16,6 +16,8 @@ type ArtifactTableProps = {
   canManage: boolean;
   onDownload: (artifact: Artifact) => void;
   onDelete: (artifact: Artifact) => void;
+  /** Set to show the Meteor Imager column (OS images listed publicly, no login). */
+  onTogglePublished?: (artifact: Artifact) => void;
   /** Omit on pages already scoped to one type / one device type. */
   showType?: boolean;
   deviceTypeNames?: Map<string, string>;
@@ -29,13 +31,16 @@ export function ArtifactTable({
   canManage,
   onDownload,
   onDelete,
+  onTogglePublished,
   showType = false,
   deviceTypeNames,
   emptyMessage = "No artifacts yet.",
   organizationId,
 }: ArtifactTableProps) {
   const showReleases = Boolean(organizationId);
-  const columnCount = 6 + (showType ? 1 : 0) + (deviceTypeNames ? 1 : 0) + (showReleases ? 1 : 0);
+  const showImager = Boolean(onTogglePublished);
+  const columnCount =
+    6 + (showType ? 1 : 0) + (deviceTypeNames ? 1 : 0) + (showReleases ? 1 : 0) + (showImager ? 1 : 0);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-glow">
@@ -50,6 +55,11 @@ export function ArtifactTable({
             <th className="px-4 py-3 font-semibold">SHA-256</th>
             <th className="px-4 py-3 font-semibold">Uploaded</th>
             {showReleases && <th className="px-4 py-3 font-semibold">Used by</th>}
+            {showImager && (
+              <th className="px-4 py-3 font-semibold" title="Listed and downloadable without login">
+                Meteor Imager
+              </th>
+            )}
             <th className="px-4 py-3 font-semibold">Actions</th>
           </tr>
         </thead>
@@ -110,6 +120,26 @@ export function ArtifactTable({
                       <span className="text-muted-foreground">
                         {releaseKind ? "No releases" : "—"}
                       </span>
+                    )}
+                  </td>
+                )}
+                {onTogglePublished && (
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {artifact.type === "os_image" ? (
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(artifact.published)}
+                          disabled={!canManage}
+                          aria-label={`Show ${artifact.name} ${artifact.version} in Meteor Imager`}
+                          onChange={() => onTogglePublished(artifact)}
+                        />
+                        <span className="text-muted-foreground">
+                          {artifact.published ? "Shown" : "Hidden"}
+                        </span>
+                      </label>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
                     )}
                   </td>
                 )}

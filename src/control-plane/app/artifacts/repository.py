@@ -8,6 +8,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.artifacts.models import Artifact, ArtifactType
+from app.devices.models import DeviceType
 
 
 class ArtifactRepository:
@@ -19,6 +20,25 @@ class ArtifactRepository:
         statement = select(Artifact).where(
             Artifact.id == artifact_id,
             Artifact.organization_id == organization_id,
+        )
+        return self.session.scalar(statement)
+
+    def list_published_os_images(self) -> list[tuple[Artifact, str | None]]:
+        """Published OS images of every organization with their device type name, newest first."""
+        statement = (
+            select(Artifact, DeviceType.name)
+            .outerjoin(DeviceType, DeviceType.id == Artifact.device_type_id)
+            .where(Artifact.published.is_(True), Artifact.type == ArtifactType.OS_IMAGE)
+            .order_by(Artifact.created_at.desc(), Artifact.id.asc())
+        )
+        return [(artifact, device_type) for artifact, device_type in self.session.execute(statement).all()]
+
+    def get_published_os_image(self, artifact_id: uuid.UUID) -> Artifact | None:
+        """A published OS image by ID, or None (also for unpublished or other types)."""
+        statement = select(Artifact).where(
+            Artifact.id == artifact_id,
+            Artifact.published.is_(True),
+            Artifact.type == ArtifactType.OS_IMAGE,
         )
         return self.session.scalar(statement)
 

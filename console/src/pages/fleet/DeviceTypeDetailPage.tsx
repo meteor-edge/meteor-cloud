@@ -77,7 +77,11 @@ export function DeviceTypeDetailPage() {
 
   const canManageType = canManageDeviceTypes(orgQuery.data?.current_user_role);
   const canManage = canManageArtifacts(orgQuery.data?.current_user_role);
-  const { onDownload, onDelete, refresh } = useArtifactActions(token, organizationId, setError);
+  const { onDownload, onDelete, onTogglePublished, refresh } = useArtifactActions(
+    token,
+    organizationId,
+    setError,
+  );
 
   const groupNames = useMemo(
     () => new Map((groupsQuery.data ?? []).map((group) => [group.id, group.name])),
@@ -203,6 +207,7 @@ export function DeviceTypeDetailPage() {
                 canManage={canManage}
                 onDownload={onDownload}
                 onDelete={onDelete}
+                onTogglePublished={type === "os_image" ? onTogglePublished : undefined}
                 emptyMessage={
                   artifactsQuery.isLoading
                     ? "Loading…"
