@@ -4,6 +4,8 @@ COMPOSE_DIR := deploy/compose
 ENV_FILE := $(COMPOSE_DIR)/.env
 COMPOSE := docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f $(COMPOSE_DIR)/docker-compose.observability.yml
+# make dev OBS=1 also starts the observability stack (same as make observability).
+OBS ?= 0
 # Observability components to run (Compose profiles); drop any to turn that component off.
 OBS_PROFILES ?= metrics,logs,alerting,dashboards
 # Profiles already chosen in .env (postgres, mqtt, ...), kept when observability profiles are added.
@@ -34,6 +36,9 @@ K8S_HTTP_PORT ?= 8088
 K8S_MQTT_PORT ?= 18883
 K8S_CERTS_DIR := .k8s/certs
 IMAGE_TAG ?= dev
+# make k8s-deploy OBS=1: kube-prometheus-stack (Apache-2.0; bundles Grafana, AGPLv3) in k3d only.
+K8S_OBS_NAMESPACE ?= monitoring
+K8S_OBS_CHART_VERSION := 93.1.1
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -50,7 +55,10 @@ join-help:
 	@echo "  Console: VITE_API_BASE_URL=http://localhost:8000 in local browser. Never a data-plane host."
 	@echo "  Host-only: DATA_PLANE_URL=http://127.0.0.1:8081 and CONTROL_PLANE_URL=http://127.0.0.1:8000."
 
-dev: ## Start control-plane, data-plane, and console
+dev: ## Start control-plane, data-plane, and console (OBS=1 adds Prometheus, Loki, Grafana)
+ifeq ($(OBS),1)
+	@$(MAKE) --no-print-directory observability
+else
 	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
 	$(COMPOSE) up --build -d
@@ -65,7 +73,9 @@ dev: ## Start control-plane, data-plane, and console
 	@echo "  MinIO API:    http://localhost:9000   (S3 endpoint for artifacts)"
 	@echo "  MinIO UI:     http://localhost:9001   (meteorcloud / meteorcloud-dev-secret)"
 	@echo "  Seed:         make seed"
+	@echo "  Observability: make dev OBS=1  (Prometheus, Grafana, Loki; see docs/observability.md)"
 	@$(MAKE) --no-print-directory join-help
+endif
 
 dev-control-plane: ## Start postgres, redis, and the control-plane API
 	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
@@ -358,7 +368,7 @@ k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
 			-p "$(K8S_HTTP_PORT):80@loadbalancer" -p "$(K8S_MQTT_PORT):8883@loadbalancer"
 	kubectl config use-context k3d-$(K8S_CLUSTER)
 
-k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install
+k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (OBS=1 adds Prometheus, Grafana)
 	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
 	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
 	@test -f $(K8S_CERTS_DIR)/server.crt || MQTT_CERTS_SKIP_CHOWN=1 MQTT_PUBLIC_HOST=localhost \
@@ -367,8 +377,16 @@ k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --ins
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) create secret generic meteorcloud-mqtt-tls \
 		--from-file=ca.crt=$(K8S_CERTS_DIR)/ca.crt --from-file=server.crt=$(K8S_CERTS_DIR)/server.crt \
 		--from-file=server.key=$(K8S_CERTS_DIR)/server.key --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
+ifeq ($(OBS),1)
+	@test -n "$$GRAFANA_ADMIN_PASSWORD" || (echo "Set GRAFANA_ADMIN_PASSWORD for the k3d Grafana (OBS=1)." && exit 1)
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+	helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+		--version $(K8S_OBS_CHART_VERSION) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_OBS_NAMESPACE) --create-namespace \
+		-f deploy/kubernetes/k3d-monitoring.yaml --set grafana.adminPassword="$$GRAFANA_ADMIN_PASSWORD" \
+		--wait --timeout 10m
+endif
 	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
-		-f $(CHART)/values-dev.yaml --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
+		-f $(CHART)/values-dev.yaml $(if $(filter 1,$(OBS)),-f $(CHART)/values-monitoring.yaml) --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
 		--set dataPlane.image.tag=$(IMAGE_TAG) --set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
 		--wait --timeout 10m
 	# Restart so pods pick up images re-imported under the same tag.
@@ -377,6 +395,12 @@ k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --ins
 	@echo ""
 	@echo "Console and API: http://localhost:$(K8S_HTTP_PORT)  (admin@meteorcloud.local / LocalAdmin123!)"
 	@echo "MQTT TLS:        mqtts://localhost:$(K8S_MQTT_PORT)  (CA: $(K8S_CERTS_DIR)/ca.crt)"
+ifeq ($(OBS),1)
+	@echo "Grafana:         kubectl -n $(K8S_OBS_NAMESPACE) port-forward svc/kube-prometheus-stack-grafana 3001:80"
+	@echo "Prometheus:      kubectl -n $(K8S_OBS_NAMESPACE) port-forward svc/kube-prometheus-stack-prometheus 9090:9090"
+else
+	@echo "Observability:   make k8s-deploy OBS=1  (kube-prometheus-stack in k3d)"
+endif
 
 k8s-status: ## Show MeteorCloud pods, services, ingress, and volumes in k3d
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) get pods,services,ingress,pvc

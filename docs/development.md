@@ -74,6 +74,9 @@ Same machine stacks **must** use network name `meteorcloud`.
 
 Telemetry is **PostgreSQL last-value** on `Device` (`TELEMETRY_PROVIDER=postgresql`). Timescale and ClickHouse are reserved names and fail fast.
 
+Add `OBS=1` (`make dev OBS=1`) to also start Prometheus, Loki and Grafana; see
+[Observability](observability.md).
+
 Stop with:
 
 ```bash

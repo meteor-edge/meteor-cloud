@@ -112,13 +112,14 @@ requests from the access log.
 ### Local development
 
 ```bash
-make observability                          # all components
+make dev OBS=1                              # app stack plus all components
+make observability                          # same as make dev OBS=1
 make observability OBS_PROFILES=metrics     # Prometheus only
 ```
 
 Grafana is on http://localhost:3001 (`GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`; the
-Grafana container refuses to start without a password, other profiles do not need one), Prometheus on http://localhost:9090. `make dev` does not start this
-stack. Profiles already in `COMPOSE_PROFILES` in `.env` (for example `mqtt`) are kept.
+Grafana container refuses to start without a password, other profiles do not need one), Prometheus on http://localhost:9090. Plain `make dev` does not start this
+stack; add `OBS=1`. `make stop` stops it either way. Profiles already in `COMPOSE_PROFILES` in `.env` (for example `mqtt`) are kept.
 
 `make observability-check` validates the Prometheus, Loki, Alloy and Alertmanager configs and
 runs the alert-rule unit tests (`rules/tests/alerts_test.yml`) with promtool.
@@ -193,6 +194,22 @@ metrics:
 `values-monitoring.yaml` is a ready overlay. The ServiceMonitors set `job` to `backend` and
 `data-plane`, so the rules and dashboards work unchanged. Logs go to stdout as JSON; collect
 them with your cluster's log agent.
+
+On the local k3d cluster, `make k8s-deploy OBS=1` installs kube-prometheus-stack
+(`deploy/kubernetes/k3d-monitoring.yaml`, namespace `monitoring`) and deploys MeteorCloud with
+`values-monitoring.yaml`. It needs `GRAFANA_ADMIN_PASSWORD`; reach the UIs with
+`kubectl port-forward` (the command prints them). This is for local testing only: on a real
+cluster, use the Prometheus your cluster already runs. No Loki in k3d.
+
+### Summary
+
+| Setup | Turn it on |
+| --- | --- |
+| Laptop (Compose) | `make dev OBS=1` |
+| Server, Compose by hand | add `-f docker-compose.observability.yml` and the profiles ([Compose README](../deploy/compose/README.md)) |
+| Server, Ansible / installer | `observability_enabled: true` / `observability.enabled: true` |
+| Kubernetes (Helm) | `-f values-monitoring.yaml` on a cluster with the Prometheus Operator |
+| Laptop (k3d) | `make k8s-deploy OBS=1` |
 
 ## CloudWatch
 

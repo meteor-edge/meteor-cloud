@@ -1,0 +1,29 @@
+# kube-prometheus-stack values for the local k3d cluster only (make k8s-deploy OBS=1).
+# Production clusters bring their own Prometheus; the MeteorCloud chart only adds
+# ServiceMonitors and rules (values-monitoring.yaml). Grafana (AGPLv3) stays reachable
+# through kubectl port-forward on localhost, see docs/licensing.md.
+
+# The release is named kube-prometheus-stack, which is the label values-monitoring.yaml sets,
+# so Prometheus picks up MeteorCloud's ServiceMonitors and rules without extra selectors.
+
+# k3s runs these inside one process and does not expose them for scraping; without this
+# their "target down" alerts fire on every laptop.
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }
+kubeEtcd: { enabled: false }
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    resources:
+      requests: { cpu: 100m, memory: 400Mi }
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+
+grafana:
+  # adminPassword comes from GRAFANA_ADMIN_PASSWORD (--set in the Makefile).
+  defaultDashboardsTimezone: browser
