@@ -88,10 +88,12 @@ connectivity:
     # Once every device shows "SSH auth: certificate": stop handing out the shared key.
     gatewayKeyRetired: false
   # Public app hostnames shown to users: <app>.<device>.<org>.<baseDomain> or
-  # <name>.<baseDomain>. reservedNames: comma-separated names already in use.
+  # <name>.<org>.<baseDomain>. reservedNames: comma-separated names already in use.
+  # allowShortNames: also allow <name>.<baseDomain>, shared by all organizations.
   apps:
     baseDomain: meteor-edge.com
     reservedNames: ""
+    allowShortNames: false
     # Serves the app hostnames: Traefik polls the backend's routing document
     # (/internal/routing/traefik) and gets wildcard certificates over DNS-01,
     # like the Compose deployment. Point *.<baseDomain> at its Service. Its

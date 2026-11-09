@@ -8,6 +8,7 @@ from pathlib import Path
 from rich.console import Console
 
 from edge_installer.config.loader import load_configuration
+from edge_installer.config.validation import ensure_valid
 from edge_installer.deployment.dns import dns_records
 from edge_installer.deployment.prepare import prepare_apply
 from edge_installer.deployment.service import PlatformDeploymentService
@@ -35,8 +36,6 @@ def run_init(*, output: Path, console: Console) -> None:
 def run_validate(*, config_path: Path, console: Console) -> None:
     try:
         # Same checks as apply/plan (including EC2 SSH key match when AWS CLI is present).
-        from edge_installer.config.validation import ensure_valid
-
         ensure_valid(load_configuration(config_path))
     except ConfigurationError as exc:
         console.print(f"[red]{exc.message}[/red]")

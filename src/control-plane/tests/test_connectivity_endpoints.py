@@ -153,7 +153,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "nginx.meteor-edge.com",
+            "hostname": f"nginx.{org.slug}.meteor-edge.com",
             "port": 80,
         },
     )
@@ -163,7 +163,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "panel.meteor-edge.com",
+            "hostname": f"panel.{org.slug}.meteor-edge.com",
             "port": 8080,
         },
     )
@@ -173,7 +173,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "other.meteor-edge.com",
+            "hostname": f"other.{org.slug}.meteor-edge.com",
             "port": 80,
         },
     )
@@ -183,7 +183,7 @@ def test_endpoints_two_ports_same_device_and_org_isolation(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "nginx.meteor-edge.com",
+            "hostname": f"nginx.{org.slug}.meteor-edge.com",
             "port": 9000,
         },
     )
@@ -226,7 +226,7 @@ def test_routing_document_omits_unready_and_requires_token(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "boiler.meteor-edge.com",
+            "hostname": f"boiler.{org.slug}.meteor-edge.com",
             "port": 80,
         },
     )
@@ -254,7 +254,7 @@ def test_routing_document_omits_unready_and_requires_token(
         headers=headers,
         json={
             "device_id": offline_reg["device_id"],
-            "hostname": "offline.meteor-edge.com",
+            "hostname": f"offline.{org.slug}.meteor-edge.com",
             "port": 80,
         },
     )
@@ -329,7 +329,7 @@ def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: 
             "release_id": release["id"],
             "target": {"device_ids": [reg["device_id"]]},
             "endpoint": {
-                "hostname": "camera.meteor-edge.com",
+                "hostname": f"camera.{org.slug}.meteor-edge.com",
                 "port": 80,
             },
         },
@@ -340,7 +340,7 @@ def test_deploy_optional_endpoint_single_device(client: TestClient, db_session: 
         headers=headers,
     )
     assert listed.status_code == 200
-    assert listed.json()[0]["hostname"] == "camera.meteor-edge.com"
+    assert listed.json()[0]["hostname"] == f"camera.{org.slug}.meteor-edge.com"
     assert listed.json()[0]["availability"] == "unknown"
 
 
@@ -354,7 +354,7 @@ def test_sync_from_software_marks_manual_endpoints_ready(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "manual.meteor-edge.com",
+            "hostname": f"manual.{org.slug}.meteor-edge.com",
             "port": 80,
         },
     )
@@ -398,7 +398,7 @@ def test_create_endpoint_unknown_deployment_id_rejected(
         headers=headers,
         json={
             "device_id": reg["device_id"],
-            "hostname": "missing.meteor-edge.com",
+            "hostname": f"missing.{org.slug}.meteor-edge.com",
             "port": 80,
             "deployment_id": str(uuid.uuid4()),
         },

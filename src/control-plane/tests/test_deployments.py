@@ -482,7 +482,7 @@ def test_deploy_detail_shows_endpoint_availability(client: TestClient, db_sessio
         json={
             "release_id": release["id"],
             "target": {"device_ids": [reg["device_id"]]},
-            "endpoint": {"hostname": "camera-health.meteor-edge.com", "port": 80},
+            "endpoint": {"hostname": f"camera-health.{org.slug}.meteor-edge.com", "port": 80},
         },
     )
     assert created.status_code == 201, created.text

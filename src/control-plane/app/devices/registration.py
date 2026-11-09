@@ -17,6 +17,7 @@ from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
 from app.core.metrics import AGENT_HEARTBEATS, DEVICE_REGISTRATIONS
 from app.devices.identity import DeviceIdentity, match_existing_device
 from app.devices.models import Device, RegistrationToken
+from app.devices.naming import default_device_name, unique_device_name
 from app.devices.repository import DeviceRepository, RegistrationTokenRepository
 from app.devices.schemas import (
     AgentHeartbeatRequest,
@@ -133,13 +134,17 @@ class RegistrationService:
             )
         return token
 
-    def _resolve_name(self, payload: AgentRegisterRequest, identity: DeviceIdentity) -> str:
-        candidate = payload.name or payload.hostname or identity.serial_number
-        if not candidate and identity.mac_addresses:
-            candidate = identity.mac_addresses[0]
-        if candidate:
-            return candidate.strip()[:255]
-        return "unnamed-device"
+    def _resolve_name(self, payload: AgentRegisterRequest, identity: DeviceIdentity, organization_id) -> str:
+        self.devices.lock_names(organization_id=organization_id)
+        return unique_device_name(
+            default_device_name(
+                requested_name=payload.name,
+                hostname=payload.hostname,
+                serial_number=identity.serial_number,
+                mac_addresses=identity.mac_addresses,
+            ),
+            taken=self.devices.taken_names(organization_id=organization_id),
+        )
 
     def _apply_inventory(
         self,
@@ -172,7 +177,7 @@ class RegistrationService:
     ) -> Device:
         device = Device(
             organization_id=token.organization_id,
-            name=self._resolve_name(payload, identity),
+            name=self._resolve_name(payload, identity, token.organization_id),
             device_type_id=token.device_type_id,
             device_group_id=token.device_group_id,
             is_enabled=True,
@@ -197,7 +202,13 @@ class RegistrationService:
         now: datetime,
     ) -> Device:
         if payload.name:
-            device.name = payload.name.strip()[:255]
+            requested = payload.name.strip()[:255]
+            if requested.casefold() != device.name.casefold():
+                self.devices.lock_names(organization_id=device.organization_id)
+                taken = self.devices.taken_names(organization_id=device.organization_id)
+                taken.discard(device.name.casefold())
+                requested = unique_device_name(requested, taken=taken)
+            device.name = requested
         # Token-bound assignments apply on re-registration when provided.
         if token.device_type_id is not None:
             device.device_type_id = token.device_type_id

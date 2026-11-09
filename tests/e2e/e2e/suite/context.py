@@ -61,8 +61,8 @@ class Context:
         return f"https://{self.cfg.fqdn}" if self.cfg.has_public_dns else f"http://{self.cp.address}"
 
     def app_hostname(self, label: str) -> str:
-        """A custom app name: <name>.<apps domain>."""
-        return f"e2e-{self.run_id}-{label}.{self.cfg.apps_base_domain}"
+        """A custom app name: <name>.<org>.<apps domain>."""
+        return f"e2e-{self.run_id}-{label}.{self.data['org_slug']}.{self.cfg.apps_base_domain}"
 
     def suggested_hostname(self, index: int, app: str) -> str:
         """The platform's suggestion for an app on device ``index``: <app>.<device>.<org>.<apps domain>."""

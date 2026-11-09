@@ -98,6 +98,21 @@ Admin list/approve/reject responses include `enrollment_key_id`,
 deleted). `mac_addresses` is the primary MAC only for new requests.
 
 Approve body (all optional): `{ "name", "device_type_id", "device_group_id" }`.
+
+**Device names.** List responses include `suggested_name` for unclaimed requests,
+and the console pre-fills it when approving, so nobody has to invent a name. It
+is the first of these that applies:
+
+1. The device's current name, if this hardware is already enrolled.
+2. `--name` from `meteorcli request-token`.
+3. The hostname, unless it is an OS default (`raspberrypi`, `ubuntu`, …) or `localhost`.
+4. The OS default or `device`, plus the last 4 characters of the primary MAC (or the
+   serial, if there is no MAC): `raspberrypi-a1b2`, `device-a1b2`.
+
+`-2`, `-3`… is added if another device in the organization has that name. The same
+rules apply if the approval has no name and to token registration. A name typed
+when approving is used as it is; repeated names are allowed, and the console warns
+about them. Renaming a device later does not change its existing public addresses.
 Reject body (optional): `{ "reason" }`. Mutation requires **owner** or **admin**.
 
 ## Rate limiting and security

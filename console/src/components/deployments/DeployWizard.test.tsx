@@ -40,6 +40,7 @@ beforeEach(() => {
   vi.mocked(listEndpoints).mockResolvedValue([]);
   vi.mocked(suggestHostname).mockResolvedValue({
     apps_domain: "apps.example.com",
+    custom_domain: "acme.apps.example.com",
     hostname: "web.edge-01.acme.apps.example.com",
     available: true,
   } as never);

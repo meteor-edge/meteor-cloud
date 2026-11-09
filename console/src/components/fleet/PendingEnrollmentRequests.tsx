@@ -5,6 +5,7 @@ import {
   approveEnrollmentRequest,
   listDeviceGroups,
   listDeviceTypes,
+  listDevices,
   listEnrollmentRequests,
   rejectEnrollmentRequest,
   type DeviceEnrollmentRequest,
@@ -13,10 +14,15 @@ import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDebounced } from "@/lib/useDebounced";
 import { formatDateTime } from "@/lib/utils";
 
 function isActiveEnrollmentRequest(entry: DeviceEnrollmentRequest): boolean {
   return entry.status === "pending" || (entry.status === "approved" && entry.claimed_at == null);
+}
+
+function displayName(entry: DeviceEnrollmentRequest): string {
+  return entry.assigned_name ?? entry.suggested_name ?? entry.requested_name ?? "—";
 }
 
 function primaryMac(addresses: string[]): string | null {
@@ -26,6 +32,12 @@ function primaryMac(addresses: string[]): string | null {
 function enrollmentKeyLabel(entry: DeviceEnrollmentRequest): string {
   return entry.enrollment_key_name || entry.enrollment_key_prefix || "Revoked/deleted key";
 }
+
+function sameName(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+const NAME_CHECK_DELAY_MS = 400;
 
 type PendingEnrollmentRequestsProps = {
   organizationId: string;
@@ -45,6 +57,7 @@ export function PendingEnrollmentRequests({
   const queryClient = useQueryClient();
   const [approveId, setApproveId] = useState<string | null>(null);
   const [approveName, setApproveName] = useState("");
+  const [approveDefaultName, setApproveDefaultName] = useState("");
   const [approveTypeId, setApproveTypeId] = useState("");
   const [approveGroupId, setApproveGroupId] = useState("");
 
@@ -69,6 +82,22 @@ export function PendingEnrollmentRequests({
     [requestsQuery.data],
   );
 
+  // Repeated names are allowed, so this only warns. A device keeps its suggested name without a check.
+  const typedName = useDebounced(approveName.trim(), NAME_CHECK_DELAY_MS);
+  const checkName = Boolean(approveId && typedName && typedName !== approveDefaultName);
+  const namesakesQuery = useQuery({
+    queryKey: ["devices", organizationId, "name", typedName, token],
+    queryFn: () =>
+      listDevices(token, organizationId, { name: typedName, page_size: 1 }),
+    enabled: checkName,
+  });
+  const nameInUse =
+    checkName &&
+    ((namesakesQuery.data?.total ?? 0) > 0 ||
+      activeRequests.some(
+        (entry) => entry.id !== approveId && sameName(displayName(entry), typedName),
+      ));
+
   if (hideWhenEmpty && activeRequests.length === 0) {
     return null;
   }
@@ -80,12 +109,13 @@ export function PendingEnrollmentRequests({
     }
     try {
       await approveEnrollmentRequest(token, organizationId, approveId, {
-        name: approveName || undefined,
+        name: approveName.trim() || undefined,
         device_type_id: approveTypeId || undefined,
         device_group_id: approveGroupId || undefined,
       });
       setApproveId(null);
       setApproveName("");
+      setApproveDefaultName("");
       setApproveTypeId("");
       setApproveGroupId("");
       await Promise.all([
@@ -132,7 +162,7 @@ export function PendingEnrollmentRequests({
             {activeRequests.map((entry) => (
               <tr key={entry.id} className="border-b border-border">
                 <td className="px-4 py-3 font-medium">
-                  {entry.assigned_name ?? entry.requested_name ?? "—"}
+                  {displayName(entry)}
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">{entry.hostname ?? "—"}</td>
                 <td className="px-4 py-3 font-mono text-xs">{primaryMac(entry.mac_addresses) ?? "—"}</td>
@@ -160,7 +190,9 @@ export function PendingEnrollmentRequests({
                           size="sm"
                           onClick={() => {
                             setApproveId(entry.id);
-                            setApproveName(entry.requested_name ?? "");
+                            const name = entry.suggested_name ?? entry.requested_name ?? "";
+                            setApproveName(name);
+                            setApproveDefaultName(name);
                             setApproveTypeId(entry.device_type_id ?? "");
                             setApproveGroupId(entry.device_group_id ?? "");
                           }}
@@ -208,8 +240,7 @@ export function PendingEnrollmentRequests({
             <div>
               <h2 className="text-lg font-semibold">Approve device</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Optionally set the name, type, and group assigned when the device claims its
-                credential.
+                The device gets this name, type, and group when it claims its credential.
               </p>
             </div>
             <div>
@@ -219,6 +250,12 @@ export function PendingEnrollmentRequests({
                 value={approveName}
                 onChange={(event) => setApproveName(event.target.value)}
               />
+              <p className="mt-1 text-xs text-muted-foreground">You can rename it later.</p>
+              {nameInUse && (
+                <p className="mt-1 text-xs text-destructive">
+                  Another device already has this name. You can still use it.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="approve-type">Device type</Label>

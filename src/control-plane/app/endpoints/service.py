@@ -29,7 +29,9 @@ from app.endpoints.schemas import (
 from app.endpoints.validation import (
     HostnameRejected,
     assert_wireguard_upstream,
+    custom_name_domain,
     normalize_domain,
+    normalize_hostname,
     suggested_hostname,
     validate_hostname,
 )
@@ -75,6 +77,7 @@ class EndpointService:
             org_slug=organization.slug,
             device_name=device.name,
             reserved=self.settings.reserved_app_names,
+            allow_short_names=self.settings.apps_allow_short_names,
         )
 
     def check_hostname(
@@ -90,13 +93,21 @@ class EndpointService:
         membership = self._require_membership(organization_id, actor.id)
         device = self._device(organization_id, device_id)
         self.authz.require(membership, "endpoint.read", device_group_id=device.device_group_id)
-        value = hostname.strip().lower().rstrip(".")
+        value = normalize_hostname(hostname)
+        existing = self.endpoints.get_by_hostname(value)
+        # An endpoint can keep its address even if it predates the current rules.
+        if (
+            existing is not None
+            and existing.id == endpoint_id
+            and existing.organization_id == organization_id
+            and existing.device_id == device.id
+        ):
+            return HostnameCheckResponse(hostname=value, available=True, reason="available", message="Available.")
         try:
             value = self._validate_hostname(value, organization_id=organization_id, device=device)
         except HostnameRejected as exc:
             return HostnameCheckResponse(hostname=value, available=False, reason=exc.reason, message=exc.message)
-        existing = self.endpoints.get_by_hostname(value)
-        if existing is not None and existing.id != endpoint_id:
+        if existing is not None:
             return HostnameCheckResponse(
                 hostname=value, available=False, reason="taken", message="This address is already in use."
             )
@@ -118,15 +129,21 @@ class EndpointService:
             org_slug=organization.slug,
             apps_base_domain=self.settings.apps_base_domain,
         )
+        custom_domain = custom_name_domain(
+            org_slug=organization.slug,
+            apps_base_domain=self.settings.apps_base_domain,
+            allow_short_names=self.settings.apps_allow_short_names,
+        )
+        apps_domain = normalize_domain(self.settings.apps_base_domain)
         label, rest = base.split(".", 1)
         for attempt in range(1, MAX_SUGGESTION_ATTEMPTS + 1):
             candidate = base if attempt == 1 else f"{label[: 63 - len(str(attempt)) - 1]}-{attempt}.{rest}"
             if self.endpoints.get_by_hostname(candidate) is None:
                 return HostnameSuggestionResponse(
-                    apps_domain=normalize_domain(self.settings.apps_base_domain), hostname=candidate, available=True
+                    apps_domain=apps_domain, custom_domain=custom_domain, hostname=candidate, available=True
                 )
         return HostnameSuggestionResponse(
-            apps_domain=normalize_domain(self.settings.apps_base_domain), hostname=base, available=False
+            apps_domain=apps_domain, custom_domain=custom_domain, hostname=base, available=False
         )
 
     def _reject_reserved_port(self, port: int) -> None:
@@ -276,7 +293,8 @@ class EndpointService:
             raise NotFoundError("endpoint_not_found", "Endpoint was not found.")
         device = self._device(organization_id, row.device_id)
         self.authz.require(membership, "endpoint.update", device_group_id=device.device_group_id)
-        if payload.hostname is not None:
+        # An unchanged address stays valid even if it predates the current rules.
+        if payload.hostname is not None and normalize_hostname(payload.hostname) != row.hostname:
             hostname = self._validate_hostname(payload.hostname, organization_id=organization_id, device=device)
             existing = self.endpoints.get_by_hostname(hostname)
             if existing is not None and existing.id != row.id:
@@ -343,7 +361,7 @@ class EndpointService:
                 "device_port_in_use",
                 "An enabled endpoint already uses this port on the device.",
             )
-        if hostname and hostname != row.hostname:
+        if hostname and normalize_hostname(hostname) != row.hostname:
             hostname = self._validate_hostname(hostname, organization_id=organization_id, device=device)
             existing = self.endpoints.get_by_hostname(hostname)
             if existing is not None and existing.id != row.id:

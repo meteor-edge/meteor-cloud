@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { listDeviceSoftware, type DeviceSoftware } from "@/api/fleet";
+import { listDeviceSoftware, listEndpoints, type DeviceSoftware } from "@/api/fleet";
 import { HealthBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/utils";
@@ -46,7 +46,19 @@ export function DeviceSoftwarePanel({
     enabled: Boolean(token && organizationId && deviceId),
   });
 
+  // A failure here only hides the links; the software list still works without them.
+  const endpointsQuery = useQuery({
+    queryKey: ["endpoints", organizationId, deviceId, token],
+    queryFn: () => listEndpoints(token, organizationId, deviceId),
+    enabled: Boolean(token && organizationId && deviceId),
+    // Like the device page: availability changes on the server while this stays open.
+    refetchInterval: 15_000,
+  });
+
   const items = softwareQuery.data ?? [];
+  const availableEndpoints = (endpointsQuery.data ?? []).filter(
+    (endpoint) => endpoint.enabled && endpoint.availability === "ready",
+  );
   const deployHref = `/organizations/${organizationId}/deployments?${new URLSearchParams({
     deploy: "1",
     device_id: deviceId,
@@ -102,7 +114,26 @@ export function DeviceSoftwarePanel({
         <tbody>
           {items.map((row) => (
             <tr key={row.id} className="border-b border-border last:border-0">
-              <td className="px-4 py-3 font-medium">{row.workload_key}</td>
+              <td className="px-4 py-3">
+                <p className="font-medium">{row.workload_key}</p>
+                {availableEndpoints
+                  .filter(
+                    (endpoint) =>
+                      endpoint.device_software_id === row.id ||
+                      endpoint.workload_key === row.workload_key,
+                  )
+                  .map((endpoint) => (
+                    <a
+                      key={endpoint.id}
+                      href={endpoint.public_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 block break-all text-xs text-link hover:underline"
+                    >
+                      {endpoint.hostname}
+                    </a>
+                  ))}
+              </td>
               <td className="px-4 py-3">{releaseLabel(row.desired_release)}</td>
               <td className="px-4 py-3">
                 {row.installed_release

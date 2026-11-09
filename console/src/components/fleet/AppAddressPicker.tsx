@@ -4,6 +4,7 @@ import { Check, Loader2, X } from "lucide-react";
 
 import { checkHostname, suggestHostname } from "@/api/fleet";
 import { Input } from "@/components/ui/input";
+import { useDebounced } from "@/lib/useDebounced";
 
 type AppAddressPickerProps = {
   token: string;
@@ -17,13 +18,15 @@ type AppAddressPickerProps = {
 
 const CHECK_DELAY_MS = 400;
 
-function useDebounced(value: string, delay: number): string {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delay);
-    return () => window.clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
+/** The app name as one DNS label, to start the custom name from. */
+function appLabel(appName: string): string {
+  return appName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 63)
+    .replace(/-+$/, "");
 }
 
 function Status({ state, message }: { state: "checking" | "ok" | "bad"; message: string }) {
@@ -52,14 +55,16 @@ export function AppAddressPicker({
   onChange,
 }: AppAddressPickerProps) {
   const [mode, setMode] = useState<"suggested" | "custom">("suggested");
-  const [custom, setCustom] = useState("");
+  // Follows the app name until the user edits it.
+  const [edited, setEdited] = useState<string | null>(null);
+  const custom = edited ?? appLabel(appName);
   const app = useDebounced(appName.trim() || "app", CHECK_DELAY_MS);
 
   const suggestion = useQuery({
     queryKey: ["hostname-suggestion", organizationId, deviceId, app, token],
     queryFn: () => suggestHostname(token, organizationId, deviceId, app),
   });
-  const domain = suggestion.data?.apps_domain ?? "";
+  const domain = suggestion.data?.custom_domain ?? "";
   const label = useDebounced(custom.trim().toLowerCase(), CHECK_DELAY_MS);
   const customHostname = label && domain ? `${label}.${domain}` : "";
   const check = useQuery({
@@ -122,7 +127,7 @@ export function AppAddressPicker({
               placeholder="shop"
               value={custom}
               onFocus={() => setMode("custom")}
-              onChange={(event) => setCustom(event.target.value)}
+              onChange={(event) => setEdited(event.target.value)}
             />
             <span className="break-all font-mono text-xs text-muted-foreground">
               .{domain || "…"}
