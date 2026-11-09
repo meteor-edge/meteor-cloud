@@ -15,6 +15,7 @@ from app.mqtt.runtime import set_mqtt_publisher
 from app.mqtt.service import NoopPublisher
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
+from tests.metrics_helpers import sample
 from tests.test_mqtt_commands import RecordingPublisher
 
 UNIT = b"[Unit]\nDescription=Camera\n[Service]\nExecStart=/bin/true\n"
@@ -813,4 +814,8 @@ def test_sweeper_failure_on_one_deploy_does_not_stop_the_others(
         return original(self, deployment)
 
     monkeypatch.setattr(DeploymentService, "tick_deployment", flaky_tick)
+    ok_before = sample("meteorcloud_deploy_sweep_ticks_total", result="ok")
+    error_before = sample("meteorcloud_deploy_sweep_ticks_total", result="error")
     assert sweep_deployments(db_session) == 1
+    assert sample("meteorcloud_deploy_sweep_ticks_total", result="ok") - ok_before == 1
+    assert sample("meteorcloud_deploy_sweep_ticks_total", result="error") - error_before == 1

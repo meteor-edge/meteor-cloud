@@ -1,2 +1,11 @@
 apiVersion: 1
-providers: []
+# Dashboards are files in json/ and change through review, not the UI. They query the
+# datasource uids "prometheus" and "loki" only (see ../datasources/datasources.yml).
+providers:
+  - name: meteorcloud
+    folder: MeteorCloud
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

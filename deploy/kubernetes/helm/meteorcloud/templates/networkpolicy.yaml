@@ -27,4 +27,14 @@ spec:
       ports:
         - port: 8000
           protocol: TCP
+    {{- with .Values.metrics.networkPolicyFrom }}
+    # Metrics scrapers (metrics.networkPolicyFrom). /metrics shares the API port, so these
+    # peers can reach the API too: list only trusted monitoring pods, not whole namespaces
+    # that run other workloads.
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: 8000
+          protocol: TCP
+    {{- end }}
 {{- end }}

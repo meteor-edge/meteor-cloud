@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from edge_installer.config.models import INSTALLATION_NAME_PATTERN, InstallationConfig
 from edge_installer.exceptions import ConfigurationError
@@ -90,8 +91,37 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
             "observability.backend=cloudwatch is not implemented yet; "
             "use backend=prometheus or set observability.enabled=false"
         )
+    if config.observability.enabled:
+        components = config.observability.components
+        if not components.enabled_names():
+            errors.append("observability.components: enable at least one component or set observability.enabled=false")
+        if components.alerting and not components.metrics:
+            errors.append("observability.components.alerting needs components.metrics (alerts are Prometheus rules)")
+        if components.dashboards and not (components.metrics or components.logs):
+            errors.append("observability.components.dashboards needs components.metrics or components.logs")
+        if components.dashboards and not os.environ.get("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD", "").strip():
+            errors.append(
+                "EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD is required for observability.components.dashboards"
+            )
+        webhook = os.environ.get("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "").strip()
+        if webhook and not _is_https_url(webhook):
+            errors.append("EDGE_PLATFORM_ALERT_WEBHOOK_URL must be an https:// URL with a host")
+        heartbeat = os.environ.get("EDGE_PLATFORM_ALERT_HEARTBEAT_URL", "").strip()
+        if heartbeat and not _is_https_url(heartbeat):
+            errors.append("EDGE_PLATFORM_ALERT_HEARTBEAT_URL must be an https:// URL with a host")
+        if heartbeat and not webhook:
+            errors.append("EDGE_PLATFORM_ALERT_HEARTBEAT_URL needs EDGE_PLATFORM_ALERT_WEBHOOK_URL")
 
     return errors
+
+
+def _is_https_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        parsed.port  # noqa: B018 - raises ValueError for a non-numeric or out-of-range port
+    except ValueError:
+        return False
+    return parsed.scheme == "https" and bool(parsed.hostname)
 
 
 def validate_dependencies(config: InstallationConfig | None = None) -> list[str]:

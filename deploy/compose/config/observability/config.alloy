@@ -21,11 +21,27 @@ loki.source.docker "containers" {
   host          = "tcp://docker-socket-proxy:2375"
   targets       = discovery.docker.containers.targets
   relabel_rules = discovery.relabel.docker.rules
-  forward_to    = [loki.write.default.receiver]
+  forward_to    = [loki.process.json_level.receiver]
 }
 
+// MeteorCloud services log one JSON object per line. Promote only `level` to a label;
+// request_id, path and everything else stay in the line (labels must stay low-cardinality).
+// Lines that are not JSON pass through unchanged.
+loki.process "json_level" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.json {
+    expressions = { level = "level" }
+  }
+
+  stage.labels {
+    values = { level = "" }
+  }
+}
+
+// LOKI_PUSH_URL lets any Loki-compatible endpoint replace the bundled Loki.
 loki.write "default" {
   endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+    url = sys.env("LOKI_PUSH_URL")
   }
 }

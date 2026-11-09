@@ -7,7 +7,10 @@
       - postgres_provider != 'external' or external_database_url | length > 0
       - cache_provider != 'redis' or redis_provider == 'bundled' or external_redis_url | length > 0
       - not (mqtt_enabled | bool) or (mqtt_platform_password | length > 0 and mqtt_internal_token | length > 0)
-      - not (observability_enabled | bool) or grafana_admin_password | length > 0
+      - >-
+        not (observability_enabled | bool)
+        or 'dashboards' not in (observability_components.split(',') | map('trim') | list)
+        or grafana_admin_password | trim | length > 0
       - not (mqtt_enabled | bool) or mqtt_broker == 'bundled' or mqtt_broker_host | length > 0
       - >-
         not (object_storage_provider == 's3' and minio_enabled | bool)
@@ -18,7 +21,7 @@
       redis_provider=external, EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD and EDGE_PLATFORM_MQTT_INTERNAL_TOKEN
       when mqtt_enabled (plus mqtt_broker_host for an external broker),
       EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID and EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY
-      (8+ chars) for bundled MinIO, and EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD when observability_enabled.
+      (8+ chars) for bundled MinIO, and EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD when observability_enabled with the dashboards component.
     quiet: true
 
 - name: Check provider settings
@@ -33,10 +36,23 @@
       - image_source != 'archive' or platform_source_archive | length > 0
       # Devices and the data plane share MQTT_BROKER_PORT; the bundled EMQX listens on 8883.
       - mqtt_broker == 'external' or (mqtt_broker_port | int) == 8883
+      - >-
+        not (observability_enabled | bool)
+        or (observability_components.split(',') | map('trim') | reject('equalto', '')
+            | difference(['metrics', 'logs', 'alerting', 'dashboards']) | list | length == 0)
+      - >-
+        not (observability_enabled | bool)
+        or (observability_components.split(',') | map('trim') | reject('equalto', '') | list | length > 0)
+      # Alerts are Prometheus rules, so alerting needs the metrics component.
+      - >-
+        not (observability_enabled | bool)
+        or 'alerting' not in (observability_components.split(',') | map('trim') | list)
+        or 'metrics' in (observability_components.split(',') | map('trim') | list)
     fail_msg: >-
       Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
       redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external,
-      image_source git|archive|registry (archive needs platform_source_archive); the bundled MQTT broker always uses port 8883.
+      image_source git|archive|registry (archive needs platform_source_archive), observability_components
+      (at least one) from metrics,logs,alerting,dashboards, alerting needs metrics; the bundled MQTT broker always uses port 8883.
     quiet: true
 
 # Hosts deployed before the Compose files moved into the repository ran a stack
@@ -226,6 +242,66 @@
         owner: root
         group: root
         mode: "0755"
+
+- name: Prepare observability data and Alertmanager secrets
+  when: observability_enabled | bool
+  block:
+    # Also created by platform_directories (provision.yml); repeated here so a deploy-only
+    # run (playbooks/services/*.yml) does not leave Docker to create it root-owned, which
+    # prom/prometheus (nobody) cannot write.
+    - name: Create the Prometheus data directory
+      ansible.builtin.file:
+        path: "{{ platform_root }}/data/prometheus"
+        state: directory
+        owner: "65534"
+        group: "65534"
+        mode: "0750"
+
+    - name: Create the Alertmanager secrets directory
+      ansible.builtin.file:
+        path: "{{ platform_root }}/secrets/alertmanager"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Readable only by Alertmanager (nobody, 65534); it lives on this host only and never
+    # enters the repository or the Compose file.
+    - name: Write the alert webhook URL
+      ansible.builtin.copy:
+        content: "{{ observability_alert_webhook_url }}"
+        dest: "{{ platform_root }}/secrets/alertmanager/webhook_url"
+        owner: "65534"
+        group: "65534"
+        mode: "0600"
+      no_log: true
+      register: platform_alertmanager_secret
+      when: observability_alert_webhook_url | length > 0
+
+    - name: Write the alert heartbeat URL
+      ansible.builtin.copy:
+        content: "{{ observability_alert_heartbeat_url }}"
+        dest: "{{ platform_root }}/secrets/alertmanager/heartbeat_url"
+        owner: "65534"
+        group: "65534"
+        mode: "0600"
+      no_log: true
+      register: platform_alertmanager_heartbeat_secret
+      when: observability_alert_webhook_url | length > 0 and observability_alert_heartbeat_url | length > 0
+
+- name: Remove a stale alert webhook URL
+  ansible.builtin.file:
+    path: "{{ platform_root }}/secrets/alertmanager/webhook_url"
+    state: absent
+  when: not (observability_enabled | bool) or observability_alert_webhook_url | length == 0
+
+- name: Remove a stale alert heartbeat URL
+  ansible.builtin.file:
+    path: "{{ platform_root }}/secrets/alertmanager/heartbeat_url"
+    state: absent
+  when: >-
+    not (observability_enabled | bool) or observability_alert_webhook_url | length == 0
+    or observability_alert_heartbeat_url | length == 0
 
 - name: Render Compose environment file
   ansible.builtin.template:

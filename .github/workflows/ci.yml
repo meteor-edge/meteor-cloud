@@ -216,6 +216,8 @@ jobs:
         run: gunzip -c images.tar.gz | docker load
       - name: Compose config (base, dev, prod, observability)
         run: make compose-config
+      - name: Observability config and alert rules
+        run: make observability-check
       - name: Minimal production stack smoke test
         run: make compose-smoke IMAGE_TAG=ci
 
@@ -285,6 +287,41 @@ jobs:
           grep -Eq 'changed=0 .*failed=0' /tmp/second-run.log
       - name: Smoke test the Ansible deployment
         run: python scripts/smoke_test.py http://127.0.0.1
+      # Same deployment with observability on (metrics + alerting, no Grafana password
+      # needed): Prometheus must scrape the API and load the rules, and the API must
+      # still pass the smoke test.
+      - name: Turn on observability with Ansible and check it scrapes the platform
+        env:
+          EDGE_PLATFORM_POSTGRES_PASSWORD: ci-${{ github.run_id }}-pg
+          EDGE_PLATFORM_JWT_SECRET: ci-${{ github.run_id }}-jwt-secret-value
+        working-directory: deploy/ansible
+        run: |
+          ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml \
+            -e observability_enabled=true -e observability_components=metrics,alerting \
+            playbooks/services/cloud_app.yml
+          python3 - <<'PY'
+          import json, time, urllib.parse, urllib.request
+
+          def get(url):
+              return json.load(urllib.request.urlopen(url, timeout=5))
+
+          deadline = time.time() + 120
+          while True:
+              try:
+                  q = urllib.parse.quote('up{job="backend"}')
+                  up = get(f"http://127.0.0.1:9090/api/v1/query?query={q}")["data"]["result"]
+                  groups = get("http://127.0.0.1:9090/api/v1/rules")["data"]["groups"]
+                  am = urllib.request.urlopen("http://127.0.0.1:9093/-/ready", timeout=5).status
+                  if up and up[0]["value"][1] == "1" and groups and am == 200:
+                      print(f"backend scraped, {len(groups)} rule groups loaded, Alertmanager ready")
+                      break
+              except Exception as exc:  # services still starting
+                  print("waiting:", exc)
+              if time.time() > deadline:
+                  raise SystemExit("Prometheus did not scrape the backend or load the rules in time")
+              time.sleep(5)
+          PY
+          python ../../scripts/smoke_test.py http://127.0.0.1
       - name: Destroy with Ansible
         if: always()
         working-directory: deploy/ansible

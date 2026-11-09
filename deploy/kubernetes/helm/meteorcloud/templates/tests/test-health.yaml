@@ -34,6 +34,24 @@ spec:
           assert dp == 200, dp
           print("data-plane: ok")
           {{- end }}
+          import urllib.error
+          def metrics(url):
+              try:
+                  return urllib.request.urlopen(url, timeout=10).read().decode()
+              except urllib.error.HTTPError as exc:
+                  return exc.code
+          targets = ["http://{{ $fullname }}-backend:8000/metrics"]
+          {{- if .Values.mqtt.enabled }}
+          targets.append("http://{{ $fullname }}-data-plane:8081/metrics")
+          {{- end }}
+          for url in targets:
+              body = metrics(url)
+              {{- if .Values.metrics.enabled }}
+              assert isinstance(body, str) and "meteorcloud_" in body, (url, body if isinstance(body, int) else body[:200])
+              {{- else }}
+              assert body == 404, (url, "metrics.enabled=false must serve 404")
+              {{- end }}
+          print("metrics: ok ({{ ternary "enabled" "disabled" .Values.metrics.enabled }})")
       securityContext:
         allowPrivilegeEscalation: false
         capabilities:

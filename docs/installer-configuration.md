@@ -12,6 +12,7 @@ Single YAML file, typically `installation.yaml` at the repo root. `edge-installe
 | `network` | SSH CIDRs, HTTP/HTTPS exposure |
 | `services` | **Which stacks to deploy** (cloud_app, vpn, ...) |
 | `components` | Bundled PostgreSQL (off = external via `EDGE_PLATFORM_DATABASE_URL`), Redis (off by default = in-memory rate limits), Traefik |
+| `observability` | Metrics, logs, alerting and dashboards on the host, each optional; retention ([Observability](observability.md#installer-installationyaml)) |
 | `deployment` | Git repo / container images, health timeout |
 | `secrets` | Must be `environment` — values from env vars |
 
@@ -83,8 +84,9 @@ aws:
 | --- | --- | --- |
 | API + console + Postgres + Traefik, registry images | `t3.small` | 30 GiB |
 | Same, `image_source: git` (build on the box) | `t3.medium` | 40 GiB |
-| + observability (Prometheus/Loki/Grafana) | `t3.large` | 50 GiB |
+| + observability (all components) | `t3.large` | 50 GiB |
 
+Observability is sized per enabled component (`observability.components`): metrics alone usually fits a `t3.medium`. The disk grows with `metrics_retention_size` and, for logs, about 5 GiB per 7 days of `log_retention_hours`.
 `arm64` uses `t4g.*`. A larger explicit type is kept. Changing type on an existing install replaces the instance (Elastic IP stays).
 
 ## Network
@@ -135,6 +137,9 @@ export EDGE_PLATFORM_ADMIN_PASSWORD='...'
 export EDGE_PLATFORM_ACME_EMAIL='ops@example.com'      # HTTPS + domain
 export EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY='...'    # activate WireGuard
 export EDGE_PLATFORM_DATABASE_URL='postgresql+psycopg://...'   # components.postgres.enabled: false
+export EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD='...'    # observability.components.dashboards
+export EDGE_PLATFORM_ALERT_WEBHOOK_URL='https://...' # observability.components.alerting delivery
+export EDGE_PLATFORM_ALERT_HEARTBEAT_URL='https://...' # optional dead-man's-switch for the Watchdog alert (needs the webhook)
 ```
 
 Never put secrets in `installation.yaml` or commit them.
@@ -149,7 +154,10 @@ Never put secrets in `installation.yaml` or commit them.
 └── terraform/
 ```
 
-Gitignored. Do not commit.
+Gitignored. Do not commit. `extra-vars.json` (mode 0600) holds only non-secret
+settings. Secrets (`EDGE_PLATFORM_*` passwords, tokens, the alert webhook URL)
+are written to `secret-vars.json` for the duration of a playbook run and deleted
+afterwards. A manual `ansible-playbook` run reads them from the environment.
 
 ## Commands
 

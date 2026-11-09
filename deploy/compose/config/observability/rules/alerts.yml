@@ -1,0 +1,208 @@
+# Alert rules for MeteorCloud (standard Prometheus format; see recording.yml).
+# Every alert links to its runbook section in docs/observability.md.
+# Counters are summed across replicas; fleet gauges are identical on every replica, so they
+# are combined with max.
+groups:
+  - name: meteorcloud-api
+    rules:
+      - alert: APIHighErrorRate
+        expr: |
+          meteorcloud:http_5xx:ratio5m{scope="public"} > 0.01
+          and on (scope) meteorcloud:http_requests:rate5m{scope="public"} > 0.2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 1% of API requests are failing with 5xx"
+          description: "{{ $value | humanizePercentage }} of public API requests returned 5xx over the last 5 minutes."
+          runbook: "docs/observability.md#apihigherrorrate"
+      - alert: APIErrorBurst
+        expr: sum(increase(http_requests_total{job="backend", path=~"/api/.*", status=~"5.."}[5m])) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "Burst of API 5xx errors"
+          description: "{{ $value | humanize }} public API requests returned 5xx in the last 5 minutes."
+          runbook: "docs/observability.md#apierrorburst"
+      - alert: APIHighLatency
+        expr: |
+          meteorcloud:http_latency_p95:5m{scope="public"} > 2
+          and on (scope) meteorcloud:http_requests:rate5m{scope="public"} > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency above 2s"
+          description: "p95 latency of public API requests is {{ $value | humanizeDuration }} (uploads, downloads and streams excluded)."
+          runbook: "docs/observability.md#apihighlatency"
+      - alert: ControlPlaneDown
+        expr: up{job="backend"} == 0 or absent(up{job="backend"})
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Control plane API is not answering scrapes"
+          description: "Prometheus cannot scrape the control plane /metrics endpoint."
+          runbook: "docs/observability.md#controlplanedown"
+      - alert: DatabaseDown
+        expr: max(meteorcloud_database_up) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Control plane cannot reach PostgreSQL"
+          description: "The API answers scrapes but its fleet query fails: logins, heartbeats and Deploys are failing."
+          runbook: "docs/observability.md#databasedown"
+      - alert: UnhandledExceptions
+        expr: sum(increase(meteorcloud_unhandled_exceptions_total[10m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Control plane requests are crashing"
+          description: "{{ $value | humanize }} requests ended in an unhandled exception in the last 10 minutes."
+          runbook: "docs/observability.md#unhandledexceptions"
+
+  - name: meteorcloud-data-plane
+    rules:
+      - alert: DataPlaneDown
+        expr: up{job="data-plane"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Data plane is running but not answering scrapes"
+          description: "Prometheus found the data plane but cannot scrape its /metrics endpoint."
+          runbook: "docs/observability.md#dataplanedown"
+      - alert: DataPlaneMqttDisconnected
+        expr: max(meteorcloud_dataplane_mqtt_connected) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Data plane is not connected to the MQTT broker"
+          description: "No device status, metrics or command results are reaching the control plane."
+          runbook: "docs/observability.md#dataplanemqttdisconnected"
+      - alert: MqttIngestFailing
+        expr: sum(rate(meteorcloud_dataplane_ingest_forward_total{result!="ok"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data plane cannot forward MQTT messages to the control plane"
+          description: "{{ $value | humanize }} messages/s are failing to reach /internal/mqtt/ingest."
+          runbook: "docs/observability.md#mqttingestfailing"
+
+  - name: meteorcloud-fleet
+    rules:
+      - alert: FleetOfflineSpike
+        expr: |
+          (
+            max(meteorcloud_devices{state="offline"})
+            / clamp_min(max(meteorcloud_devices{state="online"}) + max(meteorcloud_devices{state="offline"}), 1)
+          ) > 0.3
+          and
+          (max(meteorcloud_devices{state="offline"}) - max(meteorcloud_devices{state="offline"} offset 10m)) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many devices went offline at once"
+          description: "More than 30% of seen devices are offline and more than 5 dropped off in the last 10 minutes."
+          runbook: "docs/observability.md#fleetofflinespike"
+      - alert: DeploymentFailures
+        expr: sum(increase(meteorcloud_deployments_finished_total{status="failed"}[1h])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "A Deploy failed in the last hour"
+          description: "{{ $value | humanize }} Deploy(s) finished as failed in the last hour."
+          runbook: "docs/observability.md#deploymentfailures"
+      - alert: DeployPaused
+        expr: max(meteorcloud_deployments{status="paused"}) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A Deploy has been paused for 30 minutes"
+          description: "{{ $value | humanize }} Deploy(s) are paused, by an operator or by their failure threshold."
+          runbook: "docs/observability.md#deploypaused"
+      - alert: DeploySweeperFailing
+        expr: sum(increase(meteorcloud_deploy_sweep_ticks_total{result="error"}[15m])) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "The rollout sweeper keeps failing"
+          description: "{{ $value | humanize }} Deploy ticks failed in 15 minutes: batched and phased rollouts may be stuck."
+          runbook: "docs/observability.md#deploysweeperfailing"
+      - alert: RateLimitSpike
+        expr: sum(rate(meteorcloud_rate_limited_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agents are being rate limited"
+          description: "{{ $value | humanize }} requests/s rejected by registration, enrollment or connectivity limiters."
+          runbook: "docs/observability.md#ratelimitspike"
+
+  - name: meteorcloud-security
+    rules:
+      - alert: LoginFailureSpike
+        expr: sum(increase(meteorcloud_auth_logins_total{result="failure"}[10m])) > 20
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many failed console logins"
+          description: "{{ $value | humanize }} console logins failed in the last 10 minutes (possible password guessing)."
+          runbook: "docs/observability.md#loginfailurespike"
+      - alert: MqttAuthDenySpike
+        expr: sum(rate(meteorcloud_mqtt_auth_total{result="deny"}[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The MQTT broker is denying many clients"
+          description: "{{ $value | humanize }} MQTT auth decisions/s are deny (revoked devices retrying, or someone probing the broker)."
+          runbook: "docs/observability.md#mqttauthdenyspike"
+      - alert: InvalidRegistrationTokens
+        expr: sum(increase(meteorcloud_device_registrations_total{result="invalid_token"}[15m])) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many device registrations with invalid tokens"
+          description: "{{ $value | humanize }} registrations used an invalid, expired or revoked token in 15 minutes."
+          runbook: "docs/observability.md#invalidregistrationtokens"
+
+  - name: meteorcloud-host
+    rules:
+      - alert: HostDiskFull
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}
+               / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} is over 90% full"
+          description: "{{ $value | humanizePercentage }} used on {{ $labels.mountpoint }}."
+          runbook: "docs/observability.md#hostdiskfull"
+      - alert: HostDiskFillingUp
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}[6h], 24 * 3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} will be full within 24h"
+          description: "At the current rate {{ $labels.mountpoint }} runs out of space within a day."
+          runbook: "docs/observability.md#hostdiskfillingup"
+
+  - name: meteorcloud-meta
+    rules:
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "Always firing; proves the alert pipeline works"
+          description: "Route this to a dead-man's-switch receiver. If it stops arriving, alerting is broken."
+          runbook: "docs/observability.md#watchdog"

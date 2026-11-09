@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.exceptions import AppError
+from app.core.metrics import SHELL_SESSIONS, SHELL_SESSIONS_ACTIVE
 from app.identity.dependencies import CurrentUser
 from app.shell.dependencies import ShellSvc
 from app.shell.logs import LogSessionCreateRequest, LogSourcesResponse
@@ -152,12 +153,14 @@ async def _bridge(websocket: WebSocket, session_id: uuid.UUID, service: ShellSer
             command=target.command,
         )
     except AppError as exc:
+        SHELL_SESSIONS.labels(kind=kind, result="failed").inc()
         if consumed:
             locked(service.close_session, session_id)
         await websocket.send_text(f"error: {exc.message}")
         await websocket.close(code=4400, reason=exc.code[:120])
         return
     except Exception:
+        SHELL_SESSIONS.labels(kind=kind, result="failed").inc()
         if consumed:
             locked(service.close_session, session_id)
         logger.exception("Failed to open device shell")
@@ -165,8 +168,11 @@ async def _bridge(websocket: WebSocket, session_id: uuid.UUID, service: ShellSer
         await websocket.close(code=1011)
         return
     if connection is None:
+        SHELL_SESSIONS.labels(kind=kind, result="failed").inc()
         await websocket.close(code=1011)
         return
+    SHELL_SESSIONS.labels(kind=kind, result="opened").inc()
+    SHELL_SESSIONS_ACTIVE.labels(kind=kind).inc()
 
     settings = service.settings
     idle = settings.shell_idle_timeout_seconds
@@ -236,6 +242,7 @@ async def _bridge(websocket: WebSocket, session_id: uuid.UUID, service: ShellSer
     except Exception:
         logger.exception("%s session %s ended with an error", kind, session_id)
     finally:
+        SHELL_SESSIONS_ACTIVE.labels(kind=kind).dec()
         for task in tasks:
             task.cancel()
         # Cleanup stays synchronous so it still runs to the end if this coroutine is cancelled

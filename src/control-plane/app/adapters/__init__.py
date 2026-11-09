@@ -5,6 +5,8 @@ Unsupported provider names fail fast. Future providers are not implemented.
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -15,8 +17,11 @@ from app.ports.connectivity import DeviceConnectivityProvider
 from app.ports.deployment import DeploymentProvider
 from app.ports.identity import IdentityDirectory
 from app.ports.mqtt import MQTTGateway
+from app.ports.observability import Metrics
 from app.ports.shell import DeviceShellProvider
 from app.ports.storage import ObjectStorage
+
+logger = logging.getLogger(__name__)
 
 
 def mqtt_gateway(settings: Settings) -> MQTTGateway:
@@ -31,6 +36,23 @@ def mqtt_gateway(settings: Settings) -> MQTTGateway:
     from app.adapters.data_plane_mqtt import DataPlaneMQTTGateway
 
     return DataPlaneMQTTGateway(settings)
+
+
+def metrics_backend(settings: Settings) -> Metrics:
+    """Return the metrics adapter. Metrics are pull-only: no backend is ever contacted."""
+    from app.adapters.noop_metrics import NoopMetrics
+
+    if not settings.metrics_enabled:
+        return NoopMetrics()
+    if settings.observability_backend == "prometheus":
+        from app.adapters.prometheus_metrics import PrometheusMetrics
+
+        return PrometheusMetrics()
+    logger.warning(
+        "OBSERVABILITY_BACKEND=%s has no metrics adapter yet; metrics are disabled",
+        settings.observability_backend,
+    )
+    return NoopMetrics()
 
 
 def rate_limiter(settings: Settings, *, limit: int, window_seconds: int, prefix: str) -> RateLimiter:
@@ -80,8 +102,7 @@ def connectivity_provider(settings: Settings) -> DeviceConnectivityProvider | No
 
         return WireGuardConnectivityProvider()
     raise RuntimeError(
-        f"Unsupported connectivity.provider={settings.connectivity_provider!r}; "
-        "only 'wireguard' and 'none' are known"
+        f"Unsupported connectivity.provider={settings.connectivity_provider!r}; only 'wireguard' and 'none' are known"
     )
 
 
@@ -103,8 +124,7 @@ def shell_provider(settings: Settings) -> DeviceShellProvider | None:
             cert_ttl_seconds=settings.shell_ssh_cert_ttl_seconds,
         )
     raise RuntimeError(
-        f"Unsupported shell.provider={settings.shell_provider!r}; "
-        "only 'ssh_gateway', 'echo', and 'none' are known"
+        f"Unsupported shell.provider={settings.shell_provider!r}; only 'ssh_gateway', 'echo', and 'none' are known"
     )
 
 
@@ -120,9 +140,7 @@ def ota_provider(settings: Settings) -> DeploymentProvider | None:
 
 def identity_directory(settings: Settings, session: Session) -> IdentityDirectory:
     if settings.identity_provider != "local":
-        raise RuntimeError(
-            f"Unsupported identity.provider={settings.identity_provider!r}; only 'local' is implemented"
-        )
+        raise RuntimeError(f"Unsupported identity.provider={settings.identity_provider!r}; only 'local' is implemented")
     from app.adapters.local_identity import LocalIdentityDirectory
 
     return LocalIdentityDirectory(session)

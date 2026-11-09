@@ -1,0 +1,13 @@
+# Overlay for clusters running the Prometheus Operator (e.g. kube-prometheus-stack):
+#   helm upgrade --install meteorcloud . -f values-production.yaml -f values-monitoring.yaml
+# Set the labels your Prometheus selects ServiceMonitors and rules by.
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+  prometheusRule:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack

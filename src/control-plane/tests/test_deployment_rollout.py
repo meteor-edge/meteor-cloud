@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.deployments.models import Deployment, DeploymentDevice
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_user
+from tests.metrics_helpers import sample
 from tests.test_deployments import UNIT, _register_device, _setup_release
 
 
@@ -610,7 +611,9 @@ def test_late_report_does_not_reopen_a_finished_deploy(client: TestClient, db_se
     )
     device_id = regs[0]["device_id"]
     _age_activation(db_session, body["id"], device_id, 120)
+    timed_out_before = sample("meteorcloud_deployment_device_results_total", status="timed_out")
     _tick(db_session, body["id"])
+    assert sample("meteorcloud_deployment_device_results_total", status="timed_out") - timed_out_before == 1
     finished = _detail(client, org.id, headers, body["id"])
     assert finished["status"] == "failed"
     assert finished["counts"]["timed_out"] == 1

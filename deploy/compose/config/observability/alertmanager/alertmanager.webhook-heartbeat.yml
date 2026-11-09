@@ -1,0 +1,36 @@
+# Alertmanager config that delivers every alert to one generic webhook and also sends the
+# always-firing Watchdog to a dead-man's-switch (heartbeat) URL. If the heartbeat stops
+# arriving, the heartbeat service alerts you: the host, Prometheus or Alertmanager is down.
+# Both URLs are read from files so they never land in this repository:
+# <ALERTMANAGER_SECRETS_DIR>/webhook_url and <ALERTMANAGER_SECRETS_DIR>/heartbeat_url.
+# Selected with ALERTMANAGER_CONFIG=alertmanager.webhook-heartbeat.yml (Ansible does this when
+# observability_alert_webhook_url and observability_alert_heartbeat_url are both set).
+route:
+  receiver: webhook
+  group_by: [alertname, scope]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Watchdog always fires; the heartbeat service expects it every few minutes.
+    - matchers: [alertname="Watchdog"]
+      receiver: heartbeat
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 5m
+
+receivers:
+  - name: heartbeat
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/heartbeat_url
+        send_resolved: false
+  - name: webhook
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/webhook_url
+        send_resolved: true
+
+inhibit_rules:
+  - source_matchers: [alertname="ControlPlaneDown"]
+    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency|UnhandledExceptions"]
+  - source_matchers: [alertname="DatabaseDown"]
+    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency|UnhandledExceptions|DeploySweeperFailing"]

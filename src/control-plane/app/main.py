@@ -11,20 +11,23 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.adapters import metrics_backend
 from app.api.rest.health import router as health_router
 from app.artifacts.router import router as artifacts_router
 from app.audit.router import router as audit_router
 from app.authorization.router import router as authorization_router
 from app.connectivity.internal_router import router as connectivity_internal_router
 from app.connectivity.router import router as connectivity_router
+from app.core.access_log import AccessLogMiddleware
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.core.metrics import MetricsMiddleware, metrics_response
+from app.core.metrics import BUILD_INFO, MetricsMiddleware, configure_metrics, metrics_enabled, metrics_response
 from app.core.request_id import RequestIdMiddleware
 from app.deployments.router import router as deployments_router
 from app.deployments.sweeper import run_sweeper
 from app.devices.agent_router import router as agent_router
+from app.devices.fleet_metrics import register_fleet_metrics
 from app.devices.router import router as fleet_router
 from app.endpoints.router import router as endpoints_router
 from app.endpoints.routing import router as routing_internal_router
@@ -61,13 +64,20 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level, settings.log_format)
 
+    configure_metrics(metrics_backend(settings))
+
     application = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
         lifespan=lifespan,
     )
 
-    application.add_middleware(MetricsMiddleware)
+    if metrics_enabled():
+        application.add_middleware(MetricsMiddleware)
+        BUILD_INFO.labels(version=settings.app_version).set(1)
+        register_fleet_metrics(settings)
+    if settings.access_log_enabled:
+        application.add_middleware(AccessLogMiddleware)
     application.add_middleware(RequestIdMiddleware)
     application.add_middleware(
         CORSMiddleware,
@@ -94,12 +104,13 @@ def create_app() -> FastAPI:
     application.include_router(mqtt_internal_router)
     application.include_router(connectivity_internal_router)
     application.include_router(routing_internal_router)
-    application.add_api_route(
-        "/metrics",
-        metrics_response,
-        methods=["GET"],
-        include_in_schema=False,
-    )
+    if metrics_enabled():
+        application.add_api_route(
+            "/metrics",
+            metrics_response,
+            methods=["GET"],
+            include_in_schema=False,
+        )
 
     return application
 

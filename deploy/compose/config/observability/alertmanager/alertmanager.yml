@@ -1,0 +1,21 @@
+# Default Alertmanager config: alerts are visible at http://127.0.0.1:9093 but sent nowhere.
+# To deliver them, use alertmanager.webhook.yml (ALERTMANAGER_CONFIG=alertmanager.webhook.yml)
+# or replace this file with your own receivers. Secrets are never put in this file: receivers
+# read them from files under /etc/alertmanager/secrets (ALERTMANAGER_SECRETS_DIR on the host).
+route:
+  receiver: "null"
+  group_by: [alertname, scope]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: "null"
+
+inhibit_rules:
+  # While the API is down, its error/latency alerts are noise.
+  - source_matchers: [alertname="ControlPlaneDown"]
+    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency|UnhandledExceptions"]
+  # While the database is down, API errors and stuck rollouts follow from it.
+  - source_matchers: [alertname="DatabaseDown"]
+    target_matchers: [alertname=~"APIHighErrorRate|APIErrorBurst|APIHighLatency|UnhandledExceptions|DeploySweeperFailing"]
