@@ -193,7 +193,13 @@ class RegistrationService:
         now: datetime,
     ) -> Device:
         if payload.name:
-            device.name = payload.name.strip()[:255]
+            requested = payload.name.strip()[:255]
+            if requested.casefold() != device.name.casefold():
+                self.devices.lock_names(organization_id=device.organization_id)
+                taken = self.devices.taken_names(organization_id=device.organization_id)
+                taken.discard(device.name.casefold())
+                requested = unique_device_name(requested, taken=taken)
+            device.name = requested
         # Token-bound assignments apply on re-registration when provided.
         if token.device_type_id is not None:
             device.device_type_id = token.device_type_id

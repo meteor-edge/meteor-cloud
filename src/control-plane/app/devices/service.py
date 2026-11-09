@@ -703,9 +703,16 @@ class FleetService:
         ]
 
     def _suggested_names(
-        self, organization_id: uuid.UUID, rows: list[DeviceEnrollmentRequest]
+        self,
+        organization_id: uuid.UUID,
+        rows: list[DeviceEnrollmentRequest],
+        *,
+        include_existing: bool = True,
     ) -> dict[uuid.UUID, str]:
-        """A name per unclaimed request: a re-enrolling device keeps its own, others get distinct defaults."""
+        """A name per unclaimed request: a re-enrolling device keeps its own, others get distinct defaults.
+
+        With ``include_existing=False``, requests from a device that is already enrolled are left out.
+        """
         unclaimed = sorted(
             (row for row in rows if row.status in {"pending", "approved"} and row.claimed_at is None),
             key=lambda row: row.created_at,
@@ -733,7 +740,8 @@ class FleetService:
                 matches |= ids_by_mac.get(mac, set())
             # Several matches: the claim will be refused as ambiguous, so there is no name to keep.
             if len(matches) == 1:
-                suggested[row.id] = names_by_id[matches.pop()]
+                if include_existing:
+                    suggested[row.id] = names_by_id[matches.pop()]
                 continue
             name = unique_device_name(
                 default_device_name(
@@ -772,6 +780,13 @@ class FleetService:
             request.device_group_id = payload.device_group_id
         if payload.name is not None:
             request.assigned_name = payload.name
+        elif not request.assigned_name:
+            # Keep the name the list showed, so a later request claiming first can't take it.
+            self.devices.lock_names(organization_id=organization_id)
+            every_request = self.enrollment_requests.list(organization_id=organization_id, status=None)
+            request.assigned_name = self._suggested_names(
+                organization_id, every_request, include_existing=False
+            ).get(request.id)
 
         request.status = "approved"
         request.reviewed_by_user_id = actor.id

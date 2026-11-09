@@ -197,3 +197,24 @@ def test_device_list_filters_by_exact_name(client: TestClient, db_session: Sessi
         _register_device(client, token, name=name, mac=f"aa:bb:cc:dd:01:0{index}")
     listed = client.get(f"/api/v1/organizations/{org.id}/devices", headers=headers, params={"name": "lobby"}).json()
     assert [item["name"] for item in listed["items"]] == ["Lobby"]
+
+
+def test_approved_names_hold_even_when_a_later_request_claims_first(client: TestClient, db_session: Session) -> None:
+    org, headers, key = _org_with_key(client, db_session)
+    first = _submit(client, key, hostname="kiosk", mac_addresses=["aa:bb:cc:dd:00:10"])
+    second = _submit(client, key, hostname="kiosk", mac_addresses=["aa:bb:cc:dd:00:11"])
+    _approve(client, org, headers, first["request_id"])
+    _approve(client, org, headers, second["request_id"])
+    assert _claim(client, second)["name"] == "kiosk-2"
+    assert _claim(client, first)["name"] == "kiosk"
+
+
+def test_reregistering_with_a_taken_name_gets_a_number(client: TestClient, db_session: Session) -> None:
+    _org, _headers, token, _release = _setup_release(client, db_session)
+    _register_device(client, token, name="Lobby", mac="aa:bb:cc:dd:00:12")
+    other = _register_device(client, token, name="Kiosk", mac="aa:bb:cc:dd:00:13")
+    renamed = _register_device(client, token, name="lobby", mac="aa:bb:cc:dd:00:13")
+    assert renamed["device_id"] == other["device_id"]
+    assert renamed["name"] == "lobby-2"
+    # Asking again for the name it already has keeps it (case changes included).
+    assert _register_device(client, token, name="LOBBY-2", mac="aa:bb:cc:dd:00:13")["name"] == "LOBBY-2"
