@@ -44,8 +44,9 @@ and brings `wg0` down when the helper is present).
 
 `meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
 and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`).
-`sudo ./installcli.sh` installs root-owned helpers and passwordless sudo for those
-files only, so `meteorcli run` can stay unprivileged:
+`sudo ./installcli.sh` installs `wireguard-tools` when needed, plus root-owned
+helpers and passwordless sudo for those files only, so `meteorcli run` can stay
+unprivileged:
 
 - `/usr/local/libexec/meteorcli-wg` — create `wg0` (meteorcli's own `wg0.conf`
   keys only; no `PostUp`/`PreUp` hooks)
@@ -64,6 +65,18 @@ Config and credentials go in `~/.config/meteorcli` for a normal user, or
 install so the service finds the device token. Re-running
 `sudo ./installcli.sh --with-service` copies an existing user config into
 `/etc/meteorcli` when that dir has no `device-token` yet.
+
+**Golden image / first boot:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/meteor-edge/meteor-cloud/master/src/device-plane/agent/packaging/firstboot/install-meteorcli-firstboot.sh | sudo bash
+```
+
+See [`packaging/firstboot/`](packaging/firstboot/README.md). First-boot installs
+latest `meteorcli`, runs `request-token`, and polls with `claim` in
+`meteorcli-firstboot.service` until an administrator approves, then starts
+`meteorcli.service` and removes first-boot. The SSH session does not wait for
+approval.
 
 For local development:
 

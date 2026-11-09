@@ -5,13 +5,15 @@
 #   make agent-dist
 #
 # Writes dist/meteorcli-<version>.tar.gz, dist/meteorcli.tar.gz (stable name
-# for .../releases/latest/download/), dist/install-meteorcli.sh, dist/SHA256SUMS.
+# for .../releases/latest/download/), dist/install-meteorcli.sh,
+# dist/install-meteorcli-firstboot.sh, dist/SHA256SUMS.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENT_SRC="${ROOT}/src/device-plane/agent"
 RUNTIME_SRC="${ROOT}/src/device-plane/runtime"
 INSTALLER_SRC="${ROOT}/scripts/install-meteorcli.sh"
+FIRSTBOOT_INSTALLER_SRC="${ROOT}/src/device-plane/agent/packaging/firstboot/install-meteorcli-firstboot.sh"
 DEST="${AGENT_DIST_DIR:-${ROOT}/dist}"
 
 if ! command -v rsync >/dev/null 2>&1; then
@@ -24,6 +26,10 @@ if [[ ! -f "${AGENT_SRC}/pyproject.toml" || ! -d "${RUNTIME_SRC}" ]]; then
 fi
 if [[ ! -f "${INSTALLER_SRC}" ]]; then
   echo "error: missing ${INSTALLER_SRC}" >&2
+  exit 1
+fi
+if [[ ! -f "${FIRSTBOOT_INSTALLER_SRC}" ]]; then
+  echo "error: missing ${FIRSTBOOT_INSTALLER_SRC}" >&2
   exit 1
 fi
 
@@ -63,11 +69,12 @@ fi
 tar -C "${DEST}" -czf "${DEST}/meteorcli-${VERSION}.tar.gz" "meteorcli-${VERSION}"
 cp -f "${DEST}/meteorcli-${VERSION}.tar.gz" "${DEST}/meteorcli.tar.gz"
 cp -f "${INSTALLER_SRC}" "${DEST}/install-meteorcli.sh"
-chmod 0755 "${DEST}/install-meteorcli.sh"
+cp -f "${FIRSTBOOT_INSTALLER_SRC}" "${DEST}/install-meteorcli-firstboot.sh"
+chmod 0755 "${DEST}/install-meteorcli.sh" "${DEST}/install-meteorcli-firstboot.sh"
 
 (
   cd "${DEST}"
-  sha256sum "meteorcli-${VERSION}.tar.gz" "meteorcli.tar.gz" "install-meteorcli.sh" > SHA256SUMS
+  sha256sum "meteorcli-${VERSION}.tar.gz" "meteorcli.tar.gz" "install-meteorcli.sh" "install-meteorcli-firstboot.sh" > SHA256SUMS
 )
 
 rm -rf "${STAGE}"
@@ -76,7 +83,8 @@ echo "Packed meteorcli ${VERSION}:"
 echo "  ${DEST}/meteorcli-${VERSION}.tar.gz"
 echo "  ${DEST}/meteorcli.tar.gz"
 echo "  ${DEST}/install-meteorcli.sh"
+echo "  ${DEST}/install-meteorcli-firstboot.sh"
 echo "  ${DEST}/SHA256SUMS"
 echo
 echo "Publish: git tag agent-v${VERSION} && git push origin agent-v${VERSION}"
-echo "Or: gh release create agent-v${VERSION} ${DEST}/meteorcli.tar.gz ${DEST}/meteorcli-${VERSION}.tar.gz ${DEST}/install-meteorcli.sh ${DEST}/SHA256SUMS"
+echo "Or: gh release create agent-v${VERSION} ${DEST}/meteorcli.tar.gz ${DEST}/meteorcli-${VERSION}.tar.gz ${DEST}/install-meteorcli.sh ${DEST}/install-meteorcli-firstboot.sh ${DEST}/SHA256SUMS"

@@ -91,6 +91,11 @@ meteorcli request-token --name edge-01
 4. If the CLI timed out waiting, run `meteorcli claim`, then start the agent
    (`sudo systemctl enable --now meteorcli` or `meteorcli run`).
 
+For a Pi image that should install `meteorcli` and **keep polling until you
+approve**, without SSH or `cmdline.txt`: copy `.meteorenv` onto **bootfs**
+and append `cloud-init-user-data.yaml` to `user-data`. Details:
+[first-boot enrollment](../src/device-plane/agent/packaging/firstboot/README.md).
+
 Details: [Enrollment API keys](fleet/enrollment-api-keys.md), [Device-initiated enrollment](fleet/device-request-enrollment.md), [meteorcli](meteorcli.md).
 
 ## 4. What you should see

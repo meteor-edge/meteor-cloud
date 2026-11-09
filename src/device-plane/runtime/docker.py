@@ -6,6 +6,7 @@ Uses the ``docker`` CLI via subprocess. Callers inject ``runner`` in tests.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -81,9 +82,21 @@ class DockerError(Exception):
         self.message = message
 
 
+def resolve_docker_bin() -> str | None:
+    """Path to the docker CLI, or None when it is not installed."""
+    found = shutil.which("docker")
+    if found:
+        return found
+    # meteorcli.service may run with a PATH that omits snap; still find a real binary.
+    for candidate in ("/usr/bin/docker", "/usr/local/bin/docker", "/snap/bin/docker"):
+        if Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def docker_available() -> bool:
-    """True when the ``docker`` CLI is on PATH."""
-    return shutil.which("docker") is not None
+    """True when the ``docker`` CLI is on PATH (or a common install location)."""
+    return resolve_docker_bin() is not None
 
 
 def _default_runner(args: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:

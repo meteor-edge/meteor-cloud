@@ -6,6 +6,7 @@
 |-------|-----|
 | Missing `EDGE_PLATFORM_*` secrets | Export env vars (see [AWS prerequisites](aws-prerequisites.md)) |
 | SSH key path missing | Create key pair; verify `aws.ssh_private_key_path` and `chmod 600` |
+| PEM does not match EC2 key pair | `aws.ssh_key_name` and the PEM are different keys — import the PEM (`aws ec2 import-key-pair`) or point `ssh_key_name` at the matching pair ([AWS prerequisites](aws-prerequisites.md)) |
 | Empty PEM file (`error in libcrypto`) | Recreate key pair — AWS only gives private key once |
 | `vpn requires cloud_app` | Enable `services.cloud_app` or disable `services.vpn` |
 | Tool not found | Install Terraform, Ansible, OpenSSH |
@@ -17,6 +18,7 @@
 | `UnauthorizedOperation` | Add EC2 permissions to IAM policy |
 | `InvalidKeyPair.NotFound` | Create key pair in the **same region** as `aws.region` |
 | `InsufficientInstanceCapacity` | Try another AZ or instance type |
+| Route53 `Tried to create resource record set … but it already exists` | Older installer without `allow_overwrite`; upgrade and re-run `make aws-up ARGS='--route53'`, or delete the leftover A records for `<domain>` / `*.<domain>` |
 
 ## SSH errors
 

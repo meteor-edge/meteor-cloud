@@ -88,6 +88,11 @@ class Settings(BaseSettings):
         default=60,
         alias="ENROLLMENT_POLL_RATE_LIMIT_WINDOW_SECONDS",
     )
+    # Cap per source IP across all request ids; high enough for a site's devices behind one NAT.
+    enrollment_poll_ip_rate_limit_requests: int = Field(
+        default=600,
+        alias="ENROLLMENT_POLL_IP_RATE_LIMIT_REQUESTS",
+    )
     # Interval the device should wait between poll attempts (returned to the CLI).
     enrollment_poll_interval_seconds: int = Field(
         default=10,

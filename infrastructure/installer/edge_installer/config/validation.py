@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from edge_installer.config.models import INSTALLATION_NAME_PATTERN, InstallationConfig
 from edge_installer.exceptions import ConfigurationError
 from edge_installer.process.runner import command_exists
+from edge_installer.providers.aws.ssh_key import validate_ssh_key_matches_ec2
 
 REQUIRED_SECRET_VARS = (
     "EDGE_PLATFORM_JWT_SECRET",
@@ -149,6 +150,17 @@ def ensure_valid(config: InstallationConfig) -> None:
     errors = validate_configuration(config) + validate_dependencies(config)
     profile = config.aws.profile if config.aws else None
     errors.extend(validate_aws_credentials(profile))
+    if config.installation.provider == "aws" and config.aws is not None:
+        key_path = Path(config.aws.ssh_private_key_path).expanduser()
+        if key_path.exists():
+            errors.extend(
+                validate_ssh_key_matches_ec2(
+                    private_key_path=key_path,
+                    key_name=config.aws.ssh_key_name,
+                    region=config.aws.region,
+                    profile=profile,
+                )
+            )
     if errors:
         message = "Configuration is invalid:\n\n" + "\n".join(f"- {item}" for item in errors)
         raise ConfigurationError(message, stage="validation")

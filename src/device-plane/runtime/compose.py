@@ -28,11 +28,14 @@ class ComposeError(Exception):
 
 def compose_available() -> bool:
     """True when ``docker`` exists and ``docker compose version`` succeeds."""
-    if shutil.which("docker") is None:
+    from runtime.docker import resolve_docker_bin
+
+    docker_bin = resolve_docker_bin()
+    if docker_bin is None:
         return False
     try:
         result = subprocess.run(
-            ["docker", "compose", "version"],
+            [docker_bin, "compose", "version"],
             check=False,
             capture_output=True,
             text=True,
