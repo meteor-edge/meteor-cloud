@@ -957,3 +957,181 @@ def test_run_reowns_the_config_dir_after_reconcile(tmp_path, monkeypatch, capsys
     assert meteorcli.main(["--config-dir", str(config_dir), "run", "--once"]) == 0
     capsys.readouterr()
     assert events[-2:] == ["reconcile", "chown"]
+
+
+# --- meteorcli run waits for a pending token request (first boot hands the wait to the service) ---
+
+_APPROVED = {
+    "status": "approved",
+    "device_id": "device-1",
+    "device_token": "dev_secret-value",
+    "organization_id": "org-1",
+    "name": "edge-01",
+    "heartbeat_interval_seconds": 60,
+    "poll_interval_seconds": 10,
+}
+
+
+def _pending_device(tmp_path: Path, *, api_key: str | None = "key_abc", name: str | None = "edge-01") -> Path:
+    config_dir = tmp_path / "meteorcli"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text('{"server_url": "http://localhost:8000"}', encoding="utf-8")
+    claim = {"request_id": "req-1", "claim_secret": "clm_secret-value"}
+    if name:
+        claim["name"] = name
+    (config_dir / "claim-secret").write_text(json.dumps(claim), encoding="utf-8")
+    if api_key:
+        (config_dir / "api-key").write_text(api_key, encoding="utf-8")
+    return config_dir
+
+
+@pytest.fixture
+def run_env(monkeypatch):
+    """Fake client, no real sleeps, no systemd, and a run loop that returns at once."""
+    client = FakeClient()
+    sleeps: list[float] = []
+    loops: list[dict] = []
+    monkeypatch.setattr(meteorcli, "EdgeClient", lambda server_url, **_: client)
+    monkeypatch.setattr(meteorcli.time, "sleep", sleeps.append)
+    monkeypatch.setattr(meteorcli, "service_state", lambda: meteorcli.NOT_INSTALLED)
+    monkeypatch.setattr(meteorcli, "collect_inventory", lambda: {"hostname": "pi"})
+    monkeypatch.setattr(
+        meteorcli,
+        "run_loop",
+        lambda client, token, **kwargs: loops.append({"token": token, **kwargs}),
+    )
+    return client, sleeps, loops
+
+
+def test_run_waits_for_approval_then_runs(tmp_path, run_env) -> None:
+    client, sleeps, loops = run_env
+    config_dir = _pending_device(tmp_path)
+    client.enroll_poll_responses = [
+        {"status": "pending", "poll_interval_seconds": 10},
+        {"status": "pending", "poll_interval_seconds": 10},
+        dict(_APPROVED),
+    ]
+
+    code = meteorcli.main(["--config-dir", str(config_dir), "run"])
+
+    assert code == 0
+    assert len(client.enroll_poll_calls) == 3
+    assert sleeps == [10, 10]
+    assert (config_dir / "device-token").read_text(encoding="utf-8") == "dev_secret-value"
+    assert not (config_dir / "claim-secret").exists()
+    assert loops and loops[0]["token"] == "dev_secret-value"
+    assert client.enroll_request_calls == []
+
+
+def test_run_never_polls_faster_than_minimum(tmp_path, run_env) -> None:
+    client, sleeps, _ = run_env
+    config_dir = _pending_device(tmp_path)
+    client.enroll_poll_responses = [{"status": "pending", "poll_interval_seconds": 1}, dict(_APPROVED)]
+
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+    assert sleeps == [meteorcli.MIN_POLL_INTERVAL_SECONDS]
+
+
+def test_run_keeps_waiting_through_network_errors(tmp_path, run_env, monkeypatch) -> None:
+    client, sleeps, loops = run_env
+    config_dir = _pending_device(tmp_path)
+    responses = [AgentApiError(0, "network_error", "down"), dict(_APPROVED)]
+
+    def poll(**kwargs):
+        client.enroll_poll_calls.append(kwargs)
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(client, "enroll_poll", poll)
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+    assert sleeps == [meteorcli.RATE_LIMIT_BACKOFF_SECONDS]
+    assert loops
+
+
+def test_run_resubmits_expired_request_with_stored_key(tmp_path, run_env, caplog) -> None:
+    client, _, loops = run_env
+    config_dir = _pending_device(tmp_path)
+    client.enroll_request_response = {
+        "request_id": "req-2",
+        "claim_secret": "clm_second",
+        "status": "pending",
+        "poll_interval_seconds": 10,
+    }
+    client.enroll_poll_responses = [{"status": "expired", "poll_interval_seconds": 10}, dict(_APPROVED)]
+
+    with caplog.at_level("INFO", logger="meteorcli"):
+        assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+
+    assert client.enroll_request_calls == [{"api_key": "key_abc", "inventory": {"hostname": "pi"}, "name": "edge-01"}]
+    assert client.enroll_poll_calls[1] == {"request_id": "req-2", "claim_secret": "clm_second"}
+    assert "key_abc" not in caplog.text and "clm_" not in caplog.text
+    assert loops
+
+
+def test_run_expired_without_api_key_stops(tmp_path, run_env, capsys) -> None:
+    client, _, loops = run_env
+    config_dir = _pending_device(tmp_path, api_key=None)
+    client.enroll_poll_responses = [{"status": "expired", "poll_interval_seconds": 10}]
+
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 1
+    assert "no API key is stored" in capsys.readouterr().err
+    assert not (config_dir / "claim-secret").exists()
+    assert client.enroll_request_calls == []
+    assert loops == []
+
+
+def test_run_rejected_request_stops(tmp_path, run_env, capsys) -> None:
+    client, _, loops = run_env
+    config_dir = _pending_device(tmp_path)
+    client.enroll_poll_responses = [{"status": "rejected", "rejection_reason": "unknown device"}]
+
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 1
+    assert "unknown device" in capsys.readouterr().err
+    assert not (config_dir / "claim-secret").exists()
+    assert loops == []
+
+
+def test_run_unknown_request_drops_claim(tmp_path, run_env, monkeypatch) -> None:
+    client, _, loops = run_env
+    config_dir = _pending_device(tmp_path)
+
+    def poll(**_):
+        raise AgentApiError(401, "invalid_enrollment_request", "The enrollment request is invalid.")
+
+    monkeypatch.setattr(client, "enroll_poll", poll)
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 1
+    assert not (config_dir / "claim-secret").exists()
+    assert loops == []
+
+
+def test_run_once_does_not_wait_for_pending_request(tmp_path, run_env, capsys) -> None:
+    client, _, _ = run_env
+    config_dir = _pending_device(tmp_path)
+
+    assert meteorcli.main(["--config-dir", str(config_dir), "run", "--once"]) == 1
+    assert client.enroll_poll_calls == []
+    assert "not registered" in capsys.readouterr().err
+
+
+def test_request_token_stores_name_for_resubmit(tmp_path, run_env) -> None:
+    config_dir = tmp_path / "meteorcli"
+    code = meteorcli.main(
+        [
+            "--config-dir",
+            str(config_dir),
+            "request-token",
+            "--server",
+            "http://localhost:8000",
+            "--api-key",
+            "key_abc",
+            "--name",
+            "pi-07",
+            "--wait",
+            "0",
+        ]
+    )
+    assert code == 0
+    stored = json.loads((config_dir / "claim-secret").read_text(encoding="utf-8"))
+    assert stored == {"request_id": "req-1", "claim_secret": "clm_secret-value", "name": "pi-07"}

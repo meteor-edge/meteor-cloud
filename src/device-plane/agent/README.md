@@ -165,6 +165,14 @@ still pending on the server; pass `--new` only if you intend to replace it.
 After a rejection or expiry, run `request-token` again (no `--new` needed).
 Use `meteorcli run` after the token is stored.
 
+Or leave the wait to the service: `meteorcli request-token --wait 0`, then
+`sudo systemctl enable --now meteorcli`. While a request is pending, `meteorcli run`
+waits for approval first (every 10 seconds, also across reboots), then starts
+heartbeats. If the request expires, it submits a new one with the stored API key.
+A rejected request stops the wait. Meteor Imager's `meteor-firstrun.sh` uses this:
+it sends the request, deletes itself and `.meteorenv` from the boot partition,
+and starts `meteorcli.service`.
+
 ## Send heartbeats
 
 `meteorcli run` is a foreground loop (heartbeats, MQTT, WireGuard). It stays in

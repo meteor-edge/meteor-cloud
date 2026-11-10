@@ -8,6 +8,7 @@ Subcommands
   request-token  Ask the API for a device token; wait briefly for admin approval.
   claim          Collect the device token after a later approval.
   run        Foreground heartbeats, MQTT, WireGuard (refuses if meteorcli.service is already active).
+             With a pending token request, it first waits for approval.
   mqtt-test    Publish one TLS MQTT message (default: devices/{id}/status).
   mqtt-listen  Print inbound commands (default: devices/{id}/commands).
   status       Show persisted (non-secret) configuration.
@@ -277,7 +278,19 @@ def _load_pending_claim(paths: CliPaths) -> dict | None:
     claim_secret = data.get("claim_secret")
     if not request_id or not claim_secret:
         return None
-    return {"request_id": str(request_id), "claim_secret": str(claim_secret)}
+    pending = {"request_id": str(request_id), "claim_secret": str(claim_secret)}
+    if data.get("name"):
+        pending["name"] = str(data["name"])
+    return pending
+
+
+def _store_pending_claim(paths: CliPaths, submitted: dict, name: str | None) -> dict:
+    """Save the claim secret. The requested name is kept so an expired request can be resubmitted."""
+    pending = {"request_id": str(submitted["request_id"]), "claim_secret": str(submitted["claim_secret"])}
+    if name:
+        pending["name"] = name
+    write_secret(paths.claim_secret_path, json.dumps(pending))
+    return pending
 
 
 def _poll_interval(polled: dict | None, fallback: int) -> int:
@@ -440,12 +453,9 @@ def _cmd_request(args: argparse.Namespace) -> int:
         print(f"error: enrollment request failed: {error.message}", file=sys.stderr)
         return 1
 
-    request_id = str(submitted["request_id"])
-    claim_secret = str(submitted["claim_secret"])
-    write_secret(
-        paths.claim_secret_path,
-        json.dumps({"request_id": request_id, "claim_secret": claim_secret}),
-    )
+    stored = _store_pending_claim(paths, submitted, args.name)
+    request_id = stored["request_id"]
+    claim_secret = stored["claim_secret"]
     interval = int(submitted.get("poll_interval_seconds") or MIN_POLL_INTERVAL_SECONDS)
     print(f"Enrollment request {request_id} submitted.")
     wait_seconds = max(0, int(args.wait))
@@ -591,8 +601,116 @@ def _load_or_fail(paths: CliPaths) -> tuple[AgentConfig, str] | None:
     return config, device_token
 
 
+# Statuses from the enrollment poll that mean the request itself is unknown or revoked.
+_ENROLL_INVALID_STATUSES = frozenset({401, 403, 404})
+
+
+def _wait_for_pending_enrollment(paths: CliPaths, *, sleep) -> int | None:
+    """Wait for an administrator to approve a token request submitted earlier.
+
+    First boot (Meteor Imager's firstrun) runs ``request-token --wait 0``, deletes
+    itself and starts meteorcli.service, so the wait for approval lives here and
+    survives reboots. An expired request is resubmitted with the stored API key.
+
+    Returns None when there is nothing to wait for or the device is now enrolled,
+    or an exit code when the request ended without a device credential.
+    """
+    if read_device_token(paths.token_path) is not None:
+        return None
+    pending = _load_pending_claim(paths)
+    if pending is None:
+        return None
+    server = resolve_server_url(_load(paths))
+    if not server:
+        print(f"error: no server configured. Run '{PROG} config --domain …' first.", file=sys.stderr)
+        return 2
+    client = EdgeClient(server)
+    interval = MIN_POLL_INTERVAL_SECONDS
+    logger.info(
+        "Enrollment request %s is waiting for approval in MeteorCloud; checking every %ss.",
+        pending["request_id"],
+        interval,
+    )
+    while True:
+        try:
+            polled = client.enroll_poll(request_id=pending["request_id"], claim_secret=pending["claim_secret"])
+        except AgentApiError as error:
+            if error.status in _ENROLL_INVALID_STATUSES:
+                print(
+                    f"error: {server} does not know enrollment request {pending['request_id']} "
+                    f"({error.message}). Submit a new one with '{PROG} request-token'.",
+                    file=sys.stderr,
+                )
+                remove_secret(paths.claim_secret_path)
+                return 1
+            delay = RATE_LIMIT_BACKOFF_SECONDS if error.status == 429 else max(interval, RATE_LIMIT_BACKOFF_SECONDS)
+            logger.warning("Could not check enrollment (%s); retrying in %ss.", error.message, delay)
+            sleep(delay)
+            continue
+
+        status = polled.get("status")
+        if status == "pending":
+            interval = _poll_interval(polled, interval)
+            sleep(interval)
+            continue
+        if status == "approved" and polled.get("device_token"):
+            _persist_claimed_device(paths, client, polled)
+            logger.info("Approved: registered device %s (%s).", polled["device_id"], polled.get("name") or "-")
+            return None
+        if status == "expired":
+            renewed = _resubmit_expired_request(paths, client, pending)
+            if renewed is None:
+                return 1
+            if renewed is pending:
+                sleep(RATE_LIMIT_BACKOFF_SECONDS)
+            pending = renewed
+            continue
+        return _handle_poll_payload(paths, client, polled)
+
+
+def _resubmit_expired_request(paths: CliPaths, client: EdgeClient, pending: dict) -> dict | None:
+    """Replace an expired request. Returns the new claim, ``pending`` to retry later, or None to stop."""
+    api_key = _normalize_secret(read_secret(paths.api_key_path))
+    if not api_key:
+        print(
+            f"error: enrollment request {pending['request_id']} expired and no API key is stored to "
+            f"submit a new one. Run '{PROG} config --api-key key_…' and '{PROG} request-token'.",
+            file=sys.stderr,
+        )
+        remove_secret(paths.claim_secret_path)
+        return None
+    try:
+        submitted = client.enroll_request(
+            api_key=api_key,
+            inventory=collect_inventory(),
+            name=pending.get("name"),
+        )
+    except AgentApiError as error:
+        if error.status in _ENROLL_INVALID_STATUSES:
+            print(f"error: enrollment request expired and the API key was refused: {error.message}", file=sys.stderr)
+            remove_secret(paths.claim_secret_path)
+            return None
+        logger.warning("Enrollment request expired; resubmitting failed (%s), will retry.", error.message)
+        return pending
+    renewed = _store_pending_claim(paths, submitted, pending.get("name"))
+    logger.info(
+        "Enrollment request %s expired; submitted %s. Approve it in MeteorCloud.",
+        pending["request_id"],
+        renewed["request_id"],
+    )
+    return renewed
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     paths = _paths_from_args(args)
+    if not args.once:
+        clash = duplicate_run_message(service_state())
+        if clash:
+            print(clash, file=sys.stderr)
+            return 1
+        waited = _wait_for_pending_enrollment(paths, sleep=getattr(args, "_sleep", time.sleep))
+        if waited is not None:
+            return waited
     loaded = _load_or_fail(paths)
     if loaded is None:
         return 1
@@ -603,12 +721,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     from edge_agent.mqtt_sync import MqttSupervisor
     from edge_agent.wireguard import ConnectivityState, describe_tunnel, sync_connectivity
-
-    if not args.once:
-        clash = duplicate_run_message(service_state())
-        if clash:
-            print(clash, file=sys.stderr)
-            return 1
 
     # One schedule per run loop; --once registers every time.
     wg_state = None if args.once else ConnectivityState()
@@ -1061,7 +1173,9 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Foreground loop: heartbeats, MQTT, and WireGuard. Stays in this terminal "
             "(Ctrl+C to stop). If meteorcli.service is already active, this command "
-            "exits so you do not run two agents. --once still runs one pass."
+            "exits so you do not run two agents. --once still runs one pass. "
+            "If a token request is still pending, it first waits for approval "
+            "(waits for pending enrollment), resubmitting an expired request with the stored API key."
         ),
     )
     run_parser.add_argument("--once", action="store_true", help="Send a single heartbeat and exit.")
