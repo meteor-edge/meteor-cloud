@@ -30,15 +30,15 @@ damaged `config.json` is ignored with a warning, and the service waits for `mete
   service; use `meteorcli run` in the foreground. `--with-service` makes that an
   error instead of a note.
 
-Pin a version: `METEORCLI_VERSION=0.1.0` (must match a published `agent-v*` tag).
+Pin a version: `METEORCLI_VERSION=0.2.0` (must match a published `agent-v*` tag).
 
 **Publish a release** (maintainers): set the version in
 `src/device-plane/agent/pyproject.toml`, then:
 
 ```bash
 make agent-dist          # optional local check; writes dist/
-git tag agent-v0.1.0     # must match the pyproject version
-git push origin agent-v0.1.0
+git tag agent-v0.2.0     # must match the pyproject version
+git push origin agent-v0.2.0
 ```
 
 CI packs agent + `src/device-plane/runtime` (no tests, no secrets) and creates

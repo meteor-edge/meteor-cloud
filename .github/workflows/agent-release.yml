@@ -1,6 +1,6 @@
 # Publish meteorcli (agent + runtime only) as a GitHub Release.
 # Create a tag that matches src/device-plane/agent/pyproject.toml:
-#   git tag agent-v0.1.0 && git push origin agent-v0.1.0
+#   git tag agent-v0.2.0 && git push origin agent-v0.1.0
 name: meteorcli release
 
 on:
