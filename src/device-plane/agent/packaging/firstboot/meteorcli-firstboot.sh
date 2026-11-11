@@ -29,6 +29,8 @@ RETRY_MAX_SECONDS="${METEOR_RETRY_MAX_SECONDS:-300}"
 # Random wait before the first request, so a batch powered on together does not
 # hit the server in the same second.
 START_JITTER_SECONDS="${METEOR_START_JITTER_SECONDS:-30}"
+# Pause before asking again when the request this run waited on has gone.
+CLAIM_SETTLE_SECONDS="${METEOR_CLAIM_SETTLE_SECONDS:-5}"
 LOCK_FILE="${METEOR_FIRSTBOOT_LOCK:-/run/meteorcli-firstboot.lock}"
 UNIT_PATH="${METEOR_FIRSTBOOT_UNIT:-/etc/systemd/system/meteorcli-firstboot.service}"
 INSTALLED_SCRIPT="${METEOR_FIRSTBOOT_SCRIPT:-/usr/local/sbin/meteorcli-firstboot.sh}"
@@ -408,6 +410,14 @@ prompt_if_missing() {
       fi
     done
     if meteor_var_empty "${METEOR_DOMAIN:-}" || meteor_var_empty "${METEOR_API_KEY:-}"; then
+      if [[ ! -f "${ENV_FILE}" ]]; then
+        # A card written without an enrollment key. Exit 0: Restart=on-failure must
+        # not repeat this forever. The next boot looks again.
+        log "No enrollment settings on this device (no ${ENV_FILE}, no .meteorenv on the boot partition)."
+        log "It will not join MeteorCloud by itself. Write the card again with an enrollment key, or run:"
+        log "  sudo ${INSTALLED_SCRIPT} --domain <host> --api-key key_…"
+        exit 0
+      fi
       echo "error: METEOR_DOMAIN and METEOR_API_KEY must be set (${ENV_FILE}, .meteorenv, or the boot partition) for background poll." >&2
       exit 1
     fi
@@ -593,7 +603,7 @@ request_token_once() {
 
 poll_until_enrolled() {
   export METEORCLI_CONFIG_DIR="${CONFIG_DIR}"
-  local failures=0 claim_failures=0 delay rc started early
+  local failures=0 claim_failures=0 had_claim=0 delay rc started early
   log "Polling for admin approval every ${WAIT_SECONDS}s (meteorcli claim)."
   log "Approve in console: Fleet → API keys or Devices → pending enrollment."
   log "This runs in meteorcli-firstboot.service; you can close SSH."
@@ -604,6 +614,7 @@ poll_until_enrolled() {
   fi
   while ! enrolled; do
     if [[ -f "${CLAIM_FILE}" ]]; then
+      had_claim=1
       started="${SECONDS}"
       if meteorcli claim --wait "${WAIT_SECONDS}"; then
         break
@@ -622,6 +633,13 @@ poll_until_enrolled() {
         claim_failures=0
         log "Still pending. Will poll again."
       fi
+    elif (( had_claim )); then
+      # The request this run waited on has gone. Most often meteorcli.service
+      # collected the token a moment ago and is still writing it; asking again
+      # now would leave a second pending request for a device that is enrolled.
+      had_claim=0
+      log "The pending request is gone; checking for the device token before asking again."
+      sleep "${CLAIM_SETTLE_SECONDS}"
     else
       log "No claim secret yet; submitting request-token…"
       rc=0

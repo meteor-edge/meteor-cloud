@@ -148,7 +148,15 @@ keyfile_escape() {
 }
 
 set_wifi_country() {
-  local country="$1"
+  local country="$1" state
+  # Raspberry Pi OS ships with Wi-Fi blocked until a country is set. systemd-rfkill
+  # restores that saved state when the radio appears, which can be after this
+  # early-boot run, so clear the saved state too (as Raspberry Pi Imager does).
+  for state in "${ROOT}"/var/lib/systemd/rfkill/*:wlan; do
+    if [[ -f "${state}" ]]; then
+      echo 0 >"${state}" 2>/dev/null || true
+    fi
+  done
   if [[ -z "${ROOT}" ]] && command -v raspi-config >/dev/null 2>&1; then
     # Also unblocks Wi-Fi, which Raspberry Pi OS keeps blocked until a country is set.
     raspi-config nonint do_wifi_country "${country}" >/dev/null 2>&1 && return 0

@@ -541,6 +541,11 @@ def test_settings_without_networkmanager_write_wpa_supplicant_with_derived_key(t
         "METEOR_WIFI_SSID=MyNetwork\nMETEOR_WIFI_PSK=wifi-password-123\nMETEOR_WIFI_COUNTRY=DE\n",
         encoding="utf-8",
     )
+    # Raspberry Pi OS ships Wi-Fi blocked; systemd-rfkill restores this file at boot.
+    rfkill = root / "var" / "lib" / "systemd" / "rfkill"
+    rfkill.mkdir(parents=True)
+    (rfkill / "platform-3f300000.mmcnr:wlan").write_text("1\n", encoding="utf-8")
+    (rfkill / "platform-3f201000.serial:bluetooth").write_text("1\n", encoding="utf-8")
 
     result = subprocess.run(
         ["bash", str(FIRSTBOOT / "meteorcli-settings.sh")],
@@ -559,6 +564,8 @@ def test_settings_without_networkmanager_write_wpa_supplicant_with_derived_key(t
     assert "ssid=" + b"MyNetwork".hex() in wpa
     assert "country=DE" in wpa
     assert not (root / "etc" / "meteorcli-firstboot.env").exists()
+    assert (rfkill / "platform-3f300000.mmcnr:wlan").read_text(encoding="utf-8") == "0\n"
+    assert (rfkill / "platform-3f201000.serial:bluetooth").read_text(encoding="utf-8") == "1\n"
 
 
 def test_settings_use_wpa_supplicant_when_networkmanager_is_installed_but_disabled(tmp_path: Path) -> None:
@@ -1080,6 +1087,121 @@ esac
     assert len(sleeps) == 3
     assert all(seconds >= 1 for seconds in sleeps)
     assert sleeps[-1] >= 2
+
+
+def test_claim_collected_by_the_service_does_not_send_a_second_request(tmp_path: Path) -> None:
+    """meteorcli.service can take the token while `claim` waits: claim then drops the
+    claim secret and fails just before the service has written the device token."""
+    boot, config_dir, stub_bin, calls_log = _poll_fixture(tmp_path, "    exit 1")
+    (config_dir / "claim-secret").write_text('{"request_id":"r","claim_secret":"c"}', encoding="utf-8")
+    real_sleep = shutil.which("sleep")
+    _write_executable(
+        stub_bin / "meteorcli",
+        f"""#!/usr/bin/env bash
+cmd="${{1:-}}"
+echo "$cmd" >> "{calls_log}"
+case "$cmd" in
+  --version) echo "meteorcli-stub 0" ;;
+  claim)
+    # A full wait (not an early return), then: approved, but collected elsewhere.
+    "{real_sleep}" 1.2
+    rm -f "{config_dir}/claim-secret"
+    echo "Approved, but the device credential was already claimed." >&2
+    exit 1
+    ;;
+esac
+""",
+    )
+    # The service finishes writing the token during first boot's short pause.
+    _write_executable(
+        stub_bin / "sleep",
+        f"""#!/usr/bin/env bash
+echo "sleep $*" >> "{calls_log}"
+printf '%s' 'dev_ok' > "{config_dir}/device-token"
+""",
+    )
+
+    result = subprocess.run(
+        ["bash", str(FIRSTBOOT / "meteorcli-firstboot.sh"), "--poll"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_poll_env(tmp_path, stub_bin, config_dir, boot),
+        timeout=30,
+    )
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    calls = calls_log.read_text(encoding="utf-8").splitlines()
+    assert calls.count("claim") == 1
+    assert "request-token" not in calls
+    assert "sleep 5" in calls
+    assert not (tmp_path / "unit.service").exists()
+
+
+def test_rejected_request_is_resubmitted_after_the_pause(tmp_path: Path) -> None:
+    """A request that ended without a token (rejected, expired) is still asked for again."""
+    body = f"    printf '%s' 'dev_ok' > '{tmp_path}/etc/meteorcli/device-token'"
+    boot, config_dir, stub_bin, calls_log = _poll_fixture(tmp_path, body)
+    (config_dir / "claim-secret").write_text('{"request_id":"r","claim_secret":"c"}', encoding="utf-8")
+    stub = (stub_bin / "meteorcli").read_text(encoding="utf-8")
+    start = stub.index("  claim)")
+    stub = stub[:start] + f'  claim)\n    rm -f "{config_dir}/claim-secret"\n    exit 1\n    ;;\nesac\n'
+    _write_executable(stub_bin / "meteorcli", stub)
+
+    result = subprocess.run(
+        ["bash", str(FIRSTBOOT / "meteorcli-firstboot.sh"), "--poll"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_poll_env(tmp_path, stub_bin, config_dir, boot),
+        timeout=30,
+    )
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    calls = calls_log.read_text(encoding="utf-8").splitlines()
+    assert calls.count("request-token") == 1
+    assert calls.index("sleep 5") < calls.index("request-token")
+
+
+def test_card_without_a_key_stops_instead_of_restarting_forever(tmp_path: Path) -> None:
+    boot, config_dir, stub_bin, calls_log = _poll_fixture(tmp_path, "    exit 1")
+    (boot / ".meteorenv").unlink()
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _poll_env(tmp_path, stub_bin, config_dir, boot)
+    env["HOME"] = str(home)
+
+    result = subprocess.run(
+        ["bash", str(FIRSTBOOT / "meteorcli-firstboot.sh"), "--poll"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=home,
+        timeout=60,
+    )
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out  # 0 so systemd's Restart=on-failure does not loop
+    assert "will not join MeteorCloud by itself" in out
+    assert "request-token" not in calls_log.read_text(encoding="utf-8")
+
+    # A settings file with placeholders (the interactive installer) still retries.
+    (tmp_path / "firstboot.env").write_text(
+        "METEOR_DOMAIN=cloud.example.com\nMETEOR_API_KEY=key_replace_me\n", encoding="utf-8"
+    )
+    result = subprocess.run(
+        ["bash", str(FIRSTBOOT / "meteorcli-firstboot.sh"), "--poll"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=home,
+        timeout=60,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
 
 
 def test_retry_delay_doubles_up_to_the_cap() -> None:

@@ -169,6 +169,12 @@ sooner than the server's `Retry-After`. A wrong, revoked or expired key stops fi
 once (no retries until the next boot or `systemctl restart meteorcli-firstboot`). Only one
 enrollment run is active at a time (`/run/meteorcli-firstboot.lock`).
 
+A card written without an enrollment key sends nothing: first boot looks for settings for
+three minutes, logs that the device will not join by itself, and stops until the next boot.
+While a request waits for approval, `meteorcli.service` and first boot both watch it. When
+the service collects the token first, first boot pauses briefly
+(`METEOR_CLAIM_SETTLE_SECONDS`, default 5) and finds the token instead of asking again.
+
 ## What first boot does
 
 1. Waits for the network, installs latest `meteorcli` (`--with-service`) if missing.
