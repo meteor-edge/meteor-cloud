@@ -20,11 +20,13 @@ from typing import Any
 class AgentApiError(Exception):
     """Raised when the server returns a non-success response."""
 
-    def __init__(self, status: int, code: str, message: str) -> None:
+    def __init__(self, status: int, code: str, message: str, *, retry_after: int | None = None) -> None:
         super().__init__(f"{code}: {message}")
         self.status = status
         self.code = code
         self.message = message
+        # Seconds from the server's Retry-After header (429/503), when it sent one.
+        self.retry_after = retry_after
 
 
 class EdgeClient:
@@ -115,7 +117,11 @@ class EdgeClient:
             message = error.get("message", message)
         except (ValueError, AttributeError, OSError):
             pass
-        return AgentApiError(exc.code, code, message)
+        retry_after = None
+        raw_retry = (exc.headers.get("Retry-After") if exc.headers is not None else None) or ""
+        if raw_retry.strip().isdigit():
+            retry_after = int(raw_retry.strip())
+        return AgentApiError(exc.code, code, message, retry_after=retry_after)
 
     def register(
         self,

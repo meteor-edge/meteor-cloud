@@ -12,11 +12,14 @@ class AppError(Exception):
         message: str,
         *,
         status_code: int = 400,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
+        # Extra response headers, e.g. Retry-After on 429.
+        self.headers = headers
 
 
 class ConflictError(AppError):

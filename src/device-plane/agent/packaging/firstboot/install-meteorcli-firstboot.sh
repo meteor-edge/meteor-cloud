@@ -166,11 +166,27 @@ echo "[1/4] Fetching first-boot files"
 fetch "meteorcli-firstboot.sh" "${WORKDIR}/meteorcli-firstboot.sh"
 fetch "meteorcli-firstboot.service" "${WORKDIR}/meteorcli-firstboot.service"
 fetch "meteorcli-firstboot.env.example" "${WORKDIR}/meteorcli-firstboot.env.example"
+fetch "meteorcli-settings.sh" "${WORKDIR}/meteorcli-settings.sh"
+fetch "meteorcli-settings.service" "${WORKDIR}/meteorcli-settings.service"
 
 install -m 0755 "${WORKDIR}/meteorcli-firstboot.sh" /usr/local/sbin/meteorcli-firstboot.sh
 install -m 0644 "${WORKDIR}/meteorcli-firstboot.service" /etc/systemd/system/meteorcli-firstboot.service
 echo "  installed /usr/local/sbin/meteorcli-firstboot.sh"
 echo "  installed /etc/systemd/system/meteorcli-firstboot.service"
+install -m 0755 "${WORKDIR}/meteorcli-settings.sh" /usr/local/sbin/meteorcli-settings.sh
+install -m 0644 "${WORKDIR}/meteorcli-settings.service" /etc/systemd/system/meteorcli-settings.service
+echo "  installed /usr/local/sbin/meteorcli-settings.sh"
+echo "  installed /etc/systemd/system/meteorcli-settings.service"
+
+# Tell Meteor Imager this image applies .meteorenv v2 itself (Wi-Fi, hostname,
+# timezone, SSH key), so it writes only .meteorenv and leaves cloud-init alone.
+for cfg_dir in /boot/firmware /boot /boot/efi; do
+  if [[ "$(findmnt -n -o FSTYPE --target "${cfg_dir}" 2>/dev/null || true)" == vfat ]]; then
+    printf 'meteor_settings=2\n' >"${cfg_dir}/.meteor-settings"
+    echo "  marked ${cfg_dir}/.meteor-settings for Meteor Imager"
+    break
+  fi
+done
 
 ENV_FILE=/etc/meteorcli-firstboot.env
 echo
@@ -205,6 +221,7 @@ echo
 echo "[3/4] Enable meteorcli-firstboot.service"
 systemctl daemon-reload
 systemctl enable meteorcli-firstboot.service
+systemctl enable meteorcli-settings.service
 echo "  enabled (runs on boot until the device is approved)"
 
 echo

@@ -1452,3 +1452,44 @@ def test_expired_old_request_is_not_resubmitted_over_a_replacement(tmp_path, run
     assert client.enroll_request_calls == []
     assert client.enroll_poll_calls[1]["request_id"] == "req-9"
     assert loops
+
+
+@pytest.mark.parametrize(
+    ("error", "expected", "retry_line"),
+    [
+        (AgentApiError(401, "invalid_api_key", "The enrollment API key has expired."), 3, None),
+        (AgentApiError(403, "forbidden", "Forbidden"), 3, None),
+        (AgentApiError(429, "rate_limited", "Too many", retry_after=42), 75, "retry-after: 42"),
+        (AgentApiError(0, "network_error", "Name or service not known"), 75, None),
+        (AgentApiError(503, "unavailable", "Down"), 75, None),
+        (AgentApiError(422, "validation_error", "bad"), 1, None),
+    ],
+)
+def test_request_token_exit_code_says_whether_to_retry(
+    tmp_path, monkeypatch, capsys, error, expected, retry_line
+) -> None:
+    client = FakeClient()
+    client.enroll_request_error = error
+    monkeypatch.setattr(meteorcli, "EdgeClient", lambda server_url, **_: client)
+
+    code = meteorcli.main(
+        [
+            "--config-dir",
+            str(tmp_path / "meteorcli"),
+            "request-token",
+            "--server",
+            "http://localhost:8000",
+            "--api-key",
+            "key_abc",
+            "--wait",
+            "0",
+        ]
+    )
+
+    assert code == expected
+    err = capsys.readouterr().err
+    if retry_line:
+        assert retry_line in err
+    else:
+        assert "retry-after:" not in err
+    assert not (tmp_path / "meteorcli" / "claim-secret").exists()

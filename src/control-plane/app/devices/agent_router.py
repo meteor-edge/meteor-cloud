@@ -19,6 +19,7 @@ from app.devices.dependencies import (
     CurrentDevice,
     EnrollmentSvc,
     RegistrationSvc,
+    enforce_enroll_ip_rate_limit,
     enforce_enroll_poll_rate_limit,
     enforce_enroll_request_rate_limit,
     enforce_registration_rate_limit,
@@ -137,7 +138,11 @@ def _warn_insecure_transport(request: Request, settings: Settings) -> None:
 
 
 @router.get("/enroll/check", response_model=AgentEnrollCheckResponse)
-@router.post("/enroll/check", response_model=AgentEnrollCheckResponse)
+@router.post(
+    "/enroll/check",
+    response_model=AgentEnrollCheckResponse,
+    dependencies=[Depends(enforce_enroll_ip_rate_limit)],
+)
 def enroll_check(
     api_key: CurrentApiKey,
     service: EnrollmentSvc,
@@ -149,7 +154,8 @@ def enroll_check(
     "/enroll/request",
     response_model=AgentEnrollResponse,
     status_code=201,
-    dependencies=[Depends(enforce_enroll_request_rate_limit)],
+    # IP limit first: it runs before the key lookup in the second dependency.
+    dependencies=[Depends(enforce_enroll_ip_rate_limit), Depends(enforce_enroll_request_rate_limit)],
 )
 def enroll_request(
     payload: AgentEnrollRequest,
