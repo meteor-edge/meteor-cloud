@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     mqtt_ca_cert_path: str = Field(default="certs/ca.crt", alias="MQTT_CA_CERT_PATH")
     mqtt_provider: str = Field(default="emqx", alias="MQTT_PROVIDER")
     mqtt_enabled: bool = Field(default=True, alias="MQTT_ENABLED")
+    # Observability: pull-only metrics and stdout logs; nothing is pushed anywhere.
+    metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
+    log_format: str = Field(default="console", alias="LOG_FORMAT")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     def http_bind(self) -> tuple[str, int]:
         text = self.http_addr.strip()

@@ -16,6 +16,12 @@ from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import get_settings
 from app.core.exceptions import AppError, ConflictError, NotFoundError, ValidationAppError
+from app.core.metrics import (
+    DEPLOYMENT_DEVICE_RESULTS,
+    DEPLOYMENTS_CREATED,
+    DEPLOYMENTS_FINISHED,
+    inc_after_commit,
+)
 from app.deployments.models import (
     Deployment,
     DeploymentDevice,
@@ -72,6 +78,15 @@ def _kind_value(kind: Any) -> str:
 
 
 _CANCELLABLE_STATUSES = frozenset({DeploymentStatus.IN_PROGRESS.value, DeploymentStatus.PAUSED.value})
+
+# Device outcomes counted when an agent report moves a row into them.
+_REPORTED_DEVICE_RESULTS = frozenset(
+    {
+        DeploymentDeviceStatus.SUCCEEDED.value,
+        DeploymentDeviceStatus.FAILED.value,
+        DeploymentDeviceStatus.CANCELLED.value,
+    }
+)
 
 # Capability flag required for each release kind (when the device has reported caps).
 _KIND_CAPABILITY: dict[str, str] = {
@@ -534,6 +549,9 @@ class DeploymentService:
             },
         )
         self.session.commit()
+        DEPLOYMENTS_CREATED.labels(strategy=str(rollout.get("strategy") or "immediate")).inc()
+        if deployment.status == DeploymentStatus.COMPLETED.value:
+            DEPLOYMENTS_FINISHED.labels(status=DeploymentStatus.COMPLETED.value).inc()
         return self._to_response(deployment, include_devices=True)
 
     def _reject_kind_change(self, *, release: Release, workload_key: str, devices: list[Device]) -> None:
@@ -772,6 +790,8 @@ class DeploymentService:
             metadata={"status": deployment.status},
         )
         self.session.commit()
+        if deployment.status == DeploymentStatus.CANCELLED.value:
+            DEPLOYMENTS_FINISHED.labels(status=DeploymentStatus.CANCELLED.value).inc()
         return self._to_response(deployment, include_devices=True)
 
     def pause_deployment(
@@ -1049,6 +1069,7 @@ class DeploymentService:
         else:
             # Succeeded and/or skipped (and no open rows) counts as completed.
             deployment.status = DeploymentStatus.COMPLETED.value
+        inc_after_commit(self.session, DEPLOYMENTS_FINISHED.labels(status=deployment.status))
 
     def _rollout_rows(
         self, deployment: Deployment, rows: list[DeploymentDevice], config: RolloutConfig
@@ -1111,6 +1132,10 @@ class DeploymentService:
         for device_id in plan.ids_to_time_out:
             row = by_device[device_id]
             row.status = DeploymentDeviceStatus.TIMED_OUT.value
+            inc_after_commit(
+                self.session,
+                DEPLOYMENT_DEVICE_RESULTS.labels(status=DeploymentDeviceStatus.TIMED_OUT.value),
+            )
             row.last_error = (
                 f"No report within {config.pending_timeout_seconds} seconds of activation."
             )
@@ -1201,6 +1226,8 @@ class DeploymentService:
             }:
                 # A late device may still finish, but never goes back to pending.
                 continue
+            if progress.status != status and status in _REPORTED_DEVICE_RESULTS:
+                inc_after_commit(self.session, DEPLOYMENT_DEVICE_RESULTS.labels(status=status))
             progress.status = status
             progress.last_error = row.last_error
             if deployment is not None:

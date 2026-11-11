@@ -14,6 +14,7 @@ from app.adapters import rate_limiter as build_redis_rate_limiter
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.exceptions import AppError, UnauthorizedError
+from app.core.metrics import RATE_LIMITED
 from app.devices.enrollment import EnrollmentService
 from app.devices.models import Device, EnrollmentApiKey
 from app.devices.rate_limit import RateLimiter
@@ -85,6 +86,7 @@ def enforce_registration_rate_limit(
 ) -> None:
     client_host = request.client.host if request.client else "unknown"
     if not limiter.allow(client_host):
+        RATE_LIMITED.labels(limiter="registration").inc()
         raise RegistrationRateLimitError()
 
 
@@ -176,6 +178,7 @@ def enforce_enroll_request_rate_limit(
 ) -> None:
     client_host = request.client.host if request.client else "unknown"
     if not limiter.allow(f"{client_host}:{api_key.id}"):
+        RATE_LIMITED.labels(limiter="enrollment_request").inc()
         raise RegistrationRateLimitError()
 
 
@@ -188,6 +191,7 @@ def enforce_enroll_poll_rate_limit(
     client_host = request.client.host if request.client else "unknown"
     # Per request id alone would give a new bucket to every made-up id.
     if not ip_limiter.allow(client_host) or not limiter.allow(f"{client_host}:{payload.request_id}"):
+        RATE_LIMITED.labels(limiter="enrollment_poll").inc()
         raise RegistrationRateLimitError()
 
 

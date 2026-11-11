@@ -109,6 +109,23 @@ class SecretsSettings(BaseModel):
     source: Literal["environment"] = "environment"
 
 
+class ObservabilityComponents(BaseModel):
+    """Each observability component can be turned off on its own; the platform never depends on them.
+
+    The alert webhook URL is a secret and comes from EDGE_PLATFORM_ALERT_WEBHOOK_URL, not this file.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    metrics: bool = True  # Prometheus + node-exporter
+    logs: bool = True  # Loki + Alloy
+    alerting: bool = True  # Alertmanager
+    dashboards: bool = True  # Grafana
+
+    def enabled_names(self) -> list[str]:
+        return [name for name in ("metrics", "logs", "alerting", "dashboards") if getattr(self, name)]
+
+
 class ObservabilitySettings(BaseModel):
     """Ops telemetry sink. LOG_FORMAT setting selects console or JSON log output; /metrics endpoint is always available.
 
@@ -120,6 +137,11 @@ class ObservabilitySettings(BaseModel):
 
     enabled: bool = False
     backend: Literal["prometheus", "cloudwatch"] = "prometheus"
+    components: ObservabilityComponents = Field(default_factory=ObservabilityComponents)
+    # Logs kept by Loki (hours) and metrics kept by Prometheus (whichever limit is hit first).
+    log_retention_hours: int = Field(default=168, ge=24, le=2160)
+    metrics_retention_days: int = Field(default=15, ge=1, le=365)
+    metrics_retention_size: str = Field(default="5GB", pattern=r"^[1-9][0-9]*(MB|GB)$")
 
 
 class CloudAppServiceSettings(BaseModel):

@@ -22,6 +22,19 @@ docker compose up -d --build                                              # deve
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --wait   # production
 ```
 
+Observability is opt-in on every setup. Add the file and its profiles (`metrics`, `logs`,
+`alerting`, `dashboards`; Grafana needs `GRAFANA_ADMIN_PASSWORD` in `.env`):
+
+```bash
+make dev OBS=1                                                            # development
+COMPOSE_PROFILES="$COMPOSE_PROFILES,metrics,logs,alerting,dashboards" \
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  -f docker-compose.observability.yml up -d --wait                        # production
+```
+
+Ansible does the same with `observability_enabled: true`, the installer with
+`observability.enabled` in `installation.yaml`. See [docs/observability.md](../../docs/observability.md).
+
 `COMPOSE_PROFILES` chooses the bundled services. With no profiles, only the API,
 console, and (in production) Traefik run, and every dependency is external.
 See [docs/deployment.md](../../docs/deployment.md).

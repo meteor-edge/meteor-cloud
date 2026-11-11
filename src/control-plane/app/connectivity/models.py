@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String
+from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import INET, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,9 +32,9 @@ class DeviceConnectivity(Base, TimestampMixin):
         ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False,
     )
-    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="wireguard")
-    wg_public_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
-    wg_address: Mapped[str | None] = mapped_column(INET, nullable=True, unique=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="wireguard", server_default="wireguard")
+    wg_public_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    wg_address: Mapped[str | None] = mapped_column(INET, nullable=True)
     # Login the agent installs the browser-SSH key for (pi, ubuntu, …). Empty: SHELL_SSH_USER.
     ssh_user: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(
@@ -54,6 +54,8 @@ class DeviceConnectivity(Base, TimestampMixin):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
+        UniqueConstraint("wg_address", name="uq_device_connectivity_wg_address"),
+        UniqueConstraint("wg_public_key", name="uq_device_connectivity_wg_public_key"),
         Index("ix_device_connectivity_organization_id", "organization_id"),
         Index("ix_device_connectivity_status", "status"),
     )

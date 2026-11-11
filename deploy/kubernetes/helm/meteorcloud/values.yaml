@@ -269,6 +269,30 @@ dataPlane:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 384Mi }
 
+# --- Metrics (optional) -----------------------------------------------------
+# The API and data plane serve Prometheus metrics on GET /metrics (their own
+# ports, never routed by the ingress). Grafana, Loki and Prometheus are not part
+# of this chart: use your cluster's monitoring (kube-prometheus-stack, Grafana
+# Cloud, Datadog, ...). Dashboards ship in deploy/compose/config/observability.
+metrics:
+  # false: METRICS_ENABLED=false, /metrics returns 404 and nothing is recorded.
+  enabled: true
+  # ServiceMonitor for the Prometheus Operator (needs the monitoring.coreos.com CRDs).
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    # Labels your Prometheus selects on, e.g. { release: kube-prometheus-stack }
+    labels: {}
+  # The same recording and alert rules as the Compose bundle, as a PrometheusRule.
+  prometheusRule:
+    enabled: false
+    labels: {}
+  # With networkPolicy.enabled: peers allowed to scrape /metrics. /metrics is served on the
+  # API port, so these peers can also reach the API: select only your Prometheus pods, e.g.
+  #   - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+  #     podSelector: { matchLabels: { app.kubernetes.io/name: prometheus } }
+  networkPolicyFrom: []
+
 serviceAccount:
   create: true
   name: ""

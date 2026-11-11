@@ -54,6 +54,9 @@ ansible-playbook playbooks/site.yml \
   -e @../../.installer-state/production/extra-vars.json
 ```
 
+`extra-vars.json` has no secrets: export the same `EDGE_PLATFORM_*` variables as
+for the installer before running it.
+
 ## Docker Compose services unhealthy
 
 The stack lives in `/opt/edge-platform/compose` (Compose files plus the rendered

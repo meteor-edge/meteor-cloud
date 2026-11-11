@@ -19,7 +19,7 @@ prepares the server and runs those same files; it does not keep its own copy.
 | `minio` | profile `minio` | Only with `OBJECT_STORAGE_PROVIDER=s3` and no other S3 service |
 | `data-plane` | profile `mqtt` | Needed whenever `MQTT_ENABLED=true` |
 | `emqx` | profile `emqx` | Bundled broker on 8883 (TLS), image `emqx/emqx:5.8.6`; omit to use an external EMQX. Licensing: [MQTT](fleet/mqtt.md#emqx-version-and-licensing) |
-| Prometheus, Loki, Alloy, Grafana | `docker-compose.observability.yml` | Bound to 127.0.0.1 |
+| Prometheus, node-exporter, Loki, Alloy, Alertmanager, Grafana | `docker-compose.observability.yml`, profiles `metrics`, `logs`, `alerting`, `dashboards` | Each optional, bound to 127.0.0.1; see [Observability](observability.md) |
 
 `/internal/*` (broker callbacks) and `/metrics` are never routed by Traefik.
 

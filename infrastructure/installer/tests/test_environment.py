@@ -159,3 +159,100 @@ def test_build_ansible_extra_vars_disables_mqtt() -> None:
 
     assert extra["mqtt_enabled"] == "false"
     assert "mqtt_broker" not in extra
+
+
+def test_build_ansible_extra_vars_passes_observability_components() -> None:
+    config = load_configuration(EXAMPLE)
+    config.observability.enabled = True
+    config.observability.components.dashboards = False
+    config.observability.log_retention_hours = 72
+    config.observability.metrics_retention_days = 30
+    config.observability.metrics_retention_size = "20GB"
+
+    extra = build_ansible_extra_vars(config, _outputs())
+
+    assert extra["observability_components"] == "metrics,logs,alerting"
+    assert extra["observability_log_retention"] == "72h"
+    assert extra["observability_metrics_retention_time"] == "30d"
+    assert extra["observability_metrics_retention_size"] == "20GB"
+
+
+def test_alert_webhook_url_is_a_secret_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    from edge_installer.deployment.environment import secret_env_vars
+
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
+    config = load_configuration(EXAMPLE)
+
+    assert "observability_alert_webhook_url" not in build_ansible_extra_vars(config, _outputs())
+    assert secret_env_vars()["EDGE_PLATFORM_ALERT_WEBHOOK_URL"] == "https://hooks.example.com/x"
+
+
+def test_alert_heartbeat_url_is_a_secret_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    from edge_installer.deployment.environment import secret_env_vars
+
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_HEARTBEAT_URL", "https://hc.example.com/ping/x")
+    config = load_configuration(EXAMPLE)
+
+    assert "observability_alert_heartbeat_url" not in build_ansible_extra_vars(config, _outputs())
+    assert secret_env_vars()["EDGE_PLATFORM_ALERT_HEARTBEAT_URL"] == "https://hc.example.com/ping/x"
+
+
+def test_grafana_password_reaches_ansible(monkeypatch: pytest.MonkeyPatch) -> None:
+    from edge_installer.deployment.environment import secret_env_vars
+
+    monkeypatch.setenv("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD", "grafana-secret")
+
+    assert secret_env_vars()["EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD"] == "grafana-secret"
+
+
+def test_secrets_reach_ansible_only_while_the_playbook_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import json
+    import stat
+
+    from edge_installer.deployment.ansible import AnsibleRunner
+    from edge_installer.process.runner import ProcessResult
+
+    monkeypatch.setenv("EDGE_PLATFORM_ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
+    seen: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> ProcessResult:
+        secret_file = tmp_path / "secret-vars.json"
+        seen["secrets"] = json.loads(secret_file.read_text(encoding="utf-8"))
+        seen["mode"] = stat.S_IMODE(secret_file.stat().st_mode)
+        seen["command"] = command
+        return ProcessResult(command=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("edge_installer.deployment.ansible.run_command", fake_run)
+    inventory = tmp_path / "inventory.ini"
+    inventory.write_text("[platform]\n", encoding="utf-8")
+
+    AnsibleRunner(ansible_root=tmp_path).run_playbook(
+        "site.yml", inventory=inventory, extra_vars={"platform_url": "https://fleet.example.com"}
+    )
+
+    assert seen["secrets"] == {"EDGE_PLATFORM_ALERT_WEBHOOK_URL": "https://hooks.example.com/x"}
+    assert seen["mode"] == 0o600
+    assert f"@{tmp_path / 'secret-vars.json'}" in seen["command"]
+    assert not (tmp_path / "secret-vars.json").exists()
+    extra_path = tmp_path / "extra-vars.json"
+    assert json.loads(extra_path.read_text(encoding="utf-8")) == {"platform_url": "https://fleet.example.com"}
+    assert stat.S_IMODE(extra_path.stat().st_mode) == 0o600
+
+
+def test_secret_vars_file_is_removed_when_ansible_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from edge_installer.deployment.ansible import AnsibleRunner
+
+    monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "x" * 32)
+
+    def boom(command: list[str], **kwargs: object) -> None:
+        raise OSError("ansible-playbook not found")
+
+    monkeypatch.setattr("edge_installer.deployment.ansible.run_command", boom)
+    inventory = tmp_path / "inventory.ini"
+    inventory.write_text("[platform]\n", encoding="utf-8")
+
+    with pytest.raises(OSError):
+        AnsibleRunner(ansible_root=tmp_path).run_playbook("site.yml", inventory=inventory, extra_vars={})
+    assert not (tmp_path / "secret-vars.json").exists()

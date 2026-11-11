@@ -17,7 +17,7 @@ Do not run `make up` on a developer laptop. That path is Ansible + production Co
 
 ```bash
 cp deploy/compose/.env.example deploy/compose/.env   # make dev does this if missing
-make dev
+make dev                 # add OBS=1 for Prometheus, Grafana and Loki
 make seed      # owner@example.com / dev-password-123; demo fleet + good/fail releases
 ```
 

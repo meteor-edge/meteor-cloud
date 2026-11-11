@@ -87,3 +87,45 @@ def test_explicit_larger_disk_is_kept() -> None:
     config.aws.root_volume_size_gb = 80
     _, disk, _ = resolve_aws_host(config)
     assert disk == 80
+
+
+def test_observability_sizing_counts_only_enabled_components() -> None:
+    config = load_configuration(EXAMPLE)
+    config.observability.enabled = True
+    full = recommend_host_size(config).ram_mib
+    config.observability.components.logs = False
+    config.observability.components.dashboards = False
+
+    size = recommend_host_size(config)
+
+    assert size.ram_mib < full
+    assert "observability_logs" not in size.reasons
+    assert "observability_metrics" in size.reasons
+
+
+def test_metrics_only_observability_does_not_force_large() -> None:
+    config = load_configuration(EXAMPLE)
+    config.observability.enabled = True
+    config.observability.components.logs = False
+    config.observability.components.dashboards = False
+    config.observability.components.alerting = False
+
+    assert recommend_host_size(config).instance_type == "t3.medium"
+
+
+def test_observability_disk_follows_metrics_retention_size() -> None:
+    config = load_configuration(EXAMPLE)
+    config.observability.enabled = True
+    default_disk = recommend_host_size(config).root_volume_size_gb
+    config.observability.metrics_retention_size = "25GB"
+
+    assert recommend_host_size(config).root_volume_size_gb == default_disk + 20
+
+
+def test_observability_disk_follows_log_retention() -> None:
+    config = load_configuration(EXAMPLE)
+    config.observability.enabled = True
+    default_disk = recommend_host_size(config).root_volume_size_gb  # 168 h
+    config.observability.log_retention_hours = 720  # 30 days -> 5 weeks of chunks
+
+    assert recommend_host_size(config).root_volume_size_gb == default_disk + 4 * 5

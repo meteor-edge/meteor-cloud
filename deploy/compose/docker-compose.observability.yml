@@ -1,6 +1,15 @@
 # Loki, Prometheus, Grafana, Alloy, and node_exporter.
 # Start with: make observability (dev) or add -f docker-compose.observability.yml in production.
 # Not used by `make dev` so small machines skip the extra RAM. UIs bind to localhost only.
+#
+# Every component is optional and replaceable. Each service sits in a Compose profile:
+#   metrics     prometheus, node-exporter
+#   logs        loki, alloy (+ docker-socket-proxy)
+#   alerting    alertmanager
+#   dashboards  grafana
+# Choose with COMPOSE_PROFILES (make observability OBS_PROFILES=metrics,logs,...). Nothing in
+# the app depends on these services: it only serves /metrics and writes JSON logs to stdout.
+# Point at an external backend instead with PROMETHEUS_URL, LOKI_URL or LOKI_PUSH_URL.
 
 services:
   backend:
@@ -8,8 +17,13 @@ services:
       LOG_FORMAT: json
       OBSERVABILITY_BACKEND: prometheus
 
+  data-plane:
+    environment:
+      LOG_FORMAT: json
+
   node-exporter:
     image: prom/node-exporter:v1.8.2
+    profiles: [metrics]
     pid: host
     command:
       - "--path.procfs=/host/proc"
@@ -25,25 +39,45 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.55.1
+    profiles: [metrics]
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=15d"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-15d}"
+      - "--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-5GB}"
     volumes:
       - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/observability/rules:/etc/prometheus/rules:ro
       - ${PROMETHEUS_DATA:-prometheus_data}:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
-    depends_on:
-      - backend
-      - node-exporter
+    networks:
+      - meteorcloud
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    profiles: [alerting]
+    command:
+      - "--config.file=/etc/alertmanager/${ALERTMANAGER_CONFIG:-alertmanager.yml}"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./config/observability/alertmanager:/etc/alertmanager:ro
+      # Receiver secrets (webhook_url, ...) live outside the repo; Ansible fills this directory.
+      - ${ALERTMANAGER_SECRETS_DIR:-./config/observability/alertmanager/secrets}:/etc/alertmanager/secrets:ro
+      - ${ALERTMANAGER_DATA:-alertmanager_data}:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
     networks:
       - meteorcloud
 
   loki:
     image: grafana/loki:3.3.2
-    command: ["-config.file=/etc/loki/loki.yml"]
+    profiles: [logs]
+    command: ["-config.file=/etc/loki/loki.yml", "-config.expand-env=true"]
+    environment:
+      LOKI_RETENTION_PERIOD: ${LOKI_RETENTION_PERIOD:-168h}
     volumes:
       - ./config/observability/loki.yml:/etc/loki/loki.yml:ro
+      - ${LOKI_DATA:-loki_data}:/loki
     ports:
       - "127.0.0.1:3100:3100"
     networks:
@@ -51,6 +85,7 @@ services:
 
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
+    profiles: [logs]
     environment:
       CONTAINERS: 1
       NETWORKS: 1
@@ -63,37 +98,51 @@ services:
 
   alloy:
     image: grafana/alloy:v1.8.3
+    profiles: [logs]
     command:
       - run
       - /etc/alloy/config.alloy
       - --storage.path=/var/lib/alloy/data
+    environment:
+      LOKI_PUSH_URL: ${LOKI_PUSH_URL:-http://loki:3100/loki/api/v1/push}
     volumes:
       - ./config/observability/config.alloy:/etc/alloy/config.alloy:ro
     depends_on:
-      - loki
-      - docker-socket-proxy
+      docker-socket-proxy:
+        condition: service_started
+        required: false
     networks:
       - meteorcloud
       - docker_proxy
 
   grafana:
     image: grafana/grafana:11.4.0
+    profiles: [dashboards]
+    # The password is checked here, not with ${VAR:?}: Compose interpolates every service,
+    # so a required variable would block stacks that leave the dashboards profile off.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ -n "$$GF_SECURITY_ADMIN_PASSWORD" ] || { echo "GRAFANA_ADMIN_PASSWORD is required" >&2; exit 1; }; exec /run.sh "$$@"'
+      - grafana
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Datasource endpoints; point at an external Prometheus/Loki-compatible backend if you run one.
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
+      LOKI_URL: ${LOKI_URL:-http://loki:3100}
     volumes:
       - ./config/observability/grafana/provisioning:/etc/grafana/provisioning:ro
     ports:
       - "127.0.0.1:3001:3000"
-    depends_on:
-      - prometheus
-      - loki
     networks:
       - meteorcloud
 
 volumes:
   prometheus_data:
+  loki_data:
+  alertmanager_data:
 
 networks:
   meteorcloud:

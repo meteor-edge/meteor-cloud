@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 
 from app.core.config import Settings
+from app.core.metrics import MQTT_PUBLISH
 
 
 class DataPlaneMQTTGateway:
@@ -25,11 +26,16 @@ class DataPlaneMQTTGateway:
         qos: int = 1,
         retain: bool = False,
     ) -> None:
-        self._request(
-            "POST",
-            "/v1/publish",
-            {"topic": topic, "payload": payload, "qos": qos, "retain": retain},
-        )
+        try:
+            self._request(
+                "POST",
+                "/v1/publish",
+                {"topic": topic, "payload": payload, "qos": qos, "retain": retain},
+            )
+        except Exception:
+            MQTT_PUBLISH.labels(result="error").inc()
+            raise
+        MQTT_PUBLISH.labels(result="ok").inc()
 
     def watch_topic(self, topic: str) -> None:
         self._request("POST", "/v1/subscriptions", {"topic": topic})
