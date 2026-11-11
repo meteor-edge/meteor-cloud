@@ -138,6 +138,15 @@ class Settings(BaseSettings):
     mqtt_ping_timeout_seconds: float = Field(default=8.0, alias="MQTT_PING_TIMEOUT_SECONDS")
     data_plane_url: str = Field(default="http://127.0.0.1:8081", alias="DATA_PLANE_URL")
     telemetry_provider: str = Field(default="postgresql", alias="TELEMETRY_PROVIDER")
+    # Application data plane (Go service, contracts/data-plane-v1.md).
+    # Internal URL the control plane calls (commands); empty disables command forwarding.
+    data_plane_api_url: str = Field(default="", alias="DATA_PLANE_API_URL")
+    # Public URL handed to applications as METEORCLOUD_ENDPOINT.
+    data_plane_public_url: str = Field(default="", alias="DATA_PLANE_PUBLIC_URL")
+    # Shared secret for /internal/data-plane/* (policy snapshot) and data-plane /internal/v1/*.
+    data_plane_internal_token: str = Field(default="dev-data-plane-internal", alias="DATA_PLANE_INTERNAL_TOKEN")
+    # Lifetime of credentials the device agent mints for deployed workloads.
+    app_credential_ttl_hours: int = Field(default=168, ge=1, le=8760, alias="APP_CREDENTIAL_TTL_HOURS")
 
     database_provider: Literal["postgresql"] = Field(default="postgresql", alias="DATABASE_PROVIDER")
     # "memory" keeps rate-limit counters per process: fine for one API replica, no Redis needed.

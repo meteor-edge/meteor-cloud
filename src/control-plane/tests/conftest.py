@@ -25,6 +25,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 # Ensure metadata includes domain models.
+from app.applications import models as _application_models  # noqa: F401
 from app.artifacts import models as _artifact_models  # noqa: F401
 from app.artifacts.dependencies import get_object_storage, get_public_os_image_rate_limiter
 from app.audit import models as _audit_models  # noqa: F401

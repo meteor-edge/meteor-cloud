@@ -13,6 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters import metrics_backend
 from app.api.rest.health import router as health_router
+from app.applications.internal_router import router as applications_internal_router
+from app.applications.router import agent_router as applications_agent_router
+from app.applications.router import router as applications_router
 from app.artifacts.public_router import router as public_os_images_router
 from app.artifacts.router import router as artifacts_router
 from app.audit.router import router as audit_router
@@ -101,6 +104,9 @@ def create_app() -> FastAPI:
     application.include_router(endpoints_router)
     application.include_router(connectivity_router)
     application.include_router(shell_router)
+    application.include_router(applications_router)
+    application.include_router(applications_agent_router)
+    application.include_router(applications_internal_router)
     application.include_router(audit_router)
     application.include_router(agent_router)
     application.include_router(mqtt_internal_router)
