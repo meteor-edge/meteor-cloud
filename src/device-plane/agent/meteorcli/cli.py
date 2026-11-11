@@ -438,7 +438,7 @@ def _cmd_request(args: argparse.Namespace) -> int:
         submitted = client.enroll_request(api_key=api_key, inventory=inventory, name=args.name)
     except AgentApiError as error:
         print(f"error: enrollment request failed: {error.message}", file=sys.stderr)
-        return 1
+        return _request_failure_exit_code(error)
 
     request_id = str(submitted["request_id"])
     claim_secret = str(submitted["claim_secret"])
@@ -468,6 +468,23 @@ def _cmd_request(args: argparse.Namespace) -> int:
         sleep=getattr(args, "_sleep", time.sleep),
         max_polls=getattr(args, "_max_polls", None),
     )
+
+
+# request-token exit codes for scripts (first boot): retry later, or stop.
+EXIT_KEY_REJECTED = 3  # wrong, revoked or expired key: retrying cannot help
+EXIT_RETRY_LATER = 75  # EX_TEMPFAIL: network down, server busy or rate limited
+
+
+def _request_failure_exit_code(error: AgentApiError) -> int:
+    """Map a failed enrollment request to an exit code a first-boot script can act on."""
+    if error.status in (401, 403):
+        return EXIT_KEY_REJECTED
+    if error.status == 0 or error.status == 429 or error.status >= 500:
+        if error.retry_after:
+            # Scripts read this line to wait as long as the server asked.
+            print(f"retry-after: {error.retry_after}", file=sys.stderr)
+        return EXIT_RETRY_LATER
+    return 1
 
 
 def _cmd_claim(args: argparse.Namespace) -> int:

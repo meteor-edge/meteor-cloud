@@ -10,7 +10,13 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.devices.dependencies import get_enroll_poll_ip_rate_limiter, get_enroll_poll_rate_limiter
+from app.core.config import get_settings
+from app.devices.dependencies import (
+    get_enroll_ip_rate_limiter,
+    get_enroll_poll_ip_rate_limiter,
+    get_enroll_poll_rate_limiter,
+    get_enroll_request_rate_limiter,
+)
 from app.devices.enrollment import EnrollmentService
 from app.devices.models import DeviceEnrollmentRequest, EnrollmentApiKey
 from app.devices.rate_limit import InMemoryRateLimiter
@@ -446,3 +452,79 @@ def test_poll_is_capped_per_ip_across_request_ids(client: TestClient) -> None:
     ]
 
     assert statuses == [401, 401, 429]
+
+
+def test_wrong_keys_are_limited_per_ip_before_the_key_lookup(client: TestClient) -> None:
+    ip_limiter = InMemoryRateLimiter(limit=2, window_seconds=60)
+    client.app.dependency_overrides[get_enroll_ip_rate_limiter] = lambda: ip_limiter
+
+    responses = [
+        client.post(
+            "/api/v1/agent/enroll/request",
+            headers={"Authorization": f"Bearer key_guess-{index}"},
+            json={"mac_addresses": ["aa:bb:cc:dd:ee:01"]},
+        )
+        for index in range(3)
+    ]
+
+    assert [r.status_code for r in responses] == [401, 401, 429]
+    assert 1 <= int(responses[2].headers["Retry-After"]) <= 60
+
+
+def test_enroll_check_is_limited_per_ip(client: TestClient) -> None:
+    ip_limiter = InMemoryRateLimiter(limit=1, window_seconds=60)
+    client.app.dependency_overrides[get_enroll_ip_rate_limiter] = lambda: ip_limiter
+
+    first = client.post("/api/v1/agent/enroll/check", headers={"Authorization": "Bearer key_guess"})
+    second = client.post("/api/v1/agent/enroll/check", headers={"Authorization": "Bearer key_guess"})
+
+    assert first.status_code == 401
+    assert second.status_code == 429
+
+
+def test_rate_limited_request_says_when_to_retry(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+    limiter = InMemoryRateLimiter(limit=1, window_seconds=30)
+    client.app.dependency_overrides[get_enroll_request_rate_limiter] = lambda: limiter
+
+    _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+    limited = client.post(
+        "/api/v1/agent/enroll/request",
+        headers={"Authorization": f"Bearer {key['api_key']}"},
+        json={"mac_addresses": ["aa:bb:cc:dd:ee:02"]},
+    )
+
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "rate_limited"
+    assert 1 <= int(limited.headers["Retry-After"]) <= 30
+
+
+def test_pending_requests_are_capped_per_key(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+    other = _create_key(client, org.id, headers, name="Other batch")
+    capped = get_settings().model_copy(update={"enrollment_max_pending_per_key": 2})
+    client.app.dependency_overrides[get_settings] = lambda: capped
+
+    _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+    _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:02"])
+    third = client.post(
+        "/api/v1/agent/enroll/request",
+        headers={"Authorization": f"Bearer {key['api_key']}"},
+        json={"mac_addresses": ["aa:bb:cc:dd:ee:03"]},
+    )
+    # A device that already has a pending request can still retry (its row is reused).
+    retry = _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+    # Another key has its own allowance.
+    _enroll(client, other["api_key"], mac_addresses=["aa:bb:cc:dd:ee:04"])
+
+    assert third.status_code == 429
+    assert third.json()["error"]["code"] == "too_many_pending_requests"
+    assert third.headers["Retry-After"] == "300"
+    assert retry["status"] == "pending"
+    assert db_session.query(DeviceEnrollmentRequest).count() == 3

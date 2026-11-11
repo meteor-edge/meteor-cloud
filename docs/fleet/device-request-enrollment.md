@@ -117,7 +117,20 @@ Reject body (optional): `{ "reason" }`. Mutation requires **owner** or **admin**
 
 ## Rate limiting and security
 
-- Submit: fixed-window limiter keyed by source IP + API key (default 5 / 60s).
+- Submit and key check: a limit per source IP that runs **before** the key is looked up
+  (`ENROLLMENT_IP_RATE_LIMIT_REQUESTS`, default 120 / 60s), so wrong or made-up keys
+  are limited too.
+- Submit: fixed-window limiter keyed by source IP + API key
+  (`ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS`, default 30 / 60s; a batch of devices behind
+  one NAT with one key shares it).
+- Every `429` carries `Retry-After` (seconds until the window ends). `meteorcli request-token`
+  prints it as `retry-after: N` and exits `75` (retry later); a wrong, revoked or expired key
+  exits `3` (stop). First boot backs off from 10 s to 5 min with jitter, waits at least
+  `Retry-After`, and stops on a rejected key instead of retrying.
+- Pending requests per key are capped (`ENROLLMENT_MAX_PENDING_PER_KEY`, default 100;
+  `0` = no limit). Above it a new device gets `429 too_many_pending_requests` with
+  `Retry-After: 300`; a device that already has a pending request can still resubmit. This
+  stops a leaked key from filling the approval queue; give keys an expiry and max uses too.
 - Poll: fixed-window limiter keyed by source IP + `request_id` (default 30 / 60s),
   plus a cap per source IP across all requests (`ENROLLMENT_POLL_IP_RATE_LIMIT_REQUESTS`,
   default 600 / 60s, or 100 devices behind one address polling every 10 seconds).

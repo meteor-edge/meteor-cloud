@@ -103,3 +103,23 @@ def test_read_timeouts_and_dropped_connections_are_network_errors(monkeypatch, e
             client.heartbeat(device_token="dev_x", payload={})
         assert excinfo.value.code == "network_error"
         assert excinfo.value.status == 0
+
+
+def test_retry_after_header_is_kept_on_api_errors() -> None:
+    import io
+    import urllib.error
+    from email.message import Message
+
+    from edge_agent.client import EdgeClient
+
+    headers = Message()
+    headers["Retry-After"] = "17"
+    exc = urllib.error.HTTPError(
+        "http://x/api",
+        429,
+        "Too Many Requests",
+        headers,
+        io.BytesIO(b'{"error":{"code":"rate_limited","message":"m"}}'),
+    )
+    error = EdgeClient._to_api_error(exc)
+    assert (error.status, error.code, error.retry_after) == (429, "rate_limited", 17)

@@ -78,6 +78,54 @@ enabled and first-boot is deleted. Reboot is not required after approve.
 `METEOR_DOMAIN` is the control-plane host (`cloud.example.com` or
 `192.168.0.118:8000` for laptop `make dev`).
 
+## Settings on the card (`.meteorenv` v2, Meteor Imager)
+
+A base image with meteorcli and first-boot installed (`install-meteorcli-firstboot.sh`)
+also gets `meteorcli-settings.service`. Early in boot, before the network starts, it reads
+`.meteorenv` from the card's config partition, applies the settings, moves the enrollment
+values to `/etc/meteorcli-firstboot.env` (root only) and **deletes `.meteorenv` from the
+card**. Without `.meteorenv` it does nothing. Log: `/var/log/meteorcli-settings.log`.
+
+Config partition, first match: a FAT partition labelled `METEORCFG` (for Jetson, NUC and
+other device types), `/boot/firmware` (Raspberry Pi OS Bookworm+), `/boot`, `/boot/efi`.
+The installer writes `.meteor-settings` there, which tells Meteor Imager to write only
+`.meteorenv` and leave cloud-init alone.
+
+```text
+METEOR_ENV_VERSION=2
+METEOR_DOMAIN=fleet.example.com:8443
+METEOR_API_BASE=https://fleet.example.com:8443    # optional: when the scheme matters
+METEOR_API_KEY=key_...
+METEOR_NAME=pi-lab-01                             # optional: name in MeteorCloud
+METEOR_HOSTNAME=pi-lab-01                         # optional
+METEOR_TIMEZONE=Europe/Berlin                     # optional
+METEOR_WIFI_SSID=My Network                       # optional, with PSK and COUNTRY
+METEOR_WIFI_PSK=wifi-password
+METEOR_WIFI_COUNTRY=DE
+METEOR_WIFI_HIDDEN=false
+METEOR_SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... me@laptop   # optional
+METEOR_SSH_USER=pi                                # optional: default is the first login user
+```
+
+`KEY=value` per line, value to the end of the line (no quoting), parsed and never sourced.
+Unknown keys are ignored with a warning. Invalid values (host name, timezone, Wi-Fi
+password length, SSH key format) are skipped with a warning; enrollment still runs.
+
+- **Wi-Fi:** a NetworkManager connection `meteor-wifi` (mode 0600), or `wpa_supplicant.conf`
+  with the derived key on images without NetworkManager. The country is set through
+  `raspi-config` when present (it also unblocks Wi-Fi), otherwise `cfg80211`.
+- **SSH key:** appended to the user's `~/.ssh/authorized_keys`, and `ssh` is enabled.
+- v1 files (`METEOR_DOMAIN` and `METEOR_API_KEY` only) still work.
+
+## Request limits and retries
+
+First boot waits a random 0–30 s before the first request (`METEOR_START_JITTER_SECONDS`), so
+a batch powered on together is spread out. A failed request is retried after 10 s, doubling
+up to 5 min, plus jitter (`METEOR_RETRY_BASE_SECONDS`, `METEOR_RETRY_MAX_SECONDS`), and never
+sooner than the server's `Retry-After`. A wrong, revoked or expired key stops first boot at
+once (no retries until the next boot or `systemctl restart meteorcli-firstboot`). Only one
+enrollment run is active at a time (`/run/meteorcli-firstboot.lock`).
+
 ## What first boot does
 
 1. Waits for the network, installs latest `meteorcli` (`--with-service`) if missing.
@@ -99,6 +147,9 @@ prompts in this SSH/terminal session (not the HDMI console).
 ```bash
 sudo install -m 0755 meteorcli-firstboot.sh /usr/local/sbin/meteorcli-firstboot.sh
 sudo install -m 0644 meteorcli-firstboot.service /etc/systemd/system/meteorcli-firstboot.service
+sudo install -m 0755 meteorcli-settings.sh /usr/local/sbin/meteorcli-settings.sh
+sudo install -m 0644 meteorcli-settings.service /etc/systemd/system/meteorcli-settings.service
+sudo systemctl enable meteorcli-settings.service
 sudo install -m 0600 meteorcli-firstboot.env.example /etc/meteorcli-firstboot.env
 sudo editor /etc/meteorcli-firstboot.env
 sudo systemctl enable --now meteorcli-firstboot.service

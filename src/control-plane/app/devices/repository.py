@@ -436,6 +436,19 @@ class DeviceEnrollmentRequestRepository:
         )
         return list(self.session.scalars(statement).unique().all())
 
+    def count_pending_for_key(self, *, api_key_id: uuid.UUID, now: datetime) -> int:
+        """Pending, unexpired requests submitted with one enrollment key."""
+        statement = (
+            select(func.count())
+            .select_from(DeviceEnrollmentRequest)
+            .where(
+                DeviceEnrollmentRequest.api_key_id == api_key_id,
+                DeviceEnrollmentRequest.status == "pending",
+                or_(DeviceEnrollmentRequest.expires_at.is_(None), DeviceEnrollmentRequest.expires_at > now),
+            )
+        )
+        return int(self.session.scalar(statement) or 0)
+
     def create(self, request: DeviceEnrollmentRequest) -> DeviceEnrollmentRequest:
         self.session.add(request)
         self.session.flush()

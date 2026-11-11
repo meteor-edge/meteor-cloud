@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.exceptions import AppError, ConflictError, UnauthorizedError
 from app.core.metrics import ENROLLMENT_POLLS, ENROLLMENT_REQUESTS
 from app.devices.identity import DeviceIdentity, match_existing_device
 from app.devices.models import (
@@ -111,6 +111,7 @@ class EnrollmentService:
             request.expires_at = expires_at
             self.requests.update(request)
         else:
+            self._enforce_pending_cap(api_key, now)
             request = DeviceEnrollmentRequest(
                 organization_id=api_key.organization_id,
                 api_key_id=api_key.id,
@@ -146,6 +147,24 @@ class EnrollmentService:
             poll_interval_seconds=self.settings.enrollment_poll_interval_seconds,
             expires_at=request.expires_at,
         )
+
+    def _enforce_pending_cap(self, api_key: EnrollmentApiKey, now: datetime) -> None:
+        """Refuse a new pending request once the key has too many waiting for an answer.
+
+        Updates of a device's existing request are not counted against the cap, so a
+        device that retries never locks itself out.
+        """
+        cap = self.settings.enrollment_max_pending_per_key
+        if cap <= 0:
+            return
+        if self.requests.count_pending_for_key(api_key_id=api_key.id, now=now) >= cap:
+            raise AppError(
+                "too_many_pending_requests",
+                "This enrollment key has too many requests waiting for approval. "
+                "Approve or reject some in the console, then try again.",
+                status_code=429,
+                headers={"Retry-After": "300"},
+            )
 
     def _find_reusable_request(
         self,

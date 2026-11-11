@@ -17,7 +17,7 @@ from app.core.exceptions import AppError, UnauthorizedError
 from app.core.metrics import RATE_LIMITED
 from app.devices.enrollment import EnrollmentService
 from app.devices.models import Device, EnrollmentApiKey
-from app.devices.rate_limit import RateLimiter
+from app.devices.rate_limit import RateLimiter, retry_after_seconds
 from app.devices.registration import RegistrationService
 from app.devices.repository import DeviceRepository, EnrollmentApiKeyRepository
 from app.devices.schemas import AgentEnrollPollRequest
@@ -29,11 +29,12 @@ api_key_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 class RegistrationRateLimitError(AppError):
-    def __init__(self) -> None:
+    def __init__(self, retry_after: int | None = None) -> None:
         super().__init__(
             "rate_limited",
             "Too many registration attempts. Please try again later.",
             status_code=429,
+            headers={"Retry-After": str(retry_after)} if retry_after else None,
         )
 
 
@@ -87,7 +88,7 @@ def enforce_registration_rate_limit(
     client_host = request.client.host if request.client else "unknown"
     if not limiter.allow(client_host):
         RATE_LIMITED.labels(limiter="registration").inc()
-        raise RegistrationRateLimitError()
+        raise RegistrationRateLimitError(retry_after_seconds(limiter))
 
 
 @lru_cache
@@ -120,8 +121,22 @@ def _build_enroll_poll_ip_rate_limiter() -> RateLimiter:
     )
 
 
+@lru_cache
+def _build_enroll_ip_rate_limiter() -> RateLimiter:
+    settings = get_settings()
+    return _redis_rate_limiter(
+        limit=settings.enrollment_ip_rate_limit_requests,
+        window_seconds=settings.enrollment_request_rate_limit_window_seconds,
+        prefix="enroll_ip_rl",
+    )
+
+
 def get_enroll_request_rate_limiter() -> RateLimiter:
     return _build_enroll_request_rate_limiter()
+
+
+def get_enroll_ip_rate_limiter() -> RateLimiter:
+    return _build_enroll_ip_rate_limiter()
 
 
 def get_enroll_poll_rate_limiter() -> RateLimiter:
@@ -171,6 +186,17 @@ def get_current_api_key(
     return api_key
 
 
+def enforce_enroll_ip_rate_limit(
+    request: Request,
+    limiter: Annotated[RateLimiter, Depends(get_enroll_ip_rate_limiter)],
+) -> None:
+    """Per source IP, before the key is looked up: wrong or made-up keys are limited too."""
+    client_host = request.client.host if request.client else "unknown"
+    if not limiter.allow(client_host):
+        RATE_LIMITED.labels(limiter="enrollment_ip").inc()
+        raise RegistrationRateLimitError(retry_after_seconds(limiter))
+
+
 def enforce_enroll_request_rate_limit(
     request: Request,
     api_key: Annotated[EnrollmentApiKey, Depends(get_current_api_key)],
@@ -179,7 +205,7 @@ def enforce_enroll_request_rate_limit(
     client_host = request.client.host if request.client else "unknown"
     if not limiter.allow(f"{client_host}:{api_key.id}"):
         RATE_LIMITED.labels(limiter="enrollment_request").inc()
-        raise RegistrationRateLimitError()
+        raise RegistrationRateLimitError(retry_after_seconds(limiter))
 
 
 def enforce_enroll_poll_rate_limit(
@@ -192,7 +218,7 @@ def enforce_enroll_poll_rate_limit(
     # Per request id alone would give a new bucket to every made-up id.
     if not ip_limiter.allow(client_host) or not limiter.allow(f"{client_host}:{payload.request_id}"):
         RATE_LIMITED.labels(limiter="enrollment_poll").inc()
-        raise RegistrationRateLimitError()
+        raise RegistrationRateLimitError(retry_after_seconds(limiter))
 
 
 def get_current_device(
