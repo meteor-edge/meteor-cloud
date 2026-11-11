@@ -139,11 +139,24 @@ If a secret leaks:
 
 ## Using meteorcli
 
+With `meteorcli.service` (the default for a root install):
+
+```bash
+sudo meteorcli config --domain meteorxx.com --api-key key_...
+sudo meteorcli test
+sudo meteorcli request-token --name edge-01
+```
+
+The service polls the request and connects once it is approved.
+
+Per-user install without the service (no `sudo`, so every command uses the same
+`~/.config/meteorcli`):
+
 ```bash
 meteorcli config --domain meteorxx.com --api-key key_...
 meteorcli test
 meteorcli request-token --name edge-01
-# if still pending, later:
+# after a later approval:
 meteorcli claim
 meteorcli run
 ```

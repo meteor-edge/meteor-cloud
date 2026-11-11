@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Install meteorcli from this directory onto a Linux device.
 #
-#   ./installcli.sh              Install for the current user (~/.local)
-#   sudo ./installcli.sh         System-wide (/opt + /usr/local/bin)
+#   ./installcli.sh              Install for the current user (~/.local); no background service
+#   sudo ./installcli.sh         System-wide (/opt + /usr/local/bin) and start meteorcli.service
+#   sudo ./installcli.sh --no-service   System-wide, without the background service
 #   ./installcli.sh --uninstall  Remove the install, credentials, and MQTT/WireGuard state
 #                                (default config locations only, not METEORCLI_CONFIG_DIR)
 
@@ -20,23 +21,28 @@ USER_BIN="${HOME}/.local/bin"
 PREFIX="${PREFIX:-}"
 BIN_DIR="${BIN_DIR:-}"
 UNINSTALL=0
-WITH_SERVICE=0
+# auto: a root install starts meteorcli.service when systemd is running.
+# 1 (--with-service): require it. 0 (--no-service): skip it.
+WITH_SERVICE=auto
 
 usage() {
   cat <<EOF
 Install meteorcli from ${SCRIPT_DIR}
 
 Usage:
-  $0                      Install for this user (${USER_PREFIX}, ${USER_BIN})
-  sudo $0                 Install system-wide (${SYSTEM_PREFIX}, ${SYSTEM_BIN})
-  sudo $0 --with-service  System-wide + enable meteorcli.service (Raspberry Pi OS)
+  $0                      Install for this user (${USER_PREFIX}, ${USER_BIN}); no background service
+  sudo $0                 Install system-wide (${SYSTEM_PREFIX}, ${SYSTEM_BIN}) and start
+                          meteorcli.service, which connects once the device is registered
+  sudo $0 --no-service    System-wide, without meteorcli.service
   $0 --uninstall          Remove the install, credentials, and MQTT/WireGuard state
                           (default config locations; a METEORCLI_CONFIG_DIR is listed, not removed)
 
 Options:
   --prefix DIR     Virtualenv location
   --bin-dir DIR    Directory for the meteorcli symlink
-  --with-service   Install and enable systemd unit (root / system install only)
+  --with-service   Require meteorcli.service (the default for root when systemd runs;
+                   fails instead of skipping when it cannot be installed)
+  --no-service     Do not install or start meteorcli.service
   --uninstall      Remove the venv, symlink, unit, and ~/.config/meteorcli (and /etc/meteorcli as root)
   -h, --help       Show this help
 EOF
@@ -54,6 +60,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-service)
       WITH_SERVICE=1
+      shift
+      ;;
+    --no-service)
+      WITH_SERVICE=0
       shift
       ;;
     --uninstall)
@@ -89,13 +99,11 @@ fi
 
 need_writable() {
   local path="$1"
-  local parent
-  parent="$(dirname "${path}")"
-  if [[ -e "${path}" ]]; then
-    [[ -w "${path}" ]]
-  else
-    [[ -w "${parent}" ]]
-  fi
+  # The nearest existing ancestor decides: a fresh user has no ~/.local yet (mkdir -p creates it).
+  while [[ ! -e "${path}" && "${path}" != / ]]; do
+    path="$(dirname "${path}")"
+  done
+  [[ -w "${path}" ]]
 }
 
 find_python() {
@@ -267,11 +275,16 @@ migrate_user_config_to_system() {
     return 0
   fi
 
-  # Prefer migrating when the system dir has no device credential yet.
-  if [[ -f "${system_dir}/device-token" ]]; then
-    echo "Keeping existing ${system_dir} (device-token already present)."
-    return 0
-  fi
+  # Migrate only into an unused system dir. Every root install (and reinstall) runs this,
+  # and a device still waiting for approval has config.json/api-key/claim-secret but no
+  # device-token yet: copying a stale ~/.config over that would change its server or key.
+  local existing
+  for existing in device-token config.json api-key claim-secret; do
+    if [[ -f "${system_dir}/${existing}" ]]; then
+      echo "Keeping existing ${system_dir} (${existing} already present)."
+      return 0
+    fi
+  done
   if [[ ! -f "${user_dir}/device-token" && ! -f "${user_dir}/config.json" ]]; then
     return 0
   fi
@@ -321,7 +334,30 @@ install_service() {
   fi
   systemctl daemon-reload
   systemctl enable meteorcli.service
-  echo "Installed ${unit_dst} (enabled). Start after config: systemctl start meteorcli"
+  # restart, not start: an upgrade must replace the running agent with the new code.
+  # Before registration the service only waits; it connects once the device is approved.
+  systemctl restart meteorcli.service
+  echo "Installed and started ${unit_dst} (enabled at boot)."
+  echo "It waits for registration and connects (heartbeats, MQTT, WireGuard) once approved."
+}
+
+# Decide whether to install meteorcli.service. Prints the reason when skipping.
+want_service() {
+  case "${WITH_SERVICE}" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "note: no background service for a per-user install; this device only connects while" >&2
+    echo "      'meteorcli run' is open. For meteorcli.service, install with sudo." >&2
+    return 1
+  fi
+  # /run/systemd/system exists only when systemd is PID 1 (not in most containers or WSL1).
+  if [[ ! -d /run/systemd/system ]] || ! command -v systemctl >/dev/null 2>&1; then
+    echo "note: systemd is not running here; skipping meteorcli.service. Use 'meteorcli run'." >&2
+    return 1
+  fi
+  return 0
 }
 
 install_meteorcli() {
@@ -358,25 +394,35 @@ install_meteorcli() {
   if [[ "${EUID}" -ne 0 && ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
     echo "Add ${BIN_DIR} to PATH if meteorcli is not found."
   fi
-  if [[ "${WITH_SERVICE}" -eq 1 ]]; then
-    install_service
-  fi
+  # Packages and helpers first: the service may bring up WireGuard as soon as it starts.
   install_host_packages
   install_root_helpers
+  local service=0
+  if want_service; then
+    install_service
+    service=1
+  fi
   if [[ "${EUID}" -eq 0 ]]; then
     if ! command -v wg >/dev/null 2>&1 || ! command -v wg-quick >/dev/null 2>&1; then
       echo "warning: wg/wg-quick still missing; device WireGuard will stay off until wireguard-tools is installed." >&2
     fi
-    echo "Next: meteorcli config --domain <host> --api-key key_..."
-    echo "      meteorcli test"
-    echo "      meteorcli register|request-token, then meteorcli run"
-    echo "      (meteorcli.service uses /etc/meteorcli: sudo meteorcli register, then systemctl start meteorcli)"
+    if [[ "${service}" -eq 1 ]]; then
+      echo "Next: sudo meteorcli config --domain <host> --api-key key_..."
+      echo "      sudo meteorcli test"
+      echo "      sudo meteorcli request-token    (or: sudo meteorcli register --token ...)"
+      echo "      meteorcli.service connects as soon as the device is approved; no 'meteorcli run' needed."
+      echo "      Logs: journalctl -u meteorcli -f"
+    else
+      echo "Next: meteorcli config --domain <host> --api-key key_..."
+      echo "      meteorcli test"
+      echo "      meteorcli register|request-token, then meteorcli run"
+    fi
   else
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
     echo "Tip: sudo ./installcli.sh installs wireguard-tools, meteorcli-wg, meteorcli-logs, and meteorcli-systemd."
-    echo "     For meteorcli.service: sudo ./installcli.sh --with-service"
+    echo "     It also starts meteorcli.service, so the device connects without 'meteorcli run'."
   fi
 }
 

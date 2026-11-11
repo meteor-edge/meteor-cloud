@@ -62,14 +62,12 @@ Pick one path.
 2. On the device:
 
 ```bash
-curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
-# from a cloud checkout instead: cd src/device-plane/agent && ./installcli.sh
-meteorcli register --server http://localhost:8000 --token reg_... --name edge-01
-sudo systemctl enable --now meteorcli   # if installed with --with-service
-# or: meteorcli run                     # foreground; Ctrl+C to stop
-# systemd Deploys need the meteorcli-systemd helper, which a root install adds:
-#   curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
-# or run meteorcli.service (root): ... | sudo bash -s -- --with-service
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
+# from a cloud checkout instead: cd src/device-plane/agent && sudo ./installcli.sh
+sudo meteorcli register --server http://localhost:8000 --token reg_... --name edge-01
+# meteorcli.service (started by the installer) connects within a few seconds:
+journalctl -u meteorcli -f
+# without root / systemd there is no service: meteorcli run   (foreground; Ctrl+C to stop)
 ```
 
 Details: [Registration tokens](fleet/registration-tokens.md), [Device registration](fleet/device-registration.md).
@@ -81,15 +79,17 @@ Details: [Registration tokens](fleet/registration-tokens.md), [Device registrati
 
 ```bash
 # install meteorcli first (same curl as Path A) if the device does not have it
-meteorcli config --domain localhost:8000 --api-key key_...
+sudo meteorcli config --domain localhost:8000 --api-key key_...
 # from a Pi on the LAN to your laptop: --domain 192.168.0.118:8000
-meteorcli test
-meteorcli request-token --name edge-01
+sudo meteorcli test
+sudo meteorcli request-token --name edge-01
 ```
 
-3. Approve the pending request in the console.
-4. If the CLI timed out waiting, run `meteorcli claim`, then start the agent
-   (`sudo systemctl enable --now meteorcli` or `meteorcli run`).
+3. Approve the pending request in the console. `meteorcli.service` collects the
+   device token and connects (heartbeats, MQTT, WireGuard); nothing else to run.
+4. Without the service (non-root install, no systemd): `meteorcli request-token`
+   waits up to ~5 minutes; after a later approval run `meteorcli claim`, then
+   `meteorcli run`.
 
 For a Pi image that should install `meteorcli` and **keep polling until you
 approve**, without SSH or `cmdline.txt`: copy `.meteorenv` onto **bootfs**

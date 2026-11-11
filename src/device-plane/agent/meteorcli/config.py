@@ -40,13 +40,20 @@ def _user_home(username: str | None = None) -> Path:
 
 
 def default_config_dir() -> Path:
-    """Per-user config dir, including when the command is run via sudo.
+    """Config dir for this command.
 
-    Root uses ``/etc/meteorcli`` when there is no SUDO_USER, or when meteorcli.service
-    is installed: ``sudo meteorcli register`` must enroll the identity the service runs.
+    When meteorcli.service is installed, everyone uses ``/etc/meteorcli``, the
+    identity the service runs: enrolling into ``~/.config`` would leave the service
+    waiting forever. Writing there needs root (or a dir chowned by an earlier sudo
+    run); ``main`` turns the permission error into a "use sudo" hint.
+
+    Without the service, root uses ``/etc/meteorcli`` when there is no SUDO_USER,
+    and everyone else (including sudo) uses the invoking user's config dir.
     """
+    if SERVICE_UNIT.exists():
+        return SYSTEM_CONFIG_DIR
     sudo_user = _sudo_user()
-    if _is_root() and (sudo_user is None or SERVICE_UNIT.exists()):
+    if _is_root() and sudo_user is None:
         return SYSTEM_CONFIG_DIR
     if sudo_user:
         return _user_home(sudo_user) / ".config" / "meteorcli"

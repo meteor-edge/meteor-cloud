@@ -16,7 +16,8 @@ RestartSec=10
 User=root
 Group=root
 # Always /etc/meteorcli — enroll with ``sudo meteorcli …`` or re-run
-# ``sudo ./installcli.sh --with-service`` to migrate ~/.config/meteorcli.
+# ``sudo ./installcli.sh`` to migrate ~/.config/meteorcli. Until the device is
+# registered, ``meteorcli run`` waits here instead of exiting.
 Environment=METEORCLI_CONFIG_DIR=/etc/meteorcli
 # systemd's default PATH omits /snap/bin; Docker Desktop/snap installs land there.
 # Without docker on PATH, heartbeats report docker/docker_compose=false and Deploys skip the device.

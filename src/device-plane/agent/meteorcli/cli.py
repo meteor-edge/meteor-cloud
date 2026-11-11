@@ -8,6 +8,8 @@ Subcommands
   request-token  Ask the API for a device token; wait briefly for admin approval.
   claim          Collect the device token after a later approval.
   run        Foreground heartbeats, MQTT, WireGuard (refuses if meteorcli.service is already active).
+             With a pending token request, it first waits for approval. Under
+             meteorcli.service it also waits for setup/registration instead of exiting.
   mqtt-test    Publish one TLS MQTT message (default: devices/{id}/status).
   mqtt-listen  Print inbound commands (default: devices/{id}/commands).
   status       Show persisted (non-secret) configuration.
@@ -34,9 +36,10 @@ from edge_agent.credentials import read_device_token, read_registration_token_fi
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
 from edge_agent.registration import register
-from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_under_systemd, service_state
+from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_as_service, service_state
 from edge_agent.software import reconcile_software
 from meteorcli import __version__
+from meteorcli import config as cli_config
 from meteorcli.config import (
     CliPaths,
     chown_config_dir,
@@ -64,6 +67,8 @@ DEFAULT_ENROLL_WAIT_SECONDS = 300
 MIN_POLL_INTERVAL_SECONDS = 10
 # Extra delay after HTTP 429 before the next poll (seconds).
 RATE_LIMIT_BACKOFF_SECONDS = 30
+# meteorcli.service checks the config dir this often while the device is not registered.
+SERVICE_IDLE_CHECK_SECONDS = 10
 
 
 def _normalize_secret(value: str | None) -> str | None:
@@ -84,7 +89,7 @@ def _paths_from_args(args: argparse.Namespace) -> CliPaths:
 
 def _finish_config_write(paths: CliPaths) -> None:
     chown_config_dir(paths.config_path.parent)
-    if os.environ.get("SUDO_USER") and os.geteuid() == 0:
+    if os.environ.get("SUDO_USER") and os.geteuid() == 0 and not _service_reads(paths):
         print(
             f"note: sudo is not required; config is stored for {os.environ['SUDO_USER']} at {paths.config_path.parent}",
             file=sys.stderr,
@@ -215,7 +220,7 @@ def _cmd_register(args: argparse.Namespace) -> int:
     print(f"Heartbeat:      every {result.heartbeat_interval_seconds}s")
     print(f"Credential:     stored at {paths.token_path}")
     print()
-    _print_run_next_step()
+    _print_run_next_step(paths)
     chown_config_dir(paths.config_path.parent)
     return 0
 
@@ -277,7 +282,19 @@ def _load_pending_claim(paths: CliPaths) -> dict | None:
     claim_secret = data.get("claim_secret")
     if not request_id or not claim_secret:
         return None
-    return {"request_id": str(request_id), "claim_secret": str(claim_secret)}
+    pending = {"request_id": str(request_id), "claim_secret": str(claim_secret)}
+    if data.get("name"):
+        pending["name"] = str(data["name"])
+    return pending
+
+
+def _store_pending_claim(paths: CliPaths, submitted: dict, name: str | None) -> dict:
+    """Save the claim secret. The requested name is kept so an expired request can be resubmitted."""
+    pending = {"request_id": str(submitted["request_id"]), "claim_secret": str(submitted["claim_secret"])}
+    if name:
+        pending["name"] = name
+    write_secret(paths.claim_secret_path, json.dumps(pending))
+    return pending
 
 
 def _poll_interval(polled: dict | None, fallback: int) -> int:
@@ -290,18 +307,47 @@ def _poll_interval(polled: dict | None, fallback: int) -> int:
     return max(MIN_POLL_INTERVAL_SECONDS, suggested, 1)
 
 
-def _print_run_next_step() -> None:
+def _service_reads(paths: CliPaths) -> bool:
+    """True when meteorcli.service uses this config dir (it always reads /etc/meteorcli)."""
+    try:
+        return paths.config_path.parent.resolve() == cli_config.SYSTEM_CONFIG_DIR.resolve()
+    except OSError:
+        return False
+
+
+def _service_will_connect(paths: CliPaths) -> bool:
+    """True when the running meteorcli.service picks up enrollment written to ``paths``."""
+    return _service_reads(paths) and service_state() == "active"
+
+
+def _service_collects_claim(paths: CliPaths, server: str) -> bool:
+    """True when the running service will poll a token request submitted to ``server``.
+
+    Only a service that is still waiting for enrollment looks at new claims, and it
+    polls the server saved in the config, so a ``--server`` override is not handed over.
+    """
+    if not _service_will_connect(paths) or _enrolled(paths):
+        return False
+    saved = resolve_server_url(_load(paths))
+    return bool(saved) and saved.rstrip("/") == server.rstrip("/")
+
+
+def _print_run_next_step(paths: CliPaths) -> None:
     state = service_state()
-    if state == "active":
-        print(f"Heartbeats are already running as {UNIT}.")
+    if state == "active" and _service_reads(paths):
+        print(f"{UNIT} is running and connects (heartbeats, MQTT, WireGuard) within a few seconds.")
         print("Follow logs with: journalctl -u meteorcli -f")
         return
+    if state == "active":
+        print(f"note: {UNIT} reads {cli_config.SYSTEM_CONFIG_DIR}, not {paths.config_path.parent}.")
+        print(f"Next: {PROG} run    (foreground) or enroll again with sudo for the service")
+        return
     if state != NOT_INSTALLED:
-        print("Next: sudo systemctl start meteorcli    (background)")
-        print(f"  or: {PROG} run                       (foreground, Ctrl+C to stop)")
+        print("Next: sudo systemctl enable --now meteorcli    (background)")
+        print(f"  or: {PROG} run                              (foreground, Ctrl+C to stop)")
         return
     print(f"Next: {PROG} run    (foreground; Ctrl+C to stop)")
-    print("      Install a background service with: sudo ./installcli.sh --with-service")
+    print("      For a background agent, reinstall as root: sudo ./installcli.sh")
 
 
 def _print_claimed(paths: CliPaths, polled: dict) -> None:
@@ -309,7 +355,7 @@ def _print_claimed(paths: CliPaths, polled: dict) -> None:
     print(f"Name:           {polled.get('name')}")
     print(f"Credential:     stored at {paths.token_path}")
     print()
-    _print_run_next_step()
+    _print_run_next_step(paths)
 
 
 def _print_pending_hint(request_id: str) -> None:
@@ -334,6 +380,12 @@ def _handle_poll_payload(paths: CliPaths, client: EdgeClient, polled: dict) -> i
     if status == "approved" and polled.get("device_token"):
         _persist_claimed_device(paths, client, polled)
         _print_claimed(paths, polled)
+        return 0
+    if status == "approved" and _enrolled(paths):
+        # meteorcli.service (or another claimer) collected the token first.
+        print("Approved. The device credential was collected by meteorcli.service.")
+        remove_secret(paths.claim_secret_path)
+        _print_run_next_step(paths)
         return 0
     if status == "approved":
         print("Approved, but the device credential was already claimed.", file=sys.stderr)
@@ -422,11 +474,18 @@ def _cmd_request(args: argparse.Namespace) -> int:
                 f"error: a pending enrollment request already exists ({pending['request_id']}).",
                 file=sys.stderr,
             )
-            print(
-                f"Run '{PROG} claim' to collect the token after approval, "
-                f"or '{PROG} request-token --new' to submit a different request.",
-                file=sys.stderr,
-            )
+            if _service_collects_claim(paths, server):
+                print(
+                    f"{UNIT} is waiting for its approval and connects afterwards. "
+                    f"Use '{PROG} request-token --new' to submit a different request.",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"Run '{PROG} claim' to collect the token after approval, "
+                    f"or '{PROG} request-token --new' to submit a different request.",
+                    file=sys.stderr,
+                )
             return 2
         print(
             f"Previous enrollment request was {status}. Submitting a new request.",
@@ -440,18 +499,24 @@ def _cmd_request(args: argparse.Namespace) -> int:
         print(f"error: enrollment request failed: {error.message}", file=sys.stderr)
         return 1
 
-    request_id = str(submitted["request_id"])
-    claim_secret = str(submitted["claim_secret"])
-    write_secret(
-        paths.claim_secret_path,
-        json.dumps({"request_id": request_id, "claim_secret": claim_secret}),
-    )
+    stored = _store_pending_claim(paths, submitted, args.name)
+    request_id = stored["request_id"]
+    claim_secret = stored["claim_secret"]
     interval = int(submitted.get("poll_interval_seconds") or MIN_POLL_INTERVAL_SECONDS)
     print(f"Enrollment request {request_id} submitted.")
-    wait_seconds = max(0, int(args.wait))
+    service_waits = _service_collects_claim(paths, server)
+    if args.wait is None:
+        # The running service already polls this request; a second poller would only race it.
+        wait_seconds = 0 if service_waits else DEFAULT_ENROLL_WAIT_SECONDS
+    else:
+        wait_seconds = max(0, int(args.wait))
     if wait_seconds == 0:
-        print("Not waiting. After an administrator approves this device, collect the token with:")
-        print(f"  {PROG} claim")
+        if service_waits:
+            print(f"{UNIT} is waiting for an administrator to approve this device and then connects.")
+            print("Follow it with: journalctl -u meteorcli -f")
+        else:
+            print("Not waiting. After an administrator approves this device, collect the token with:")
+            print(f"  {PROG} claim")
         return 0
 
     print(
@@ -591,8 +656,187 @@ def _load_or_fail(paths: CliPaths) -> tuple[AgentConfig, str] | None:
     return config, device_token
 
 
+def _enrolled(paths: CliPaths) -> bool:
+    """True when this config dir holds a device id and a device credential."""
+    config = _load(paths)
+    return bool(config and config.device_id) and read_device_token(paths.token_path) is not None
+
+
+def _service_wait_until_enrolled(paths: CliPaths, *, sleep) -> None:
+    """meteorcli.service: idle until this device is registered, then return.
+
+    The installer starts the service before anyone has run ``config`` or
+    ``request-token``. Exiting here would make systemd restart it every few
+    seconds, so it checks the config dir instead: a pending token request is
+    waited on (and collected), a registration token written by ``register`` is
+    picked up on the next check. A rejected or expired request goes back to idle.
+    """
+    announced: str | None = None
+    while not _enrolled(paths):
+        if _load_pending_claim(paths) is not None:
+            announced = None
+            _wait_for_pending_enrollment(paths, sleep=sleep)
+            if _enrolled(paths):
+                break
+            # The request ended without a credential (rejected, refused key, no server,
+            # or a token whose config write was interrupted): back to waiting.
+        elif not resolve_server_url(_load(paths)):
+            if announced != "unconfigured":
+                logger.info(
+                    "Waiting for setup. Run 'sudo %s config --domain <host> --api-key key_…' "
+                    "and 'sudo %s request-token'.",
+                    PROG,
+                    PROG,
+                )
+                announced = "unconfigured"
+        elif announced != "unregistered":
+            logger.info(
+                "Waiting for registration. Run 'sudo %s request-token' (or 'sudo %s register'); "
+                "this service connects as soon as the device is approved.",
+                PROG,
+                PROG,
+            )
+            announced = "unregistered"
+        sleep(SERVICE_IDLE_CHECK_SECONDS)
+
+
+def _claim_replaced(paths: CliPaths, pending: dict) -> bool:
+    """True when the claim on disk is no longer ``pending`` (e.g. ``request-token --new`` ran)."""
+    on_disk = _load_pending_claim(paths)
+    return on_disk is not None and on_disk["request_id"] != pending["request_id"]
+
+
+# Statuses from the enrollment poll that mean the request itself is unknown or revoked.
+_ENROLL_INVALID_STATUSES = frozenset({401, 403, 404})
+
+
+def _wait_for_pending_enrollment(paths: CliPaths, *, sleep) -> int | None:
+    """Wait for an administrator to approve a token request submitted earlier.
+
+    First boot (Meteor Imager's firstrun) runs ``request-token --wait 0``, deletes
+    itself and starts meteorcli.service, so the wait for approval lives here and
+    survives reboots. An expired request is resubmitted with the stored API key.
+
+    Returns None when there is nothing to wait for or the device is now enrolled,
+    or an exit code when the request ended without a device credential.
+    """
+    if _enrolled(paths):
+        return None
+    pending = _load_pending_claim(paths)
+    if pending is None:
+        return None
+    server = resolve_server_url(_load(paths))
+    if not server:
+        print(f"error: no server configured. Run '{PROG} config --domain …' first.", file=sys.stderr)
+        return 2
+    client = EdgeClient(server)
+    interval = MIN_POLL_INTERVAL_SECONDS
+    logger.info(
+        "Enrollment request %s is waiting for approval in MeteorCloud; checking every %ss.",
+        pending["request_id"],
+        interval,
+    )
+    while True:
+        # Another process (an interactive `request-token`/`claim`, or `request-token --new`)
+        # may have collected the token or replaced the request since the last poll.
+        if _enrolled(paths):
+            return None
+        on_disk = _load_pending_claim(paths)
+        if on_disk is None:
+            return None
+        if on_disk["request_id"] != pending["request_id"]:
+            pending = on_disk
+        try:
+            polled = client.enroll_poll(request_id=pending["request_id"], claim_secret=pending["claim_secret"])
+        except AgentApiError as error:
+            if _claim_replaced(paths, pending):
+                continue  # this answer is about the old request; poll the new one
+            if error.status in _ENROLL_INVALID_STATUSES:
+                print(
+                    f"error: {server} does not know enrollment request {pending['request_id']} "
+                    f"({error.message}). Submit a new one with '{PROG} request-token'.",
+                    file=sys.stderr,
+                )
+                remove_secret(paths.claim_secret_path)
+                return 1
+            delay = RATE_LIMIT_BACKOFF_SECONDS if error.status == 429 else max(interval, RATE_LIMIT_BACKOFF_SECONDS)
+            logger.warning("Could not check enrollment (%s); retrying in %ss.", error.message, delay)
+            sleep(delay)
+            continue
+
+        status = polled.get("status")
+        if status == "pending":
+            interval = _poll_interval(polled, interval)
+            sleep(interval)
+            continue
+        if status == "approved" and polled.get("device_token"):
+            # Collect even if the claim was replaced meanwhile: the token is shown only once.
+            _persist_claimed_device(paths, client, polled)
+            logger.info("Approved: registered device %s (%s).", polled["device_id"], polled.get("name") or "-")
+            return None
+        if _claim_replaced(paths, pending):
+            continue  # do not resubmit or drop a request someone already replaced
+        if status == "expired":
+            renewed = _resubmit_expired_request(paths, client, pending)
+            if renewed is None:
+                return 1
+            if renewed is pending:
+                sleep(RATE_LIMIT_BACKOFF_SECONDS)
+            pending = renewed
+            continue
+        if status == "approved" and _enrolled(paths):
+            # The token was collected by another process between our checks.
+            return None
+        return _handle_poll_payload(paths, client, polled)
+
+
+def _resubmit_expired_request(paths: CliPaths, client: EdgeClient, pending: dict) -> dict | None:
+    """Replace an expired request. Returns the new claim, ``pending`` to retry later, or None to stop."""
+    api_key = _normalize_secret(read_secret(paths.api_key_path))
+    if not api_key:
+        print(
+            f"error: enrollment request {pending['request_id']} expired and no API key is stored to "
+            f"submit a new one. Run '{PROG} config --api-key key_…' and '{PROG} request-token'.",
+            file=sys.stderr,
+        )
+        remove_secret(paths.claim_secret_path)
+        return None
+    try:
+        submitted = client.enroll_request(
+            api_key=api_key,
+            inventory=collect_inventory(),
+            name=pending.get("name"),
+        )
+    except AgentApiError as error:
+        if error.status in _ENROLL_INVALID_STATUSES:
+            print(f"error: enrollment request expired and the API key was refused: {error.message}", file=sys.stderr)
+            remove_secret(paths.claim_secret_path)
+            return None
+        logger.warning("Enrollment request expired; resubmitting failed (%s), will retry.", error.message)
+        return pending
+    renewed = _store_pending_claim(paths, submitted, pending.get("name"))
+    logger.info(
+        "Enrollment request %s expired; submitted %s. Approve it in MeteorCloud.",
+        pending["request_id"],
+        renewed["request_id"],
+    )
+    return renewed
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     paths = _paths_from_args(args)
+    if not args.once:
+        clash = duplicate_run_message(service_state())
+        if clash:
+            print(clash, file=sys.stderr)
+            return 1
+        wait_sleep = getattr(args, "_sleep", time.sleep)
+        if running_as_service():
+            _service_wait_until_enrolled(paths, sleep=wait_sleep)
+        else:
+            waited = _wait_for_pending_enrollment(paths, sleep=wait_sleep)
+            if waited is not None:
+                return waited
     loaded = _load_or_fail(paths)
     if loaded is None:
         return 1
@@ -603,12 +847,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     from edge_agent.mqtt_sync import MqttSupervisor
     from edge_agent.wireguard import ConnectivityState, describe_tunnel, sync_connectivity
-
-    if not args.once:
-        clash = duplicate_run_message(service_state())
-        if clash:
-            print(clash, file=sys.stderr)
-            return 1
 
     # One schedule per run loop; --once registers every time.
     wg_state = None if args.once else ConnectivityState()
@@ -655,7 +893,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 0
 
     interval = args.interval or config.heartbeat_interval_seconds
-    if running_under_systemd():
+    if running_as_service():
         logger.info("Running as %s", UNIT)
     else:
         logger.info("Running in the foreground (Ctrl+C to stop). This is not a background daemon.")
@@ -1021,9 +1259,12 @@ def build_parser() -> argparse.ArgumentParser:
     request_parser.add_argument(
         "--wait",
         type=int,
-        default=DEFAULT_ENROLL_WAIT_SECONDS,
+        default=None,
         metavar="SECONDS",
-        help=(f"How long to poll for approval (default: {DEFAULT_ENROLL_WAIT_SECONDS}; 0 submits and exits)."),
+        help=(
+            f"How long to poll for approval (default: {DEFAULT_ENROLL_WAIT_SECONDS}, or 0 when "
+            "meteorcli.service is running and waits instead; 0 submits and exits)."
+        ),
     )
     request_parser.add_argument(
         "--new",
@@ -1061,7 +1302,10 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Foreground loop: heartbeats, MQTT, and WireGuard. Stays in this terminal "
             "(Ctrl+C to stop). If meteorcli.service is already active, this command "
-            "exits so you do not run two agents. --once still runs one pass."
+            "exits so you do not run two agents. --once still runs one pass. "
+            "If a token request is still pending, it first waits for approval "
+            "(waits for pending enrollment), resubmitting an expired request with the stored API key. "
+            "As meteorcli.service it also waits until the device is configured and registered."
         ),
     )
     run_parser.add_argument("--once", action="store_true", help="Send a single heartbeat and exit.")
@@ -1154,7 +1398,21 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = build_parser()
     args = parser.parse_args(argv)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except PermissionError as error:
+        where = error.filename or "the meteorcli config directory"
+        if Path(str(where)).name.startswith(".tmp"):
+            where = Path(str(where)).parent  # an atomic write's temp file: name the directory
+
+        print(f"error: permission denied: {where}", file=sys.stderr)
+        if os.geteuid() != 0:
+            print(
+                f"{UNIT} keeps this device's identity in {cli_config.SYSTEM_CONFIG_DIR}. "
+                f"Run the command with sudo, e.g. 'sudo {PROG} {args.command}'.",
+                file=sys.stderr,
+            )
+        return 1
 
 
 if __name__ == "__main__":
