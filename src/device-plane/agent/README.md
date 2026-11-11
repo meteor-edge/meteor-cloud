@@ -19,9 +19,7 @@ Debian-like systems work the same way.
 **On a device** (no cloud clone):
 
 ```bash
-curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
-# system-wide + systemd:
-# curl -fsSL .../install-meteorcli.sh | sudo bash -s -- --with-service
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
 ```
 
 Maintainers publish that file by tagging `agent-v<version>` (see [meteorcli](../../../docs/meteorcli.md)).
@@ -30,11 +28,16 @@ From this directory (also requires sibling `../runtime`, included in the wheel
 via Hatch `force-include`):
 
 ```bash
-./installcli.sh                    # current user (~/.local)
-sudo ./installcli.sh               # system-wide
-sudo ./installcli.sh --with-service  # + enable meteorcli.service
+./installcli.sh                    # current user (~/.local); no background service
+sudo ./installcli.sh               # system-wide + start meteorcli.service
+sudo ./installcli.sh --no-service  # system-wide, CLI only
 meteorcli --help
 ```
+
+A root install starts `meteorcli.service` when systemd is running. Before the
+device is registered the service only waits; once a token is stored or an
+enrollment request is approved it connects (heartbeats, MQTT, WireGuard).
+`--with-service` is still accepted and turns "no systemd" into an error.
 
 A user install puts the venv in `~/.local/share/meteorcli` and the command in
 `~/.local/bin`. A system install uses `/opt/meteorcli` and `/usr/local/bin`.
@@ -59,12 +62,11 @@ When the control plane has WireGuard enabled, `run` registers this device’s
 **public** key and brings up a tunnel (private key stays on the device). See
 [Device connectivity](../../../docs/fleet/connectivity.md).
 
-Config and credentials go in `~/.config/meteorcli` for a normal user, or
-`/etc/meteorcli` when running as root / under `meteorcli.service`. Prefer
-`sudo meteorcli register` or `sudo meteorcli request-token` after a system
-install so the service finds the device token. Re-running
-`sudo ./installcli.sh --with-service` copies an existing user config into
-`/etc/meteorcli` when that dir has no `device-token` yet.
+Config and credentials go in `/etc/meteorcli` whenever `meteorcli.service` is
+installed (for every user, so enrollment lands where the service reads it; use
+`sudo meteorcli …`). Without the service: `~/.config/meteorcli` for a normal
+user, `/etc/meteorcli` for root. Re-running `sudo ./installcli.sh` copies an
+existing user config into `/etc/meteorcli` when that dir has no `device-token` yet.
 
 **Golden image / first boot:**
 
@@ -163,13 +165,15 @@ meteorcli claim
 `meteorcli request-token` will refuse to create a second request while a claim is
 still pending on the server; pass `--new` only if you intend to replace it.
 After a rejection or expiry, run `request-token` again (no `--new` needed).
-Use `meteorcli run` after the token is stored.
+Without the service, use `meteorcli run` after the token is stored.
 
-Or leave the wait to the service: `meteorcli request-token --wait 0`, then
-`sudo systemctl enable --now meteorcli`. While a request is pending, `meteorcli run`
-waits for approval first (every 10 seconds, also across reboots), then starts
-heartbeats. If the request expires, it submits a new one with the stored API key.
-A rejected request stops the wait. Meteor Imager's `meteor-firstrun.sh` uses this:
+With `meteorcli.service` running, `request-token` does not wait (unless you pass
+`--wait`): the service waits for approval (every 10 seconds, also across
+reboots), then starts heartbeats. If the request expires, it submits a new one
+with the stored API key. A rejected request sends the service back to waiting.
+Before anything is configured the service also just waits, so the installer can
+start it right away. A foreground `meteorcli run` with a pending request waits
+the same way; there a rejection ends the command. Meteor Imager's `meteor-firstrun.sh` uses this:
 it sends the request, deletes itself and `.meteorenv` from the boot partition,
 and starts `meteorcli.service`.
 
@@ -179,7 +183,7 @@ and starts `meteorcli.service`.
 the terminal until Ctrl+C. It is not a background daemon.
 
 ```bash
-sudo systemctl enable --now meteorcli   # background; requires --with-service
+systemctl status meteorcli              # started by a root install
 journalctl -u meteorcli -f
 meteorcli status
 meteorcli run                           # foreground; refused if the service is already active

@@ -94,7 +94,7 @@ heartbeat does not immediately flip a device offline.
 ## Reference agent
 
 ```bash
-sudo systemctl enable --now meteorcli   # background (installcli.sh --with-service)
+systemctl status meteorcli   # started by a root install; heartbeats once registered
 journalctl -u meteorcli -f
 meteorcli run          # foreground loop; Ctrl+C to stop
 meteorcli run --once   # single heartbeat

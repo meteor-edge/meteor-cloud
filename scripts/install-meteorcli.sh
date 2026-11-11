@@ -2,8 +2,10 @@
 # Download the meteorcli release tarball and run its installer.
 # Does not clone the MeteorCloud repository.
 #
-#   curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
-#   curl -fsSL .../install-meteorcli.sh | sudo bash -s -- --with-service
+#   curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
+#     (root: also starts meteorcli.service, which connects once the device is registered)
+#   curl -fsSL .../install-meteorcli.sh | sudo bash -s -- --no-service   (CLI only)
+#   curl -fsSL .../install-meteorcli.sh | bash   (per-user, no background service)
 #
 # Override: METEORCLI_RELEASE_REPO, METEORCLI_VERSION (latest | 0.1.0 | agent-v0.1.0),
 # METEORCLI_DIST_URL (full tarball URL). Extra args go to installcli.sh.
