@@ -19,6 +19,12 @@ next). As soon as a token is stored or an enrollment request is approved, it
 connects: heartbeats, MQTT and WireGuard, with no `meteorcli run`. Re-running the
 installer upgrades and restarts the service.
 
+The service does not exit on its own. If the server refuses the device credential (the
+device was deleted or its token revoked), or something unexpected fails, it logs the reason
+and tries again after 30 s, doubling up to 15 min. Enroll the device again with
+`sudo meteorcli request-token --new`; the running service picks up the new credential. A
+damaged `config.json` is ignored with a warning, and the service waits for `meteorcli config`.
+
 - `--no-service` skips the service (CLI only).
 - Without root, or where systemd is not running (most containers), there is no
   service; use `meteorcli run` in the foreground. `--with-service` makes that an

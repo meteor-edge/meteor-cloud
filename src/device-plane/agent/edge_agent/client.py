@@ -62,6 +62,9 @@ class EdgeClient:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
                 return json.loads(raw) if raw else {}
+        except ValueError as exc:
+            # A captive portal or proxy answered instead of MeteorCloud; retry like a network failure.
+            raise AgentApiError(0, "bad_response", f"{url} did not answer with JSON") from exc
         except urllib.error.HTTPError as exc:
             raise self._to_api_error(exc) from exc
         except urllib.error.URLError as exc:  # network-level failure

@@ -840,8 +840,53 @@ def _resubmit_expired_request(paths: CliPaths, client: EdgeClient, pending: dict
     return renewed
 
 
+# meteorcli.service: wait between attempts after the server refused the device
+# credential or something unexpected failed; doubles up to the maximum.
+SERVICE_RETRY_MIN_SECONDS = 30
+SERVICE_RETRY_MAX_SECONDS = 900
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     paths = _paths_from_args(args)
+    if args.once or not running_as_service():
+        return _run_agent(paths, args)
+    return _run_service(paths, args)
+
+
+def _run_service(paths: CliPaths, args: argparse.Namespace) -> int:
+    """meteorcli.service never gives up: a refused credential or an unexpected error is
+    logged and tried again, slowly, instead of exiting into a systemd restart loop.
+
+    Each attempt reads the config dir again, so enrolling the device again (or fixing
+    a damaged file) is picked up without restarting the service.
+    """
+    delay = SERVICE_RETRY_MIN_SECONDS
+    while True:
+        started = time.monotonic()
+        try:
+            code = _run_agent(paths, args)
+        except Exception as error:
+            code, failure = None, error
+        if code == 0:
+            return 0
+        if time.monotonic() - started >= SERVICE_RETRY_MAX_SECONDS:
+            delay = SERVICE_RETRY_MIN_SECONDS  # it ran for a while: start the backoff over
+        if code is None:
+            logger.error("Unexpected error. The agent stays up and tries again in %ss.", delay, exc_info=failure)
+        else:
+            logger.error(
+                "The agent could not connect with this device's credential (deleted or revoked in "
+                "MeteorCloud?). It tries again in %ss. To enroll the device again: "
+                "'sudo %s request-token --new' (or 'sudo %s register').",
+                delay,
+                PROG,
+                PROG,
+            )
+        getattr(args, "_sleep", time.sleep)(delay)
+        delay = min(delay * 2, SERVICE_RETRY_MAX_SECONDS)
+
+
+def _run_agent(paths: CliPaths, args: argparse.Namespace) -> int:
     if not args.once:
         clash = duplicate_run_message(service_state())
         if clash:
@@ -909,7 +954,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(describe_tunnel(paths.config_path.parent).summary())
         return 0
 
-    interval = args.interval or config.heartbeat_interval_seconds
+    interval = max(1, args.interval or config.heartbeat_interval_seconds)
     if running_as_service():
         logger.info("Running as %s", UNIT)
     else:

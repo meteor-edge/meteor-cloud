@@ -52,8 +52,8 @@ def run_loop(
     """
     backoff = _INITIAL_BACKOFF
     while should_continue():
-        payload = payload_factory() if payload_factory else {}
         try:
+            payload = payload_factory() if payload_factory else {}
             send_heartbeat(client, device_token, payload)
             backoff = _INITIAL_BACKOFF
             sleep(interval_seconds)
@@ -64,5 +64,12 @@ def run_loop(
             # Jitter spreads a fleet's retries after a shared outage.
             delay = backoff * jitter(0.5, 1.0)
             logger.warning("Heartbeat failed (%s); retrying in %.0fs.", error.code, delay)
+            sleep(delay)
+            backoff = min(backoff * 2, _MAX_BACKOFF)
+        except Exception:
+            # A bug or a local fault (disk full, a tool that failed) in one round must
+            # not take the agent offline: log it and try again.
+            delay = backoff * jitter(0.5, 1.0)
+            logger.exception("Heartbeat round failed; retrying in %.0fs.", delay)
             sleep(delay)
             backoff = min(backoff * 2, _MAX_BACKOFF)
