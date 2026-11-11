@@ -320,6 +320,18 @@ def _service_will_connect(paths: CliPaths) -> bool:
     return _service_reads(paths) and service_state() == "active"
 
 
+def _service_collects_claim(paths: CliPaths, server: str) -> bool:
+    """True when the running service will poll a token request submitted to ``server``.
+
+    Only a service that is still waiting for enrollment looks at new claims, and it
+    polls the server saved in the config, so a ``--server`` override is not handed over.
+    """
+    if not _service_will_connect(paths) or _enrolled(paths):
+        return False
+    saved = resolve_server_url(_load(paths))
+    return bool(saved) and saved.rstrip("/") == server.rstrip("/")
+
+
 def _print_run_next_step(paths: CliPaths) -> None:
     state = service_state()
     if state == "active" and _service_reads(paths):
@@ -462,7 +474,7 @@ def _cmd_request(args: argparse.Namespace) -> int:
                 f"error: a pending enrollment request already exists ({pending['request_id']}).",
                 file=sys.stderr,
             )
-            if _service_will_connect(paths):
+            if _service_collects_claim(paths, server):
                 print(
                     f"{UNIT} is waiting for its approval and connects afterwards. "
                     f"Use '{PROG} request-token --new' to submit a different request.",
@@ -492,7 +504,7 @@ def _cmd_request(args: argparse.Namespace) -> int:
     claim_secret = stored["claim_secret"]
     interval = int(submitted.get("poll_interval_seconds") or MIN_POLL_INTERVAL_SECONDS)
     print(f"Enrollment request {request_id} submitted.")
-    service_waits = _service_will_connect(paths)
+    service_waits = _service_collects_claim(paths, server)
     if args.wait is None:
         # The running service already polls this request; a second poller would only race it.
         wait_seconds = 0 if service_waits else DEFAULT_ENROLL_WAIT_SECONDS
@@ -663,9 +675,11 @@ def _service_wait_until_enrolled(paths: CliPaths, *, sleep) -> None:
     while not _enrolled(paths):
         if _load_pending_claim(paths) is not None:
             announced = None
-            if _wait_for_pending_enrollment(paths, sleep=sleep) is None:
-                continue
-            # The request ended without a credential (rejected, refused key, no server).
+            _wait_for_pending_enrollment(paths, sleep=sleep)
+            if _enrolled(paths):
+                break
+            # The request ended without a credential (rejected, refused key, no server,
+            # or a token whose config write was interrupted): back to waiting.
         elif not resolve_server_url(_load(paths)):
             if announced != "unconfigured":
                 logger.info(
@@ -686,6 +700,12 @@ def _service_wait_until_enrolled(paths: CliPaths, *, sleep) -> None:
         sleep(SERVICE_IDLE_CHECK_SECONDS)
 
 
+def _claim_replaced(paths: CliPaths, pending: dict) -> bool:
+    """True when the claim on disk is no longer ``pending`` (e.g. ``request-token --new`` ran)."""
+    on_disk = _load_pending_claim(paths)
+    return on_disk is not None and on_disk["request_id"] != pending["request_id"]
+
+
 # Statuses from the enrollment poll that mean the request itself is unknown or revoked.
 _ENROLL_INVALID_STATUSES = frozenset({401, 403, 404})
 
@@ -700,7 +720,7 @@ def _wait_for_pending_enrollment(paths: CliPaths, *, sleep) -> int | None:
     Returns None when there is nothing to wait for or the device is now enrolled,
     or an exit code when the request ended without a device credential.
     """
-    if read_device_token(paths.token_path) is not None:
+    if _enrolled(paths):
         return None
     pending = _load_pending_claim(paths)
     if pending is None:
@@ -729,6 +749,8 @@ def _wait_for_pending_enrollment(paths: CliPaths, *, sleep) -> int | None:
         try:
             polled = client.enroll_poll(request_id=pending["request_id"], claim_secret=pending["claim_secret"])
         except AgentApiError as error:
+            if _claim_replaced(paths, pending):
+                continue  # this answer is about the old request; poll the new one
             if error.status in _ENROLL_INVALID_STATUSES:
                 print(
                     f"error: {server} does not know enrollment request {pending['request_id']} "
@@ -748,9 +770,12 @@ def _wait_for_pending_enrollment(paths: CliPaths, *, sleep) -> int | None:
             sleep(interval)
             continue
         if status == "approved" and polled.get("device_token"):
+            # Collect even if the claim was replaced meanwhile: the token is shown only once.
             _persist_claimed_device(paths, client, polled)
             logger.info("Approved: registered device %s (%s).", polled["device_id"], polled.get("name") or "-")
             return None
+        if _claim_replaced(paths, pending):
+            continue  # do not resubmit or drop a request someone already replaced
         if status == "expired":
             renewed = _resubmit_expired_request(paths, client, pending)
             if renewed is None:

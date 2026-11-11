@@ -1294,9 +1294,15 @@ def _request_token_args(config_dir: Path, *extra: str) -> list[str]:
     ]
 
 
+def _saved_server(config_dir: Path, server: str = "http://localhost:8000") -> None:
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.json").write_text(json.dumps({"server_url": server}), encoding="utf-8")
+
+
 def test_request_token_leaves_the_wait_to_the_running_service(tmp_path, run_env, monkeypatch, capsys) -> None:
     client, _, _ = run_env
     config_dir = tmp_path / "meteorcli"
+    _saved_server(config_dir)
     monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
     monkeypatch.setattr("meteorcli.config.SYSTEM_CONFIG_DIR", config_dir)
 
@@ -1364,3 +1370,85 @@ def test_claim_succeeds_when_the_service_collected_the_token(tmp_path, run_env, 
     assert meteorcli.main(["--config-dir", str(config_dir), "claim"]) == 0
     assert "collected by meteorcli.service" in capsys.readouterr().out
     assert not (config_dir / "claim-secret").exists()
+
+
+def test_request_token_waits_when_the_service_is_already_connected(tmp_path, run_env, monkeypatch) -> None:
+    # A connected service is in its heartbeat loop and no longer looks at claims.
+    client, _, _ = run_env
+    config_dir = tmp_path / "meteorcli"
+    _write_enrolled(config_dir)
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
+    monkeypatch.setattr("meteorcli.config.SYSTEM_CONFIG_DIR", config_dir)
+    client.enroll_poll_responses = [dict(_APPROVED)]
+
+    assert meteorcli.main(_request_token_args(config_dir)) == 0
+    assert len(client.enroll_poll_calls) == 1
+
+
+def test_request_token_waits_when_server_differs_from_the_saved_one(tmp_path, run_env, monkeypatch) -> None:
+    # The service polls the saved server; a request sent elsewhere would never be collected.
+    client, _, _ = run_env
+    config_dir = tmp_path / "meteorcli"
+    _saved_server(config_dir, "http://other-cloud:8000")
+    monkeypatch.setattr(meteorcli, "service_state", lambda: "active")
+    monkeypatch.setattr("meteorcli.config.SYSTEM_CONFIG_DIR", config_dir)
+    client.enroll_poll_responses = [dict(_APPROVED)]
+
+    assert meteorcli.main(_request_token_args(config_dir)) == 0
+    assert len(client.enroll_poll_calls) == 1
+
+
+def test_service_does_not_spin_on_a_token_without_device_id(tmp_path, run_env, monkeypatch) -> None:
+    # Interrupted claim: the token was committed, the config with device_id was not.
+    client, _, loops = run_env
+    _as_service(monkeypatch)
+    config_dir = _pending_device(tmp_path)
+    (config_dir / "device-token").write_text("dev_secret-value", encoding="utf-8")
+    client.enroll_poll_responses = [{"status": "approved", "device_token": None}]
+    sleeps = _scripted_sleep(monkeypatch, [lambda: _write_enrolled(config_dir)])
+
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+    assert sleeps == [meteorcli.SERVICE_IDLE_CHECK_SECONDS]
+    assert loops
+
+
+def test_unknown_old_request_does_not_drop_a_replacement(tmp_path, run_env, monkeypatch) -> None:
+    client, _, loops = run_env
+    config_dir = _pending_device(tmp_path)
+    answers = ["invalid", dict(_APPROVED)]
+
+    def poll(**kwargs):
+        client.enroll_poll_calls.append(kwargs)
+        answer = answers.pop(0)
+        if answer == "invalid":
+            # `request-token --new` replaced the claim while this poll was in flight.
+            (config_dir / "claim-secret").write_text(
+                json.dumps({"request_id": "req-9", "claim_secret": "clm_new"}), encoding="utf-8"
+            )
+            raise AgentApiError(404, "not_found", "Unknown enrollment request.")
+        return answer
+
+    monkeypatch.setattr(client, "enroll_poll", poll)
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+    assert client.enroll_poll_calls[1] == {"request_id": "req-9", "claim_secret": "clm_new"}
+    assert loops
+
+
+def test_expired_old_request_is_not_resubmitted_over_a_replacement(tmp_path, run_env, monkeypatch) -> None:
+    client, _, loops = run_env
+    config_dir = _pending_device(tmp_path)
+    answers = [{"status": "expired"}, dict(_APPROVED)]
+
+    def poll(**kwargs):
+        client.enroll_poll_calls.append(kwargs)
+        if len(client.enroll_poll_calls) == 1:
+            (config_dir / "claim-secret").write_text(
+                json.dumps({"request_id": "req-9", "claim_secret": "clm_new"}), encoding="utf-8"
+            )
+        return answers.pop(0)
+
+    monkeypatch.setattr(client, "enroll_poll", poll)
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+    assert client.enroll_request_calls == []
+    assert client.enroll_poll_calls[1]["request_id"] == "req-9"
+    assert loops

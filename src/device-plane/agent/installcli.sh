@@ -275,11 +275,16 @@ migrate_user_config_to_system() {
     return 0
   fi
 
-  # Prefer migrating when the system dir has no device credential yet.
-  if [[ -f "${system_dir}/device-token" ]]; then
-    echo "Keeping existing ${system_dir} (device-token already present)."
-    return 0
-  fi
+  # Migrate only into an unused system dir. Every root install (and reinstall) runs this,
+  # and a device still waiting for approval has config.json/api-key/claim-secret but no
+  # device-token yet: copying a stale ~/.config over that would change its server or key.
+  local existing
+  for existing in device-token config.json api-key claim-secret; do
+    if [[ -f "${system_dir}/${existing}" ]]; then
+      echo "Keeping existing ${system_dir} (${existing} already present)."
+      return 0
+    fi
+  done
   if [[ ! -f "${user_dir}/device-token" && ! -f "${user_dir}/config.json" ]]; then
     return 0
   fi

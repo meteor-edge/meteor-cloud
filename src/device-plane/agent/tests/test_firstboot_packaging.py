@@ -387,3 +387,41 @@ esac
     assert "claim" in calls
     assert "request-token" not in calls
     assert (config_dir / "device-token").read_text(encoding="utf-8") == "dev_resumed"
+
+
+def _run_migration(tmp_path: Path) -> tuple[Path, Path, subprocess.CompletedProcess]:
+    system_dir = tmp_path / "etc-meteorcli"
+    home = tmp_path / "home"
+    user_dir = home / ".config" / "meteorcli"
+    user_dir.mkdir(parents=True)
+    (user_dir / "config.json").write_text('{"server_url": "http://old-cloud"}', encoding="utf-8")
+    (user_dir / "api-key").write_text("key_old", encoding="utf-8")
+    function = _installcli_function("migrate_user_config_to_system").replace("/etc/meteorcli", str(system_dir))
+    result = subprocess.run(
+        ["bash", "-c", f"{function}\nmigrate_user_config_to_system"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "HOME": str(home), "SUDO_USER": ""},
+        check=False,
+    )
+    return system_dir, user_dir, result
+
+
+def test_migration_fills_an_empty_system_dir(tmp_path) -> None:
+    system_dir, _, result = _run_migration(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (system_dir / "api-key").read_text(encoding="utf-8") == "key_old"
+
+
+def test_migration_keeps_a_system_dir_waiting_for_approval(tmp_path) -> None:
+    # Configured and pending, but no device-token yet: a reinstall must not overwrite it.
+    system_dir = tmp_path / "etc-meteorcli"
+    system_dir.mkdir()
+    (system_dir / "config.json").write_text('{"server_url": "http://new-cloud"}', encoding="utf-8")
+    (system_dir / "api-key").write_text("key_new", encoding="utf-8")
+    (system_dir / "claim-secret").write_text('{"request_id": "r", "claim_secret": "c"}', encoding="utf-8")
+    _, _, result = _run_migration(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "Keeping existing" in result.stdout
+    assert (system_dir / "api-key").read_text(encoding="utf-8") == "key_new"
+    assert "new-cloud" in (system_dir / "config.json").read_text(encoding="utf-8")

@@ -123,6 +123,10 @@ meteorcli test
 meteorcli config --show
 ```
 
+With `meteorcli.service` installed, prefix these and the enrollment commands
+below with `sudo` (the config lives in `/etc/meteorcli`); per-user installs run
+them as shown.
+
 Local / HTTP testing:
 
 ```bash
@@ -132,7 +136,7 @@ meteorcli test
 ```
 
 The API key is stored at `~/.config/meteorcli/api-key` (or `/etc/meteorcli/api-key`
-as root) with `0600` permissions and is never printed by `status` or `--show`.
+with the service or as root) with `0600` permissions and is never printed by `status` or `--show`.
 
 ## Path 1 — register with a token
 
@@ -140,7 +144,8 @@ Create a token in the dashboard (**Devices → Add device**). Prefer a token fil
 
 ```bash
 printf '%s' "reg_..." > /tmp/meteorcli.token
-meteorcli register --token-file /tmp/meteorcli.token --name edge-01
+sudo meteorcli register --token-file /tmp/meteorcli.token --name edge-01   # with meteorcli.service
+meteorcli register --token-file /tmp/meteorcli.token --name edge-01        # per-user install
 ```
 
 Or pass `--server` / `--token` explicitly if the CLI is not yet configured.
@@ -148,7 +153,8 @@ Or pass `--server` / `--token` explicitly if the CLI is not yet configured.
 ## Path 2 — request a device token
 
 ```bash
-meteorcli request-token --name edge-01
+sudo meteorcli request-token --name edge-01   # with meteorcli.service
+meteorcli request-token --name edge-01        # per-user install, no service
 ```
 
 The command asks the API for a device token, then polls for at most five minutes

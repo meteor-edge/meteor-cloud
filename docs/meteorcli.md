@@ -67,11 +67,17 @@ Uninstall (`./installcli.sh --uninstall`) removes the install **and** stored cre
 
 ## Configure
 
+With `meteorcli.service` installed (root install), the config lives in
+`/etc/meteorcli`, so use `sudo`:
+
 ```bash
-meteorcli config --domain localhost:8000 --api-key key_...
-meteorcli test
-meteorcli config --show
+sudo meteorcli config --domain localhost:8000 --api-key key_...
+sudo meteorcli test
+sudo meteorcli config --show
 ```
+
+Per-user install without the service: the same commands without `sudo`. Keep
+using the same form for every later command, so they all share one config dir.
 
 ## Enroll
 
@@ -79,12 +85,16 @@ meteorcli config --show
 
 ```bash
 sudo meteorcli register --server http://localhost:8000 --token-file /tmp/meteorcli.token --name edge-01
+# per-user install without the service:
+meteorcli register --server http://localhost:8000 --token-file /tmp/meteorcli.token --name edge-01
 ```
 
 **Device-initiated:**
 
 ```bash
 sudo meteorcli request-token --name edge-01
+# per-user install without the service:
+meteorcli request-token --name edge-01
 ```
 
 With `meteorcli.service` running, `request-token` returns right away and the
@@ -92,6 +102,9 @@ service waits for the approval (every 10 seconds, across reboots; an expired
 request is resubmitted with the stored API key), then connects. Follow it with
 `journalctl -u meteorcli -f`. Pass `--wait SECONDS` to wait in the terminal
 instead. A rejected request sends the service back to waiting for a new one.
+`request-token` waits in the terminal itself when the service is already
+connected (re-enrolling) or `--server` differs from the saved server, since the
+service would not collect that request.
 
 Without the service, `request-token` waits up to ~5 minutes (`--wait`); after a
 later approval run `meteorcli claim`, then start the agent in the foreground:
