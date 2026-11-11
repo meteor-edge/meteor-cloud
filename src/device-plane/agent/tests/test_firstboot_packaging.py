@@ -447,6 +447,9 @@ def _fake_root(tmp_path: Path) -> Path:
     root = tmp_path / "root"
     (root / "boot" / "firmware").mkdir(parents=True)
     (root / "etc" / "NetworkManager").mkdir(parents=True)
+    wants = root / "etc" / "systemd" / "system" / "multi-user.target.wants"
+    wants.mkdir(parents=True)
+    (wants / "NetworkManager.service").symlink_to("/lib/systemd/system/NetworkManager.service")
     (root / "usr" / "share" / "zoneinfo" / "Europe").mkdir(parents=True)
     (root / "usr" / "share" / "zoneinfo" / "Europe" / "Berlin").write_text("TZif", encoding="utf-8")
     (root / "home" / "pi").mkdir(parents=True)
@@ -533,6 +536,7 @@ def test_settings_without_networkmanager_write_wpa_supplicant_with_derived_key(t
 
     root = _fake_root(tmp_path)
     shutil.rmtree(root / "etc" / "NetworkManager")
+    shutil.rmtree(root / "etc" / "systemd")
     (root / "boot" / "firmware" / ".meteorenv").write_text(
         "METEOR_WIFI_SSID=MyNetwork\nMETEOR_WIFI_PSK=wifi-password-123\nMETEOR_WIFI_COUNTRY=DE\n",
         encoding="utf-8",
@@ -555,6 +559,43 @@ def test_settings_without_networkmanager_write_wpa_supplicant_with_derived_key(t
     assert "ssid=" + b"MyNetwork".hex() in wpa
     assert "country=DE" in wpa
     assert not (root / "etc" / "meteorcli-firstboot.env").exists()
+
+
+def test_settings_use_wpa_supplicant_when_networkmanager_is_installed_but_disabled(tmp_path: Path) -> None:
+    root = _fake_root(tmp_path)
+    (root / "etc" / "systemd" / "system" / "multi-user.target.wants" / "NetworkManager.service").unlink()
+    (root / "boot" / "firmware" / ".meteorenv").write_text(
+        "METEOR_WIFI_SSID=MyNetwork\nMETEOR_WIFI_PSK=wifi-password-123\n", encoding="utf-8"
+    )
+
+    result = _run_settings(tmp_path, root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "etc" / "wpa_supplicant" / "wpa_supplicant.conf").exists()
+    assert not (root / "etc" / "NetworkManager" / "system-connections").exists()
+
+
+def test_settings_keep_the_card_file_when_a_setting_cannot_be_written(tmp_path: Path) -> None:
+    root = _fake_root(tmp_path)
+    card = root / "boot" / "firmware" / ".meteorenv"
+    card.write_text(
+        "METEOR_DOMAIN=fleet.example.com\nMETEOR_API_KEY=key_abc\n"
+        "METEOR_HOSTNAME=pi-lab-01\nMETEOR_WIFI_SSID=MyNetwork\nMETEOR_WIFI_PSK=wifi-password-123\n",
+        encoding="utf-8",
+    )
+    # A file where the connections directory should be: the Wi-Fi profile cannot be written.
+    (root / "etc" / "NetworkManager" / "system-connections").write_text("", encoding="utf-8")
+
+    result = _run_settings(tmp_path, root)
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert "warning: wifi failed" in out
+    assert "Wi-Fi MyNetwork added" not in out
+    assert card.exists(), "the only copy of the Wi-Fi settings must stay for the next boot"
+    assert (root / "etc" / "hostname").read_text(encoding="utf-8") == "pi-lab-01\n"
+    assert "METEOR_API_KEY=key_abc" in (root / "etc" / "meteorcli-firstboot.env").read_text(encoding="utf-8")
+    assert "wifi-password-123" not in out
 
 
 def test_settings_skip_invalid_values_but_keep_enrollment(tmp_path: Path) -> None:

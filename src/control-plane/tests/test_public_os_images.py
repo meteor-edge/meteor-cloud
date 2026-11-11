@@ -79,6 +79,22 @@ def test_only_managers_can_publish(client: TestClient, db_session: Session) -> N
     assert client.get(PUBLIC).json() == []
 
 
+def test_developers_manage_artifacts_but_cannot_publish(client: TestClient, db_session: Session) -> None:
+    org, headers = _owner_setup(client, db_session)
+    artifact = _upload(client, org.id, headers).json()
+    developer = create_user(db_session, email="dev-publish@example.com")
+    add_member(db_session, org, developer, OrganizationRole.DEVELOPER)
+    dev_headers = auth_header(client, "dev-publish@example.com")
+
+    response = _publish(client, org.id, dev_headers, artifact["id"])
+    assert response.status_code == 403
+    response = _upload(client, org.id, dev_headers, version="2.0", published="true")
+    assert response.status_code == 403
+    assert client.get(PUBLIC).json() == []
+
+    assert _upload(client, org.id, dev_headers, version="2.0").status_code == 201
+
+
 def test_public_routes_are_rate_limited_per_ip(client: TestClient) -> None:
     limiter = InMemoryRateLimiter(limit=1, window_seconds=60)
     client.app.dependency_overrides[get_public_os_image_rate_limiter] = lambda: limiter

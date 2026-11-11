@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs } from "@/components/ui/tabs";
-import { canManageArtifacts, canManageDeviceTypes } from "@/lib/permissions";
+import { canManageArtifacts, canManageDeviceTypes, canPublishOsImages } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 type Tab = "overview" | "devices" | "artifacts";
@@ -77,6 +77,7 @@ export function DeviceTypeDetailPage() {
 
   const canManageType = canManageDeviceTypes(orgQuery.data?.current_user_role);
   const canManage = canManageArtifacts(orgQuery.data?.current_user_role);
+  const canPublish = canPublishOsImages(orgQuery.data?.current_user_role);
   const { onDownload, onDelete, onTogglePublished, refresh } = useArtifactActions(
     token,
     organizationId,
@@ -208,6 +209,7 @@ export function DeviceTypeDetailPage() {
                 onDownload={onDownload}
                 onDelete={onDelete}
                 onTogglePublished={type === "os_image" ? onTogglePublished : undefined}
+                canPublish={canPublish}
                 emptyMessage={
                   artifactsQuery.isLoading
                     ? "Loading…"
@@ -234,6 +236,7 @@ export function DeviceTypeDetailPage() {
           deviceTypes={[deviceType]}
           fixedDeviceType={deviceType}
           defaultType={uploadType}
+          canPublish={canPublish}
           onClose={() => setUploadType(null)}
           onUploaded={async () => {
             setUploadType(null);

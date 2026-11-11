@@ -686,8 +686,9 @@ take_lock() {
   if [[ "${POLL_MODE}" -eq 1 ]]; then
     # The interactive run hands off to the unit and exits; wait for it.
     if ! flock -w 300 9; then
-      log "Another first-boot enrollment run still holds ${LOCK_FILE}; exiting."
-      exit 0
+      # Non-zero, so Restart=on-failure tries again if the other run stops without enrolling.
+      log "Another first-boot enrollment run still holds ${LOCK_FILE}; retrying later."
+      exit 1
     fi
   elif ! flock -n 9; then
     log "First-boot enrollment is already running (journalctl -u meteorcli-firstboot -f)."

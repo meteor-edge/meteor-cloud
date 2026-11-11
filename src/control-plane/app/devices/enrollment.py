@@ -83,14 +83,14 @@ class EnrollmentService:
 
         primary_macs = [identity.primary_mac] if identity.primary_mac else []
 
-        existing = None
-        if not identity.is_empty:
-            # Concurrent submissions for one device must not both miss the row below.
-            self.session.execute(
-                select(func.pg_advisory_xact_lock(func.hashtextextended(str(api_key.organization_id), 0)))
-            )
-            existing = self._find_reusable_request(api_key, identity)
+        # Serializes submissions per organization: one device must not get two rows,
+        # and concurrent submissions must not all pass the pending cap.
+        self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(str(api_key.organization_id), 0))))
+        existing = None if identity.is_empty else self._find_reusable_request(api_key, identity)
         if existing is not None:
+            if existing.status == "pending" and not self._counted_for_key(existing, api_key, now):
+                # Moving another key's request, or reviving an expired one, takes a new slot.
+                self._enforce_pending_cap(api_key, now)
             request = existing
             request.api_key_id = api_key.id
             request.claim_secret_hash = claim.token_hash
@@ -165,6 +165,14 @@ class EnrollmentService:
                 status_code=429,
                 headers={"Retry-After": "300"},
             )
+
+    @staticmethod
+    def _counted_for_key(request: DeviceEnrollmentRequest, api_key: EnrollmentApiKey, now: datetime) -> bool:
+        """Whether the pending cap already counts this row for the key (see count_pending_for_key)."""
+        expires_at = request.expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return request.api_key_id == api_key.id and (expires_at is None or expires_at > now)
 
     def _find_reusable_request(
         self,

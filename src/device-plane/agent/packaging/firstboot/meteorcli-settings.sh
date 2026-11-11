@@ -27,6 +27,7 @@ NM_DIR="${ROOT}/etc/NetworkManager/system-connections"
 EXPAND_FLAG="${ROOT}/etc/meteorcli-expand-rootfs"
 SSHD_DROPIN="${ROOT}/etc/ssh/sshd_config.d/10-meteor.conf"
 MOUNTED_CFG=""
+SETTINGS_PATH=""
 
 log() {
   local msg
@@ -50,6 +51,7 @@ trap cleanup EXIT
 
 # --- find .meteorenv -------------------------------------------------------
 
+# Sets SETTINGS_PATH. Not for $(...): MOUNTED_CFG must reach the EXIT trap.
 find_settings_file() {
   local dir dev
   local -a dirs=()
@@ -71,7 +73,7 @@ find_settings_file() {
   dirs+=("${ROOT}/boot/firmware" "${ROOT}/boot" "${ROOT}/boot/efi")
   for dir in "${dirs[@]}"; do
     if [[ -f "${dir}/.meteorenv" ]]; then
-      printf '%s\n' "${dir}/.meteorenv"
+      SETTINGS_PATH="${dir}/.meteorenv"
       return 0
     fi
   done
@@ -114,11 +116,11 @@ apply_hostname() {
   fi
   local old=""
   [[ -f "${ROOT}/etc/hostname" ]] && old="$(head -n 1 "${ROOT}/etc/hostname")"
-  printf '%s\n' "${name}" >"${ROOT}/etc/hostname"
+  printf '%s\n' "${name}" >"${ROOT}/etc/hostname" || return 1
   if [[ -f "${ROOT}/etc/hosts" ]] && grep -q '^127\.0\.1\.1' "${ROOT}/etc/hosts"; then
-    sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t${name}/" "${ROOT}/etc/hosts"
+    sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t${name}/" "${ROOT}/etc/hosts" || return 1
   else
-    printf '127.0.1.1\t%s\n' "${name}" >>"${ROOT}/etc/hosts"
+    printf '127.0.1.1\t%s\n' "${name}" >>"${ROOT}/etc/hosts" || return 1
   fi
   [[ -z "${ROOT}" ]] && hostname "${name}" 2>/dev/null || true
   log "hostname ${old:-?} -> ${name}"
@@ -132,8 +134,8 @@ apply_timezone() {
     log "warning: unknown timezone ${tz}; skipped"
     return 0
   fi
-  ln -sf "/usr/share/zoneinfo/${tz}" "${ROOT}/etc/localtime"
-  printf '%s\n' "${tz}" >"${ROOT}/etc/timezone"
+  ln -sf "/usr/share/zoneinfo/${tz}" "${ROOT}/etc/localtime" || return 1
+  printf '%s\n' "${tz}" >"${ROOT}/etc/timezone" || return 1
   log "timezone ${tz}"
 }
 
@@ -151,14 +153,23 @@ set_wifi_country() {
     # Also unblocks Wi-Fi, which Raspberry Pi OS keeps blocked until a country is set.
     raspi-config nonint do_wifi_country "${country}" >/dev/null 2>&1 && return 0
   fi
-  mkdir -p "${ROOT}/etc/modprobe.d"
-  printf 'options cfg80211 ieee80211_regdom=%s\n' "${country}" >"${ROOT}/etc/modprobe.d/meteor-wifi-country.conf"
+  mkdir -p "${ROOT}/etc/modprobe.d" || return 1
+  printf 'options cfg80211 ieee80211_regdom=%s\n' "${country}" >"${ROOT}/etc/modprobe.d/meteor-wifi-country.conf" || return 1
   if [[ -z "${ROOT}" ]]; then
     command -v iw >/dev/null 2>&1 && iw reg set "${country}" 2>/dev/null || true
     command -v rfkill >/dev/null 2>&1 && rfkill unblock wifi 2>/dev/null || true
   fi
 }
 
+# Images can ship NetworkManager's files without running it (dhcpcd + wpa_supplicant),
+# so go by whether the service is enabled, not by /etc/NetworkManager existing.
+networkmanager_enabled() {
+  local link="${ROOT}/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
+  [[ -e "${link}" || -L "${link}" ]]
+}
+
+# Every write is checked: the caller runs this under `||`, where errexit is off,
+# and .meteorenv (the only copy of the Wi-Fi password) is kept when it fails.
 apply_wifi() {
   local ssid psk country hidden
   ssid="$(cfg METEOR_WIFI_SSID)"
@@ -176,7 +187,7 @@ apply_wifi() {
   fi
   if [[ -n "${country}" ]]; then
     if [[ "${country}" =~ ^[A-Z]{2}$ ]]; then
-      set_wifi_country "${country}"
+      set_wifi_country "${country}" || return 1
     else
       log "warning: METEOR_WIFI_COUNTRY must be two capital letters; country skipped"
       country=""
@@ -184,10 +195,10 @@ apply_wifi() {
   fi
   [[ "${hidden}" == "true" || "${hidden}" == "1" ]] && hidden=true || hidden=false
 
-  if [[ -d "${ROOT}/etc/NetworkManager" ]]; then
+  if networkmanager_enabled; then
     local file="${NM_DIR}/meteor-wifi.nmconnection" uuid
     uuid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo 7d3c1b52-0b6e-4c55-9a1d-0f7e3c2b9a10)"
-    mkdir -p "${NM_DIR}"
+    mkdir -p "${NM_DIR}" || return 1
     (
       umask 077
       {
@@ -214,9 +225,9 @@ apply_wifi() {
         echo "[ipv6]"
         echo "method=auto"
       } >"${file}.tmp"
-    )
-    chmod 0600 "${file}.tmp"
-    mv -f "${file}.tmp" "${file}"
+    ) || return 1
+    chmod 0600 "${file}.tmp" || return 1
+    mv -f "${file}.tmp" "${file}" || return 1
     if [[ -z "${ROOT}" ]] && command -v nmcli >/dev/null 2>&1 && nmcli -t general status >/dev/null 2>&1; then
       nmcli connection reload >/dev/null 2>&1 || true
       nmcli connection up meteor-wifi >/dev/null 2>&1 || true
@@ -225,9 +236,17 @@ apply_wifi() {
     return 0
   fi
 
-  local wpa="${ROOT}/etc/wpa_supplicant/wpa_supplicant.conf" ssid_hex
+  local wpa="${ROOT}/etc/wpa_supplicant/wpa_supplicant.conf" ssid_hex key=""
   ssid_hex="$(printf '%s' "${ssid}" | od -An -tx1 | tr -d ' \n')"
-  mkdir -p "$(dirname "${wpa}")"
+  if [[ -n "${psk}" && ! "${psk}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    # Store the derived key, not the passphrase.
+    key="$(wpa_psk_hex "${ssid}" "${psk}" || true)"
+    if [[ ! "${key}" =~ ^[0-9a-f]{64}$ ]]; then
+      log "warning: could not derive the Wi-Fi key (needs python3 or wpa_passphrase)"
+      return 1
+    fi
+  fi
+  mkdir -p "$(dirname "${wpa}")" || return 1
   (
     umask 077
     {
@@ -240,17 +259,16 @@ apply_wifi() {
       [[ "${hidden}" == true ]] && echo "	scan_ssid=1"
       if [[ -z "${psk}" ]]; then
         echo "	key_mgmt=NONE"
-      elif [[ "${psk}" =~ ^[0-9a-fA-F]{64}$ ]]; then
-        echo "	psk=${psk}"
+      elif [[ -n "${key}" ]]; then
+        echo "	psk=${key}"
       else
-        # Store the derived key, not the passphrase.
-        echo "	psk=$(wpa_psk_hex "${ssid}" "${psk}")"
+        echo "	psk=${psk}"
       fi
       echo "}"
     } >"${wpa}.tmp"
-  )
-  chmod 0600 "${wpa}.tmp"
-  mv -f "${wpa}.tmp" "${wpa}"
+  ) || return 1
+  chmod 0600 "${wpa}.tmp" || return 1
+  mv -f "${wpa}.tmp" "${wpa}" || return 1
   log "Wi-Fi ${ssid} added (wpa_supplicant, password not logged)"
 }
 
@@ -315,8 +333,8 @@ apply_user() {
     first="$(awk -F: '$3 == 1000 { print $1; exit }' "${ROOT}/etc/passwd")"
     if [[ -n "${first}" ]]; then
       if ! usermod -l "${user}" -d "/home/${user}" -m "${first}"; then
-        log "warning: could not rename user ${first} to ${user}; user skipped"
-        return 0
+        log "warning: could not rename user ${first} to ${user}"
+        return 1
       fi
       if awk -F: -v g="${first}" '$1 == g { found = 1 } END { exit !found }' "${ROOT}/etc/group" 2>/dev/null; then
         groupmod -n "${user}" "${first}" || log "warning: could not rename group ${first}"
@@ -331,8 +349,8 @@ apply_user() {
     else
       groups="$(login_groups)"
       if ! useradd -m -s /bin/bash ${groups:+-G "${groups}"} "${user}"; then
-        log "warning: could not create user ${user}; user skipped"
-        return 0
+        log "warning: could not create user ${user}"
+        return 1
       fi
       log "user ${user} created"
     fi
@@ -342,6 +360,7 @@ apply_user() {
       log "password set for ${user} (not logged)"
     else
       log "warning: could not set the password for ${user}"
+      return 1
     fi
   fi
 }
@@ -363,10 +382,10 @@ apply_ssh() {
   case "${pwauth}" in
     "") ;;
     true|false)
-      mkdir -p "$(dirname "${SSHD_DROPIN}")"
+      mkdir -p "$(dirname "${SSHD_DROPIN}")" || return 1
       # sshd keeps the first value it reads; 10- sorts before cloud-init's 50-.
       printf '# Written by meteorcli-settings.sh\nPasswordAuthentication %s\n' \
-        "$([[ "${pwauth}" == true ]] && echo yes || echo no)" >"${SSHD_DROPIN}"
+        "$([[ "${pwauth}" == true ]] && echo yes || echo no)" >"${SSHD_DROPIN}" || return 1
       log "SSH password login $([[ "${pwauth}" == true ]] && echo allowed || echo disabled)"
       ;;
     *) log "warning: METEOR_SSH_PASSWORD_AUTH must be true or false; skipped" ;;
@@ -400,11 +419,11 @@ apply_ssh_key() {
     return 0
   fi
   ak="${ROOT}${home}/.ssh/authorized_keys"
-  mkdir -p "$(dirname "${ak}")"
-  touch "${ak}"
-  grep -qxF "${key}" "${ak}" || printf '%s\n' "${key}" >>"${ak}"
-  chmod 0700 "$(dirname "${ak}")"
-  chmod 0600 "${ak}"
+  mkdir -p "$(dirname "${ak}")" || return 1
+  touch "${ak}" || return 1
+  grep -qxF "${key}" "${ak}" || printf '%s\n' "${key}" >>"${ak}" || return 1
+  chmod 0700 "$(dirname "${ak}")" || return 1
+  chmod 0600 "${ak}" || return 1
   [[ -z "${ROOT}" ]] && chown -R "${user}:" "$(dirname "${ak}")" 2>/dev/null || true
   # A key means "let me in": enable SSH unless .meteorenv turned it off.
   [[ "$(cfg METEOR_SSH_ENABLED)" == false ]] || ssh_service enable
@@ -507,22 +526,27 @@ remove_settings_file() {
 }
 
 main() {
-  local path
+  local path step failed=0
   expand_rootfs_once || log "warning: resizing the root filesystem failed"
   ensure_ssh_host_keys || log "warning: SSH host keys failed"
-  if ! path="$(find_settings_file)"; then
-    exit 0
-  fi
+  find_settings_file || exit 0
+  path="${SETTINGS_PATH}"
   log "Applying ${path}"
   parse_settings "${path}"
   # Save first: enrollment still works if a setting below fails.
   save_enrollment
-  apply_hostname || log "warning: hostname failed"
-  apply_timezone || log "warning: timezone failed"
-  apply_wifi || log "warning: Wi-Fi failed"
-  apply_user || log "warning: user failed"
-  apply_ssh || log "warning: SSH settings failed"
-  apply_ssh_key || log "warning: SSH key failed"
+  for step in hostname timezone wifi user ssh ssh_key; do
+    if ! "apply_${step}"; then
+      log "warning: ${step} failed"
+      failed=1
+    fi
+  done
+  if [[ "${failed}" -eq 1 ]]; then
+    # Every step is safe to repeat; the next boot tries again.
+    log "warning: ${path} kept so the failed settings are retried on the next boot;" \
+      "it still holds the Wi-Fi password and enrollment key"
+    return 0
+  fi
   remove_settings_file "${path}"
 }
 

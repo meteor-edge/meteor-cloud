@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
+from app.core.exceptions import AppError
 from app.devices.dependencies import (
     get_enroll_ip_rate_limiter,
     get_enroll_poll_ip_rate_limiter,
@@ -477,9 +478,12 @@ def test_enroll_check_is_limited_per_ip(client: TestClient) -> None:
 
     first = client.post("/api/v1/agent/enroll/check", headers={"Authorization": "Bearer key_guess"})
     second = client.post("/api/v1/agent/enroll/check", headers={"Authorization": "Bearer key_guess"})
+    # GET serves the same check, so it shares the same limit.
+    third = client.get("/api/v1/agent/enroll/check", headers={"Authorization": "Bearer key_guess"})
 
     assert first.status_code == 401
     assert second.status_code == 429
+    assert third.status_code == 429
 
 
 def test_rate_limited_request_says_when_to_retry(client: TestClient, db_session: Session) -> None:
@@ -528,3 +532,67 @@ def test_pending_requests_are_capped_per_key(client: TestClient, db_session: Ses
     assert third.headers["Retry-After"] == "300"
     assert retry["status"] == "pending"
     assert db_session.query(DeviceEnrollmentRequest).count() == 3
+
+
+def test_moving_or_reviving_a_request_counts_against_the_cap(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key = _create_key(client, org.id, headers)
+    other = _create_key(client, org.id, headers, name="Other batch")
+    capped = get_settings().model_copy(update={"enrollment_max_pending_per_key": 1})
+    client.app.dependency_overrides[get_settings] = lambda: capped
+
+    _enroll(client, key["api_key"], mac_addresses=["aa:bb:cc:dd:ee:01"])
+    moved = _enroll(client, other["api_key"], mac_addresses=["aa:bb:cc:dd:ee:02"])
+    # The full key cannot take over the other key's pending request.
+    takeover = client.post(
+        "/api/v1/agent/enroll/request",
+        headers={"Authorization": f"Bearer {key['api_key']}"},
+        json={"mac_addresses": ["aa:bb:cc:dd:ee:02"]},
+    )
+    assert takeover.status_code == 429
+
+    # Nor revive its own expired request while another one is pending.
+    db_session.expire_all()
+    row = db_session.get(DeviceEnrollmentRequest, UUID(moved["request_id"]))
+    row.api_key_id = UUID(key["id"])
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    db_session.commit()
+    revive = client.post(
+        "/api/v1/agent/enroll/request",
+        headers={"Authorization": f"Bearer {key['api_key']}"},
+        json={"mac_addresses": ["aa:bb:cc:dd:ee:02"]},
+    )
+    assert revive.status_code == 429
+
+
+def test_requests_without_identity_respect_the_cap_when_concurrent(
+    client: TestClient, db_session: Session, engine
+) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    key_id = UUID(_create_key(client, org.id, headers)["id"])
+    db_session.commit()
+    settings = get_settings().model_copy(update={"enrollment_max_pending_per_key": 2})
+    workers = 6
+    barrier = Barrier(workers)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def submit(_: int) -> bool:
+        with factory() as session:
+            api_key = session.get(EnrollmentApiKey, key_id)
+            barrier.wait(timeout=10)
+            try:
+                EnrollmentService(session, settings).submit_request(api_key=api_key, payload=AgentEnrollRequest())
+            except AppError:
+                return False
+            return True
+
+    with ThreadPoolExecutor(workers) as pool:
+        accepted = sum(pool.map(submit, range(workers)))
+
+    assert accepted == 2
+    db_session.expire_all()
+    assert db_session.query(DeviceEnrollmentRequest).count() == 2

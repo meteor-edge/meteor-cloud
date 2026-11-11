@@ -62,6 +62,12 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("artifact", "create", "Upload artifacts", "Upload new artifact versions."),
     PermissionDef("artifact", "update", "Update artifacts", "Edit artifact metadata."),
     PermissionDef("artifact", "delete", "Delete artifacts", "Delete artifacts and their stored objects."),
+    PermissionDef(
+        "artifact",
+        "publish",
+        "Publish OS images",
+        "Show OS images in Meteor Imager, where anyone who can reach the server can download them.",
+    ),
     PermissionDef("deployment", "read", "View deployments", "List and open deployments."),
     PermissionDef("deployment", "create", "Create deployments", "Start deployments."),
     PermissionDef("deployment", "cancel", "Cancel deployments", "Cancel in-progress deployments."),

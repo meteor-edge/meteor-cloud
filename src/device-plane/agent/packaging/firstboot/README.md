@@ -94,29 +94,39 @@ The installer writes `.meteor-settings` there, which tells Meteor Imager to writ
 ```text
 METEOR_ENV_VERSION=2
 METEOR_DOMAIN=fleet.example.com:8443
-METEOR_API_BASE=https://fleet.example.com:8443    # optional: when the scheme matters
 METEOR_API_KEY=key_...
-METEOR_NAME=pi-lab-01                             # optional: name in MeteorCloud
-METEOR_HOSTNAME=pi-lab-01                         # optional
-METEOR_TIMEZONE=Europe/Berlin                     # optional
-METEOR_WIFI_SSID=My Network                       # optional, with PSK and COUNTRY
+# Optional from here on.
+# Only when the scheme matters:
+METEOR_API_BASE=https://fleet.example.com:8443
+# Name in MeteorCloud:
+METEOR_NAME=pi-lab-01
+METEOR_HOSTNAME=pi-lab-01
+METEOR_TIMEZONE=Europe/Berlin
+# Wi-Fi: SSID with PSK and COUNTRY.
+METEOR_WIFI_SSID=My Network
 METEOR_WIFI_PSK=wifi-password
 METEOR_WIFI_COUNTRY=DE
 METEOR_WIFI_HIDDEN=false
-METEOR_USER=ops                                   # optional: login user
-METEOR_USER_PASSWORD_HASH=$6$salt$hash            # optional: crypt hash, never plain text
-METEOR_SSH_ENABLED=true                           # optional: true / false
-METEOR_SSH_PASSWORD_AUTH=false                    # optional: false = keys only
-METEOR_SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... me@laptop   # optional
-METEOR_SSH_USER=pi                                # optional: default METEOR_USER, else the first login user
+# Login user; the password only as a crypt hash, never plain text.
+METEOR_USER=ops
+METEOR_USER_PASSWORD_HASH=$6$salt$hash
+# SSH on or off; PASSWORD_AUTH=false allows keys only.
+METEOR_SSH_ENABLED=true
+METEOR_SSH_PASSWORD_AUTH=false
+# Key user: default METEOR_USER, else the first login user.
+METEOR_SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... me@laptop
+METEOR_SSH_USER=pi
 ```
 
-`KEY=value` per line, value to the end of the line (no quoting), parsed and never sourced.
+`KEY=value` per line, value to the end of the line (no quoting, so no `# comments` after a
+value; put them on their own line), parsed and never sourced.
 Unknown keys are ignored with a warning. Invalid values (host name, timezone, Wi-Fi
 password length, SSH key format) are skipped with a warning; enrollment still runs.
+If applying a setting fails (for example a write error), `.meteorenv` stays on the card
+and the next boot tries again; the log says which setting failed.
 
-- **Wi-Fi:** a NetworkManager connection `meteor-wifi` (mode 0600), or `wpa_supplicant.conf`
-  with the derived key on images without NetworkManager. The country is set through
+- **Wi-Fi:** a NetworkManager connection `meteor-wifi` (mode 0600) when NetworkManager is
+  enabled, otherwise `wpa_supplicant.conf` with the derived key. The country is set through
   `raspi-config` when present (it also unblocks Wi-Fi), otherwise `cfg80211`.
 - **User:** like Raspberry Pi Imager. The image's first user (uid 1000) is renamed to
   `METEOR_USER` (home and group too), or the user is created with sudo. The password is set

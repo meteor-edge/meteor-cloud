@@ -137,7 +137,11 @@ def _warn_insecure_transport(request: Request, settings: Settings) -> None:
     )
 
 
-@router.get("/enroll/check", response_model=AgentEnrollCheckResponse)
+@router.get(
+    "/enroll/check",
+    response_model=AgentEnrollCheckResponse,
+    dependencies=[Depends(enforce_enroll_ip_rate_limit)],
+)
 @router.post(
     "/enroll/check",
     response_model=AgentEnrollCheckResponse,

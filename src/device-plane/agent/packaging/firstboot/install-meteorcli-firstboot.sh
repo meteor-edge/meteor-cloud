@@ -186,14 +186,44 @@ echo "  installed /usr/local/sbin/meteorcli-settings.sh"
 echo "  installed /etc/systemd/system/meteorcli-settings.service"
 
 # Tell Meteor Imager this image applies .meteorenv v2 itself (Wi-Fi, hostname,
-# timezone, SSH key), so it writes only .meteorenv and leaves cloud-init alone.
-for cfg_dir in /boot/firmware /boot /boot/efi; do
-  if [[ "$(findmnt -n -o FSTYPE --target "${cfg_dir}" 2>/dev/null || true)" == vfat ]]; then
-    printf 'meteor_settings=2\n' >"${cfg_dir}/.meteor-settings"
-    echo "  marked ${cfg_dir}/.meteor-settings for Meteor Imager"
-    break
+# timezone, user, SSH), so it writes only .meteorenv and leaves cloud-init alone.
+# Same partition order as meteorcli-settings.sh: METEORCFG first, then boot.
+mark_config_partition() {
+  local dir="" tmp="" cfg_dev=/dev/disk/by-label/METEORCFG cfg_dir
+  if [[ -e "${cfg_dev}" ]]; then
+    dir="$(findmnt -n -o TARGET "${cfg_dev}" 2>/dev/null | head -n 1 || true)"
+    if [[ -z "${dir}" ]]; then
+      tmp="$(mktemp -d)"
+      if mount "${cfg_dev}" "${tmp}" 2>/dev/null; then
+        dir="${tmp}"
+      else
+        rmdir "${tmp}"
+        tmp=""
+      fi
+    fi
   fi
-done
+  if [[ -z "${dir}" ]]; then
+    for cfg_dir in /boot/firmware /boot /boot/efi; do
+      if [[ "$(findmnt -n -o FSTYPE --target "${cfg_dir}" 2>/dev/null || true)" == vfat ]]; then
+        dir="${cfg_dir}"
+        break
+      fi
+    done
+  fi
+  if [[ -z "${dir}" ]]; then
+    echo "  warning: no FAT config partition; Meteor Imager will treat this as a stock image"
+  elif printf 'meteor_settings=2\n' 2>/dev/null >"${dir}/.meteor-settings"; then
+    echo "  marked ${dir}/.meteor-settings for Meteor Imager"
+  else
+    echo "  warning: could not write ${dir}/.meteor-settings (read-only?); Meteor Imager will treat this as a stock image"
+  fi
+  if [[ -n "${tmp}" ]]; then
+    umount "${tmp}" 2>/dev/null || true
+    rmdir "${tmp}" 2>/dev/null || true
+  fi
+  return 0
+}
+mark_config_partition
 
 ENV_FILE=/etc/meteorcli-firstboot.env
 if [[ "${IMAGE}" -eq 1 ]]; then

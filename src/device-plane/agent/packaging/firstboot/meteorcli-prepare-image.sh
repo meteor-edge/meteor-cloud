@@ -120,10 +120,13 @@ elif live; then
   systemctl enable meteorcli-firstboot.service meteorcli-settings.service >/dev/null
   note "already installed; enabled"
 fi
-if [[ -n "${BOOT}" && ! -f "${BOOT}/.meteor-settings" ]]; then
-  printf 'meteor_settings=2\n' >"${BOOT}/.meteor-settings"
+if [[ -n "${BOOT}" ]]; then
+  if [[ -f "${BOOT}/.meteor-settings" ]] || printf 'meteor_settings=2\n' 2>/dev/null >"${BOOT}/.meteor-settings"; then
+    note "Meteor Imager marker: ${BOOT}/.meteor-settings"
+  else
+    note "warning: could not write ${BOOT}/.meteor-settings (read-only?); Meteor Imager will treat cards like a stock image"
+  fi
 fi
-[[ -n "${BOOT}" ]] && note "Meteor Imager marker: ${BOOT}/.meteor-settings"
 if live && ! command -v meteorcli >/dev/null 2>&1; then
   note "meteorcli is not installed; each card installs it on first boot (needs internet)"
 fi

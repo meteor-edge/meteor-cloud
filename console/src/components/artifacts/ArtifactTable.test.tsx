@@ -75,6 +75,7 @@ describe("ArtifactTable Meteor Imager column", () => {
           onDownload={vi.fn()}
           onDelete={vi.fn()}
           onTogglePublished={onTogglePublished}
+          canPublish
         />
       </MemoryRouter>,
     );
@@ -83,6 +84,21 @@ describe("ArtifactTable Meteor Imager column", () => {
     expect(screen.getAllByRole("checkbox")).toHaveLength(1);
     fireEvent.click(toggle);
     expect(onTogglePublished).toHaveBeenCalledWith(image);
+  });
+
+  it("is read-only for members who manage artifacts but cannot publish", () => {
+    render(
+      <MemoryRouter>
+        <ArtifactTable
+          artifacts={[artifact({ type: "os_image", name: "rpi-os" })]}
+          canManage
+          onDownload={vi.fn()}
+          onDelete={vi.fn()}
+          onTogglePublished={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("checkbox", { name: "Show rpi-os 1.0 in Meteor Imager" })).toBeDisabled();
   });
 
   it("hides the column when no handler is given", () => {

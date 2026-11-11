@@ -16,6 +16,8 @@ type ArtifactUploadDialogProps = {
   defaultType?: ArtifactType;
   /** When set, the artifact is bound to this device type and the picker is hidden. */
   fixedDeviceType?: DeviceType;
+  /** Owners and admins only: offers "Show in Meteor Imager" for OS images. */
+  canPublish?: boolean;
   onClose: () => void;
   onUploaded: (artifact: Artifact) => void;
 };
@@ -38,6 +40,7 @@ export function ArtifactUploadDialog({
   deviceTypes,
   defaultType = "os_image",
   fixedDeviceType,
+  canPublish = false,
   onClose,
   onUploaded,
 }: ArtifactUploadDialogProps) {
@@ -106,7 +109,7 @@ export function ArtifactUploadDialog({
           type,
           device_type_id: deviceTypeId || null,
           description: description || null,
-          published: type === "os_image" && published,
+          published: canPublish && type === "os_image" && published,
         },
         { onProgress, signal: abortRef.current.signal },
       );
@@ -238,7 +241,7 @@ export function ArtifactUploadDialog({
           />
         </div>
 
-        {type === "os_image" && (
+        {canPublish && type === "os_image" && (
           <label className="flex items-start gap-2 text-sm">
             <input
               type="checkbox"

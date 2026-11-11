@@ -18,6 +18,8 @@ type ArtifactTableProps = {
   onDelete: (artifact: Artifact) => void;
   /** Set to show the Meteor Imager column (OS images listed publicly, no login). */
   onTogglePublished?: (artifact: Artifact) => void;
+  /** Owners and admins only; others see the column read-only. */
+  canPublish?: boolean;
   /** Omit on pages already scoped to one type / one device type. */
   showType?: boolean;
   deviceTypeNames?: Map<string, string>;
@@ -32,6 +34,7 @@ export function ArtifactTable({
   onDownload,
   onDelete,
   onTogglePublished,
+  canPublish = false,
   showType = false,
   deviceTypeNames,
   emptyMessage = "No artifacts yet.",
@@ -130,7 +133,7 @@ export function ArtifactTable({
                         <input
                           type="checkbox"
                           checked={Boolean(artifact.published)}
-                          disabled={!canManage}
+                          disabled={!canPublish}
                           aria-label={`Show ${artifact.name} ${artifact.version} in Meteor Imager`}
                           onChange={() => onTogglePublished(artifact)}
                         />

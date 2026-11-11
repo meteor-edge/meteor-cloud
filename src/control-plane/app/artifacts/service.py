@@ -215,6 +215,8 @@ class ArtifactService:
         """
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.create")
+        if payload.published:
+            self.authz.require(membership, "artifact.publish")
 
         max_bytes = self.settings.artifact_max_upload_bytes
         if declared_size is not None and declared_size > max_bytes:
@@ -313,6 +315,7 @@ class ArtifactService:
         """Show or hide an OS image in Meteor Imager (the public OS image list)."""
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.update")
+        self.authz.require(membership, "artifact.publish")
         artifact = self._require_artifact(organization_id, artifact_id)
         if payload.published and artifact.type != ArtifactType.OS_IMAGE:
             raise AppError(

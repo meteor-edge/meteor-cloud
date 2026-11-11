@@ -42,6 +42,11 @@ export function canManageArtifacts(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "developer";
 }
 
+/** Show OS images in Meteor Imager (artifact.publish): public downloads, so owners and admins only. */
+export function canPublishOsImages(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 /** Start or cancel Deploy actions. Prefer /me/access when available. */
 export function canManageDeployments(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "operator" || role === "developer";

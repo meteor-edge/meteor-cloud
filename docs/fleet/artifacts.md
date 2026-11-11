@@ -54,8 +54,10 @@ organization (case-insensitive). Uploading it again returns
 
 ## API
 
-Reading requires organization membership. Uploading, changing and deleting require
-the **owner** or **admin** role.
+Reading requires organization membership. Uploading, changing and deleting need
+`artifact.create` / `artifact.update` / `artifact.delete` (owner, admin, developer).
+Publishing an OS image (`published`, at upload or with `PATCH`) also needs
+`artifact.publish`: **owner** or **admin** only.
 
 | Method | Path | Notes |
 |--------|------|-------|

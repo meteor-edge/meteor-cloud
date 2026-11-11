@@ -11,7 +11,7 @@ vi.mock("@/api/fleet", () => ({ uploadArtifact: vi.fn() }));
 beforeEach(() => vi.mocked(uploadArtifact).mockReset());
 afterEach(() => vi.restoreAllMocks());
 
-function setup() {
+function setup({ canPublish = false } = {}) {
   const onClose = vi.fn();
   const onUploaded = vi.fn();
   const view = render(
@@ -19,6 +19,7 @@ function setup() {
       token="token"
       organizationId="org-1"
       deviceTypes={[]}
+      canPublish={canPublish}
       onClose={onClose}
       onUploaded={onUploaded}
     />,
@@ -35,7 +36,7 @@ async function beginUpload(user: ReturnType<typeof userEvent.setup>) {
 describe("ArtifactUploadDialog", () => {
   it("sends published for an OS image only when the Meteor Imager box is ticked", async () => {
     vi.mocked(uploadArtifact).mockResolvedValue({ id: "a" } as Artifact);
-    const { user } = setup();
+    const { user } = setup({ canPublish: true });
     await user.click(screen.getByRole("checkbox", { name: /Show in Meteor Imager/ }));
     await beginUpload(user);
     await waitFor(() => expect(uploadArtifact).toHaveBeenCalled());
@@ -43,6 +44,11 @@ describe("ArtifactUploadDialog", () => {
       type: "os_image",
       published: true,
     });
+  });
+
+  it("does not offer Meteor Imager to members who cannot publish", () => {
+    setup();
+    expect(screen.queryByRole("checkbox", { name: /Show in Meteor Imager/ })).not.toBeInTheDocument();
   });
 
   it("requires a file before calling the upload API", async () => {
