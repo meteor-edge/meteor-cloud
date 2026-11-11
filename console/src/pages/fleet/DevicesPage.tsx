@@ -24,10 +24,11 @@ import { DevicesNav } from "@/components/fleet/DevicesNav";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { PendingEnrollmentRequests } from "@/components/fleet/PendingEnrollmentRequests";
 import { StatusBadge } from "@/components/fleet/StatusBadge";
+import { DeviceSetupDialog } from "@/components/fleet/DeviceSetupDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { canDeleteDevices, canManageFleet } from "@/lib/permissions";
+import { canDeleteDevices, canManageEnrollmentKeys, canManageFleet } from "@/lib/permissions";
 import { cn, formatDateTime, formatRelativeTime } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
@@ -89,6 +90,7 @@ export function DevicesPage() {
   });
 
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const [showSetup, setShowSetup] = useState(false);
   const canDelete = canDeleteDevices(orgQuery.data?.current_user_role);
 
   const typeNames = useMemo(() => {
@@ -229,6 +231,11 @@ export function DevicesPage() {
             <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
           </Button>
           {canManage && (
+            <Button variant="secondary" onClick={() => setShowSetup(true)}>
+              Set up a device card
+            </Button>
+          )}
+          {canManage && (
             <Button
               onClick={() => {
                 setFormError(null);
@@ -241,6 +248,15 @@ export function DevicesPage() {
         </div>
       </div>
       <DevicesNav organizationId={organizationId} />
+
+      {showSetup && token && (
+        <DeviceSetupDialog
+          token={token}
+          organizationId={organizationId}
+          canCreateKey={canManageEnrollmentKeys(orgQuery.data?.current_user_role)}
+          onClose={() => setShowSetup(false)}
+        />
+      )}
 
       {canManage && showAddForm && (
         <form
