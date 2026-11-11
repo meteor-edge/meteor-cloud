@@ -593,7 +593,7 @@ request_token_once() {
 
 poll_until_enrolled() {
   export METEORCLI_CONFIG_DIR="${CONFIG_DIR}"
-  local failures=0 delay rc
+  local failures=0 claim_failures=0 delay rc started early
   log "Polling for admin approval every ${WAIT_SECONDS}s (meteorcli claim)."
   log "Approve in console: Fleet → API keys or Devices → pending enrollment."
   log "This runs in meteorcli-firstboot.service; you can close SSH."
@@ -604,10 +604,24 @@ poll_until_enrolled() {
   fi
   while ! enrolled; do
     if [[ -f "${CLAIM_FILE}" ]]; then
+      started="${SECONDS}"
       if meteorcli claim --wait "${WAIT_SECONDS}"; then
         break
       fi
-      log "Still pending. Will poll again."
+      # claim normally returns after WAIT_SECONDS of slow polling. When it comes
+      # back much sooner (server down, rate limited, a short wait), back off here,
+      # so this loop never polls the server in a tight circle.
+      early=$(( WAIT_SECONDS / 2 ))
+      (( early < 1 )) && early=1
+      if (( SECONDS - started < early )); then
+        claim_failures=$(( claim_failures + 1 ))
+        delay="$(retry_delay "${claim_failures}")"
+        log "Still pending. Will poll again in ${delay}s."
+        sleep "${delay}"
+      else
+        claim_failures=0
+        log "Still pending. Will poll again."
+      fi
     else
       log "No claim secret yet; submitting request-token…"
       rc=0
