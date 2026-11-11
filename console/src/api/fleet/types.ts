@@ -475,6 +475,11 @@ export type DeviceEnrollmentRequest = {
   requested_name: string | null;
   assigned_name: string | null;
   suggested_name?: string | null;
+  /** Set when the suggestion is `<kind>-<name_suffix>`: the kind follows the device type picked at approval. */
+  name_suffix?: string | null;
+  /** Catalog device type that fits the board model the device reported. */
+  suggested_device_type_id?: string | null;
+  hardware_model?: string | null;
   device_type_id: string | null;
   device_group_id: string | null;
   serial_number: string | null;

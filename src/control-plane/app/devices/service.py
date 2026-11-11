@@ -29,7 +29,13 @@ from app.devices.models import (
     EnrollmentApiKey,
     RegistrationToken,
 )
-from app.devices.naming import default_device_name, unique_device_name
+from app.devices.naming import (
+    default_device_name,
+    device_type_slug_for,
+    hardware_suffix,
+    match_device_type,
+    unique_device_name,
+)
 from app.devices.repository import (
     DeviceEnrollmentRequestRepository,
     DeviceGroupRepository,
@@ -694,13 +700,32 @@ class FleetService:
         all_rows = rows
         if status is not None:
             all_rows = self.enrollment_requests.list(organization_id=organization_id, status=None)
-        suggested = self._suggested_names(organization_id, all_rows)
+        device_types = self.device_types.list(organization_id=organization_id)
+        suggested = self._suggested_names(organization_id, all_rows, device_types=device_types)
         return [
             DeviceEnrollmentRequestResponse.model_validate(item).model_copy(
-                update={"suggested_name": suggested.get(item.id)}
+                update={"suggested_name": suggested.get(item.id), **self._naming_hints(item, suggested, device_types)}
             )
             for item in rows
         ]
+
+    @staticmethod
+    def _naming_hints(
+        row: DeviceEnrollmentRequest, suggested: dict[uuid.UUID, str], device_types: list[DeviceType]
+    ) -> dict[str, Any]:
+        """What the approval dialog needs to keep ``<kind>-<suffix>`` in step with the chosen device type."""
+        if row.status != "pending":
+            return {}
+        hints: dict[str, Any] = {}
+        if row.device_type_id is None:
+            matched = match_device_type(row.hardware_model, device_types)
+            hints["suggested_device_type_id"] = matched.id if matched is not None else None
+        suffix = hardware_suffix(serial_number=row.serial_number, mac_addresses=row.mac_addresses or [])
+        name = suggested.get(row.id)
+        # Only a generated name follows the type: a chosen or kept name stays as it is.
+        if suffix and name and not row.assigned_name and name.endswith(f"-{suffix}"):
+            hints["name_suffix"] = suffix
+        return hints
 
     def _suggested_names(
         self,
@@ -708,6 +733,7 @@ class FleetService:
         rows: list[DeviceEnrollmentRequest],
         *,
         include_existing: bool = True,
+        device_types: list[DeviceType] | None = None,
     ) -> dict[uuid.UUID, str]:
         """A name per unclaimed request: a re-enrolling device keeps its own, others get distinct defaults.
 
@@ -719,6 +745,8 @@ class FleetService:
         )
         if not unclaimed:
             return {}
+        if device_types is None:
+            device_types = self.device_types.list(organization_id=organization_id)
         known = self.devices.list_identities(organization_id=organization_id)
         taken = {device.name.casefold() for device in known}
         taken.update(row.assigned_name.casefold() for row in unclaimed if row.assigned_name)
@@ -749,6 +777,8 @@ class FleetService:
                     hostname=row.hostname,
                     serial_number=row.serial_number,
                     mac_addresses=row.mac_addresses or [],
+                    device_type_slug=device_type_slug_for(row.device_type_id, row.hardware_model, device_types),
+                    hardware_model=row.hardware_model,
                 ),
                 taken=taken,
             )
@@ -1139,6 +1169,7 @@ class FleetService:
             os_version=device.os_version,
             kernel_version=device.kernel_version,
             architecture=device.architecture,
+            hardware_model=device.hardware_model,
             cpu_model=device.cpu_model,
             cpu_cores=device.cpu_cores,
             memory_mb=device.memory_mb,

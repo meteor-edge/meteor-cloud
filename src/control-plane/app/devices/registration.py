@@ -17,8 +17,8 @@ from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
 from app.core.metrics import AGENT_HEARTBEATS, DEVICE_REGISTRATIONS
 from app.devices.identity import DeviceIdentity, match_existing_device
 from app.devices.models import Device, RegistrationToken
-from app.devices.naming import default_device_name, unique_device_name
-from app.devices.repository import DeviceRepository, RegistrationTokenRepository
+from app.devices.naming import chosen_name, default_device_name, device_type_slug_for, unique_device_name
+from app.devices.repository import DeviceRepository, DeviceTypeRepository, RegistrationTokenRepository
 from app.devices.schemas import (
     AgentHeartbeatRequest,
     AgentHeartbeatResponse,
@@ -134,7 +134,8 @@ class RegistrationService:
             )
         return token
 
-    def _resolve_name(self, payload: AgentRegisterRequest, identity: DeviceIdentity, organization_id) -> str:
+    def _resolve_name(self, payload: AgentRegisterRequest, identity: DeviceIdentity, token: RegistrationToken) -> str:
+        organization_id = token.organization_id
         self.devices.lock_names(organization_id=organization_id)
         return unique_device_name(
             default_device_name(
@@ -142,6 +143,12 @@ class RegistrationService:
                 hostname=payload.hostname,
                 serial_number=identity.serial_number,
                 mac_addresses=identity.mac_addresses,
+                device_type_slug=device_type_slug_for(
+                    token.device_type_id,
+                    payload.hardware_model,
+                    DeviceTypeRepository(self.session).list(organization_id=organization_id),
+                ),
+                hardware_model=payload.hardware_model,
             ),
             taken=self.devices.taken_names(organization_id=organization_id),
         )
@@ -159,6 +166,7 @@ class RegistrationService:
         device.os_version = payload.os_version
         device.kernel_version = payload.kernel_version
         device.architecture = payload.architecture
+        device.hardware_model = payload.hardware_model
         device.cpu_model = payload.cpu_model
         device.cpu_cores = payload.cpu_cores
         device.memory_mb = payload.memory_mb
@@ -177,7 +185,7 @@ class RegistrationService:
     ) -> Device:
         device = Device(
             organization_id=token.organization_id,
-            name=self._resolve_name(payload, identity, token.organization_id),
+            name=self._resolve_name(payload, identity, token),
             device_type_id=token.device_type_id,
             device_group_id=token.device_group_id,
             is_enabled=True,
@@ -201,8 +209,8 @@ class RegistrationService:
         generated,
         now: datetime,
     ) -> Device:
-        if payload.name:
-            requested = payload.name.strip()[:255]
+        requested = chosen_name(payload.name, payload.hostname)
+        if requested:
             if requested.casefold() != device.name.casefold():
                 self.devices.lock_names(organization_id=device.organization_id)
                 taken = self.devices.taken_names(organization_id=device.organization_id)

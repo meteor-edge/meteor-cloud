@@ -238,6 +238,7 @@ class DeviceResponse(BaseModel):
     os_version: str | None
     kernel_version: str | None
     architecture: str | None
+    hardware_model: str | None = None
     cpu_model: str | None
     cpu_cores: int | None
     memory_mb: int | None
@@ -310,6 +311,7 @@ class AgentRegisterRequest(BaseModel):
     os_version: str | None = Field(default=None, max_length=255)
     kernel_version: str | None = Field(default=None, max_length=255)
     architecture: str | None = Field(default=None, max_length=64)
+    hardware_model: str | None = Field(default=None, max_length=255)
     cpu_model: str | None = Field(default=None, max_length=255)
     cpu_cores: int | None = Field(default=None, ge=0)
     memory_mb: int | None = Field(default=None, ge=0)
@@ -401,6 +403,10 @@ class DeviceEnrollmentRequestResponse(BaseModel):
     assigned_name: str | None
     # What the device will be called unless an administrator picks a name (list responses, unclaimed requests).
     suggested_name: str | None = None
+    # Set when the suggestion is ``<kind>-<name_suffix>``: the kind follows the device type picked at approval.
+    name_suffix: str | None = None
+    # Catalog device type that fits the reported board model (pending requests without a type).
+    suggested_device_type_id: uuid.UUID | None = None
     device_type_id: uuid.UUID | None
     device_group_id: uuid.UUID | None
     serial_number: str | None
@@ -410,6 +416,7 @@ class DeviceEnrollmentRequestResponse(BaseModel):
     os_version: str | None
     kernel_version: str | None
     architecture: str | None
+    hardware_model: str | None = None
     cpu_model: str | None
     cpu_cores: int | None
     memory_mb: int | None
@@ -458,6 +465,7 @@ class AgentEnrollRequest(BaseModel):
     os_version: str | None = Field(default=None, max_length=255)
     kernel_version: str | None = Field(default=None, max_length=255)
     architecture: str | None = Field(default=None, max_length=64)
+    hardware_model: str | None = Field(default=None, max_length=255)
     cpu_model: str | None = Field(default=None, max_length=255)
     cpu_cores: int | None = Field(default=None, ge=0)
     memory_mb: int | None = Field(default=None, ge=0)

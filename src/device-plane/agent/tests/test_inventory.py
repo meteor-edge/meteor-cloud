@@ -119,3 +119,33 @@ def test_primary_mac_ignores_virtual_interfaces_only_system(monkeypatch, tmp_pat
     net = _net_dir(tmp_path, {"docker0": "aa:bb:cc:dd:ee:03"})
     _patch_net(monkeypatch, net, None)
     assert inventory.read_mac_addresses() == []
+
+
+def _files(monkeypatch, files: dict[str, str]) -> None:
+    monkeypatch.setattr(inventory, "_read_text", lambda path: files.get(path))
+
+
+def test_raspberry_pi_reports_model_and_serial_from_the_device_tree(monkeypatch) -> None:
+    _files(
+        monkeypatch,
+        {
+            "/sys/firmware/devicetree/base/model": "Raspberry Pi 5 Model B Rev 1.0\x00",
+            "/sys/firmware/devicetree/base/serial-number": "10000000abcd1234\x00",
+        },
+    )
+    assert inventory.read_hardware_model() == "Raspberry Pi 5 Model B Rev 1.0"
+    assert inventory.read_serial_number() == "10000000abcd1234"
+
+
+def test_pc_reports_dmi_model_and_skips_placeholders(monkeypatch) -> None:
+    _files(
+        monkeypatch,
+        {
+            "/sys/class/dmi/id/product_name": "System Product Name",
+            "/sys/class/dmi/id/board_name": "NUC13ANHi5",
+            "/sys/class/dmi/id/product_serial": "To Be Filled By O.E.M.",
+            "/sys/class/dmi/id/board_serial": "0000000000",
+        },
+    )
+    assert inventory.read_hardware_model() == "NUC13ANHi5"
+    assert inventory.read_serial_number() is None

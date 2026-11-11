@@ -36,15 +36,50 @@ def read_os_release() -> tuple[str | None, str | None]:
     return name, version
 
 
-def read_serial_number() -> str | None:
-    for path in (
-        "/sys/class/dmi/id/product_serial",
-        "/sys/class/dmi/id/board_serial",
-    ):
-        value = _read_text(path)
-        if value and value.lower() not in {"none", "to be filled by o.e.m."}:
+# Firmware placeholders that identify nothing.
+_PLACEHOLDER_VALUES = frozenset(
+    {
+        "default string",
+        "none",
+        "not applicable",
+        "not specified",
+        "system product name",
+        "system serial number",
+        "to be filled by o.e.m.",
+        "unknown",
+    }
+)
+
+
+def _first_real_value(paths: tuple[str, ...]) -> str | None:
+    for path in paths:
+        # Device-tree strings end with a NUL byte.
+        value = (_read_text(path) or "").replace("\x00", "").strip()
+        if value and value.lower() not in _PLACEHOLDER_VALUES and value.strip("0"):
             return value
     return None
+
+
+def read_serial_number() -> str | None:
+    """Board serial: DMI on PCs, the device tree on ARM boards such as the Raspberry Pi."""
+    return _first_real_value(
+        (
+            "/sys/class/dmi/id/product_serial",
+            "/sys/class/dmi/id/board_serial",
+            "/sys/firmware/devicetree/base/serial-number",
+        )
+    )
+
+
+def read_hardware_model() -> str | None:
+    """Board model, e.g. ``Raspberry Pi 5 Model B Rev 1.0`` (device tree) or a DMI product name."""
+    return _first_real_value(
+        (
+            "/sys/firmware/devicetree/base/model",
+            "/sys/class/dmi/id/product_name",
+            "/sys/class/dmi/id/board_name",
+        )
+    )
 
 
 _VIRTUAL_IFACE_PREFIXES = (
@@ -167,6 +202,7 @@ def collect_inventory() -> dict[str, Any]:
         "os_version": os_version,
         "kernel_version": kernel_version,
         "architecture": architecture,
+        "hardware_model": read_hardware_model(),
         "cpu_model": cpu_model,
         "cpu_cores": cpu_cores,
         "memory_mb": read_memory_mb(),

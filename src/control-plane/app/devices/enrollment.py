@@ -24,10 +24,11 @@ from app.devices.models import (
     DeviceEnrollmentRequest,
     EnrollmentApiKey,
 )
-from app.devices.naming import default_device_name, unique_device_name
+from app.devices.naming import default_device_name, device_type_slug_for, unique_device_name
 from app.devices.repository import (
     DeviceEnrollmentRequestRepository,
     DeviceRepository,
+    DeviceTypeRepository,
     EnrollmentApiKeyRepository,
 )
 from app.devices.schemas import (
@@ -103,6 +104,7 @@ class EnrollmentService:
             request.os_version = payload.os_version
             request.kernel_version = payload.kernel_version
             request.architecture = payload.architecture
+            request.hardware_model = payload.hardware_model
             request.cpu_model = payload.cpu_model
             request.cpu_cores = payload.cpu_cores
             request.memory_mb = payload.memory_mb
@@ -126,6 +128,7 @@ class EnrollmentService:
                 os_version=payload.os_version,
                 kernel_version=payload.kernel_version,
                 architecture=payload.architecture,
+                hardware_model=payload.hardware_model,
                 cpu_model=payload.cpu_model,
                 cpu_cores=payload.cpu_cores,
                 memory_mb=payload.memory_mb,
@@ -324,6 +327,12 @@ class EnrollmentService:
                 hostname=request.hostname,
                 serial_number=identity.serial_number,
                 mac_addresses=identity.mac_addresses,
+                device_type_slug=device_type_slug_for(
+                    request.device_type_id,
+                    request.hardware_model,
+                    DeviceTypeRepository(self.session).list(organization_id=request.organization_id),
+                ),
+                hardware_model=request.hardware_model,
             ),
             taken=self.devices.taken_names(organization_id=request.organization_id),
         )
@@ -336,6 +345,7 @@ class EnrollmentService:
         device.os_version = request.os_version
         device.kernel_version = request.kernel_version
         device.architecture = request.architecture
+        device.hardware_model = request.hardware_model
         device.cpu_model = request.cpu_model
         device.cpu_cores = request.cpu_cores
         device.memory_mb = request.memory_mb
