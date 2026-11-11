@@ -258,6 +258,7 @@ class RegistrationService:
     ) -> AgentHeartbeatResponse:
         from app.deployments.software_schemas import SoftwareReportItem
         from app.deployments.software_service import DeviceSoftwareService
+        from app.network.service import DeviceWifiService
 
         now = datetime.now(UTC)
         device.last_seen_at = now
@@ -301,4 +302,5 @@ class RegistrationService:
             heartbeat_interval_seconds=self.settings.device_heartbeat_interval_seconds,
             server_time=now,
             desired_software=desired,
+            wifi_pending=DeviceWifiService(self.session, self.settings).has_pending(device.id),
         )

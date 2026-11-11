@@ -49,6 +49,7 @@ from app.devices.dependencies import (
 )
 from app.devices.rate_limit import InMemoryRateLimiter
 from app.endpoints import models as _endpoint_models  # noqa: F401
+from app.network import models as _network_models  # noqa: F401
 from app.identity import models as _identity_models  # noqa: F401
 from app.identity.models import User
 from app.main import create_app

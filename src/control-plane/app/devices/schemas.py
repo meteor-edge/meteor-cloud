@@ -345,6 +345,8 @@ class AgentHeartbeatResponse(BaseModel):
     heartbeat_interval_seconds: int
     server_time: datetime
     desired_software: list[dict[str, Any]] = Field(default_factory=list)
+    # Wi-Fi changes are waiting: collect them from GET /api/v1/agent/network/wifi.
+    wifi_pending: bool = False
 
 
 # --------------------------------------------------------------------------- #

@@ -78,6 +78,12 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("endpoint", "delete", "Delete endpoints", "Remove public application endpoints."),
     PermissionDef("device", "shell", "Open device terminal", "Open a browser SSH session to a device."),
     PermissionDef("device", "logs", "View device logs", "Read service, container and system logs on a device."),
+    PermissionDef(
+        "device",
+        "network",
+        "Change device Wi-Fi",
+        "Add, change and remove the Wi-Fi networks of a device. A wrong network can take it offline.",
+    ),
     PermissionDef("enrollment_key", "read", "View enrollment API keys", "List enrollment API keys."),
     PermissionDef("enrollment_key", "manage", "Manage enrollment API keys", "Create and revoke enrollment API keys."),
     PermissionDef("mqtt", "test", "Use MQTT test tools", "Publish and listen in the organization MQTT test UI."),
