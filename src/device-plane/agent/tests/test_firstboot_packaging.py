@@ -589,6 +589,35 @@ def test_settings_skip_invalid_values_but_keep_enrollment(tmp_path: Path) -> Non
     assert out.count("warning:") == 4
 
 
+def test_settings_on_an_enrolled_device_do_not_keep_the_key(tmp_path: Path) -> None:
+    root = _fake_root(tmp_path)
+    (root / "etc" / "meteorcli").mkdir(parents=True)
+    (root / "etc" / "meteorcli" / "device-token").write_text("dev_token", encoding="utf-8")
+    card = root / "boot" / "firmware" / ".meteorenv"
+    card.write_text(
+        "METEOR_DOMAIN=fleet.example.com\nMETEOR_API_KEY=key_abc\nMETEOR_HOSTNAME=pi-moved\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", str(FIRSTBOOT / "meteorcli-settings.sh")],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_settings_env(tmp_path, root),
+        timeout=30,
+    )
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert "already enrolled" in out
+    # Other settings still apply, the key is not written anywhere and leaves the card.
+    assert (root / "etc" / "hostname").read_text(encoding="utf-8") == "pi-moved\n"
+    assert not (root / "etc" / "meteorcli-firstboot.env").exists()
+    assert not card.exists()
+    assert "key_abc" not in out
+
+
 def test_settings_do_nothing_without_a_settings_file(tmp_path: Path) -> None:
     root = _fake_root(tmp_path)
     result = subprocess.run(
@@ -724,6 +753,49 @@ def test_busy_server_gets_backoff_and_retry_after(tmp_path: Path) -> None:
     # The server's Retry-After (7 s) wins over the 1-2 s backoff.
     assert calls.count("sleep 7") == 2
     assert (config_dir / "device-token").read_text(encoding="utf-8") == "dev_ok"
+
+
+def test_pending_poll_that_returns_at_once_backs_off(tmp_path: Path) -> None:
+    """claim coming back immediately (server down, short wait) must not spin the loop."""
+    boot, config_dir, stub_bin, calls_log = _poll_fixture(tmp_path, "    exit 1")
+    (config_dir / "claim-secret").write_text('{"request_id":"r","claim_secret":"c"}', encoding="utf-8")
+    counter = tmp_path / "claims"
+    _write_executable(
+        stub_bin / "meteorcli",
+        f"""#!/usr/bin/env bash
+cmd="${{1:-}}"
+echo "$cmd" >> "{calls_log}"
+case "$cmd" in
+  --version) echo "meteorcli-stub 0" ;;
+  claim)
+    n=$(( $(cat "{counter}" 2>/dev/null || echo 0) + 1 )); echo "$n" > "{counter}"
+    if [ "$n" -lt 4 ]; then echo "error: poll failed: connection refused" >&2; exit 1; fi
+    printf '%s' 'dev_ok' > "{config_dir}/device-token"
+    rm -f "{config_dir}/claim-secret"
+    ;;
+esac
+""",
+    )
+
+    result = subprocess.run(
+        ["bash", str(FIRSTBOOT / "meteorcli-firstboot.sh"), "--poll"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_poll_env(tmp_path, stub_bin, config_dir, boot),
+        timeout=30,
+    )
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    calls = calls_log.read_text(encoding="utf-8").splitlines()
+    assert calls.count("claim") == 4
+    assert "request-token" not in calls
+    # One pause after every early return, growing up to the cap.
+    sleeps = [int(line.split()[1]) for line in calls if line.startswith("sleep ")]
+    assert len(sleeps) == 3
+    assert all(seconds >= 1 for seconds in sleeps)
+    assert sleeps[-1] >= 2
 
 
 def test_retry_delay_doubles_up_to_the_cap() -> None:

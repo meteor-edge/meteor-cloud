@@ -16,6 +16,7 @@ set -euo pipefail
 
 ROOT="${METEOR_ROOT:-}"   # tests only: prefix for every system path
 ENV_FILE="${METEOR_FIRSTBOOT_ENV:-${ROOT}/etc/meteorcli-firstboot.env}"
+TOKEN_FILE="${METEOR_DEVICE_TOKEN_FILE:-${ROOT}/etc/meteorcli/device-token}"
 LOG_FILE="${METEOR_SETTINGS_LOG:-${ROOT}/var/log/meteorcli-settings.log}"
 CFG_MOUNT="${METEOR_CFG_MOUNT:-/run/meteorcfg}"
 NM_DIR="${ROOT}/etc/NetworkManager/system-connections"
@@ -310,6 +311,11 @@ save_enrollment() {
   domain="$(cfg METEOR_DOMAIN)"
   key="$(cfg METEOR_API_KEY)"
   if [[ -z "${domain}" && -z "${key}" ]]; then
+    return 0
+  fi
+  if [[ -s "${TOKEN_FILE}" ]]; then
+    # First boot already ran and removed itself; do not leave the key on disk.
+    log "This device is already enrolled; the enrollment key in .meteorenv was not kept"
     return 0
   fi
   if [[ -z "${domain}" || "${key}" != key_* ]]; then
