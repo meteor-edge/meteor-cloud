@@ -52,9 +52,14 @@ jobs:
           \`\`\`bash
           curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-meteorcli-firstboot.sh | sudo bash
           \`\`\`
+          Prepare a device to become an OS image (then back it up with Meteor Imager):
+          \`\`\`bash
+          curl -fsSLO https://github.com/${{ github.repository }}/releases/latest/download/meteorcli-prepare-image.sh && sudo bash meteorcli-prepare-image.sh
+          \`\`\`
           Pin a version with \`METEORCLI_VERSION=${ver}\`." \
             dist/meteorcli.tar.gz \
             "dist/meteorcli-${ver}.tar.gz" \
             dist/install-meteorcli.sh \
             dist/install-meteorcli-firstboot.sh \
+            dist/meteorcli-prepare-image.sh \
             dist/SHA256SUMS

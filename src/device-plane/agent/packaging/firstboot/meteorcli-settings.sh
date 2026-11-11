@@ -2,12 +2,16 @@
 # Apply the settings Meteor Imager (or a person) put in .meteorenv on the card's
 # config partition, early in boot, before the network starts:
 #
-#   Wi-Fi (NetworkManager, or wpa_supplicant without it), hostname, timezone and
-#   an SSH public key. The enrollment values (domain, key, name, API base) move
-#   to /etc/meteorcli-firstboot.env (root only) for meteorcli-firstboot.service.
+#   Wi-Fi (NetworkManager, or wpa_supplicant without it), hostname, timezone,
+#   login user and password (as a crypt hash), SSH on/off, password login and an
+#   SSH public key. The enrollment values (domain, key, name, API base) move to
+#   /etc/meteorcli-firstboot.env (root only) for meteorcli-firstboot.service.
 #
 # Then .meteorenv is deleted from the card, so the key and Wi-Fi password are no
 # longer readable by whoever holds it. Nothing found: exits 0 and changes nothing.
+#
+# On every boot, before that: SSH host keys are created when missing, and the root
+# filesystem grows to the card once when meteorcli-prepare-image.sh asked for it.
 #
 # Config partition, first match: a FAT partition labelled METEORCFG (any device
 # type), /boot/firmware (Raspberry Pi OS Bookworm+), /boot, /boot/efi (x86).
@@ -20,6 +24,8 @@ TOKEN_FILE="${METEOR_DEVICE_TOKEN_FILE:-${ROOT}/etc/meteorcli/device-token}"
 LOG_FILE="${METEOR_SETTINGS_LOG:-${ROOT}/var/log/meteorcli-settings.log}"
 CFG_MOUNT="${METEOR_CFG_MOUNT:-/run/meteorcfg}"
 NM_DIR="${ROOT}/etc/NetworkManager/system-connections"
+EXPAND_FLAG="${ROOT}/etc/meteorcli-expand-rootfs"
+SSHD_DROPIN="${ROOT}/etc/ssh/sshd_config.d/10-meteor.conf"
 MOUNTED_CFG=""
 
 log() {
@@ -75,7 +81,7 @@ find_settings_file() {
 # --- parse -------------------------------------------------------------------
 
 declare -A CFG=()
-ALLOWED_KEYS=" METEOR_ENV_VERSION METEOR_DOMAIN METEOR_API_BASE METEOR_API_KEY METEOR_NAME METEOR_HOSTNAME METEOR_TIMEZONE METEOR_WIFI_SSID METEOR_WIFI_PSK METEOR_WIFI_COUNTRY METEOR_WIFI_HIDDEN METEOR_SSH_AUTHORIZED_KEY METEOR_SSH_USER "
+ALLOWED_KEYS=" METEOR_ENV_VERSION METEOR_DOMAIN METEOR_API_BASE METEOR_API_KEY METEOR_NAME METEOR_HOSTNAME METEOR_TIMEZONE METEOR_WIFI_SSID METEOR_WIFI_PSK METEOR_WIFI_COUNTRY METEOR_WIFI_HIDDEN METEOR_SSH_AUTHORIZED_KEY METEOR_SSH_USER METEOR_USER METEOR_USER_PASSWORD_HASH METEOR_SSH_ENABLED METEOR_SSH_PASSWORD_AUTH "
 
 parse_settings() {
   local path="$1" line key val
@@ -271,6 +277,108 @@ default_ssh_user() {
   awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ { print $1; exit }' "${ROOT}/etc/passwd"
 }
 
+user_exists() {
+  awk -F: -v u="$1" '$1 == u { found = 1 } END { exit !found }' "${ROOT}/etc/passwd"
+}
+
+# Groups Raspberry Pi OS gives its first user, where they exist on this image.
+login_groups() {
+  local g out=""
+  for g in adm dialout cdrom sudo audio video plugdev games users input render netdev gpio i2c spi docker; do
+    if awk -F: -v g="${g}" '$1 == g { found = 1 } END { exit !found }' "${ROOT}/etc/group" 2>/dev/null; then
+      out="${out:+${out},}${g}"
+    fi
+  done
+  printf '%s' "${out}"
+}
+
+# Like Raspberry Pi Imager: the image's first user (uid 1000) is renamed to the
+# chosen name, keeping its groups (sudo, docker, ...) and files. Without one, a
+# new user is created. The password arrives as a crypt hash, never as text.
+apply_user() {
+  local user hash first groups
+  user="$(cfg METEOR_USER)"
+  hash="$(cfg METEOR_USER_PASSWORD_HASH)"
+  if [[ -z "${user}" ]]; then
+    [[ -z "${hash}" ]] || log "warning: METEOR_USER_PASSWORD_HASH needs METEOR_USER; password skipped"
+    return 0
+  fi
+  if [[ ! "${user}" =~ ^[a-z_][a-z0-9_-]{0,31}$ || "${user}" == root ]]; then
+    log "warning: METEOR_USER is not a valid user name; skipped"
+    return 0
+  fi
+  if [[ -n "${hash}" && ! "${hash}" =~ ^\$(6|5|y)\$[./A-Za-z0-9\$=,]+$ ]]; then
+    log "warning: METEOR_USER_PASSWORD_HASH is not a crypt hash; password skipped"
+    hash=""
+  fi
+  if ! user_exists "${user}"; then
+    first="$(awk -F: '$3 == 1000 { print $1; exit }' "${ROOT}/etc/passwd")"
+    if [[ -n "${first}" ]]; then
+      if ! usermod -l "${user}" -d "/home/${user}" -m "${first}"; then
+        log "warning: could not rename user ${first} to ${user}; user skipped"
+        return 0
+      fi
+      if awk -F: -v g="${first}" '$1 == g { found = 1 } END { exit !found }' "${ROOT}/etc/group" 2>/dev/null; then
+        groupmod -n "${user}" "${first}" || log "warning: could not rename group ${first}"
+      fi
+      local f
+      for f in "${ROOT}"/etc/sudoers.d/*; do
+        if [[ -f "${f}" ]] && grep -q "^${first}[[:space:]]" "${f}"; then
+          sed -i "s/^${first}\([[:space:]]\)/${user}\1/" "${f}"
+        fi
+      done
+      log "user ${first} renamed to ${user}"
+    else
+      groups="$(login_groups)"
+      if ! useradd -m -s /bin/bash ${groups:+-G "${groups}"} "${user}"; then
+        log "warning: could not create user ${user}; user skipped"
+        return 0
+      fi
+      log "user ${user} created"
+    fi
+  fi
+  if [[ -n "${hash}" ]]; then
+    if usermod -p "${hash}" "${user}"; then
+      log "password set for ${user} (not logged)"
+    else
+      log "warning: could not set the password for ${user}"
+    fi
+  fi
+}
+
+ssh_service() {
+  [[ -z "${ROOT}" ]] && command -v systemctl >/dev/null 2>&1 || return 0
+  if [[ "$1" == enable ]]; then
+    systemctl enable ssh >/dev/null 2>&1 || systemctl enable sshd >/dev/null 2>&1 || true
+    systemctl start --no-block ssh >/dev/null 2>&1 || true
+  else
+    systemctl disable --now ssh >/dev/null 2>&1 || systemctl disable --now sshd >/dev/null 2>&1 || true
+  fi
+}
+
+apply_ssh() {
+  local enabled pwauth
+  enabled="$(cfg METEOR_SSH_ENABLED)"
+  pwauth="$(cfg METEOR_SSH_PASSWORD_AUTH)"
+  case "${pwauth}" in
+    "") ;;
+    true|false)
+      mkdir -p "$(dirname "${SSHD_DROPIN}")"
+      # sshd keeps the first value it reads; 10- sorts before cloud-init's 50-.
+      printf '# Written by meteorcli-settings.sh\nPasswordAuthentication %s\n' \
+        "$([[ "${pwauth}" == true ]] && echo yes || echo no)" >"${SSHD_DROPIN}"
+      log "SSH password login $([[ "${pwauth}" == true ]] && echo allowed || echo disabled)"
+      ;;
+    *) log "warning: METEOR_SSH_PASSWORD_AUTH must be true or false; skipped" ;;
+  esac
+  case "${enabled}" in
+    "") ;;
+    true) ssh_service enable && log "SSH enabled" ;;
+    false) ssh_service disable && log "SSH disabled" ;;
+    *) log "warning: METEOR_SSH_ENABLED must be true or false; skipped" ;;
+  esac
+}
+
 apply_ssh_key() {
   local key user home ak
   key="$(cfg METEOR_SSH_AUTHORIZED_KEY)"
@@ -280,6 +388,7 @@ apply_ssh_key() {
     return 0
   fi
   user="$(cfg METEOR_SSH_USER)"
+  [[ -n "${user}" ]] || user="$(cfg METEOR_USER)"
   [[ -n "${user}" ]] || user="$(default_ssh_user || true)"
   if [[ -z "${user}" ]]; then
     log "warning: no login user on this image for the SSH key; skipped"
@@ -296,14 +405,55 @@ apply_ssh_key() {
   grep -qxF "${key}" "${ak}" || printf '%s\n' "${key}" >>"${ak}"
   chmod 0700 "$(dirname "${ak}")"
   chmod 0600 "${ak}"
-  if [[ -z "${ROOT}" ]]; then
-    chown -R "${user}:" "$(dirname "${ak}")" 2>/dev/null || true
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl enable ssh >/dev/null 2>&1 || systemctl enable sshd >/dev/null 2>&1 || true
-      systemctl start --no-block ssh >/dev/null 2>&1 || true
-    fi
-  fi
+  [[ -z "${ROOT}" ]] && chown -R "${user}:" "$(dirname "${ak}")" 2>/dev/null || true
+  # A key means "let me in": enable SSH unless .meteorenv turned it off.
+  [[ "$(cfg METEOR_SSH_ENABLED)" == false ]] || ssh_service enable
   log "SSH key added for ${user}"
+}
+
+# A prepared image ships without host keys so every card gets its own.
+ensure_ssh_host_keys() {
+  [[ -x "${ROOT}/usr/sbin/sshd" ]] || return 0
+  compgen -G "${ROOT}/etc/ssh/ssh_host_*_key" >/dev/null && return 0
+  if ssh-keygen -A ${ROOT:+-f "${ROOT}"} >/dev/null 2>&1; then
+    log "SSH host keys created"
+  else
+    log "warning: could not create SSH host keys"
+  fi
+}
+
+# Grow the root partition and filesystem to the card, once, after a prepared
+# image (often shrunk by Meteor Imager's backup) is written to a larger card.
+expand_rootfs_once() {
+  [[ -f "${EXPAND_FLAG}" ]] || return 0
+  # Removed first: a failure must not repeat on every boot.
+  rm -f "${EXPAND_FLAG}"
+  [[ -z "${ROOT}" ]] || return 0
+  local src name disk num last
+  src="$(findmnt -n -o SOURCE /)"
+  name="$(basename "${src}")"
+  disk="$(lsblk -no PKNAME "${src}" 2>/dev/null | head -n 1)"
+  num="$(cat "/sys/class/block/${name}/partition" 2>/dev/null || true)"
+  if [[ -z "${disk}" || -z "${num}" ]]; then
+    log "warning: root ${src} is not a partition; not resized"
+    return 0
+  fi
+  last="$(lsblk -lno NAME,TYPE "/dev/${disk}" | awk '$2 == "part" { n = $1 } END { print n }')"
+  if [[ "${last}" != "${name}" ]]; then
+    log "warning: root ${src} is not the last partition; not resized"
+    return 0
+  fi
+  if ! command -v sfdisk >/dev/null 2>&1 || ! command -v resize2fs >/dev/null 2>&1; then
+    log "warning: sfdisk or resize2fs missing; root filesystem not resized"
+    return 0
+  fi
+  if echo ", +" | sfdisk --no-reread --no-tell-kernel -q -N "${num}" "/dev/${disk}" >/dev/null 2>&1 \
+    && partx -u -n "${num}" "/dev/${disk}" \
+    && resize2fs "${src}" >/dev/null 2>&1; then
+    log "root filesystem ${src} grown to the card"
+  else
+    log "warning: could not grow ${src}; run: sudo raspi-config nonint do_expand_rootfs"
+  fi
 }
 
 save_enrollment() {
@@ -358,6 +508,8 @@ remove_settings_file() {
 
 main() {
   local path
+  expand_rootfs_once || log "warning: resizing the root filesystem failed"
+  ensure_ssh_host_keys || log "warning: SSH host keys failed"
   if ! path="$(find_settings_file)"; then
     exit 0
   fi
@@ -368,6 +520,8 @@ main() {
   apply_hostname || log "warning: hostname failed"
   apply_timezone || log "warning: timezone failed"
   apply_wifi || log "warning: Wi-Fi failed"
+  apply_user || log "warning: user failed"
+  apply_ssh || log "warning: SSH settings failed"
   apply_ssh_key || log "warning: SSH key failed"
   remove_settings_file "${path}"
 }

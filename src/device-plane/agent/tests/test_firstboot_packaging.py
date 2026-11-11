@@ -633,6 +633,249 @@ def test_settings_do_nothing_without_a_settings_file(tmp_path: Path) -> None:
     assert (root / "etc" / "hostname").read_text(encoding="utf-8") == "raspberrypi\n"
 
 
+PASSWORD_HASH = "$6$saltsalt$" + "a" * 86
+
+
+def _command_stubs(tmp_path: Path, *names: str) -> tuple[Path, Path]:
+    """Stub commands that only record how they were called."""
+    stub_bin = tmp_path / "stub-bin"
+    stub_bin.mkdir(exist_ok=True)
+    calls = tmp_path / "calls.log"
+    for name in names:
+        _write_executable(stub_bin / name, f'#!/usr/bin/env bash\necho "{name} $*" >> "{calls}"\nexit 0\n')
+    return stub_bin, calls
+
+
+def _run_settings(tmp_path: Path, root: Path, stub_bin: Path | None = None) -> subprocess.CompletedProcess:
+    env = _settings_env(tmp_path, root)
+    if stub_bin is not None:
+        env["PATH"] = f"{stub_bin}{os.pathsep}{env.get('PATH', '')}"
+    return subprocess.run(
+        ["bash", str(FIRSTBOOT / "meteorcli-settings.sh")],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def test_settings_rename_the_first_user_set_its_password_and_ssh(tmp_path: Path) -> None:
+    root = _fake_root(tmp_path)
+    (root / "etc" / "group").write_text("sudo:x:27:pi\npi:x:1000:\n", encoding="utf-8")
+    sudoers = root / "etc" / "sudoers.d" / "010_pi-nopasswd"
+    sudoers.parent.mkdir(parents=True)
+    sudoers.write_text("pi ALL=(ALL) NOPASSWD: ALL\n", encoding="utf-8")
+    (root / "boot" / "firmware" / ".meteorenv").write_text(
+        "METEOR_ENV_VERSION=2\n"
+        "METEOR_USER=ops\n"
+        f"METEOR_USER_PASSWORD_HASH={PASSWORD_HASH}\n"
+        "METEOR_SSH_ENABLED=true\n"
+        "METEOR_SSH_PASSWORD_AUTH=false\n",
+        encoding="utf-8",
+    )
+    stub_bin, calls = _command_stubs(tmp_path, "usermod", "groupmod", "useradd")
+
+    result = _run_settings(tmp_path, root, stub_bin)
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert PASSWORD_HASH not in out
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "usermod -l ops -d /home/ops -m pi",
+        "groupmod -n ops pi",
+        f"usermod -p {PASSWORD_HASH} ops",
+    ]
+    assert sudoers.read_text(encoding="utf-8") == "ops ALL=(ALL) NOPASSWD: ALL\n"
+    dropin = root / "etc" / "ssh" / "sshd_config.d" / "10-meteor.conf"
+    assert "PasswordAuthentication no\n" in dropin.read_text(encoding="utf-8")
+    assert "SSH enabled" in out
+
+
+def test_settings_create_the_user_when_the_image_has_none(tmp_path: Path) -> None:
+    root = _fake_root(tmp_path)
+    (root / "etc" / "passwd").write_text("root:x:0:0:root:/root:/bin/bash\n", encoding="utf-8")
+    (root / "etc" / "group").write_text("sudo:x:27:\nvideo:x:44:\ndocker:x:990:\n", encoding="utf-8")
+    (root / "boot" / "firmware" / ".meteorenv").write_text(
+        f"METEOR_USER=ops\nMETEOR_USER_PASSWORD_HASH={PASSWORD_HASH}\nMETEOR_SSH_PASSWORD_AUTH=true\n",
+        encoding="utf-8",
+    )
+    stub_bin, calls = _command_stubs(tmp_path, "usermod", "groupmod", "useradd")
+
+    result = _run_settings(tmp_path, root, stub_bin)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "useradd -m -s /bin/bash -G sudo,video,docker ops",
+        f"usermod -p {PASSWORD_HASH} ops",
+    ]
+    dropin = root / "etc" / "ssh" / "sshd_config.d" / "10-meteor.conf"
+    assert "PasswordAuthentication yes\n" in dropin.read_text(encoding="utf-8")
+
+
+def test_settings_refuse_a_plain_text_password_and_bad_user(tmp_path: Path) -> None:
+    root = _fake_root(tmp_path)
+    (root / "boot" / "firmware" / ".meteorenv").write_text(
+        "METEOR_USER=pi\nMETEOR_USER_PASSWORD_HASH=plain-password\n", encoding="utf-8"
+    )
+    stub_bin, calls = _command_stubs(tmp_path, "usermod", "groupmod", "useradd")
+
+    result = _run_settings(tmp_path, root, stub_bin)
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert "not a crypt hash" in out
+    assert "plain-password" not in out
+    assert not calls.exists()
+
+    (root / "boot" / "firmware" / ".meteorenv").write_text("METEOR_USER=root\n", encoding="utf-8")
+    result = _run_settings(tmp_path, root, stub_bin)
+    assert "METEOR_USER is not a valid user name" in result.stdout
+    assert not calls.exists()
+
+
+def test_settings_create_missing_ssh_host_keys_and_grow_once(tmp_path: Path) -> None:
+    root = _fake_root(tmp_path)
+    sshd = root / "usr" / "sbin" / "sshd"
+    sshd.parent.mkdir(parents=True)
+    _write_executable(sshd, "#!/bin/sh\n")
+    (root / "etc" / "meteorcli-expand-rootfs").write_text("", encoding="utf-8")
+    stub_bin, calls = _command_stubs(tmp_path, "ssh-keygen")
+
+    result = _run_settings(tmp_path, root, stub_bin)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls.read_text(encoding="utf-8") == f"ssh-keygen -A -f {root}\n"
+    assert not (root / "etc" / "meteorcli-expand-rootfs").exists()
+
+    (root / "etc" / "ssh").mkdir(parents=True, exist_ok=True)
+    (root / "etc" / "ssh" / "ssh_host_ed25519_key").write_text("key", encoding="utf-8")
+    calls.unlink()
+    result = _run_settings(tmp_path, root, stub_bin)
+    assert result.returncode == 0
+    assert not calls.exists()
+
+
+def _prepared_device(tmp_path: Path) -> Path:
+    root = _fake_root(tmp_path)
+    boot = root / "boot" / "firmware"
+    (boot / "cmdline.txt").write_text(
+        "console=tty1 root=PARTUUID=abc-02 rootwait ds=nocloud;i=meteor-123\n", encoding="utf-8"
+    )
+    (boot / "user-data").write_text("#cloud-config\nusers:\n- name: pi\n  passwd: secret-hash\n", encoding="utf-8")
+    (boot / "network-config").write_text("wifis: {password: wifi-password-123}\n", encoding="utf-8")
+    (boot / "meta-data").write_text("instance-id: meteor-123\n", encoding="utf-8")
+    for path in (
+        "usr/local/sbin/meteorcli-settings.sh",
+        "usr/local/sbin/meteorcli-firstboot.sh",
+        "etc/systemd/system/meteorcli-firstboot.service",
+    ):
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("installed", encoding="utf-8")
+    meteorcli = root / "etc" / "meteorcli"
+    (meteorcli / "wireguard").mkdir(parents=True)
+    (meteorcli / "device-token").write_text("dev_token", encoding="utf-8")
+    (meteorcli / "wireguard" / "wg0.conf").write_text("PrivateKey=x", encoding="utf-8")
+    (root / "etc" / "meteorcli-firstboot.env").write_text("METEOR_API_KEY=key_abc\n", encoding="utf-8")
+    (root / "home" / "pi" / ".config" / "meteorcli").mkdir(parents=True)
+    (root / "home" / "pi" / ".bash_history").write_text("sudo something\n", encoding="utf-8")
+    nm = root / "etc" / "NetworkManager" / "system-connections"
+    nm.mkdir(parents=True)
+    (nm / "home.nmconnection").write_text("[connection]\ntype=wifi\n[wifi-security]\npsk=x\n", encoding="utf-8")
+    (nm / "lan.nmconnection").write_text("[connection]\ntype=ethernet\n", encoding="utf-8")
+    (root / "etc" / "netplan").mkdir(parents=True)
+    (root / "etc" / "netplan" / "50-cloud-init.yaml").write_text("wifis: {}\n", encoding="utf-8")
+    (root / "etc" / "cloud").mkdir(parents=True)
+    (root / "var" / "lib" / "cloud" / "instance").mkdir(parents=True)
+    (root / "etc" / "ssh").mkdir(parents=True)
+    (root / "etc" / "ssh" / "ssh_host_ed25519_key").write_text("private", encoding="utf-8")
+    (root / "etc" / "ssh" / "sshd_config").write_text("Include /etc/ssh/sshd_config.d/*.conf\n", encoding="utf-8")
+    (root / "etc" / "machine-id").write_text("0123456789abcdef0123456789abcdef\n", encoding="utf-8")
+    (root / "var" / "log").mkdir(parents=True)
+    (root / "var" / "log" / "syslog.1").write_text("old", encoding="utf-8")
+    (root / "var" / "log" / "meteorcli-settings.log").write_text("Applying", encoding="utf-8")
+    return root
+
+
+def test_prepare_image_removes_this_devices_identity(tmp_path: Path) -> None:
+    root = _prepared_device(tmp_path)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("METEOR")}
+    env.update({"METEOR_ROOT": str(root), "METEOR_PREPARE_ALLOW_NONROOT": "1"})
+
+    result = subprocess.run(
+        ["bash", str(FIRSTBOOT / "meteorcli-prepare-image.sh"), "--yes", "--no-poweroff"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert "this device is enrolled" in out
+    boot = root / "boot" / "firmware"
+    assert (boot / ".meteor-settings").read_text(encoding="utf-8") == "meteor_settings=2\n"
+    assert (boot / "user-data").read_text(encoding="utf-8") == "#cloud-config\n"
+    assert not (boot / "network-config").exists()
+    assert (boot / "meta-data").exists()
+    assert "ds=nocloud" not in (boot / "cmdline.txt").read_text(encoding="utf-8")
+    assert "rootwait" in (boot / "cmdline.txt").read_text(encoding="utf-8")
+
+    assert list((root / "etc" / "meteorcli").iterdir()) == []
+    assert not (root / "etc" / "meteorcli-firstboot.env").exists()
+    assert not (root / "home" / "pi" / ".config" / "meteorcli").exists()
+    assert not (root / "home" / "pi" / ".bash_history").exists()
+
+    nm = root / "etc" / "NetworkManager" / "system-connections"
+    assert sorted(p.name for p in nm.iterdir()) == ["lan.nmconnection"]
+    assert not (root / "etc" / "netplan" / "50-cloud-init.yaml").exists()
+    assert (root / "etc" / "cloud" / "cloud-init.disabled").exists()
+    assert not (root / "var" / "lib" / "cloud").exists()
+
+    assert not list((root / "etc" / "ssh").glob("ssh_host_*"))
+    assert (root / "etc" / "ssh" / "sshd_config").exists()
+    assert (root / "etc" / "machine-id").read_text(encoding="utf-8") == ""
+    assert (root / "etc" / "meteorcli-expand-rootfs").exists()
+    assert not (root / "var" / "log" / "syslog.1").exists()
+    assert (root / "var" / "log" / "meteorcli-settings.log").read_text(encoding="utf-8") == ""
+
+
+def test_prepare_image_keep_wifi_and_requires_confirmation(tmp_path: Path) -> None:
+    root = _prepared_device(tmp_path)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("METEOR")}
+    env.update({"METEOR_ROOT": str(root), "METEOR_PREPARE_ALLOW_NONROOT": "1"})
+    script = str(FIRSTBOOT / "meteorcli-prepare-image.sh")
+
+    refused = subprocess.run(
+        ["bash", script], check=False, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=30
+    )
+    assert refused.returncode == 1
+    assert "pass --yes" in refused.stderr
+    assert (root / "etc" / "meteorcli" / "device-token").exists()
+
+    kept = subprocess.run(
+        ["bash", script, "--yes", "--no-poweroff", "--keep-wifi"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert kept.returncode == 0, kept.stdout + kept.stderr
+    assert (root / "etc" / "NetworkManager" / "system-connections" / "home.nmconnection").exists()
+
+
+def test_prepare_image_is_released_and_installs_first_boot_for_images() -> None:
+    subprocess.run(["bash", "-n", str(FIRSTBOOT / "meteorcli-prepare-image.sh")], check=True)
+    dist = (Path(__file__).resolve().parents[4] / "scripts" / "agent-dist.sh").read_text(encoding="utf-8")
+    assert "meteorcli-prepare-image.sh" in dist
+    prepare = (FIRSTBOOT / "meteorcli-prepare-image.sh").read_text(encoding="utf-8")
+    assert "install-meteorcli-firstboot.sh" in prepare and "--image" in prepare
+    installer = (FIRSTBOOT / "install-meteorcli-firstboot.sh").read_text(encoding="utf-8")
+    assert "--image)" in installer
+
+
 def test_settings_unit_runs_before_network_and_enrollment() -> None:
     unit = (FIRSTBOOT / "meteorcli-settings.service").read_text(encoding="utf-8")
     assert "Type=oneshot" in unit

@@ -1,8 +1,8 @@
 [Unit]
-Description=MeteorCloud settings from the boot partition (Wi-Fi, hostname, timezone, SSH key)
+Description=MeteorCloud settings from the boot partition (Wi-Fi, hostname, user, SSH)
 Documentation=https://github.com/meteor-edge/meteor-cloud
-# Early in boot, before the network and before first-boot enrollment, so the Wi-Fi
-# network and host name are in place when they start. Does nothing without .meteorenv.
+# Early in boot, before the network, SSH and first-boot enrollment, so the Wi-Fi
+# network, host name and SSH host keys are in place when they start.
 DefaultDependencies=no
 After=local-fs.target
 Before=network-pre.target NetworkManager.service wpa_supplicant.service dhcpcd.service ssh.service meteorcli-firstboot.service sysinit.target shutdown.target

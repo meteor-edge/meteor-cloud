@@ -95,6 +95,22 @@ them. On a multi-organization server every organization's published images appea
 list (organization IDs are not shown). Only `os_image` artifacts can be published; the
 database enforces it.
 
+### Your own OS image (Docker and meteorcli preinstalled)
+
+1. Write a plain OS (for example Raspberry Pi OS Lite Bookworm), boot it and install Docker,
+   packages and `meteorcli`. Do not enroll it.
+2. On the device: `sudo bash meteorcli-prepare-image.sh` (agent release asset). It installs
+   first boot and removes the device's identity, Wi-Fi, SSH host keys and machine-id, then
+   powers off. Details: [first-boot README](../../src/device-plane/agent/packaging/firstboot/README.md#build-an-os-image-golden-image).
+3. Back up the card with Meteor Imager (**Back up a card**, or
+   `meteor-imager backup --device /dev/sdX --out golden.img.gz`). The root filesystem is
+   shrunk so the image fits smaller cards.
+4. Upload the file here as an `os_image` with **Show in Meteor Imager**.
+5. Write cards with Meteor Imager: the **General** tab sets hostname, user and password, Wi-Fi
+   and SSH; the **MeteorCloud** tab sets the domain and an enrollment key. Each device grows its
+   root filesystem, gets new host keys, and sends a token request that shows up under pending
+   enrollments for approval.
+
 ## Limitations
 
 - Uploads pass through the control plane, which spools them to temporary disk

@@ -24,6 +24,7 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
 fi
 
 RUN_NOW=0
+IMAGE=0
 usage() {
   cat <<EOF
 Install first-boot enrollment (request-token, then background poll until approved).
@@ -37,6 +38,8 @@ Usage:
 
 Options:
   --now        Start meteorcli-firstboot.service immediately
+  --image      Install and enable only; no enrollment settings on this device
+               (used by meteorcli-prepare-image.sh: each card brings its own)
   -h, --help   Show this help
 EOF
 }
@@ -45,6 +48,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --now)
       RUN_NOW=1
+      shift
+      ;;
+    --image)
+      IMAGE=1
       shift
       ;;
     -h|--help)
@@ -189,6 +196,13 @@ for cfg_dir in /boot/firmware /boot /boot/efi; do
 done
 
 ENV_FILE=/etc/meteorcli-firstboot.env
+if [[ "${IMAGE}" -eq 1 ]]; then
+  systemctl daemon-reload
+  systemctl enable meteorcli-firstboot.service meteorcli-settings.service
+  echo "  enabled for image use; each card's .meteorenv provides enrollment"
+  exit 0
+fi
+
 echo
 echo "[2/4] Enrollment settings"
 if [[ ! -f "${ENV_FILE}" ]]; then

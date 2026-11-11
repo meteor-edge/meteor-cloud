@@ -103,8 +103,12 @@ METEOR_WIFI_SSID=My Network                       # optional, with PSK and COUNT
 METEOR_WIFI_PSK=wifi-password
 METEOR_WIFI_COUNTRY=DE
 METEOR_WIFI_HIDDEN=false
+METEOR_USER=ops                                   # optional: login user
+METEOR_USER_PASSWORD_HASH=$6$salt$hash            # optional: crypt hash, never plain text
+METEOR_SSH_ENABLED=true                           # optional: true / false
+METEOR_SSH_PASSWORD_AUTH=false                    # optional: false = keys only
 METEOR_SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... me@laptop   # optional
-METEOR_SSH_USER=pi                                # optional: default is the first login user
+METEOR_SSH_USER=pi                                # optional: default METEOR_USER, else the first login user
 ```
 
 `KEY=value` per line, value to the end of the line (no quoting), parsed and never sourced.
@@ -114,8 +118,37 @@ password length, SSH key format) are skipped with a warning; enrollment still ru
 - **Wi-Fi:** a NetworkManager connection `meteor-wifi` (mode 0600), or `wpa_supplicant.conf`
   with the derived key on images without NetworkManager. The country is set through
   `raspi-config` when present (it also unblocks Wi-Fi), otherwise `cfg80211`.
-- **SSH key:** appended to the user's `~/.ssh/authorized_keys`, and `ssh` is enabled.
+- **User:** like Raspberry Pi Imager. The image's first user (uid 1000) is renamed to
+  `METEOR_USER` (home and group too), or the user is created with sudo. The password is set
+  from `METEOR_USER_PASSWORD_HASH` (`$6$`, `$5$` or `$y$` crypt only; plain text is refused).
+- **SSH:** `METEOR_SSH_PASSWORD_AUTH` writes `/etc/ssh/sshd_config.d/10-meteor.conf`.
+  `METEOR_SSH_ENABLED` turns `ssh` on or off. The SSH key is appended to the user's
+  `~/.ssh/authorized_keys` and turns `ssh` on unless `METEOR_SSH_ENABLED=false`.
 - v1 files (`METEOR_DOMAIN` and `METEOR_API_KEY` only) still work.
+
+## Build an OS image (golden image)
+
+To publish an image with Docker, packages and meteorcli already installed:
+
+1. Write a plain OS (for example Raspberry Pi OS Lite Bookworm), boot it and install what every
+   device needs (Docker, packages, `meteorcli`). Do not enroll it, or prepare will remove the
+   enrollment.
+2. Prepare the card on the device. It powers off when done:
+   ```sh
+   curl -fsSLO https://github.com/meteor-edge/meteor-cloud/releases/latest/download/meteorcli-prepare-image.sh
+   sudo bash meteorcli-prepare-image.sh          # asks you to type "prepare"; --yes for scripts
+   ```
+   It installs first boot and `.meteor-settings` (`install-meteorcli-firstboot.sh --image`), and
+   removes this device's identity: `/etc/meteorcli` contents, `/etc/meteorcli-firstboot.env`,
+   Wi-Fi profiles (`--keep-wifi` keeps them), cloud-init state (cloud-init is disabled),
+   settings files on the boot partition, SSH host keys, `/etc/machine-id`, shell history and
+   logs. `--zero-free-space` makes the backup compress better; `--no-poweroff` stays on.
+3. Back up the card with Meteor Imager (**Back up a card**, or
+   `meteor-imager backup --device /dev/sdX --out golden.img.gz`), upload it as an `os_image`
+   artifact and publish it ([artifacts](../../../../../docs/fleet/artifacts.md#meteor-imager-public-os-images)).
+
+On each new card's first boot, `meteorcli-settings` grows the root partition to the card (once),
+creates new SSH host keys, applies `.meteorenv` and first boot sends one token request.
 
 ## Request limits and retries
 
