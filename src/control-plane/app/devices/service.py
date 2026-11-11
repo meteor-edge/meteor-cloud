@@ -29,6 +29,12 @@ from app.devices.models import (
     EnrollmentApiKey,
     RegistrationToken,
 )
+from app.devices.device_config import (
+    DEVICE_CONFIG_FILE_NAME,
+    DeviceConfigRequest,
+    DeviceConfigResponse,
+    render_device_config,
+)
 from app.devices.naming import (
     default_device_name,
     device_type_slug_for,
@@ -684,6 +690,15 @@ class FleetService:
             self.session.commit()
             self.session.refresh(key)
         return EnrollmentApiKeyResponse.model_validate(key)
+
+    # ----------------------------------------------------- device config file
+    def create_device_config(
+        self, *, actor: User, organization_id: uuid.UUID, payload: DeviceConfigRequest
+    ) -> DeviceConfigResponse:
+        """Render the first-boot settings file. It holds secrets, so nothing is stored or logged."""
+        membership = self._require_membership(organization_id, actor.id)
+        self._require(membership, "device.create")
+        return DeviceConfigResponse(file_name=DEVICE_CONFIG_FILE_NAME, content=render_device_config(payload))
 
     # --------------------------------------------------- enrollment requests
     def list_enrollment_requests(

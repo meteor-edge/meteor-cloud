@@ -6,6 +6,8 @@ import os
 import shutil
 import stat
 import subprocess
+
+import pytest
 from pathlib import Path
 
 FIRSTBOOT = Path(__file__).resolve().parents[1] / "packaging" / "firstboot"
@@ -1219,3 +1221,52 @@ def test_retry_delay_doubles_up_to_the_cap() -> None:
     bases = [10, 20, 40, 80, 160, 300, 300, 300]
     for delay, base in zip(delays, bases, strict=True):
         assert base <= delay <= base + base // 4
+
+
+# What the MeteorCloud console downloads (control plane: app/devices/device_config.py) and
+# Meteor Imager writes (MeteorEnvV2). The control-plane test renders exactly this text.
+CONSOLE_SETTINGS_FILE = (
+    "METEOR_ENV_VERSION=2\n"
+    "METEOR_DOMAIN=fleet.example.com:8443\n"
+    "METEOR_API_KEY=key_secret-value\n"
+    "METEOR_NAME=Lobby kiosk\n"
+    "METEOR_HOSTNAME=pi-lab-01\n"
+    "METEOR_TIMEZONE=Europe/Berlin\n"
+    'METEOR_WIFI_SSID=My Net; \\ "x"\n'
+    "METEOR_WIFI_PSK=wifi-password-123\n"
+    "METEOR_WIFI_COUNTRY=DE\n"
+    "METEOR_WIFI_HIDDEN=false\n"
+    "METEOR_USER=pi\n"
+    "METEOR_USER_PASSWORD_HASH=$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1\n"
+    "METEOR_SSH_ENABLED=true\n"
+    "METEOR_SSH_PASSWORD_AUTH=false\n"
+    f"METEOR_SSH_AUTHORIZED_KEY={SSH_KEY}\n"
+)
+
+
+@pytest.mark.parametrize("file_name", ["meteorenv.txt", ".meteorenv", "meteorenv"])
+def test_settings_file_from_the_console_applies_like_the_imagers(tmp_path: Path, file_name: str) -> None:
+    root = _fake_root(tmp_path)
+    card = root / "boot" / "firmware" / file_name
+    # A Windows editor's byte order mark and line endings must not matter.
+    card.write_bytes(b"\xef\xbb\xbf" + CONSOLE_SETTINGS_FILE.replace("\n", "\r\n").encode())
+
+    stub_bin, calls = _command_stubs(tmp_path, "usermod", "groupmod", "useradd")
+    result = _run_settings(tmp_path, root, stub_bin)
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert calls.read_text(encoding="utf-8").splitlines()[-1].startswith("usermod -p $6$saltstring$svn8UoSV")
+    assert "ignoring unknown key" not in out
+    assert "warning" not in out, out
+    assert not card.exists(), "the settings file (key, Wi-Fi password) must leave the card"
+    saved = (root / "etc" / "meteorcli-firstboot.env").read_text(encoding="utf-8")
+    assert "METEOR_DOMAIN=fleet.example.com:8443\n" in saved
+    assert "METEOR_API_KEY=key_secret-value\n" in saved
+    assert "METEOR_NAME=Lobby kiosk\n" in saved
+    assert (root / "etc" / "hostname").read_text(encoding="utf-8") == "pi-lab-01\n"
+    wifi = (root / "etc" / "NetworkManager" / "system-connections" / "meteor-wifi.nmconnection").read_text(
+        encoding="utf-8"
+    )
+    assert "psk=wifi-password-123" in wifi
+    assert "wifi-password-123" not in out and "key_secret-value" not in out

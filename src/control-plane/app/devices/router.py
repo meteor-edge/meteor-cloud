@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from app.deployments.software_dependencies import DeviceSoftwareSvc
 from app.deployments.software_schemas import DeviceSoftwareResponse
 from app.devices.dependencies import FleetSvc
+from app.devices.device_config import DeviceConfigRequest, DeviceConfigResponse
 from app.devices.schemas import (
     DeviceCredentialResponse,
     DeviceEnrollmentRequestResponse,
@@ -226,6 +227,18 @@ def revoke_enrollment_key(
     service: FleetSvc,
 ) -> EnrollmentApiKeyResponse:
     return service.revoke_enrollment_key(actor=current_user, organization_id=organization_id, key_id=key_id)
+
+
+# ---------------------------------------------------------- device config file
+@router.post("/device-config", response_model=DeviceConfigResponse)
+def create_device_config(
+    organization_id: uuid.UUID,
+    payload: DeviceConfigRequest,
+    current_user: CurrentUser,
+    service: FleetSvc,
+) -> DeviceConfigResponse:
+    """The first-boot settings file for a card, as Meteor Imager writes it. Nothing is stored."""
+    return service.create_device_config(actor=current_user, organization_id=organization_id, payload=payload)
 
 
 # ------------------------------------------------------- enrollment requests
