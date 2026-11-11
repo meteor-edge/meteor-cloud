@@ -39,6 +39,15 @@ def test_only_published_os_images_are_listed_and_downloadable_without_login(
     [image] = client.get(PUBLIC).json()
     assert image["id"] == artifact["id"]
     assert image["device_type"] == "Raspberry Pi 4"
+    assert image["device_types"] == [
+        {
+            "name": "Raspberry Pi 4",
+            "slug": device_type["slug"],
+            "manufacturer": "Raspberry Pi Ltd",
+            "model": None,
+            "architecture": "arm64",
+        }
+    ]
     assert image["description"] == "Lite"
     assert image["size_bytes"] == len(IMAGE)
     assert image["checksum_sha256"] == hashlib.sha256(IMAGE).hexdigest()

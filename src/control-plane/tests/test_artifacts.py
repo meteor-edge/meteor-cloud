@@ -110,14 +110,22 @@ def test_duplicate_version_rejected_but_other_device_type_allowed(client: TestCl
     assert case_dup.json()["error"]["code"] == "artifact_exists"
 
 
-def test_concurrent_duplicate_upload_hits_unique_constraint(
+def test_concurrent_duplicate_upload_is_refused_when_the_row_is_written(
     client: TestClient, db_session: Session, object_storage: InMemoryObjectStorage, monkeypatch
 ) -> None:
     org, headers = _owner_setup(client, db_session)
     assert _upload(client, org.id, headers).status_code == 201
 
-    # Simulate a second upload that passed the pre-check before the first one committed.
-    monkeypatch.setattr(ArtifactRepository, "find_duplicate", lambda *args, **kwargs: None)
+    # Simulate a second upload that passed the pre-check before the first one committed:
+    # only the check made under the lock, after the file is stored, sees the first row.
+    real = ArtifactRepository.find_duplicate
+    calls = {"count": 0}
+
+    def pre_check_misses(self, **kwargs):
+        calls["count"] += 1
+        return None if calls["count"] % 2 == 1 else real(self, **kwargs)
+
+    monkeypatch.setattr(ArtifactRepository, "find_duplicate", pre_check_misses)
     duplicate = _upload(client, org.id, headers)
 
     assert duplicate.status_code == 409
@@ -125,11 +133,61 @@ def test_concurrent_duplicate_upload_hits_unique_constraint(
     assert len(object_storage.objects) == 1
     assert client.get(f"/api/v1/organizations/{org.id}/artifacts", headers=headers).json()["total"] == 1
 
-    # The unique index is on lower(name)/lower(version), not the raw columns.
+    # Names and versions are compared without case.
     assert _upload(client, org.id, headers, name="Race OS", version="9.0").status_code == 201
     case_race = _upload(client, org.id, headers, name="race os", version="9.0")
     assert case_race.status_code == 409
     assert case_race.json()["error"]["code"] == "artifact_exists"
+
+
+def test_one_artifact_for_several_device_types(
+    client: TestClient, db_session: Session, object_storage: InMemoryObjectStorage
+) -> None:
+    org, headers = _owner_setup(client, db_session)
+    base = f"/api/v1/organizations/{org.id}"
+    pi3, pi4, pi5 = (_device_type(client, org.id, headers, name=f"Raspberry Pi {n}")["id"] for n in (3, 4, 5))
+
+    # Repeated fields, as the console sends them; a comma-separated value works too.
+    uploaded = client.post(
+        f"{base}/artifacts",
+        headers=headers,
+        data={"name": "MeteorCloud OS", "version": "1.1", "type": "os_image", "device_type_ids": [pi3, pi4]},
+        files={"file": ("os.img", IMAGE, "application/octet-stream")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    artifact = uploaded.json()
+    assert sorted(artifact["device_type_ids"]) == sorted([pi3, pi4])
+    assert artifact["device_type_id"] is None
+
+    # It is listed under each of its device types, and counted for each.
+    for type_id, total in ((pi3, 1), (pi4, 1), (pi5, 0)):
+        listed = client.get(f"{base}/artifacts", headers=headers, params={"device_type_id": type_id}).json()
+        assert listed["total"] == total
+        assert client.get(f"{base}/device-types/{type_id}", headers=headers).json()["artifact_count"] == total
+
+    # Same name and version: refused when a device type is shared, fine otherwise.
+    assert _upload(client, org.id, headers, device_type_ids=f"{pi4},{pi5}").status_code == 409
+    other = _upload(client, org.id, headers, device_type_ids=pi5)
+    assert other.status_code == 201, other.text
+    assert _upload(client, org.id, headers).status_code == 201
+
+    # The list can be changed later, with the same rule.
+    clash = client.patch(f"{base}/artifacts/{other.json()['id']}", headers=headers, json={"device_type_ids": [pi4, pi5]})
+    assert clash.status_code == 409, clash.text
+    widened = client.patch(
+        f"{base}/artifacts/{artifact['id']}", headers=headers, json={"device_type_ids": [pi3, pi4, pi3]}
+    )
+    assert widened.status_code == 200, widened.text
+    cleared = client.patch(f"{base}/artifacts/{other.json()['id']}", headers=headers, json={"device_type_ids": []})
+    assert cleared.status_code == 409, cleared.text  # the artifact without device types already has this name
+    narrowed = client.patch(f"{base}/artifacts/{artifact['id']}", headers=headers, json={"device_type_ids": [pi3]})
+    assert narrowed.json()["device_type_ids"] == [pi3]
+    assert narrowed.json()["device_type_id"] == pi3
+
+    # A device type that artifacts are for cannot be deleted; deleting the artifact frees it.
+    assert client.delete(f"{base}/device-types/{pi3}", headers=headers).status_code == 409
+    assert client.delete(f"{base}/artifacts/{artifact['id']}", headers=headers).status_code == 204
+    assert client.delete(f"{base}/device-types/{pi3}", headers=headers).status_code == 204
 
 
 def test_upload_validation(client: TestClient, db_session: Session, object_storage: InMemoryObjectStorage) -> None:

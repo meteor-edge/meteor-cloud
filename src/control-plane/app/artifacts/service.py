@@ -12,7 +12,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from jose import JWTError, jwt
 from sqlalchemy import func, select
@@ -27,11 +27,13 @@ from app.artifacts.schemas import (
     ArtifactResponse,
     ArtifactUpdate,
     PublicOsImage,
+    PublicOsImageDeviceType,
 )
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError, ConflictError, NotFoundError, UnauthorizedError
+from app.devices.models import DeviceType
 from app.devices.repository import DeviceTypeRepository
 from app.devices.schemas import Page
 from app.identity.models import User
@@ -221,21 +223,9 @@ class ArtifactService:
         max_bytes = self.settings.artifact_max_upload_bytes
         if declared_size is not None and declared_size > max_bytes:
             raise ArtifactTooLargeError(max_bytes)
-        if payload.device_type_id is not None and (
-            self.device_types.get(organization_id=organization_id, type_id=payload.device_type_id) is None
-        ):
-            raise NotFoundError("device_type_not_found", "Device type was not found.")
-        if self.artifacts.find_duplicate(
-            organization_id=organization_id,
-            device_type_id=payload.device_type_id,
-            type=payload.type,
-            name=payload.name,
-            version=payload.version,
-        ):
-            raise ConflictError(
-                "artifact_exists",
-                "An artifact with this name, type, and version already exists.",
-            )
+        device_types = self._require_device_types(organization_id, payload.device_type_ids)
+        # Checked before the (possibly long) upload, and again under a lock when the row is written.
+        self._refuse_duplicate(organization_id, payload.device_type_ids, payload.type, payload.name, payload.version)
 
         artifact_id = uuid.uuid4()
         stored_name = safe_file_name(file_name)
@@ -264,7 +254,7 @@ class ArtifactService:
         artifact = Artifact(
             id=artifact_id,
             organization_id=organization_id,
-            device_type_id=payload.device_type_id,
+            device_types=device_types,
             name=payload.name,
             version=payload.version,
             type=payload.type,
@@ -279,6 +269,10 @@ class ArtifactService:
             published=payload.published,
         )
         try:
+            self.artifacts.lock_names(organization_id=organization_id)
+            self._refuse_duplicate(
+                organization_id, payload.device_type_ids, payload.type, payload.name, payload.version
+            )
             self.artifacts.create(artifact)
             self.audit.record(
                 actor=actor,
@@ -291,6 +285,7 @@ class ArtifactService:
                     "version": artifact.version,
                     "type": artifact.type.value,
                     "published": artifact.published,
+                    "device_type_ids": [str(value) for value in artifact.device_type_ids],
                 },
             )
             self.session.commit()
@@ -312,10 +307,11 @@ class ArtifactService:
     def update_artifact(
         self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID, payload: ArtifactUpdate
     ) -> ArtifactResponse:
-        """Show or hide an OS image in Meteor Imager (the public OS image list)."""
+        """Change the device types, or show or hide an OS image in Meteor Imager (the public OS image list)."""
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.update")
-        self.authz.require(membership, "artifact.publish")
+        if payload.published is not None:
+            self.authz.require(membership, "artifact.publish")
         artifact = self._require_artifact(organization_id, artifact_id)
         if payload.published and artifact.type != ArtifactType.OS_IMAGE:
             raise AppError(
@@ -323,19 +319,69 @@ class ArtifactService:
                 "Only OS images can be shown in Meteor Imager.",
                 status_code=422,
             )
-        if artifact.published != payload.published:
+        changes: dict[str, Any] = {}
+        if payload.device_type_ids is not None and set(payload.device_type_ids) != set(artifact.device_type_ids):
+            device_types = self._require_device_types(organization_id, payload.device_type_ids)
+            self.artifacts.lock_names(organization_id=organization_id)
+            self._refuse_duplicate(
+                organization_id,
+                payload.device_type_ids,
+                artifact.type,
+                artifact.name,
+                artifact.version,
+                exclude_id=artifact.id,
+            )
+            artifact.device_types = device_types
+            changes["device_type_ids"] = [str(value) for value in payload.device_type_ids]
+        if payload.published is not None and artifact.published != payload.published:
             artifact.published = payload.published
+            changes["published"] = payload.published
+        if changes:
             self.audit.record(
                 actor=actor,
                 organization_id=organization_id,
                 action="artifact.update",
                 resource_type="artifact",
                 resource_id=artifact.id,
-                metadata={"name": artifact.name, "version": artifact.version, "published": payload.published},
+                metadata={"name": artifact.name, "version": artifact.version, **changes},
             )
             self.session.commit()
             self.session.refresh(artifact)
         return self._to_response(artifact, self._release_counts([artifact.id]).get(artifact.id, 0))
+
+    def _require_device_types(self, organization_id: uuid.UUID, type_ids: list[uuid.UUID]) -> list[DeviceType]:
+        """The organization's device types with these IDs, or NotFoundError if one is missing or foreign."""
+        if not type_ids:
+            return []
+        by_id = {item.id: item for item in self.device_types.list(organization_id=organization_id)}
+        if any(type_id not in by_id for type_id in type_ids):
+            raise NotFoundError("device_type_not_found", "Device type was not found.")
+        return [by_id[type_id] for type_id in type_ids]
+
+    def _refuse_duplicate(
+        self,
+        organization_id: uuid.UUID,
+        device_type_ids: list[uuid.UUID],
+        type: ArtifactType,
+        name: str,
+        version: str,
+        *,
+        exclude_id: uuid.UUID | None = None,
+    ) -> None:
+        if self.artifacts.find_duplicate(
+            organization_id=organization_id,
+            device_type_ids=device_type_ids,
+            type=type,
+            name=name,
+            version=version,
+            exclude_id=exclude_id,
+        ):
+            raise ConflictError(
+                "artifact_exists",
+                "An artifact with this name, type, and version already exists for one of these device types."
+                if device_type_ids
+                else "An artifact with this name, type, and version already exists.",
+            )
 
     # ---------------------------------------------------- public (Meteor Imager)
     def list_public_os_images(self) -> list[PublicOsImage]:
@@ -346,7 +392,8 @@ class ArtifactService:
                 name=artifact.name,
                 version=artifact.version,
                 description=artifact.description,
-                device_type=device_type,
+                device_type=", ".join(item.name for item in artifact.device_types) or None,
+                device_types=[PublicOsImageDeviceType.model_validate(item) for item in artifact.device_types],
                 file_name=artifact.file_name,
                 content_type=artifact.content_type,
                 size_bytes=artifact.size_bytes,
@@ -354,7 +401,7 @@ class ArtifactService:
                 created_at=artifact.created_at,
                 download_url=f"/api/v1/os-images/{artifact.id}/download",
             )
-            for artifact, device_type in self.artifacts.list_published_os_images()
+            for artifact in self.artifacts.list_published_os_images()
         ]
 
     def open_public_os_image(self, artifact_id: uuid.UUID) -> tuple[Artifact, StoredObject]:

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.artifacts.models import ArtifactType
 
 # Versions are free-form (semver, dates, build ids) but must be URL/file safe.
+_MAX_DEVICE_TYPES = 50
 _VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 
 
@@ -21,7 +22,8 @@ class ArtifactCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     version: str = Field(min_length=1, max_length=64)
     type: ArtifactType = ArtifactType.OS_IMAGE
-    device_type_id: uuid.UUID | None = None
+    # Device types the artifact is for; none means not hardware-specific.
+    device_type_ids: list[uuid.UUID] = Field(default_factory=list, max_length=_MAX_DEVICE_TYPES)
     description: str | None = Field(default=None, max_length=2000)
     metadata: dict[str, Any] = Field(default_factory=dict)
     published: bool = False
@@ -31,6 +33,11 @@ class ArtifactCreate(BaseModel):
         if self.published and self.type != ArtifactType.OS_IMAGE:
             raise ValueError("Only OS images can be shown in Meteor Imager")
         return self
+
+    @field_validator("device_type_ids")
+    @classmethod
+    def _distinct_device_types(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        return list(dict.fromkeys(value))
 
     @field_validator("name")
     @classmethod
@@ -68,7 +75,9 @@ class ArtifactResponse(BaseModel):
 
     id: uuid.UUID
     organization_id: uuid.UUID
-    device_type_id: uuid.UUID | None
+    device_type_ids: list[uuid.UUID] = Field(default_factory=list)
+    # The only device type, or null with none or several. Kept for older clients: use device_type_ids.
+    device_type_id: uuid.UUID | None = None
     name: str
     version: str
     type: ArtifactType
@@ -87,9 +96,25 @@ class ArtifactResponse(BaseModel):
 
 
 class ArtifactUpdate(BaseModel):
-    """Fields an owner or admin can change after upload."""
+    """Fields that can change after upload; omitted fields stay as they are."""
 
-    published: bool
+    published: bool | None = None
+    device_type_ids: list[uuid.UUID] | None = Field(default=None, max_length=_MAX_DEVICE_TYPES)
+
+    @field_validator("device_type_ids")
+    @classmethod
+    def _distinct_device_types(cls, value: list[uuid.UUID] | None) -> list[uuid.UUID] | None:
+        return None if value is None else list(dict.fromkeys(value))
+
+
+class PublicOsImageDeviceType(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    slug: str
+    manufacturer: str | None
+    model: str | None
+    architecture: str | None
 
 
 class PublicOsImage(BaseModel):
@@ -99,7 +124,9 @@ class PublicOsImage(BaseModel):
     name: str
     version: str
     description: str | None
+    # Names of the device types, joined with ", " (null when not hardware-specific).
     device_type: str | None
+    device_types: list[PublicOsImageDeviceType] = Field(default_factory=list)
     file_name: str
     content_type: str | None
     size_bytes: int
