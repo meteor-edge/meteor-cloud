@@ -107,7 +107,7 @@ describe("uploadArtifact", () => {
       {
         ...payload,
         description: "Stable release",
-        device_type_id: "type-1",
+        device_type_ids: ["type-1", "type-2"],
       },
       { onProgress: progress },
     );
@@ -125,7 +125,7 @@ describe("uploadArtifact", () => {
     expect(form.get("version")).toBe("1.0");
     expect(form.get("type")).toBe("os_image");
     expect(form.get("description")).toBe("Stable release");
-    expect(form.get("device_type_id")).toBe("type-1");
+    expect(form.getAll("device_type_ids")).toEqual(["type-1", "type-2"]);
     expect(form.get("file")).toBeInstanceOf(File);
     expect((form.get("file") as File).name).toBe("disk.img");
     expect((form.get("file") as File).size).toBe(payload.file.size);
@@ -147,13 +147,13 @@ describe("uploadArtifact", () => {
       {
         ...payload,
         description: "",
-        device_type_id: null,
+        device_type_ids: [],
       },
       { onProgress: progress },
     );
     const form = xhr.send.mock.calls[0][0];
     expect(form.has("description")).toBe(false);
-    expect(form.has("device_type_id")).toBe(false);
+    expect(form.has("device_type_ids")).toBe(false);
     xhr.upload.onprogress?.(new ProgressEvent("progress", { loaded: 50 }));
     expect(progress).not.toHaveBeenCalled();
     xhr.onload?.();

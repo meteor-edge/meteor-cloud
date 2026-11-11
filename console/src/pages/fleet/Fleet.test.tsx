@@ -227,7 +227,7 @@ describe("Device types", () => {
           file,
           version: "2.0.0",
           type: "os_image",
-          device_type_id: "type-1",
+          device_type_ids: ["type-1"],
         }),
         expect.anything(),
       );
@@ -853,6 +853,38 @@ describe("API keys", () => {
       updated_at: new Date().toISOString(),
     };
   }
+
+  it("keeps a generated name in step with the device type picked at approval", async () => {
+    const user = userEvent.setup();
+    const request = { ...pendingWithSuggestion("req-1", "raspberrypi-dda1b2"), name_suffix: "dda1b2" };
+    vi.mocked(fleetApi.listEnrollmentRequests).mockResolvedValue([request]);
+    vi.mocked(fleetApi.listDeviceTypes).mockResolvedValue([deviceType]);
+    vi.mocked(fleetApi.approveEnrollmentRequest).mockResolvedValue(request);
+
+    renderApp(["/organizations/org-1/api-keys"]);
+    await user.click(await screen.findByRole("button", { name: /^approve$/i }));
+    const dialog = screen.getByRole("dialog", { name: /approve device/i });
+    const name = within(dialog).getByLabelText(/^name$/i);
+    await user.selectOptions(within(dialog).getByLabelText(/device type/i), "type-1");
+    expect(name).toHaveValue("gateway-dda1b2");
+    await user.selectOptions(within(dialog).getByLabelText(/device type/i), "");
+    expect(name).toHaveValue("raspberrypi-dda1b2");
+
+    // A typed name stays when the type changes.
+    await user.clear(name);
+    await user.type(name, "Lobby");
+    await user.selectOptions(within(dialog).getByLabelText(/device type/i), "type-1");
+    expect(name).toHaveValue("Lobby");
+    await user.click(screen.getByRole("button", { name: /confirm approval/i }));
+    await waitFor(() => {
+      expect(fleetApi.approveEnrollmentRequest).toHaveBeenCalledWith(
+        "token-123",
+        "org-1",
+        "req-1",
+        expect.objectContaining({ name: "Lobby", device_type_id: "type-1" }),
+      );
+    });
+  });
 
   it("pre-fills the suggested name so approving takes one click", async () => {
     const user = userEvent.setup();

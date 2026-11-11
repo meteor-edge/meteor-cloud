@@ -5,11 +5,13 @@ import { useParams, useSearchParams } from "react-router-dom";
 import {
   listArtifacts,
   listDeviceTypes,
+  type Artifact,
   type ArtifactListParams,
   type ArtifactType,
 } from "@/api/fleet";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
+import { ArtifactDeviceTypesDialog } from "@/components/artifacts/ArtifactDeviceTypesDialog";
 import { ArtifactTable } from "@/components/artifacts/ArtifactTable";
 import { ArtifactUploadDialog } from "@/components/artifacts/ArtifactUploadDialog";
 import { ARTIFACT_TYPE_SECTION_LABELS, ARTIFACT_TYPES } from "@/components/artifacts/artifactTypes";
@@ -44,6 +46,7 @@ export function ArtifactsPage() {
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
   const [page, setPage] = useState(1);
   const [showUpload, setShowUpload] = useState(false);
+  const [editTypesOf, setEditTypesOf] = useState<Artifact | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const orgQuery = useQuery({
@@ -154,6 +157,7 @@ export function ArtifactsPage() {
         canPublish={canPublish}
         showType={!type}
         deviceTypeNames={deviceTypeNames}
+        onEditDeviceTypes={setEditTypesOf}
         organizationId={organizationId}
         emptyMessage={artifactsQuery.isLoading ? "Loading artifacts…" : "No artifacts found."}
       />
@@ -193,6 +197,20 @@ export function ArtifactsPage() {
           onClose={() => setShowUpload(false)}
           onUploaded={async () => {
             setShowUpload(false);
+            await refresh();
+          }}
+        />
+      )}
+
+      {editTypesOf && token && (
+        <ArtifactDeviceTypesDialog
+          token={token}
+          organizationId={organizationId}
+          artifact={editTypesOf}
+          deviceTypes={typesQuery.data ?? []}
+          onClose={() => setEditTypesOf(null)}
+          onSaved={async () => {
+            setEditTypesOf(null);
             await refresh();
           }}
         />

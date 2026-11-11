@@ -14,6 +14,7 @@ import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { typedDefaultName } from "@/lib/deviceNames";
 import { useDebounced } from "@/lib/useDebounced";
 import { formatDateTime } from "@/lib/utils";
 
@@ -35,12 +36,6 @@ function enrollmentKeyLabel(entry: DeviceEnrollmentRequest): string {
 
 function sameName(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
-}
-
-/** Same rule as the server: a device type's slug without separators, then the hardware suffix. */
-export function typedDefaultName(typeSlug: string, suffix: string): string {
-  const kind = typeSlug.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 40);
-  return kind ? `${kind}-${suffix}` : "";
 }
 
 const NAME_CHECK_DELAY_MS = 400;
