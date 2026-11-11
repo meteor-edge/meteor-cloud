@@ -1452,3 +1452,129 @@ def test_expired_old_request_is_not_resubmitted_over_a_replacement(tmp_path, run
     assert client.enroll_request_calls == []
     assert client.enroll_poll_calls[1]["request_id"] == "req-9"
     assert loops
+
+
+@pytest.mark.parametrize(
+    ("error", "expected", "retry_line"),
+    [
+        (AgentApiError(401, "invalid_api_key", "The enrollment API key has expired."), 3, None),
+        (AgentApiError(403, "forbidden", "Forbidden"), 3, None),
+        (AgentApiError(429, "rate_limited", "Too many", retry_after=42), 75, "retry-after: 42"),
+        (AgentApiError(0, "network_error", "Name or service not known"), 75, None),
+        (AgentApiError(503, "unavailable", "Down"), 75, None),
+        (AgentApiError(422, "validation_error", "bad"), 1, None),
+    ],
+)
+def test_request_token_exit_code_says_whether_to_retry(
+    tmp_path, monkeypatch, capsys, error, expected, retry_line
+) -> None:
+    client = FakeClient()
+    client.enroll_request_error = error
+    monkeypatch.setattr(meteorcli, "EdgeClient", lambda server_url, **_: client)
+
+    code = meteorcli.main(
+        [
+            "--config-dir",
+            str(tmp_path / "meteorcli"),
+            "request-token",
+            "--server",
+            "http://localhost:8000",
+            "--api-key",
+            "key_abc",
+            "--wait",
+            "0",
+        ]
+    )
+
+    assert code == expected
+    err = capsys.readouterr().err
+    if retry_line:
+        assert retry_line in err
+    else:
+        assert "retry-after:" not in err
+    assert not (tmp_path / "meteorcli" / "claim-secret").exists()
+
+
+# --- meteorcli.service never exits -------------------------------------------------------
+
+
+def test_service_stays_up_when_the_credential_is_refused_and_uses_a_new_one(tmp_path, run_env, monkeypatch, caplog):
+    client, sleeps, _ = run_env
+    _as_service(monkeypatch)
+    config_dir = tmp_path / "meteorcli"
+    _write_enrolled(config_dir)
+    tokens: list[str] = []
+
+    def loop(_client, token, **_kwargs):
+        tokens.append(token)
+        if len(tokens) < 3:
+            raise AgentApiError(401, "invalid_device_token", "The device token is invalid.")
+
+    def enroll_again(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 2:  # an administrator enrolled the device again meanwhile
+            (config_dir / "device-token").write_text("dev_new-value", encoding="utf-8")
+
+    monkeypatch.setattr(meteorcli, "run_loop", loop)
+    monkeypatch.setattr(meteorcli.time, "sleep", enroll_again)
+
+    with caplog.at_level("INFO", logger="meteorcli"):
+        assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+
+    assert tokens == ["dev_secret-value", "dev_secret-value", "dev_new-value"]
+    assert sleeps == [meteorcli.SERVICE_RETRY_MIN_SECONDS, meteorcli.SERVICE_RETRY_MIN_SECONDS * 2]
+    assert "request-token --new" in caplog.text
+
+
+def test_service_stays_up_after_an_unexpected_error(tmp_path, run_env, monkeypatch, caplog) -> None:
+    _client, sleeps, _ = run_env
+    _as_service(monkeypatch)
+    config_dir = tmp_path / "meteorcli"
+    _write_enrolled(config_dir)
+    attempts: list[int] = []
+
+    def loop(*_args, **_kwargs):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(meteorcli, "run_loop", loop)
+    with caplog.at_level("INFO", logger="meteorcli"):
+        assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+    assert len(attempts) == 2
+    assert sleeps == [meteorcli.SERVICE_RETRY_MIN_SECONDS]
+    assert "Unexpected error" in caplog.text and "boom" in caplog.text
+
+
+def test_service_waits_instead_of_crashing_on_a_damaged_config(tmp_path, run_env, monkeypatch, caplog) -> None:
+    _client, _sleeps, loops = run_env
+    _as_service(monkeypatch)
+    config_dir = tmp_path / "meteorcli"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text('{"server_url": "http://loc', encoding="utf-8")  # cut off
+    (config_dir / "device-token").write_text("dev_secret-value", encoding="utf-8")
+    sleeps = _scripted_sleep(monkeypatch, [lambda: None, lambda: _write_enrolled(config_dir)])
+
+    with caplog.at_level("INFO"):
+        assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+
+    assert sleeps == [meteorcli.SERVICE_IDLE_CHECK_SECONDS] * 2
+    assert "is damaged and was ignored" in caplog.text
+    assert loops and loops[0]["token"] == "dev_secret-value"
+
+
+def test_foreground_run_still_reports_a_refused_credential(tmp_path, run_env, monkeypatch) -> None:
+    config_dir = tmp_path / "meteorcli"
+    _write_enrolled(config_dir)
+
+    def loop(*_args, **_kwargs):
+        raise AgentApiError(401, "invalid_device_token", "The device token is invalid.")
+
+    monkeypatch.setattr(meteorcli, "run_loop", loop)
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 1
+
+
+def test_unit_always_restarts_the_agent() -> None:
+    unit = (Path(__file__).resolve().parents[1] / "packaging" / "meteorcli.service").read_text(encoding="utf-8")
+    assert "Restart=always" in unit
+    assert "StartLimitIntervalSec=0" in unit

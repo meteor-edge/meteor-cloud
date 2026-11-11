@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 # Ensure metadata includes domain models.
 from app.artifacts import models as _artifact_models  # noqa: F401
-from app.artifacts.dependencies import get_object_storage
+from app.artifacts.dependencies import get_object_storage, get_public_os_image_rate_limiter
 from app.audit import models as _audit_models  # noqa: F401
 from app.authorization import models as _authorization_models  # noqa: F401
 from app.authorization.roles import get_system_role_id
@@ -41,6 +41,7 @@ from app.deployments import models as _deployment_models  # noqa: F401
 from app.deployments import software_models as _software_models  # noqa: F401
 from app.devices import models as _fleet_models  # noqa: F401
 from app.devices.dependencies import (
+    get_enroll_ip_rate_limiter,
     get_enroll_poll_ip_rate_limiter,
     get_enroll_poll_rate_limiter,
     get_enroll_request_rate_limiter,
@@ -124,10 +125,16 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
     application.dependency_overrides[get_enroll_poll_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
+    application.dependency_overrides[get_enroll_ip_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
     application.dependency_overrides[get_enroll_poll_ip_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
     application.dependency_overrides[get_connectivity_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
+    application.dependency_overrides[get_public_os_image_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
     with TestClient(application) as test_client:

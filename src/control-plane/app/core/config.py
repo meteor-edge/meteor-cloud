@@ -71,10 +71,33 @@ class Settings(BaseSettings):
         alias="REGISTRATION_RATE_LIMIT_WINDOW_SECONDS",
     )
 
+    # Public OS image list and download (Meteor Imager), per source IP.
+    public_os_image_rate_limit_requests: int = Field(
+        default=60,
+        alias="PUBLIC_OS_IMAGE_RATE_LIMIT_REQUESTS",
+    )
+    public_os_image_rate_limit_window_seconds: int = Field(
+        default=60,
+        alias="PUBLIC_OS_IMAGE_RATE_LIMIT_WINDOW_SECONDS",
+    )
+
     # Device-initiated enrollment (request -> approve -> claim).
+    # Per source IP and key. Sites flash a batch of devices behind one NAT with one key,
+    # and devices back off on 429, so this allows a burst rather than a trickle.
     enrollment_request_rate_limit_requests: int = Field(
-        default=5,
+        default=30,
         alias="ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS",
+    )
+    # Per source IP, checked before the key is looked up (so wrong keys are limited too).
+    enrollment_ip_rate_limit_requests: int = Field(
+        default=120,
+        alias="ENROLLMENT_IP_RATE_LIMIT_REQUESTS",
+    )
+    # Pending (unanswered) requests one key may have at a time; 0 means no limit.
+    # Stops a leaked key from filling the approval queue.
+    enrollment_max_pending_per_key: int = Field(
+        default=100,
+        alias="ENROLLMENT_MAX_PENDING_PER_KEY",
     )
     enrollment_request_rate_limit_window_seconds: int = Field(
         default=60,

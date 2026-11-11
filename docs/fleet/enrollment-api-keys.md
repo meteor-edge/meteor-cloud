@@ -11,7 +11,9 @@ API keys**.
   stored. The plaintext is returned **once** at creation.
 - List responses never include the plaintext.
 - Revoked or expired keys are rejected with `401 invalid_api_key`.
-- Submitting a request is rate-limited per source IP and key (default 5 / 60s).
+- Submitting a request is rate-limited per source IP and key (default 30 / 60s) and per
+  source IP before the key is checked (default 120 / 60s). One key can have at most 100
+  pending requests (`ENROLLMENT_MAX_PENDING_PER_KEY`).
 
 ## Options
 

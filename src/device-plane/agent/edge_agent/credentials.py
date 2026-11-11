@@ -47,7 +47,8 @@ def read_device_token(path: Path) -> str | None:
     recover_device_secrets(path.parent)
     try:
         token = path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
+    except (FileNotFoundError, UnicodeDecodeError):
+        # Not text: a damaged file is treated like a missing one (enroll again).
         return None
     return token or None
 

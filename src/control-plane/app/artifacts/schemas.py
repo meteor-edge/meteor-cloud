@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.artifacts.models import ArtifactType
 
@@ -24,6 +24,13 @@ class ArtifactCreate(BaseModel):
     device_type_id: uuid.UUID | None = None
     description: str | None = Field(default=None, max_length=2000)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    published: bool = False
+
+    @model_validator(mode="after")
+    def _only_os_images_are_published(self) -> ArtifactCreate:
+        if self.published and self.type != ArtifactType.OS_IMAGE:
+            raise ValueError("Only OS images can be shown in Meteor Imager")
+        return self
 
     @field_validator("name")
     @classmethod
@@ -76,6 +83,29 @@ class ArtifactResponse(BaseModel):
     updated_at: datetime
     # Releases that install this artifact; it cannot be deleted while this is above zero.
     release_count: int = 0
+    published: bool = False
+
+
+class ArtifactUpdate(BaseModel):
+    """Fields an owner or admin can change after upload."""
+
+    published: bool
+
+
+class PublicOsImage(BaseModel):
+    """An OS image anyone can list and download (Meteor Imager), without login."""
+
+    id: uuid.UUID
+    name: str
+    version: str
+    description: str | None
+    device_type: str | None
+    file_name: str
+    content_type: str | None
+    size_bytes: int
+    checksum_sha256: str
+    created_at: datetime
+    download_url: str
 
 
 class ArtifactDownloadLinkResponse(BaseModel):

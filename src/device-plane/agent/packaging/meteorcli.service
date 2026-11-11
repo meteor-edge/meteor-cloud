@@ -3,13 +3,16 @@ Description=MeteorCloud device agent (meteorcli)
 Documentation=https://github.com/meteor-edge/meteor-cloud
 After=network-online.target
 Wants=network-online.target
+# Never let systemd give up restarting the agent.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 # System installs put the binary in /usr/local/bin. Override ExecStart if you
 # installed for a user (~/.local/bin/meteorcli).
 ExecStart=/usr/local/bin/meteorcli run
-Restart=on-failure
+# always: the agent has no reason to stop; a crash or a clean exit both restart it.
+Restart=always
 RestartSec=10
 # systemd / docker apply need privileges on Raspberry Pi OS. Run as root for
 # fleet deploys, or drop capabilities carefully for heartbeat-only use.

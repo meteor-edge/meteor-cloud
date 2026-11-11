@@ -12,7 +12,15 @@ import time
 
 from app.ports.cache import RateLimiter
 
-__all__ = ["InMemoryRateLimiter", "RateLimiter", "RedisRateLimiter"]
+__all__ = ["InMemoryRateLimiter", "RateLimiter", "RedisRateLimiter", "retry_after_seconds"]
+
+
+def retry_after_seconds(limiter: object, default: int = 60) -> int:
+    """Seconds until the limiter's current fixed window ends (for ``Retry-After``)."""
+    window = getattr(limiter, "_window", None)
+    if not isinstance(window, int) or window <= 0:
+        return default
+    return max(1, window - int(time.time()) % window)
 
 
 class RedisRateLimiter:

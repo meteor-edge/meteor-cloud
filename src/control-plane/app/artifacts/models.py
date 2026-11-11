@@ -12,7 +12,19 @@ import enum
 import uuid
 from typing import Any
 
-from sqlalchemy import BigInteger, Enum, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -76,8 +88,11 @@ class Artifact(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # OS images only: listed and downloadable without login (GET /api/v1/os-images), for Meteor Imager.
+    published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_false())
 
     __table_args__ = (
+        CheckConstraint("NOT published OR type = 'os_image'", name="ck_artifacts_published_os_image"),
         # Case-insensitive name/version; NULLS NOT DISTINCT so org-wide rows stay unique.
         Index(
             "uq_artifacts_org_type_name_version",

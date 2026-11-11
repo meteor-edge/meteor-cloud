@@ -130,6 +130,7 @@ Stored as `resource` + `action` columns; id is derived.
 | `artifact.create` | Upload artifacts | Upload new artifact versions. |
 | `artifact.update` | Update artifacts | Edit artifact metadata. |
 | `artifact.delete` | Delete artifacts | Delete artifacts and their stored objects. |
+| `artifact.publish` | Publish OS images | Show OS images in Meteor Imager, where anyone who can reach the server can download them. |
 | `deployment.read` | View deployments | List and open deployments. |
 | `deployment.create` | Create deployments | Start deployments. |
 | `deployment.cancel` | Cancel deployments | Cancel in-progress deployments. |
@@ -186,6 +187,7 @@ System roles: `organization_id IS NULL`, `is_system = true`, immutable via API.
 | artifact.create | ✓ | ✓ | | ✓ | |
 | artifact.update | ✓ | ✓ | | ✓ | |
 | artifact.delete | ✓ | ✓ | | ✓ | |
+| artifact.publish | ✓ | ✓ | | | |
 | deployment.read | ✓ | ✓ | ✓ | ✓ | ✓ |
 | deployment.create | ✓ | ✓ | ✓ | ✓ | |
 | deployment.cancel | ✓ | ✓ | ✓ | ✓ | |

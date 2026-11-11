@@ -103,3 +103,41 @@ def test_read_timeouts_and_dropped_connections_are_network_errors(monkeypatch, e
             client.heartbeat(device_token="dev_x", payload={})
         assert excinfo.value.code == "network_error"
         assert excinfo.value.status == 0
+
+
+def test_retry_after_header_is_kept_on_api_errors() -> None:
+    import io
+    import urllib.error
+    from email.message import Message
+
+    from edge_agent.client import EdgeClient
+
+    headers = Message()
+    headers["Retry-After"] = "17"
+    exc = urllib.error.HTTPError(
+        "http://x/api",
+        429,
+        "Too Many Requests",
+        headers,
+        io.BytesIO(b'{"error":{"code":"rate_limited","message":"m"}}'),
+    )
+    error = EdgeClient._to_api_error(exc)
+    assert (error.status, error.code, error.retry_after) == (429, "rate_limited", 17)
+
+
+def test_answer_that_is_not_json_is_a_retryable_error(monkeypatch) -> None:
+    """A captive portal or proxy page with status 200 must not crash the agent."""
+
+    class FakeResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    for body in (b"<html>Sign in to Wi-Fi</html>", b"\xff\xfe\x00garbage"):
+        monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout, body=body: FakeResponse(body))
+        with pytest.raises(AgentApiError) as raised:
+            EdgeClient("http://localhost:8000").heartbeat(device_token="dev_x", payload={})
+        assert raised.value.status == 0  # retried like a network failure, never treated as "revoked"
+        assert raised.value.code == "bad_response"

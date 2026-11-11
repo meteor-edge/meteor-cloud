@@ -16,6 +16,8 @@ type ArtifactUploadDialogProps = {
   defaultType?: ArtifactType;
   /** When set, the artifact is bound to this device type and the picker is hidden. */
   fixedDeviceType?: DeviceType;
+  /** Owners and admins only: offers "Show in Meteor Imager" for OS images. */
+  canPublish?: boolean;
   onClose: () => void;
   onUploaded: (artifact: Artifact) => void;
 };
@@ -38,6 +40,7 @@ export function ArtifactUploadDialog({
   deviceTypes,
   defaultType = "os_image",
   fixedDeviceType,
+  canPublish = false,
   onClose,
   onUploaded,
 }: ArtifactUploadDialogProps) {
@@ -47,6 +50,7 @@ export function ArtifactUploadDialog({
   const [type, setType] = useState<ArtifactType>(defaultType);
   const [deviceTypeId, setDeviceTypeId] = useState(fixedDeviceType?.id ?? "");
   const [description, setDescription] = useState("");
+  const [published, setPublished] = useState(false);
   const [progress, setProgress] = useState<UploadProgressState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -105,6 +109,7 @@ export function ArtifactUploadDialog({
           type,
           device_type_id: deviceTypeId || null,
           description: description || null,
+          published: canPublish && type === "os_image" && published,
         },
         { onProgress, signal: abortRef.current.signal },
       );
@@ -235,6 +240,24 @@ export function ArtifactUploadDialog({
             disabled={uploading}
           />
         </div>
+
+        {canPublish && type === "os_image" && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={published}
+              onChange={(event) => setPublished(event.target.checked)}
+              disabled={uploading}
+            />
+            <span>
+              Show in Meteor Imager
+              <span className="block text-xs text-muted-foreground">
+                Anyone who can reach this server can list and download the image without signing in.
+              </span>
+            </span>
+          </label>
+        )}
 
         {progress && file && <UploadProgress fileName={file.name} state={progress} />}
 

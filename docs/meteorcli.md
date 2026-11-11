@@ -19,20 +19,26 @@ next). As soon as a token is stored or an enrollment request is approved, it
 connects: heartbeats, MQTT and WireGuard, with no `meteorcli run`. Re-running the
 installer upgrades and restarts the service.
 
+The service does not exit on its own. If the server refuses the device credential (the
+device was deleted or its token revoked), or something unexpected fails, it logs the reason
+and tries again after 30 s, doubling up to 15 min. Enroll the device again with
+`sudo meteorcli request-token --new`; the running service picks up the new credential. A
+damaged `config.json` is ignored with a warning, and the service waits for `meteorcli config`.
+
 - `--no-service` skips the service (CLI only).
 - Without root, or where systemd is not running (most containers), there is no
   service; use `meteorcli run` in the foreground. `--with-service` makes that an
   error instead of a note.
 
-Pin a version: `METEORCLI_VERSION=0.1.0` (must match a published `agent-v*` tag).
+Pin a version: `METEORCLI_VERSION=0.2.0` (must match a published `agent-v*` tag).
 
 **Publish a release** (maintainers): set the version in
 `src/device-plane/agent/pyproject.toml`, then:
 
 ```bash
 make agent-dist          # optional local check; writes dist/
-git tag agent-v0.1.0     # must match the pyproject version
-git push origin agent-v0.1.0
+git tag agent-v0.2.0     # must match the pyproject version
+git push origin agent-v0.2.0
 ```
 
 CI packs agent + `src/device-plane/runtime` (no tests, no secrets) and creates
@@ -126,6 +132,6 @@ already runs as root and does not need that helper.
 - [Getting started](getting-started.md)
 - [Registration tokens](fleet/registration-tokens.md)
 - [Device-initiated enrollment](fleet/device-request-enrollment.md)
-- [First-boot enroll on a Pi image](../src/device-plane/agent/packaging/firstboot/README.md) (`install-meteorcli-firstboot.sh`)
+- [First-boot enroll on a Pi image](../src/device-plane/agent/packaging/firstboot/README.md) (`install-meteorcli-firstboot.sh`; build your own OS image with `meteorcli-prepare-image.sh`)
 - [Heartbeat](fleet/heartbeat.md)
 - [MQTT](fleet/mqtt.md)

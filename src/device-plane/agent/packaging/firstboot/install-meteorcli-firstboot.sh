@@ -24,6 +24,7 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
 fi
 
 RUN_NOW=0
+IMAGE=0
 usage() {
   cat <<EOF
 Install first-boot enrollment (request-token, then background poll until approved).
@@ -37,6 +38,8 @@ Usage:
 
 Options:
   --now        Start meteorcli-firstboot.service immediately
+  --image      Install and enable only; no enrollment settings on this device
+               (used by meteorcli-prepare-image.sh: each card brings its own)
   -h, --help   Show this help
 EOF
 }
@@ -45,6 +48,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --now)
       RUN_NOW=1
+      shift
+      ;;
+    --image)
+      IMAGE=1
       shift
       ;;
     -h|--help)
@@ -166,13 +173,66 @@ echo "[1/4] Fetching first-boot files"
 fetch "meteorcli-firstboot.sh" "${WORKDIR}/meteorcli-firstboot.sh"
 fetch "meteorcli-firstboot.service" "${WORKDIR}/meteorcli-firstboot.service"
 fetch "meteorcli-firstboot.env.example" "${WORKDIR}/meteorcli-firstboot.env.example"
+fetch "meteorcli-settings.sh" "${WORKDIR}/meteorcli-settings.sh"
+fetch "meteorcli-settings.service" "${WORKDIR}/meteorcli-settings.service"
 
 install -m 0755 "${WORKDIR}/meteorcli-firstboot.sh" /usr/local/sbin/meteorcli-firstboot.sh
 install -m 0644 "${WORKDIR}/meteorcli-firstboot.service" /etc/systemd/system/meteorcli-firstboot.service
 echo "  installed /usr/local/sbin/meteorcli-firstboot.sh"
 echo "  installed /etc/systemd/system/meteorcli-firstboot.service"
+install -m 0755 "${WORKDIR}/meteorcli-settings.sh" /usr/local/sbin/meteorcli-settings.sh
+install -m 0644 "${WORKDIR}/meteorcli-settings.service" /etc/systemd/system/meteorcli-settings.service
+echo "  installed /usr/local/sbin/meteorcli-settings.sh"
+echo "  installed /etc/systemd/system/meteorcli-settings.service"
+
+# Tell Meteor Imager this image applies .meteorenv v2 itself (Wi-Fi, hostname,
+# timezone, user, SSH), so it writes only .meteorenv and leaves cloud-init alone.
+# Same partition order as meteorcli-settings.sh: METEORCFG first, then boot.
+mark_config_partition() {
+  local dir="" tmp="" cfg_dev=/dev/disk/by-label/METEORCFG cfg_dir
+  if [[ -e "${cfg_dev}" ]]; then
+    dir="$(findmnt -n -o TARGET "${cfg_dev}" 2>/dev/null | head -n 1 || true)"
+    if [[ -z "${dir}" ]]; then
+      tmp="$(mktemp -d)"
+      if mount "${cfg_dev}" "${tmp}" 2>/dev/null; then
+        dir="${tmp}"
+      else
+        rmdir "${tmp}"
+        tmp=""
+      fi
+    fi
+  fi
+  if [[ -z "${dir}" ]]; then
+    for cfg_dir in /boot/firmware /boot /boot/efi; do
+      if [[ "$(findmnt -n -o FSTYPE --target "${cfg_dir}" 2>/dev/null || true)" == vfat ]]; then
+        dir="${cfg_dir}"
+        break
+      fi
+    done
+  fi
+  if [[ -z "${dir}" ]]; then
+    echo "  warning: no FAT config partition; Meteor Imager will treat this as a stock image"
+  elif printf 'meteor_settings=2\n' 2>/dev/null >"${dir}/.meteor-settings"; then
+    echo "  marked ${dir}/.meteor-settings for Meteor Imager"
+  else
+    echo "  warning: could not write ${dir}/.meteor-settings (read-only?); Meteor Imager will treat this as a stock image"
+  fi
+  if [[ -n "${tmp}" ]]; then
+    umount "${tmp}" 2>/dev/null || true
+    rmdir "${tmp}" 2>/dev/null || true
+  fi
+  return 0
+}
+mark_config_partition
 
 ENV_FILE=/etc/meteorcli-firstboot.env
+if [[ "${IMAGE}" -eq 1 ]]; then
+  systemctl daemon-reload
+  systemctl enable meteorcli-firstboot.service meteorcli-settings.service
+  echo "  enabled for image use; each card's .meteorenv provides enrollment"
+  exit 0
+fi
+
 echo
 echo "[2/4] Enrollment settings"
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -205,6 +265,7 @@ echo
 echo "[3/4] Enable meteorcli-firstboot.service"
 systemctl daemon-reload
 systemctl enable meteorcli-firstboot.service
+systemctl enable meteorcli-settings.service
 echo "  enabled (runs on boot until the device is approved)"
 
 echo

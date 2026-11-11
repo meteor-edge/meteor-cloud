@@ -17,7 +17,7 @@ import { useArtifactActions } from "@/components/artifacts/useArtifactActions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
-import { canManageArtifacts } from "@/lib/permissions";
+import { canManageArtifacts, canPublishOsImages } from "@/lib/permissions";
 
 const PAGE_SIZE = 20;
 
@@ -72,7 +72,12 @@ export function ArtifactsPage() {
   });
 
   const canManage = canManageArtifacts(orgQuery.data?.current_user_role);
-  const { onDownload, onDelete, refresh } = useArtifactActions(token, organizationId, setError);
+  const canPublish = canPublishOsImages(orgQuery.data?.current_user_role);
+  const { onDownload, onDelete, onTogglePublished, refresh } = useArtifactActions(
+    token,
+    organizationId,
+    setError,
+  );
   const deviceTypeNames = useMemo(
     () => new Map((typesQuery.data ?? []).map((item) => [item.id, item.name])),
     [typesQuery.data],
@@ -145,6 +150,8 @@ export function ArtifactsPage() {
         canManage={canManage}
         onDownload={onDownload}
         onDelete={onDelete}
+        onTogglePublished={onTogglePublished}
+        canPublish={canPublish}
         showType={!type}
         deviceTypeNames={deviceTypeNames}
         organizationId={organizationId}
@@ -182,6 +189,7 @@ export function ArtifactsPage() {
           organizationId={organizationId}
           deviceTypes={typesQuery.data ?? []}
           defaultType={type ?? "os_image"}
+          canPublish={canPublish}
           onClose={() => setShowUpload(false)}
           onUploaded={async () => {
             setShowUpload(false);

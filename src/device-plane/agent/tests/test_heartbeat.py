@@ -117,3 +117,28 @@ def test_heartbeat_does_not_log_credential(caplog) -> None:
         )
     joined = " ".join(record.getMessage() for record in caplog.records)
     assert "dev_super-secret" not in joined
+
+
+def test_run_loop_survives_an_unexpected_error_in_one_round(caplog) -> None:
+    client = FakeClient()
+    sleeps: list[float] = []
+    rounds = {"n": 0}
+
+    def payload() -> dict:
+        rounds["n"] += 1
+        if rounds["n"] == 1:
+            raise OSError(28, "No space left on device")
+        return {}
+
+    run_loop(
+        client,
+        "dev_secret",
+        interval_seconds=60,
+        sleep=sleeps.append,
+        should_continue=lambda: rounds["n"] < 2,
+        payload_factory=payload,
+        jitter=lambda _low, _high: 1.0,
+    )
+    assert len(client.heartbeat_calls) == 1
+    assert sleeps == [1.0, 60]
+    assert "Heartbeat round failed" in caplog.text

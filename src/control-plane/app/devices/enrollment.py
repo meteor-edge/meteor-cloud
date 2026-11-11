@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.exceptions import AppError, ConflictError, UnauthorizedError
 from app.core.metrics import ENROLLMENT_POLLS, ENROLLMENT_REQUESTS
 from app.devices.identity import DeviceIdentity, match_existing_device
 from app.devices.models import (
@@ -83,14 +83,14 @@ class EnrollmentService:
 
         primary_macs = [identity.primary_mac] if identity.primary_mac else []
 
-        existing = None
-        if not identity.is_empty:
-            # Concurrent submissions for one device must not both miss the row below.
-            self.session.execute(
-                select(func.pg_advisory_xact_lock(func.hashtextextended(str(api_key.organization_id), 0)))
-            )
-            existing = self._find_reusable_request(api_key, identity)
+        # Serializes submissions per organization: one device must not get two rows,
+        # and concurrent submissions must not all pass the pending cap.
+        self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(str(api_key.organization_id), 0))))
+        existing = None if identity.is_empty else self._find_reusable_request(api_key, identity)
         if existing is not None:
+            if existing.status == "pending" and not self._counted_for_key(existing, api_key, now):
+                # Moving another key's request, or reviving an expired one, takes a new slot.
+                self._enforce_pending_cap(api_key, now)
             request = existing
             request.api_key_id = api_key.id
             request.claim_secret_hash = claim.token_hash
@@ -111,6 +111,7 @@ class EnrollmentService:
             request.expires_at = expires_at
             self.requests.update(request)
         else:
+            self._enforce_pending_cap(api_key, now)
             request = DeviceEnrollmentRequest(
                 organization_id=api_key.organization_id,
                 api_key_id=api_key.id,
@@ -146,6 +147,32 @@ class EnrollmentService:
             poll_interval_seconds=self.settings.enrollment_poll_interval_seconds,
             expires_at=request.expires_at,
         )
+
+    def _enforce_pending_cap(self, api_key: EnrollmentApiKey, now: datetime) -> None:
+        """Refuse a new pending request once the key has too many waiting for an answer.
+
+        Updates of a device's existing request are not counted against the cap, so a
+        device that retries never locks itself out.
+        """
+        cap = self.settings.enrollment_max_pending_per_key
+        if cap <= 0:
+            return
+        if self.requests.count_pending_for_key(api_key_id=api_key.id, now=now) >= cap:
+            raise AppError(
+                "too_many_pending_requests",
+                "This enrollment key has too many requests waiting for approval. "
+                "Approve or reject some in the console, then try again.",
+                status_code=429,
+                headers={"Retry-After": "300"},
+            )
+
+    @staticmethod
+    def _counted_for_key(request: DeviceEnrollmentRequest, api_key: EnrollmentApiKey, now: datetime) -> bool:
+        """Whether the pending cap already counts this row for the key (see count_pending_for_key)."""
+        expires_at = request.expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return request.api_key_id == api_key.id and (expires_at is None or expires_at > now)
 
     def _find_reusable_request(
         self,

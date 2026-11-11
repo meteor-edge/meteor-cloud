@@ -355,6 +355,8 @@ export type Artifact = {
   updated_at: string;
   /** Releases that install this artifact; it cannot be deleted while above zero. */
   release_count?: number;
+  /** OS images only: listed and downloadable without login in Meteor Imager. */
+  published?: boolean;
 };
 
 export type ArtifactListParams = {

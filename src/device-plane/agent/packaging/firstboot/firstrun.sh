@@ -28,6 +28,8 @@ BOOT="$(boot_dir)"
 LOG="${BOOT}/meteorcli-firstrun.log"
 FIRSTBOOT_SCRIPT="/usr/local/sbin/meteorcli-firstboot.sh"
 UNIT_PATH="/etc/systemd/system/meteorcli-firstboot.service"
+SETTINGS_SCRIPT="/usr/local/sbin/meteorcli-settings.sh"
+SETTINGS_UNIT="/etc/systemd/system/meteorcli-settings.service"
 
 log() {
   echo "$(date -Is 2>/dev/null || date) $*" | tee -a "${LOG}"
@@ -66,9 +68,26 @@ enable_firstboot_service() {
   elif [ ! -f "${UNIT_PATH}" ]; then
     write_unit
   fi
+  install_settings_service
   systemctl daemon-reload
   systemctl enable meteorcli-firstboot.service
   log "enabled meteorcli-firstboot.service"
+  if [ -x "${SETTINGS_SCRIPT}" ] && [ -f "${SETTINGS_UNIT}" ]; then
+    systemctl enable meteorcli-settings.service
+    log "enabled meteorcli-settings.service"
+  else
+    log "meteorcli-settings.service not available; Wi-Fi, hostname, user and SSH in .meteorenv are not applied"
+  fi
+}
+
+# Applies .meteorenv v2 (Wi-Fi, hostname, user, SSH) early in boot, like the installer does.
+install_settings_service() {
+  if [ -f "${BOOT}/meteorcli-settings.sh" ]; then
+    install -m 0755 "${BOOT}/meteorcli-settings.sh" "${SETTINGS_SCRIPT}"
+  fi
+  if [ -f "${BOOT}/meteorcli-settings.service" ]; then
+    install -m 0644 "${BOOT}/meteorcli-settings.service" "${SETTINGS_UNIT}"
+  fi
 }
 
 install_from_bootfs() {

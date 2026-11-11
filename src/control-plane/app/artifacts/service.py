@@ -21,7 +21,13 @@ from sqlalchemy.orm import Session
 
 from app.artifacts.models import Artifact, ArtifactType
 from app.artifacts.repository import ArtifactRepository
-from app.artifacts.schemas import ArtifactCreate, ArtifactDownloadLinkResponse, ArtifactResponse
+from app.artifacts.schemas import (
+    ArtifactCreate,
+    ArtifactDownloadLinkResponse,
+    ArtifactResponse,
+    ArtifactUpdate,
+    PublicOsImage,
+)
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
@@ -209,6 +215,8 @@ class ArtifactService:
         """
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.create")
+        if payload.published:
+            self.authz.require(membership, "artifact.publish")
 
         max_bytes = self.settings.artifact_max_upload_bytes
         if declared_size is not None and declared_size > max_bytes:
@@ -268,6 +276,7 @@ class ArtifactService:
             checksum_sha256=reader.hexdigest(),
             metadata_=payload.metadata,
             created_by_user_id=actor.id,
+            published=payload.published,
         )
         try:
             self.artifacts.create(artifact)
@@ -277,7 +286,12 @@ class ArtifactService:
                 action="artifact.upload",
                 resource_type="artifact",
                 resource_id=artifact.id,
-                metadata={"name": artifact.name, "version": artifact.version, "type": artifact.type.value},
+                metadata={
+                    "name": artifact.name,
+                    "version": artifact.version,
+                    "type": artifact.type.value,
+                    "published": artifact.published,
+                },
             )
             self.session.commit()
         except IntegrityError as exc:
@@ -295,6 +309,61 @@ class ArtifactService:
         return ArtifactResponse.model_validate(artifact)
 
     # ----------------------------------------------------------------- delete
+    def update_artifact(
+        self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID, payload: ArtifactUpdate
+    ) -> ArtifactResponse:
+        """Show or hide an OS image in Meteor Imager (the public OS image list)."""
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require(membership, "artifact.update")
+        self.authz.require(membership, "artifact.publish")
+        artifact = self._require_artifact(organization_id, artifact_id)
+        if payload.published and artifact.type != ArtifactType.OS_IMAGE:
+            raise AppError(
+                "artifact_not_publishable",
+                "Only OS images can be shown in Meteor Imager.",
+                status_code=422,
+            )
+        if artifact.published != payload.published:
+            artifact.published = payload.published
+            self.audit.record(
+                actor=actor,
+                organization_id=organization_id,
+                action="artifact.update",
+                resource_type="artifact",
+                resource_id=artifact.id,
+                metadata={"name": artifact.name, "version": artifact.version, "published": payload.published},
+            )
+            self.session.commit()
+            self.session.refresh(artifact)
+        return self._to_response(artifact, self._release_counts([artifact.id]).get(artifact.id, 0))
+
+    # ---------------------------------------------------- public (Meteor Imager)
+    def list_public_os_images(self) -> list[PublicOsImage]:
+        """OS images an owner or admin published; no login, every organization."""
+        return [
+            PublicOsImage(
+                id=artifact.id,
+                name=artifact.name,
+                version=artifact.version,
+                description=artifact.description,
+                device_type=device_type,
+                file_name=artifact.file_name,
+                content_type=artifact.content_type,
+                size_bytes=artifact.size_bytes,
+                checksum_sha256=artifact.checksum_sha256,
+                created_at=artifact.created_at,
+                download_url=f"/api/v1/os-images/{artifact.id}/download",
+            )
+            for artifact, device_type in self.artifacts.list_published_os_images()
+        ]
+
+    def open_public_os_image(self, artifact_id: uuid.UUID) -> tuple[Artifact, StoredObject]:
+        """Open a published OS image; anything else is not found, so IDs reveal nothing."""
+        artifact = self.artifacts.get_published_os_image(artifact_id)
+        if artifact is None:
+            raise NotFoundError("os_image_not_found", "OS image was not found.")
+        return artifact, self._open(artifact)
+
     def delete_artifact(self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> None:
         """Commit metadata deletion and an audit event, then attempt object deletion.
 
@@ -348,9 +417,7 @@ class ArtifactService:
         artifact = self._require_artifact(organization_id, artifact_id)
         return artifact, self._open(artifact)
 
-    def open_content(
-        self, *, organization_id: uuid.UUID, artifact_id: uuid.UUID
-    ) -> tuple[Artifact, StoredObject]:
+    def open_content(self, *, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> tuple[Artifact, StoredObject]:
         """Open artifact bytes for an already-authorized caller (e.g. agent download)."""
         artifact = self._require_artifact(organization_id, artifact_id)
         return artifact, self._open(artifact)

@@ -72,3 +72,23 @@ def test_config_roundtrip(agent_paths) -> None:
     save_config(agent_paths, config)
     loaded = load_config(agent_paths)
     assert loaded == config
+
+
+def test_damaged_files_are_treated_as_missing(tmp_path, caplog) -> None:
+    from edge_agent.config import AgentPaths, load_config
+    from edge_agent.credentials import read_device_token
+
+    token = tmp_path / "device-token"
+    token.write_bytes(b"\xff\xfe\x00\x00")
+    assert read_device_token(token) is None
+
+    paths = AgentPaths(config_path=tmp_path / "config.json", token_path=token)
+    for damaged in ("", '{"server_url": "http://x"', "[1, 2]", '{"heartbeat_interval_seconds": "soon"}'):
+        paths.config_path.write_text(damaged, encoding="utf-8")
+        assert load_config(paths) is None
+    assert caplog.text.count("is damaged and was ignored") == 1  # once, not on every check
+
+    paths.config_path.write_text('{"server_url": "http://x", "heartbeat_interval_seconds": 0}', encoding="utf-8")
+    assert load_config(paths).heartbeat_interval_seconds == 60
+    paths.config_path.write_text('{"server_url": "http://x", "heartbeat_interval_seconds": 1}', encoding="utf-8")
+    assert load_config(paths).heartbeat_interval_seconds == 5

@@ -9,6 +9,7 @@ are injectable so tests never touch the real system locations.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from dataclasses import asdict, dataclass
@@ -50,15 +51,39 @@ def load_config(paths: AgentPaths) -> AgentConfig | None:
         raw = paths.config_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
-    data = json.loads(raw)
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("not a JSON object")
+        interval = int(data.get("heartbeat_interval_seconds") or 60)
+    except (ValueError, TypeError):
+        # Cut off by a power loss, or edited by hand. Treated as not configured, so the
+        # service waits for `meteorcli config` instead of crashing on every start.
+        _warn_damaged(paths.config_path)
+        return None
     return AgentConfig(
-        server_url=data.get("server_url") or "",
-        device_id=data.get("device_id") or "",
-        organization_id=data.get("organization_id") or "",
-        name=data.get("name") or "",
-        heartbeat_interval_seconds=int(data.get("heartbeat_interval_seconds", 60)),
+        server_url=str(data.get("server_url") or ""),
+        device_id=str(data.get("device_id") or ""),
+        organization_id=str(data.get("organization_id") or ""),
+        name=str(data.get("name") or ""),
+        heartbeat_interval_seconds=max(MIN_HEARTBEAT_INTERVAL_SECONDS, interval),
         domain=data.get("domain"),
         api_base=data.get("api_base"),
+    )
+
+
+# A heartbeat interval of 0 from a damaged file would spin the loop.
+MIN_HEARTBEAT_INTERVAL_SECONDS = 5
+_warned_damaged: set[str] = set()
+
+
+def _warn_damaged(path: Path) -> None:
+    if str(path) in _warned_damaged:
+        return
+    _warned_damaged.add(str(path))
+    logging.getLogger("edge_agent").warning(
+        "%s is damaged and was ignored. Run 'meteorcli config --domain <host> --api-key key_…' to write it again.",
+        path,
     )
 
 
