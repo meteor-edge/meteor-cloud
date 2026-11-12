@@ -1,10 +1,12 @@
 # Device settings file (set up a card without Meteor Imager)
 
 The console can build the same settings file that
-[Meteor Imager](https://github.com/meteor-edge/meteor-imager) writes to a card:
-enrollment (MeteorCloud address and enrollment key), Wi-Fi, hostname, timezone, a
-login user and SSH. You download it, copy it to the card's boot partition yourself,
-and the device applies it on first boot.
+[Meteor Imager](https://github.com/meteor-edge/meteor-imager) writes to a card.
+The dialog is split like Raspberry Pi Imager customisation first (hostname,
+timezone, username/password with Generate, Wi-Fi SSID/password, SSH), then
+**optional** MeteorCloud enrollment (domain and enrollment key). You download
+one file, copy it to the card's boot partition, and the device applies it on
+first boot.
 
 Where to find it:
 

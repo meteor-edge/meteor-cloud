@@ -10,6 +10,7 @@ import {
   type EnrollmentApiKey,
 } from "@/api/fleet";
 import { ApiError } from "@/api/http";
+import { PasswordWithGenerate } from "@/components/PasswordWithGenerate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,15 +54,16 @@ function saveTextFile(fileName: string, content: string) {
 const FIELDSET = "space-y-3 rounded-md border border-border p-3";
 const SELECT =
   "flex h-10 w-full rounded-md border border-input bg-field px-3 text-sm text-foreground";
+const HINT = "text-xs text-muted-foreground";
+const SECTION = "space-y-3";
 
 function isActive(key: EnrollmentApiKey, now: number): boolean {
   return key.revoked_at === null && (key.expires_at === null || Date.parse(key.expires_at) > now);
 }
-const HINT = "text-xs text-muted-foreground";
 
 /**
- * Settings for a new device, like Meteor Imager's form, downloaded as one file to copy
- * to the card's boot partition. Secrets are sent to the server only to build the file.
+ * Settings for a new device: Raspberry Pi Imager–style OS options first, then
+ * optional MeteorCloud enrollment. Downloaded as one file for the card's boot partition.
  */
 export function DeviceSetupDialog({
   token,
@@ -71,7 +73,21 @@ export function DeviceSetupDialog({
   onDownloadImage,
   onClose,
 }: DeviceSetupDialogProps) {
-  const [useEnroll, setUseEnroll] = useState(true);
+  // Imager-style defaults: Wi-Fi / user / SSH on; MeteorCloud enroll is optional.
+  const [useWifi, setUseWifi] = useState(true);
+  const [ssid, setSsid] = useState("");
+  const [psk, setPsk] = useState("");
+  const [country, setCountry] = useState("DE");
+  const [hiddenSsid, setHiddenSsid] = useState(false);
+  const [hostname, setHostname] = useState("");
+  const [timezone, setTimezone] = useState(browserTimezone);
+  const [useUser, setUseUser] = useState(true);
+  const [userName, setUserName] = useState("pi");
+  const [userPassword, setUserPassword] = useState("");
+  const [useSsh, setUseSsh] = useState(true);
+  const [sshPassword, setSshPassword] = useState(true);
+  const [sshKey, setSshKey] = useState("");
+  const [useEnroll, setUseEnroll] = useState(false);
   const [domain, setDomain] = useState(defaultDomain);
   const [newKey, setNewKey] = useState(canCreateKey);
   const [apiKey, setApiKey] = useState("");
@@ -79,19 +95,6 @@ export function DeviceSetupDialog({
   // Made by this dialog: newer than the list, so it is not checked against it.
   const [madeKey, setMadeKey] = useState("");
   const [deviceName, setDeviceName] = useState("");
-  const [useWifi, setUseWifi] = useState(false);
-  const [ssid, setSsid] = useState("");
-  const [psk, setPsk] = useState("");
-  const [country, setCountry] = useState("DE");
-  const [hiddenSsid, setHiddenSsid] = useState(false);
-  const [hostname, setHostname] = useState("");
-  const [timezone, setTimezone] = useState(browserTimezone);
-  const [useUser, setUseUser] = useState(false);
-  const [userName, setUserName] = useState("");
-  const [userPassword, setUserPassword] = useState("");
-  const [useSsh, setUseSsh] = useState(false);
-  const [sshPassword, setSshPassword] = useState(true);
-  const [sshKey, setSshKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -111,6 +114,24 @@ export function DeviceSetupDialog({
 
   function problems(): string[] {
     const found: string[] = [];
+    if (useWifi) {
+      if (!ssid) found.push("Enter the Wi-Fi network name.");
+      if (psk.length < 8 || psk.length > 63) {
+        found.push("The Wi-Fi password must be 8 to 63 characters.");
+      }
+      if (!/^[A-Z]{2}$/.test(country.trim().toUpperCase())) {
+        found.push("Enter the two-letter Wi-Fi country code, e.g. DE.");
+      }
+    }
+    if (useUser) {
+      if (!userName.trim()) found.push("Enter the username.");
+      if (userPassword.length > 0 && userPassword.length < 8) {
+        found.push("The login password must be at least 8 characters (or leave it empty).");
+      }
+    }
+    if (useSsh && !sshPassword && !sshKey.trim()) {
+      found.push("Public-key only SSH needs a public key.");
+    }
     if (useEnroll) {
       if (!domain.trim()) found.push("Enter the address devices use to reach MeteorCloud.");
       const pasted = apiKey.trim();
@@ -129,19 +150,6 @@ export function DeviceSetupDialog({
       ) {
         found.push("No active enrollment key starts like this one. It may be revoked or expired.");
       }
-    }
-    if (useWifi) {
-      if (!ssid) found.push("Enter the Wi-Fi network name.");
-      if (psk.length < 8 || psk.length > 63) {
-        found.push("The Wi-Fi password must be 8 to 63 characters.");
-      }
-      if (!/^[A-Z]{2}$/.test(country.trim().toUpperCase())) {
-        found.push("Enter the two-letter Wi-Fi country code, e.g. DE.");
-      }
-    }
-    if (useUser && !userName.trim()) found.push("Enter the username.");
-    if (useSsh && !sshPassword && !sshKey.trim()) {
-      found.push("Public-key only SSH needs a public key.");
     }
     if (!useEnroll && !useWifi && !useUser && !useSsh && !hostname.trim() && !timezone.trim()) {
       found.push("Nothing to write: turn on at least one setting.");
@@ -211,16 +219,16 @@ export function DeviceSetupDialog({
       aria-label={title}
     >
       <form
-        className="max-h-[90vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-glow"
+        className="max-h-[90vh] w-full max-w-2xl space-y-5 overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-glow"
         onSubmit={onSubmit}
         autoComplete="off"
       >
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Choose the device&apos;s settings here and download them as one file. Copy that file to
-            the card and the device sets itself up on first boot, the same way a card written by
-            Meteor Imager does.
+            First configure the card like Raspberry Pi Imager (Wi-Fi, user, SSH). MeteorCloud
+            enrollment is optional below. Download one settings file and copy it to the card&apos;s
+            boot partition.
           </p>
         </div>
 
@@ -244,283 +252,311 @@ export function DeviceSetupDialog({
               </>
             )}
           </li>
-          <li>Fill in the settings below and download the settings file.</li>
+          <li>Fill in OS settings (and MeteorCloud if you want), then download the settings file.</li>
           <li>
             Put the card back in your computer and copy <code>meteorenv.txt</code> to its boot
             partition: the small drive that appears, usually named <code>bootfs</code> or{" "}
             <code>METEORCFG</code>. Keep the file name.
           </li>
           <li>
-            Put the card in the device and power it on. It applies the settings, deletes the file
-            from the card, and asks to join. Approve it under Devices.
+            Put the card in the device and power it on. It applies the settings and deletes the file
+            from the card. If you included enrollment, approve the device under Devices → Pending.
           </li>
         </ol>
 
-        <fieldset className={FIELDSET}>
-          <legend className="px-1 text-sm font-medium">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={useEnroll}
-                onChange={(event) => setUseEnroll(event.target.checked)}
+        <section className={SECTION} aria-labelledby="setup-os-heading">
+          <div>
+            <h3 id="setup-os-heading" className="text-base font-semibold">
+              OS settings (like Raspberry Pi Imager)
+            </h3>
+            <p className={HINT}>
+              Hostname, login user, Wi-Fi and SSH — the same ideas as OS customisation in the
+              imager.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="setup-hostname">Hostname (optional)</Label>
+              <Input
+                id="setup-hostname"
+                value={hostname}
+                onChange={(event) => setHostname(event.target.value.toLowerCase())}
+                placeholder="raspberrypi"
+                spellCheck={false}
               />
-              Register this device with MeteorCloud on first boot
-            </label>
-          </legend>
-          {useEnroll && (
-            <>
-              <div>
-                <Label htmlFor="setup-domain">MeteorCloud address the device connects to</Label>
-                <Input
-                  id="setup-domain"
-                  value={domain}
-                  onChange={(event) => setDomain(event.target.value)}
-                  placeholder="fleet.example.com or 192.168.0.10:8000"
-                  spellCheck={false}
+            </div>
+            <div>
+              <Label htmlFor="setup-timezone">Timezone (optional)</Label>
+              <Input
+                id="setup-timezone"
+                value={timezone}
+                onChange={(event) => setTimezone(event.target.value)}
+                placeholder="Europe/Berlin"
+                spellCheck={false}
+              />
+            </div>
+          </div>
+
+          <fieldset className={FIELDSET}>
+            <legend className="px-1 text-sm font-medium">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={useUser}
+                  onChange={(event) => setUseUser(event.target.checked)}
                 />
-              </div>
-              <div className="space-y-1">
-                {canCreateKey && (
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="radio" checked={newKey} onChange={() => setNewKey(true)} />
-                    Create a new enrollment key for this file
+                Set username and password
+              </label>
+            </legend>
+            {useUser && (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="setup-user">Username</Label>
+                    <Input
+                      id="setup-user"
+                      value={userName}
+                      onChange={(event) => setUserName(event.target.value)}
+                      placeholder="pi"
+                      spellCheck={false}
+                      autoCapitalize="off"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="setup-user-password">Password</Label>
+                    <PasswordWithGenerate
+                      id="setup-user-password"
+                      value={userPassword}
+                      onChange={setUserPassword}
+                      length={16}
+                    />
+                  </div>
+                </div>
+                <p className={HINT}>
+                  The image&apos;s first user is renamed to this name (or created). Only a hash of
+                  the password goes into the file. Use Generate, then copy the password somewhere
+                  safe.
+                </p>
+              </>
+            )}
+          </fieldset>
+
+          <fieldset className={FIELDSET}>
+            <legend className="px-1 text-sm font-medium">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={useWifi}
+                  onChange={(event) => setUseWifi(event.target.checked)}
+                />
+                Configure wireless LAN
+              </label>
+            </legend>
+            {useWifi && (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="setup-ssid">SSID</Label>
+                    <Input
+                      id="setup-ssid"
+                      value={ssid}
+                      onChange={(event) => setSsid(event.target.value)}
+                      spellCheck={false}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="setup-psk">Wi-Fi password</Label>
+                    <PasswordWithGenerate
+                      id="setup-psk"
+                      value={psk}
+                      onChange={setPsk}
+                      length={16}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="setup-country">Wireless LAN country</Label>
+                    <Input
+                      id="setup-country"
+                      value={country}
+                      onChange={(event) => setCountry(event.target.value.toUpperCase())}
+                      placeholder="DE"
+                      maxLength={2}
+                    />
+                  </div>
+                  <label className="flex items-end gap-2 pb-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={hiddenSsid}
+                      onChange={(event) => setHiddenSsid(event.target.checked)}
+                    />
+                    Hidden SSID
                   </label>
-                )}
+                </div>
+                <p className={HINT}>
+                  The Wi-Fi password is in the file and on the card until first boot. Anyone with
+                  either can read it.
+                </p>
+              </>
+            )}
+          </fieldset>
+
+          <fieldset className={FIELDSET}>
+            <legend className="px-1 text-sm font-medium">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={useSsh}
+                  onChange={(event) => setUseSsh(event.target.checked)}
+                />
+                Enable SSH
+              </label>
+            </legend>
+            {useSsh && (
+              <>
                 <label className="flex items-center gap-2 text-sm">
-                  <input type="radio" checked={!newKey} onChange={() => setNewKey(false)} />
-                  Use an enrollment key I have
+                  <input type="radio" checked={sshPassword} onChange={() => setSshPassword(true)} />
+                  Use password authentication
                 </label>
-                {!newKey && keysQuery.isSuccess && activeKeys.length === 0 && (
-                  <p className="text-sm text-amber-500">
-                    This organization has no active enrollment keys.{" "}
-                    {canCreateKey
-                      ? "Choose “Create a new enrollment key” above, or make one under Devices, Enrollment keys."
-                      : "Ask an owner or admin for one."}
-                  </p>
-                )}
-                {!newKey && activeKeys.length > 0 && (
-                  <select
-                    aria-label="Which enrollment key"
-                    className={SELECT}
-                    value={keyId}
-                    onChange={(event) => setKeyId(event.target.value)}
-                  >
-                    <option value="">Choose a key…</option>
-                    {activeKeys.map((key) => (
-                      <option key={key.id} value={key.id}>
-                        {key.name} · {key.key_prefix}…
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {!newKey && (
-                  <Input
-                    aria-label="Enrollment key"
-                    type="password"
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                    placeholder={chosenKey ? `${chosenKey.key_prefix}…` : "key_…"}
-                    autoComplete="new-password"
-                    spellCheck={false}
-                  />
-                )}
-                <p className={HINT}>
-                  {!newKey && activeKeys.length > 0
-                    ? "MeteorCloud shows a key only once, when it is made, so paste the key itself. "
-                    : "Keys are listed under Devices, Enrollment keys. "}
-                  Revoke the key when the batch of devices is done.
-                </p>
-              </div>
-              <div>
-                <Label htmlFor="setup-device-name">Device name in MeteorCloud (optional)</Label>
-                <Input
-                  id="setup-device-name"
-                  value={deviceName}
-                  onChange={(event) => setDeviceName(event.target.value)}
-                  placeholder="Automatic: device type and MAC, e.g. raspberrypi5-a1b2c3"
-                  maxLength={63}
-                  spellCheck={false}
-                />
-                <p className={HINT}>
-                  Leave it empty when the same file goes on several cards, so each device gets its
-                  own name.
-                </p>
-              </div>
-            </>
-          )}
-        </fieldset>
-
-        <fieldset className={FIELDSET}>
-          <legend className="px-1 text-sm font-medium">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={useWifi}
-                onChange={(event) => setUseWifi(event.target.checked)}
-              />
-              Connect to Wi-Fi
-            </label>
-          </legend>
-          {useWifi && (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <Label htmlFor="setup-ssid">Network name (SSID)</Label>
-                  <Input
-                    id="setup-ssid"
-                    value={ssid}
-                    onChange={(event) => setSsid(event.target.value)}
-                    spellCheck={false}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="setup-psk">Wi-Fi password</Label>
-                  <Input
-                    id="setup-psk"
-                    type="password"
-                    value={psk}
-                    onChange={(event) => setPsk(event.target.value)}
-                    autoComplete="new-password"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="setup-country">Country</Label>
-                  <Input
-                    id="setup-country"
-                    value={country}
-                    onChange={(event) => setCountry(event.target.value.toUpperCase())}
-                    placeholder="DE"
-                    maxLength={2}
-                  />
-                </div>
-                <label className="flex items-end gap-2 pb-2 text-sm">
+                <label className="flex items-center gap-2 text-sm">
                   <input
-                    type="checkbox"
-                    checked={hiddenSsid}
-                    onChange={(event) => setHiddenSsid(event.target.checked)}
+                    type="radio"
+                    checked={!sshPassword}
+                    onChange={() => setSshPassword(false)}
                   />
-                  Hidden network
+                  Allow public-key authentication only
                 </label>
-              </div>
-              <p className={HINT}>
-                The Wi-Fi password is in the file and on the card until first boot. Anyone with
-                either can read it.
-              </p>
-            </>
-          )}
-        </fieldset>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="setup-hostname">Hostname (optional)</Label>
-            <Input
-              id="setup-hostname"
-              value={hostname}
-              onChange={(event) => setHostname(event.target.value.toLowerCase())}
-              placeholder="raspberrypi"
-              spellCheck={false}
-            />
-          </div>
-          <div>
-            <Label htmlFor="setup-timezone">Timezone (optional)</Label>
-            <Input
-              id="setup-timezone"
-              value={timezone}
-              onChange={(event) => setTimezone(event.target.value)}
-              placeholder="Europe/Berlin"
-              spellCheck={false}
-            />
-          </div>
-        </div>
-
-        <fieldset className={FIELDSET}>
-          <legend className="px-1 text-sm font-medium">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={useUser}
-                onChange={(event) => setUseUser(event.target.checked)}
-              />
-              Set username and password
-            </label>
-          </legend>
-          {useUser && (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <Label htmlFor="setup-user">Username</Label>
+                  <Label htmlFor="setup-ssh-key">
+                    SSH public key{sshPassword ? " (optional)" : ""}
+                  </Label>
                   <Input
-                    id="setup-user"
-                    value={userName}
-                    onChange={(event) => setUserName(event.target.value)}
-                    placeholder="pi"
+                    id="setup-ssh-key"
+                    value={sshKey}
+                    onChange={(event) => setSshKey(event.target.value)}
+                    placeholder="ssh-ed25519 AAAA… you@laptop"
                     spellCheck={false}
-                    autoCapitalize="off"
                   />
+                </div>
+                <p className={HINT}>
+                  Password login uses the user password above. The key is added for that user (or
+                  the image&apos;s first user).
+                </p>
+              </>
+            )}
+          </fieldset>
+        </section>
+
+        <section className={SECTION} aria-labelledby="setup-meteor-heading">
+          <div>
+            <h3 id="setup-meteor-heading" className="text-base font-semibold">
+              MeteorCloud (optional)
+            </h3>
+            <p className={HINT}>
+              Not required for Wi-Fi or SSH. Turn this on to put enrollment settings in the same
+              file so the device can request a token on first boot (or via meteorcli.service).
+            </p>
+          </div>
+
+          <fieldset className={FIELDSET}>
+            <legend className="px-1 text-sm font-medium">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={useEnroll}
+                  onChange={(event) => setUseEnroll(event.target.checked)}
+                />
+                Register this device with MeteorCloud on first boot
+              </label>
+            </legend>
+            {useEnroll && (
+              <>
+                <div>
+                  <Label htmlFor="setup-domain">MeteorCloud address the device connects to</Label>
+                  <Input
+                    id="setup-domain"
+                    value={domain}
+                    onChange={(event) => setDomain(event.target.value)}
+                    placeholder="fleet.example.com or 192.168.0.10:8000"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="space-y-1">
+                  {canCreateKey && (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="radio" checked={newKey} onChange={() => setNewKey(true)} />
+                      Create a new enrollment key for this file
+                    </label>
+                  )}
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="radio" checked={!newKey} onChange={() => setNewKey(false)} />
+                    Use an enrollment key I have
+                  </label>
+                  {!newKey && keysQuery.isSuccess && activeKeys.length === 0 && (
+                    <p className="text-sm text-amber-500">
+                      This organization has no active enrollment keys.{" "}
+                      {canCreateKey
+                        ? "Choose “Create a new enrollment key” above, or make one under Devices, Enrollment keys."
+                        : "Ask an owner or admin for one."}
+                    </p>
+                  )}
+                  {!newKey && activeKeys.length > 0 && (
+                    <select
+                      aria-label="Which enrollment key"
+                      className={SELECT}
+                      value={keyId}
+                      onChange={(event) => setKeyId(event.target.value)}
+                    >
+                      <option value="">Choose a key…</option>
+                      {activeKeys.map((key) => (
+                        <option key={key.id} value={key.id}>
+                          {key.name} · {key.key_prefix}…
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {!newKey && (
+                    <Input
+                      aria-label="Enrollment key"
+                      type="password"
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                      placeholder={chosenKey ? `${chosenKey.key_prefix}…` : "key_…"}
+                      autoComplete="new-password"
+                      spellCheck={false}
+                    />
+                  )}
+                  <p className={HINT}>
+                    {!newKey && activeKeys.length > 0
+                      ? "MeteorCloud shows a key only once, when it is made, so paste the key itself. "
+                      : "Keys are listed under Devices, Enrollment keys. "}
+                    Revoke the key when the batch of devices is done.
+                  </p>
                 </div>
                 <div>
-                  <Label htmlFor="setup-user-password">Password</Label>
+                  <Label htmlFor="setup-device-name">Device name in MeteorCloud (optional)</Label>
                   <Input
-                    id="setup-user-password"
-                    type="password"
-                    value={userPassword}
-                    onChange={(event) => setUserPassword(event.target.value)}
-                    autoComplete="new-password"
+                    id="setup-device-name"
+                    value={deviceName}
+                    onChange={(event) => setDeviceName(event.target.value)}
+                    placeholder="Automatic: device type and MAC, e.g. raspberrypi5-a1b2c3"
+                    maxLength={63}
+                    spellCheck={false}
                   />
+                  <p className={HINT}>
+                    Leave it empty when the same file goes on several cards, so each device gets its
+                    own name.
+                  </p>
                 </div>
-              </div>
-              <p className={HINT}>
-                The image&apos;s first user is renamed to this name (or created). Only a hash of
-                the password goes into the file.
-              </p>
-            </>
-          )}
-        </fieldset>
-
-        <fieldset className={FIELDSET}>
-          <legend className="px-1 text-sm font-medium">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={useSsh}
-                onChange={(event) => setUseSsh(event.target.checked)}
-              />
-              Enable SSH
-            </label>
-          </legend>
-          {useSsh && (
-            <>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="radio" checked={sshPassword} onChange={() => setSshPassword(true)} />
-                Use password authentication
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="radio" checked={!sshPassword} onChange={() => setSshPassword(false)} />
-                Allow public-key authentication only
-              </label>
-              <div>
-                <Label htmlFor="setup-ssh-key">
-                  SSH public key{sshPassword ? " (optional)" : ""}
-                </Label>
-                <Input
-                  id="setup-ssh-key"
-                  value={sshKey}
-                  onChange={(event) => setSshKey(event.target.value)}
-                  placeholder="ssh-ed25519 AAAA… you@laptop"
-                  spellCheck={false}
-                />
-              </div>
-              <p className={HINT}>
-                The key is added for the user above, or the image&apos;s first user.
-              </p>
-            </>
-          )}
-        </fieldset>
+              </>
+            )}
+          </fieldset>
+        </section>
 
         <p className={HINT}>
           Works with MeteorCloud OS images (the ones that include meteorcli). An image built before
           agent 0.3.0 only reads the name <code>.meteorenv</code>: rename the file on the card.
-          Delete the downloaded file from your computer once it is on the card: it holds the
+          Delete the downloaded file from your computer once it is on the card: it may hold the
           enrollment key and the Wi-Fi password.
         </p>
 

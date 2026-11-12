@@ -11,6 +11,7 @@ import {
   type DeviceAction,
 } from "@/api/fleet";
 import { ApiError } from "@/api/http";
+import { PasswordWithGenerate } from "@/components/PasswordWithGenerate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -253,13 +254,11 @@ export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, 
             </div>
             <div>
               <Label htmlFor="action-password">Password</Label>
-              <Input
+              <PasswordWithGenerate
                 id="action-password"
-                type="password"
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="new-password"
-                required
+                onChange={setPassword}
+                length={16}
               />
             </div>
           </div>

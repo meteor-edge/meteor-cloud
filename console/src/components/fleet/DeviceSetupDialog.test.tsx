@@ -69,32 +69,52 @@ function setup(props: Partial<Parameters<typeof DeviceSetupDialog>[0]> = {}) {
   return { user: userEvent.setup(), onDownloadImage };
 }
 
+async function enableEnrollment(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    screen.getByRole("checkbox", { name: "Register this device with MeteorCloud on first boot" }),
+  );
+}
+
 describe("DeviceSetupDialog", () => {
-  it("makes a key and downloads the settings the way Meteor Imager writes them", async () => {
+  it("downloads OS settings without MeteorCloud when enrollment stays off", async () => {
     const { user } = setup();
-    await user.type(screen.getByLabelText(/MeteorCloud address/), "fleet.example.com");
-    await user.click(screen.getByRole("checkbox", { name: "Connect to Wi-Fi" }));
-    await user.type(screen.getByLabelText(/Network name/), "Shop floor");
+    expect(screen.getByText(/OS settings \(like Raspberry Pi Imager\)/)).toBeInTheDocument();
+    expect(screen.getByText(/MeteorCloud \(optional\)/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("SSID"), "Shop floor");
     await user.type(screen.getByLabelText("Wi-Fi password"), "wifi-password-123");
-    expect(screen.getByLabelText("Country")).toHaveValue("DE");
-    await user.click(screen.getByRole("checkbox", { name: "Set username and password" }));
-    await user.type(screen.getByLabelText("Username"), "ops");
-    await user.type(screen.getByLabelText("Password"), "login-password");
-    await user.click(screen.getByRole("checkbox", { name: "Enable SSH" }));
+    expect(screen.getByLabelText(/Wireless LAN country/)).toHaveValue("DE");
+    expect(screen.getByLabelText("Username")).toHaveValue("pi");
+    await user.type(screen.getByLabelText(/^Password$/), "login-password");
+    await user.clear(screen.getByLabelText(/Timezone/));
+    await user.click(screen.getByRole("button", { name: "Download settings file" }));
+
+    await waitFor(() => expect(createDeviceConfig).toHaveBeenCalled());
+    expect(createEnrollmentKey).not.toHaveBeenCalled();
+    expect(vi.mocked(createDeviceConfig).mock.calls[0][2]).toEqual({
+      wifi: { ssid: "Shop floor", psk: "wifi-password-123", country: "DE", hidden: false },
+      user: { name: "pi", password: "login-password" },
+      ssh: { enabled: true, password_authentication: true },
+    });
+    expect(await screen.findByText(/meteorenv.txt downloaded/)).toBeInTheDocument();
+  });
+
+  it("makes a key and downloads when MeteorCloud enrollment is turned on", async () => {
+    const { user } = setup();
+    await enableEnrollment(user);
+    await user.type(screen.getByLabelText(/MeteorCloud address/), "fleet.example.com");
+    await user.type(screen.getByLabelText("SSID"), "Shop floor");
+    await user.type(screen.getByLabelText("Wi-Fi password"), "wifi-password-123");
+    await user.type(screen.getByLabelText(/^Password$/), "login-password");
     await user.clear(screen.getByLabelText(/Timezone/));
     await user.click(screen.getByRole("button", { name: "Download settings file" }));
 
     await waitFor(() => expect(createDeviceConfig).toHaveBeenCalled());
     expect(createEnrollmentKey).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(createDeviceConfig).mock.calls[0][2]).toEqual({
-      enrollment: { domain: "fleet.example.com", api_key: "key_made-for-this-file" },
-      wifi: { ssid: "Shop floor", psk: "wifi-password-123", country: "DE", hidden: false },
-      user: { name: "ops", password: "login-password" },
-      ssh: { enabled: true, password_authentication: true },
+    expect(vi.mocked(createDeviceConfig).mock.calls[0][2].enrollment).toEqual({
+      domain: "fleet.example.com",
+      api_key: "key_made-for-this-file",
     });
-    expect(await screen.findByText(/meteorenv.txt downloaded/)).toBeInTheDocument();
 
-    // A second download reuses the key instead of making another.
     await user.click(screen.getByRole("button", { name: "Download settings file" }));
     await waitFor(() => expect(createDeviceConfig).toHaveBeenCalledTimes(2));
     expect(createEnrollmentKey).toHaveBeenCalledTimes(1);
@@ -102,12 +122,17 @@ describe("DeviceSetupDialog", () => {
 
   it("says what is missing before calling the server", async () => {
     const { user } = setup({ canCreateKey: false });
-    await user.click(screen.getByRole("checkbox", { name: "Connect to Wi-Fi" }));
     await user.click(screen.getByRole("button", { name: "Download settings file" }));
-    expect(screen.getByText(/Enter an enrollment key/)).toBeInTheDocument();
     expect(screen.getByText(/Wi-Fi password must be 8 to 63/)).toBeInTheDocument();
+    expect(screen.queryByText(/Enter an enrollment key/)).not.toBeInTheDocument();
     expect(createDeviceConfig).not.toHaveBeenCalled();
-    expect(createEnrollmentKey).not.toHaveBeenCalled();
+  });
+
+  it("generates a login password from the button", async () => {
+    const { user } = setup();
+    const buttons = screen.getAllByRole("button", { name: "Generate" });
+    await user.click(buttons[0]);
+    expect((screen.getByLabelText(/^Password$/) as HTMLInputElement).value).toHaveLength(16);
   });
 
   it("lists active keys to pick from, and checks the pasted key is that one", async () => {
@@ -121,6 +146,12 @@ describe("DeviceSetupDialog", () => {
       }),
     ]);
     const { user } = setup();
+    await enableEnrollment(user);
+    // Avoid empty Wi-Fi blocking the enrollment checks.
+    await user.click(screen.getByRole("checkbox", { name: "Configure wireless LAN" }));
+    await user.click(screen.getByRole("checkbox", { name: "Set username and password" }));
+    await user.click(screen.getByRole("checkbox", { name: "Enable SSH" }));
+    await user.clear(screen.getByLabelText(/Timezone/));
     await user.type(screen.getByLabelText(/MeteorCloud address/), "fleet.example.com");
     await user.click(screen.getByRole("radio", { name: "Use an enrollment key I have" }));
     const picker = await screen.findByRole("combobox", { name: "Which enrollment key" });
@@ -148,6 +179,7 @@ describe("DeviceSetupDialog", () => {
       enrollmentKey({ revoked_at: "2026-11-02T00:00:00Z" }),
     ]);
     const { user } = setup();
+    await enableEnrollment(user);
     await user.click(screen.getByRole("radio", { name: "Use an enrollment key I have" }));
     expect(await screen.findByText(/no active enrollment keys/)).toBeInTheDocument();
     expect(
@@ -158,6 +190,11 @@ describe("DeviceSetupDialog", () => {
   it("refuses a pasted key that matches no active key", async () => {
     vi.mocked(listEnrollmentKeys).mockResolvedValue([enrollmentKey({})]);
     const { user } = setup();
+    await enableEnrollment(user);
+    await user.click(screen.getByRole("checkbox", { name: "Configure wireless LAN" }));
+    await user.click(screen.getByRole("checkbox", { name: "Set username and password" }));
+    await user.click(screen.getByRole("checkbox", { name: "Enable SSH" }));
+    await user.clear(screen.getByLabelText(/Timezone/));
     await user.type(screen.getByLabelText(/MeteorCloud address/), "fleet.example.com");
     await user.click(screen.getByRole("radio", { name: "Use an enrollment key I have" }));
     await screen.findByRole("combobox", { name: "Which enrollment key" });

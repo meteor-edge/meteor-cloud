@@ -104,6 +104,13 @@ describe("DeviceActionsPanel", () => {
     );
   });
 
+  it("can generate an SSH password", async () => {
+    const user = setup();
+    await user.click(await screen.findByRole("button", { name: "Change SSH password" }));
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toHaveLength(16);
+  });
+
   it("hides SSH user controls without the permission", async () => {
     setup({ canUsers: false });
     expect(await screen.findByRole("button", { name: "Restart" })).toBeInTheDocument();
