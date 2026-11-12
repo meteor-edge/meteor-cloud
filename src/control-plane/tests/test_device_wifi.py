@@ -138,7 +138,10 @@ def test_only_owners_and_admins_change_wifi_and_devices_see_only_their_own(
     client: TestClient, db_session: Session
 ) -> None:
     org, headers, agent, url = _device(client, db_session)
-    for email, role in (("operator@example.com", OrganizationRole.OPERATOR), ("viewer@example.com", OrganizationRole.VIEWER)):
+    for email, role in (
+        ("operator@example.com", OrganizationRole.OPERATOR),
+        ("viewer@example.com", OrganizationRole.VIEWER),
+    ):
         add_member(db_session, org, create_user(db_session, email=email), role)
         member = auth_header(client, email)
         assert client.get(url, headers=member).status_code == 200
@@ -182,7 +185,9 @@ def test_validation_and_open_networks(client: TestClient, db_session: Session) -
     assert (change["security"], change["password"]) == ("open", None)
 
 
-def test_removing_a_network_is_refused_when_it_would_cut_the_device_off(client: TestClient, db_session: Session) -> None:
+def test_removing_a_network_is_refused_when_it_would_cut_the_device_off(
+    client: TestClient, db_session: Session
+) -> None:
     _org, headers, agent, url = _device(client, db_session)
     saved = [{"ssid": "Old", "managed": False}, {"ssid": "Spare", "managed": False}]
     _report(client, agent, status={"supported": True, "connected_ssid": "Old", "saved_networks": saved})
@@ -202,7 +207,9 @@ def test_removing_a_network_is_refused_when_it_would_cut_the_device_off(client: 
 
     # With a cable in, the connected network may be removed too.
     _report(
-        client, agent, status={"supported": True, "connected_ssid": "Old", "wired_connected": True, "saved_networks": saved}
+        client,
+        agent,
+        status={"supported": True, "connected_ssid": "Old", "wired_connected": True, "saved_networks": saved},
     )
     assert client.post(f"{url}/networks/remove", headers=headers, json={"ssid": "Old"}).status_code == 200
 

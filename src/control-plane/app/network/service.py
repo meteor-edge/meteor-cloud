@@ -193,7 +193,9 @@ class DeviceWifiService:
         rows = self._rows(device.id, for_update=True)
         row = next((item for item in rows if item.ssid == payload.ssid), None)
         on_device = status is not None and any(item.get("ssid") == payload.ssid for item in status.saved_networks or [])
-        never_reached_device = row is not None and row.action == ACTION_APPLY and row.state in {STATE_PENDING, STATE_FAILED}
+        never_reached_device = (
+            row is not None and row.action == ACTION_APPLY and row.state in {STATE_PENDING, STATE_FAILED}
+        )
         if row is None and not on_device:
             raise NotFoundError("wifi_network_not_found", "The device has no Wi-Fi network with this name.")
         if row is not None and never_reached_device and not on_device:
@@ -292,7 +294,9 @@ class DeviceWifiService:
                 row.password_expires_at = None
                 row.reported_at = now
                 row.state = {"applied": STATE_APPLIED, "rolled_back": STATE_ROLLED_BACK}.get(result.state, STATE_FAILED)
-                row.last_error = None if row.state == STATE_APPLIED else (result.error or "The device reported a failure.")
+                row.last_error = (
+                    None if row.state == STATE_APPLIED else (result.error or "The device reported a failure.")
+                )
         if payload.status is not None:
             status = self._status(device.id)
             if status is None:
@@ -309,4 +313,3 @@ class DeviceWifiService:
             status.reported_at = now
         self.session.commit()
         return AgentWifiReportResponse(accepted=accepted)
-

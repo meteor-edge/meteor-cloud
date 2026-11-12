@@ -94,8 +94,8 @@ class ArtifactRepository:
         """Return a page of artifacts and the total number of matches.
 
         Pages are one-based and ordered newest first, then by ID. Type and
-        device type filters are exact (an artifact matches each of its device types); None omits either filter. Version and
-        name/file-name search use case-insensitive SQL LIKE patterns, with
+        device type filters are exact (an artifact matches each of its device types);
+        None omits either filter. Version and name/file-name search use case-insensitive SQL LIKE patterns, with
         surrounding wildcards; supplied percent and underscore remain wildcards.
         """
         statement = select(Artifact).where(Artifact.organization_id == organization_id)

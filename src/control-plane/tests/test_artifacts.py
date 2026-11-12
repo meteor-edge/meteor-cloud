@@ -172,7 +172,9 @@ def test_one_artifact_for_several_device_types(
     assert _upload(client, org.id, headers).status_code == 201
 
     # The list can be changed later, with the same rule.
-    clash = client.patch(f"{base}/artifacts/{other.json()['id']}", headers=headers, json={"device_type_ids": [pi4, pi5]})
+    clash = client.patch(
+        f"{base}/artifacts/{other.json()['id']}", headers=headers, json={"device_type_ids": [pi4, pi5]}
+    )
     assert clash.status_code == 409, clash.text
     widened = client.patch(
         f"{base}/artifacts/{artifact['id']}", headers=headers, json={"device_type_ids": [pi3, pi4, pi3]}

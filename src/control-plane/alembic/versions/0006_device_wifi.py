@@ -77,7 +77,9 @@ def upgrade() -> None:
         {
             "id": permission_id,
             "label": "Change device Wi-Fi",
-            "description": "Add, change and remove the Wi-Fi networks of a device. A wrong network can take it offline.",
+            "description": (
+                "Add, change and remove the Wi-Fi networks of a device. A wrong network can take it offline."
+            ),
         },
     )
     op.get_bind().execute(

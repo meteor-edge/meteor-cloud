@@ -57,7 +57,8 @@ def upload_artifact(
     version: Annotated[str, Form()],
     type: Annotated[str, Form()] = ArtifactType.OS_IMAGE.value,
     device_type_ids: Annotated[
-        list[str] | None, Form(description="Device types the artifact is for: repeat the field, or separate with commas")
+        list[str] | None,
+        Form(description="Device types the artifact is for: repeat the field, or separate with commas"),
     ] = None,
     device_type_id: Annotated[str | None, Form(description="One device type; use device_type_ids")] = None,
     description: Annotated[str | None, Form()] = None,

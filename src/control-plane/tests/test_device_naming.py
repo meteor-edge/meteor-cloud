@@ -14,7 +14,6 @@ from app.devices.naming import default_device_name, match_device_type, model_kin
 from tests.conftest import auth_header, create_org_with_owner, create_user
 from tests.test_deployments import _register_device, _setup_release
 
-
 PI5 = "Raspberry Pi 5 Model B Rev 1.0"
 
 
@@ -157,7 +156,9 @@ def test_two_default_hostnames_get_distinct_suggestions_that_the_device_receives
     assert _suggestions(client, org, headers)[first["request_id"]] is None
 
 
-def test_repeated_chosen_name_is_numbered_while_pending_and_after_claim(client: TestClient, db_session: Session) -> None:
+def test_repeated_chosen_name_is_numbered_while_pending_and_after_claim(
+    client: TestClient, db_session: Session
+) -> None:
     org, headers, key = _org_with_key(client, db_session)
     first = _submit(client, key, name="kiosk", hostname="pi", mac_addresses=["aa:bb:cc:dd:00:03"])
     second = _submit(client, key, name="kiosk", hostname="pi", mac_addresses=["aa:bb:cc:dd:00:04"])
@@ -287,7 +288,9 @@ def test_reregistering_with_a_taken_name_gets_a_number(client: TestClient, db_se
 
 
 def _device_type(client: TestClient, org, headers, name: str, **fields) -> str:
-    response = client.post(f"/api/v1/organizations/{org.id}/device-types", headers=headers, json={"name": name, **fields})
+    response = client.post(
+        f"/api/v1/organizations/{org.id}/device-types", headers=headers, json={"name": name, **fields}
+    )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
@@ -296,9 +299,7 @@ def test_name_follows_the_device_type_picked_at_approval(client: TestClient, db_
     org, headers, key = _org_with_key(client, db_session)
     nuc = _device_type(client, org, headers, "Intel NUC 13")
     # What a card from the imager sends with agent 0.2.0: the hostname as its name, no board model.
-    submitted = _submit(
-        client, key, name="raspberrypi", hostname="raspberrypi", mac_addresses=["aa:bb:cc:dd:00:20"]
-    )
+    submitted = _submit(client, key, name="raspberrypi", hostname="raspberrypi", mac_addresses=["aa:bb:cc:dd:00:20"])
     row = client.get(f"/api/v1/organizations/{org.id}/enrollment-requests", headers=headers).json()[0]
     assert row["suggested_name"] == "raspberrypi-dd0020"
     assert row["name_suffix"] == "dd0020"

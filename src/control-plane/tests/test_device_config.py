@@ -109,6 +109,8 @@ def test_download_needs_a_member_who_can_add_devices_and_never_echoes_secrets(
     stored = hash_line.split("=", 1)[1]
     assert stored == sha512_crypt("Hello world!", salt=stored.split("$")[2])
 
-    bad = client.post(url, headers=headers, json={**FULL, "wifi": {"ssid": "n", "psk": "bad\nsecret-psk", "country": "DE"}})
+    bad = client.post(
+        url, headers=headers, json={**FULL, "wifi": {"ssid": "n", "psk": "bad\nsecret-psk", "country": "DE"}}
+    )
     assert bad.status_code == 422
     assert "secret-psk" not in bad.text

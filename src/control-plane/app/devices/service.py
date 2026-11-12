@@ -20,6 +20,12 @@ from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, NotFoundError
+from app.devices.device_config import (
+    DEVICE_CONFIG_FILE_NAME,
+    DeviceConfigRequest,
+    DeviceConfigResponse,
+    render_device_config,
+)
 from app.devices.models import (
     Device,
     DeviceEnrollmentRequest,
@@ -28,12 +34,6 @@ from app.devices.models import (
     DeviceType,
     EnrollmentApiKey,
     RegistrationToken,
-)
-from app.devices.device_config import (
-    DEVICE_CONFIG_FILE_NAME,
-    DeviceConfigRequest,
-    DeviceConfigResponse,
-    render_device_config,
 )
 from app.devices.naming import (
     default_device_name,
@@ -380,10 +380,7 @@ class FleetService:
         if scope.mode == "device_groups":
             allowed = set(scope.device_group_ids)
             groups = [item for item in groups if item.id in allowed]
-        return [
-            self._to_device_group_response(item, device_count=counts.get(item.id, 0))
-            for item in groups
-        ]
+        return [self._to_device_group_response(item, device_count=counts.get(item.id, 0)) for item in groups]
 
     def get_device_group(
         self,
@@ -829,9 +826,9 @@ class FleetService:
             # Keep the name the list showed, so a later request claiming first can't take it.
             self.devices.lock_names(organization_id=organization_id)
             every_request = self.enrollment_requests.list(organization_id=organization_id, status=None)
-            request.assigned_name = self._suggested_names(
-                organization_id, every_request, include_existing=False
-            ).get(request.id)
+            request.assigned_name = self._suggested_names(organization_id, every_request, include_existing=False).get(
+                request.id
+            )
 
         request.status = "approved"
         request.reviewed_by_user_id = actor.id

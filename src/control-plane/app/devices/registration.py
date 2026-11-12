@@ -246,9 +246,7 @@ class RegistrationService:
         except Exception:
             self.session.rollback()
             raise
-        return AgentMqttCredentialsResponse(
-            **info.model_dump(), config_version=mqtt_config_version(self.settings)
-        )
+        return AgentMqttCredentialsResponse(**info.model_dump(), config_version=mqtt_config_version(self.settings))
 
     def heartbeat(
         self,

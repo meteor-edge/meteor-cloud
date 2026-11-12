@@ -81,5 +81,7 @@ class DeviceWifiStatus(Base, TimestampMixin):
     # True when another link (Ethernet) also reaches the network, so Wi-Fi changes cannot cut the device off.
     wired_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_false())
     # Networks saved on the device: [{"ssid": ..., "managed": bool}].
-    saved_networks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    saved_networks: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
