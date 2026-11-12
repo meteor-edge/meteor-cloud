@@ -1022,20 +1022,25 @@ class DeploymentService:
                         message=exc.message if isinstance(exc, AppError) else "Could not create this rollback.",
                     )
                 )
-        self.audit.record(
-            actor=actor,
-            organization_id=organization_id,
-            action="deployment.rollback",
-            resource_type="deployment",
-            resource_id=original.id,
-            outcome="success" if not failed else "partial",
-            metadata={
-                "created_deployment_ids": [str(item.id) for item in created],
-                "failed_release_ids": [str(item.release_id) for item in failed],
-                "skipped_devices": len(no_previous),
-            },
-        )
-        self.session.commit()
+        # Group creates already committed; keep returning them if the audit write fails.
+        try:
+            self.audit.record(
+                actor=actor,
+                organization_id=organization_id,
+                action="deployment.rollback",
+                resource_type="deployment",
+                resource_id=original.id,
+                outcome="success" if not failed else "partial",
+                metadata={
+                    "created_deployment_ids": [str(item.id) for item in created],
+                    "failed_release_ids": [str(item.release_id) for item in failed],
+                    "skipped_devices": len(no_previous),
+                },
+            )
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            logger.exception("audit write for deployment.rollback failed")
         skipped = [
             RollbackSkippedDevice(
                 device_id=device_id,

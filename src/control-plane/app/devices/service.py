@@ -101,6 +101,7 @@ class FleetService:
         resource_type: str,
         resource_id: uuid.UUID | str | None = None,
         metadata: dict[str, Any] | None = None,
+        outcome: str = "success",
     ) -> None:
         self.audit.record(
             actor=actor,
@@ -109,6 +110,7 @@ class FleetService:
             resource_type=resource_type,
             resource_id=resource_id,
             metadata=metadata,
+            outcome=outcome,
         )
 
     # ---------------------------------------------------------------- helpers
@@ -1175,6 +1177,7 @@ class FleetService:
             resource_type="device",
             resource_id=device_id,
             metadata={"name": device.name},
+            outcome="failure" if response.status == "failed" else "success",
         )
         self.session.commit()
         return response

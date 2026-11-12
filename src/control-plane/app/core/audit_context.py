@@ -13,7 +13,7 @@ access log promises not to log them.
 from __future__ import annotations
 
 import uuid
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
 _MAX_USER_AGENT = 512
@@ -35,7 +35,7 @@ class AuditRequestContext:
 _current: ContextVar[AuditRequestContext | None] = ContextVar("audit_request_context", default=None)
 
 
-def open_request_context(*, ip: str | None, user_agent: str | None):
+def open_request_context(*, ip: str | None, user_agent: str | None) -> Token[AuditRequestContext | None]:
     """Start a request's context; pass the returned token to ``close_request_context``."""
     context = AuditRequestContext(
         ip=(ip or None) and ip[:_MAX_IP],
@@ -44,7 +44,7 @@ def open_request_context(*, ip: str | None, user_agent: str | None):
     return _current.set(context)
 
 
-def close_request_context(token) -> None:
+def close_request_context(token: Token[AuditRequestContext | None]) -> None:
     _current.reset(token)
 
 

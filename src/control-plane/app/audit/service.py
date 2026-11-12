@@ -65,6 +65,8 @@ class AuditRecorder:
         if actor is not None:
             resolved_type, resolved_id = "user", str(actor.id)
         elif actor_type is not None:
+            if actor_type == "user":
+                raise ValueError("Pass a User through actor= instead of actor_type='user'.")
             resolved_type, resolved_id = actor_type, str(actor_id) if actor_id is not None else None
         elif context is not None and context.actor_type is not None:
             resolved_type, resolved_id = context.actor_type, context.actor_id

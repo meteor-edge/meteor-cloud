@@ -178,6 +178,30 @@ def test_device_group_crud_is_audited(client: TestClient, db_session: Session) -
     assert actions == ["device_group.delete", "device_group.update", "device_group.create"]
 
 
+def test_failed_ping_is_audited_as_failure(db_session: Session) -> None:
+    from tests.test_mqtt_commands import _client_with_publisher, _register
+
+    class FailingPublisher:
+        def publish(self, topic: str, payload: str, *, qos: int = 1, retain: bool = False) -> None:
+            raise RuntimeError("broker unavailable")
+
+    client = _client_with_publisher(db_session, FailingPublisher())
+    headers, body = _register(client, db_session)
+    org_id = body["organization_id"]
+    device_id = body["device_id"]
+
+    response = client.post(
+        f"/api/v1/organizations/{org_id}/devices/{device_id}/commands/ping",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "failed"
+
+    (event,) = _events(client, org_id, headers, action="device.command.ping")
+    assert event["outcome"] == "failure"
+    assert event["resource_id"] == device_id
+
+
 def test_list_pages_with_before_cursor(client: TestClient, db_session: Session) -> None:
     _owner, org, headers = _setup(client, db_session)
     for name in ("A", "B", "C"):
