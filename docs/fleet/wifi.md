@@ -26,6 +26,15 @@ The old password stays wrong on the device afterwards, but the new profile wins.
 **Remove** is refused by the device when the network is the one it is connected
 through and no cable is plugged in, because that would cut it off.
 
+## Which connection a device uses
+
+**Devices → a device → Network → Connection** shows the link the device's traffic
+uses now: Ethernet, Wi-Fi (with the network name and signal), a mobile network, or
+another link, plus its interface (`eth0`, `wlan0`) and whether the other one is also
+connected. It is the IPv4 default route with the lowest metric, so with a cable and
+Wi-Fi both up it shows Ethernet. meteorcli 0.3.0 or newer reports it with every change
+and at least every 5 minutes; it does not need NetworkManager or the Wi-Fi helper.
+
 ## How the password is protected
 
 1. The console sends the password once over HTTPS. No response, list or audit entry
@@ -79,7 +88,7 @@ Agent (device credential):
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET` | `/api/v1/agent/network/wifi` | Waiting changes, with the password |
-| `POST` | `/api/v1/agent/network/wifi/report` | `status` and `results` (`id`, `revision`, `state`, `error`). A result for an older revision of a change is ignored |
+| `POST` | `/api/v1/agent/network/wifi/report` | `status` and `results` (`id`, `revision`, `state`, `error`). A result for an older revision of a change is ignored. `status.uplink_type` (`ethernet`, `wifi`, `cellular`, `other`; unknown values are stored as `other`) and `status.uplink_interface` are optional |
 
 ## Not included
 

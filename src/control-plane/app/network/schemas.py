@@ -9,6 +9,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 WifiSecurity = Literal["wpa-psk", "open"]
+UplinkType = Literal["ethernet", "wifi", "cellular", "other"]
+UPLINK_TYPES: tuple[str, ...] = ("ethernet", "wifi", "cellular", "other")
 _LINE_BREAKS = ("\x00", "\r", "\n")
 
 
@@ -90,6 +92,9 @@ class WifiStatusResponse(BaseModel):
     interface: str | None
     wired_connected: bool
     saved_networks: list[WifiSavedNetwork]
+    # None from agents before the uplink was reported.
+    uplink_type: UplinkType | None = None
+    uplink_interface: str | None = None
     reported_at: datetime
 
 
@@ -123,6 +128,16 @@ class AgentWifiStatus(BaseModel):
     interface: str | None = Field(default=None, max_length=32)
     wired_connected: bool = False
     saved_networks: list[WifiSavedNetwork] = Field(default_factory=list, max_length=64)
+    # The link traffic leaves on (default route). A kind this server does not know is stored as "other".
+    uplink_type: str | None = Field(default=None, max_length=16)
+    uplink_interface: str | None = Field(default=None, max_length=32)
+
+    @field_validator("uplink_type")
+    @classmethod
+    def _known_uplink(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value if value in UPLINK_TYPES else "other"
 
 
 class AgentWifiResult(BaseModel):

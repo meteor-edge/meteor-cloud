@@ -93,13 +93,27 @@ def _change(**extra: Any) -> dict[str, Any]:
     }
 
 
-def _sync(client: FakeClient, helper: FakeHelper, clock: list[float] | None = None) -> WifiSync:
+UPLINK = {"uplink_type": "wifi", "uplink_interface": "wlan0"}
+
+
+def _sync(
+    client: FakeClient, helper: FakeHelper, clock: list[float] | None = None, uplink: dict[str, str] | None = None
+) -> WifiSync:
     now = clock if clock is not None else [0.0]
+    link = UPLINK if uplink is None else uplink
 
     def sleep(seconds: float) -> None:
         now[0] += seconds
 
-    return WifiSync(client, "token", runner=helper, installed=lambda: True, sleep=sleep, clock=lambda: now[0])
+    return WifiSync(
+        client,
+        "token",
+        runner=helper,
+        installed=lambda: True,
+        uplink=lambda: dict(link),
+        sleep=sleep,
+        clock=lambda: now[0],
+    )
 
 
 def test_first_heartbeat_reports_wifi_status_then_only_changes() -> None:
@@ -108,11 +122,32 @@ def test_first_heartbeat_reports_wifi_status_then_only_changes() -> None:
     sync = _sync(client, helper, clock)
     sync.on_heartbeat({"status": "online"})
     sync.on_heartbeat({"status": "online"})
-    assert client.reports == [{"results": [], "status": STATUS}]
+    assert client.reports == [{"results": [], "status": {**STATUS, **UPLINK}}]
     assert client.fetches == 0
     clock[0] += wifi.STATUS_REFRESH_SECONDS
     sync.on_heartbeat({"status": "online"})
     assert len(client.reports) == 2
+
+
+def test_a_new_uplink_is_reported_with_the_next_heartbeat() -> None:
+    client, helper = FakeClient(), FakeHelper()
+    link = dict(UPLINK)
+    sync = WifiSync(
+        client, "token", runner=helper, installed=lambda: True, uplink=lambda: dict(link), clock=lambda: 0.0
+    )
+    sync.on_heartbeat({"status": "online"})
+    link.update(uplink_type="ethernet", uplink_interface="eth0")
+    sync.on_heartbeat({"status": "online"})
+    assert [report["status"]["uplink_type"] for report in client.reports] == ["wifi", "ethernet"]
+
+
+def test_a_failing_uplink_reader_does_not_stop_the_report() -> None:
+    def broken() -> dict[str, str]:
+        raise OSError("no /proc")
+
+    client = FakeClient()
+    WifiSync(client, "token", runner=FakeHelper(), installed=lambda: True, uplink=broken).on_heartbeat({})
+    assert client.reports[0]["status"] == STATUS
 
 
 def test_saved_for_later_is_applied_and_reported() -> None:
@@ -187,11 +222,16 @@ def test_unconfirmed_change_from_before_a_restart_is_rolled_back() -> None:
 
 def test_missing_helper_reports_unsupported_and_fails_changes() -> None:
     client = FakeClient([_change()])
-    sync = WifiSync(client, "token", runner=FakeHelper(), installed=lambda: False, clock=lambda: 0.0)
+    uplink = {"uplink_type": "ethernet", "uplink_interface": "eth0"}
+    sync = WifiSync(
+        client, "token", runner=FakeHelper(), installed=lambda: False, uplink=lambda: uplink, clock=lambda: 0.0
+    )
     sync.on_heartbeat({"wifi_pending": True})
     report = client.reports[-1]
     assert report["status"]["supported"] is False
     assert "installer" in report["status"]["unsupported_reason"]
+    # The link in use does not need the helper.
+    assert report["status"]["uplink_type"] == "ethernet"
     assert report["results"][0]["state"] == "failed"
 
 
@@ -204,7 +244,7 @@ def test_older_server_and_errors_never_stop_the_heartbeat_loop(caplog: pytest.Lo
     def boom(args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
         raise RuntimeError("bug")
 
-    WifiSync(FakeClient(), "token", runner=boom, installed=lambda: True).on_heartbeat({})
+    WifiSync(FakeClient(), "token", runner=boom, installed=lambda: True, uplink=dict).on_heartbeat({})
     assert "Wi-Fi sync failed" in caplog.text
 
 

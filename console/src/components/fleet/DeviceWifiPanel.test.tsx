@@ -26,6 +26,8 @@ const reported: DeviceWifi = {
     interface: "wlan0",
     wired_connected: false,
     saved_networks: [{ ssid: "Home", managed: false }],
+    uplink_type: "wifi",
+    uplink_interface: "wlan0",
     reported_at: "2026-11-11T10:00:00Z",
   },
   networks: [],

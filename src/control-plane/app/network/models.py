@@ -84,4 +84,7 @@ class DeviceWifiStatus(Base, TimestampMixin):
     saved_networks: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
+    # The link traffic leaves on (default route): ethernet, wifi, cellular or other.
+    uplink_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    uplink_interface: Mapped[str | None] = mapped_column(String(32), nullable=True)
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

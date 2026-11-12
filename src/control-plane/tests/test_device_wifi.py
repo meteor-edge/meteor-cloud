@@ -246,3 +246,28 @@ def test_password_sealed_for_one_change_does_not_open_as_another(client: TestCli
     assert [(item["ssid"], item["password"]) for item in changes] == [("A", PASSWORD)]
     networks = {item["ssid"]: item for item in client.get(url, headers=headers).json()["networks"]}
     assert networks["B"]["state"] == "failed"
+
+
+def test_the_link_in_use_is_shown_also_where_wifi_cannot_be_managed(client: TestClient, db_session: Session) -> None:
+    _org, headers, agent, url = _device(client, db_session)
+    _report(
+        client,
+        agent,
+        status={
+            "supported": False,
+            "unsupported_reason": "NetworkManager is not installed on this device.",
+            "uplink_type": "ethernet",
+            "uplink_interface": "eth0",
+        },
+    )
+    status = client.get(url, headers=headers).json()["status"]
+    assert (status["uplink_type"], status["uplink_interface"]) == ("ethernet", "eth0")
+
+    # A kind a newer agent knows and this server does not: kept as "other", not refused.
+    _report(client, agent, status={"supported": True, "uplink_type": "satellite", "uplink_interface": "sat0"})
+    assert client.get(url, headers=headers).json()["status"]["uplink_type"] == "other"
+
+    # Agents from before the uplink: nothing to show.
+    _report(client, agent, status={"supported": True, "connected_ssid": "Home"})
+    status = client.get(url, headers=headers).json()["status"]
+    assert (status["uplink_type"], status["uplink_interface"]) == (None, None)

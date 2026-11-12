@@ -19,6 +19,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from edge_agent.client import AgentApiError, EdgeClient
+from edge_agent.inventory import read_uplink
 
 logger = logging.getLogger("edge_agent")
 
@@ -76,6 +77,7 @@ class WifiSync:
         *,
         runner: Runner = _default_runner,
         installed: Callable[[], bool] = helper_installed,
+        uplink: Callable[[], dict[str, str]] = read_uplink,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -83,6 +85,7 @@ class WifiSync:
         self.device_token = device_token
         self._runner = runner
         self._installed = installed
+        self._read_uplink = uplink
         self._sleep = sleep
         self._clock = clock
         self._started = False
@@ -110,11 +113,19 @@ class WifiSync:
             answer["error"] = (done.stderr or "").strip()[:300] or "The Wi-Fi helper failed."
         return done.returncode, answer
 
+    def _uplink(self) -> dict[str, str]:
+        try:
+            return self._read_uplink()
+        except Exception:  # noqa: BLE001 - best effort, like the rest of the inventory
+            return {}
+
     def status(self) -> dict[str, Any]:
-        """This device's Wi-Fi, in the shape the server expects (no passwords)."""
+        """This device's Wi-Fi and the link it uses now, in the shape the server expects (no passwords)."""
+        # The uplink is read without the helper, so it is reported even where Wi-Fi cannot be managed.
+        uplink = self._uplink()
         code, answer = self._helper("status")
         if code != 0:
-            return {"supported": False, "unsupported_reason": str(answer.get("error", ""))[:255]}
+            return {"supported": False, "unsupported_reason": str(answer.get("error", ""))[:255], **uplink}
         keys = (
             "supported",
             "unsupported_reason",
@@ -124,7 +135,7 @@ class WifiSync:
             "wired_connected",
             "saved_networks",
         )
-        return {key: answer[key] for key in keys if key in answer}
+        return {**{key: answer[key] for key in keys if key in answer}, **uplink}
 
     # -------------------------------------------------------------- steps
     def _recover(self) -> None:

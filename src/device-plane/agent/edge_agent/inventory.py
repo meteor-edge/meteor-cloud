@@ -148,6 +148,51 @@ def read_mac_addresses() -> list[str]:
     return [macs[chosen]]
 
 
+_RTF_UP = 0x1
+
+
+def _iface_kind(net_dir: Path, iface: str) -> str:
+    """ethernet, wifi, cellular or other, from sysfs (no root, no NetworkManager)."""
+    base = net_dir / iface
+    uevent = _read_text(str(base / "uevent")) or ""
+    devtype = next((line.split("=", 1)[1] for line in uevent.splitlines() if line.startswith("DEVTYPE=")), "")
+    if devtype == "wlan" or (base / "wireless").exists() or (base / "phy80211").exists():
+        return "wifi"
+    if devtype == "wwan" or iface.startswith("wwan"):
+        return "cellular"
+    if _is_virtual_iface(iface) or devtype:
+        return "other"
+    # ARPHRD_ETHER on real hardware (a "device" link); bridges and tunnels have none.
+    if _read_text(str(base / "type")) == "1" and (base / "device").exists():
+        return "ethernet"
+    return "other"
+
+
+def read_uplink() -> dict[str, str]:
+    """The link this device's traffic leaves on: the IPv4 default route with the lowest metric.
+
+    ``{"uplink_type": "ethernet", "uplink_interface": "eth0"}``, or ``{}`` without a default route.
+    """
+    content = _read_text("/proc/net/route")
+    if not content:
+        return {}
+    best: tuple[int, str] | None = None
+    for line in content.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) < 8 or fields[1] != "00000000" or fields[7] != "00000000":
+            continue
+        try:
+            flags, metric = int(fields[3], 16), int(fields[6])
+        except ValueError:
+            continue
+        if flags & _RTF_UP and (best is None or metric < best[0]):
+            best = (metric, fields[0])
+    if best is None:
+        return {}
+    iface = best[1]
+    return {"uplink_type": _iface_kind(_sys_class_net(), iface), "uplink_interface": iface[:32]}
+
+
 def read_cpu() -> tuple[str | None, int | None]:
     """Return (cpu_model, cpu_cores)."""
     content = _read_text("/proc/cpuinfo")

@@ -21,6 +21,7 @@ import { DeviceEndpointsPanel } from "@/components/fleet/DeviceEndpointsPanel";
 import { DeviceLogs } from "@/components/fleet/DeviceLogs";
 import { DeviceMqttStatus } from "@/components/fleet/DeviceMqttStatus";
 import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
+import { DeviceUplinkPanel } from "@/components/fleet/DeviceUplinkPanel";
 import { DeviceResourceMeters } from "@/components/fleet/DeviceResourceMeters";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
@@ -307,6 +308,12 @@ export function DeviceDetailPage() {
 
       {activeTab === "network" && (
         <>
+          {token && (
+            <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+              <h2 className="text-lg font-semibold">Connection</h2>
+              <DeviceUplinkPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+            </div>
+          )}
           <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
         <h2 className="text-lg font-semibold">Public URLs</h2>
         <p className="text-sm text-muted-foreground">

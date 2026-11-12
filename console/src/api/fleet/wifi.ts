@@ -26,8 +26,13 @@ export type DeviceWifiStatus = {
   interface: string | null;
   wired_connected: boolean;
   saved_networks: { ssid: string; managed: boolean }[];
+  /** The link traffic leaves on (default route). null from agents that do not report it. */
+  uplink_type: UplinkType | null;
+  uplink_interface: string | null;
   reported_at: string;
 };
+
+export type UplinkType = "ethernet" | "wifi" | "cellular" | "other";
 
 export type DeviceWifi = {
   /** null: the device has not reported its Wi-Fi (agent older than 0.3.0, or not online since). */

@@ -120,6 +120,8 @@ class DeviceWifiService:
                 interface=status.interface,
                 wired_connected=status.wired_connected,
                 saved_networks=[WifiSavedNetwork.model_validate(item) for item in status.saved_networks or []],
+                uplink_type=status.uplink_type,
+                uplink_interface=status.uplink_interface,
                 reported_at=status.reported_at,
             ),
             networks=[self._to_response(row) for row in rows],
@@ -310,6 +312,8 @@ class DeviceWifiService:
             status.interface = reported.interface
             status.wired_connected = reported.wired_connected
             status.saved_networks = [item.model_dump() for item in reported.saved_networks]
+            status.uplink_type = reported.uplink_type
+            status.uplink_interface = reported.uplink_interface
             status.reported_at = now
         self.session.commit()
         return AgentWifiReportResponse(accepted=accepted)
