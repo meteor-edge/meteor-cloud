@@ -127,6 +127,9 @@ Foreground `meteorcli run` is unprivileged. systemd Deploys go through
 `meteorcli-systemd` (installed by `sudo ./installcli.sh`). `meteorcli.service`
 already runs as root and does not need that helper.
 
+Wi-Fi changes ordered from the console go through `meteorcli-wifi` (same installer,
+NetworkManager only). See [Wi-Fi](fleet/wifi.md).
+
 ## Related
 
 - [Getting started](getting-started.md)

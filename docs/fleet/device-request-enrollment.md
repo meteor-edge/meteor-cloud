@@ -104,11 +104,19 @@ and the console pre-fills it when approving, so nobody has to invent a name. It
 is the first of these that applies:
 
 1. The device's current name, if this hardware is already enrolled.
-2. `--name` from `meteorcli request-token`.
-3. The hostname, unless it is an OS default (`raspberrypi`, `ubuntu`, …) or `localhost`.
-4. The OS default or `device`, plus the last 4 characters of the primary MAC (or the
-   serial, if there is no MAC): `raspberrypi-a1b2`, `device-a1b2`.
+2. `--name` from `meteorcli request-token` (or `METEOR_NAME` on the card), unless it
+   only repeats the hostname. Agents up to 0.2.0 sent the hostname as the name.
+3. The device kind, a dash, and the last three bytes of the primary MAC:
+   `raspberrypi5-a1b2c3`. Without a MAC the end of the serial is used.
 
+The kind is the first that is known: the device type chosen at approval (its slug
+without dashes, so "Raspberry Pi 5" gives `raspberrypi5`), a device type of the
+organization that matches the model the device reports, the reported model
+(`hardware_model`, from the device tree or DMI), the hostname, then `device`.
+The hostname itself is never used as the name: images share it.
+
+Responses also carry `name_suffix` and `suggested_device_type_id`, so the console can
+preselect the matching type and rebuild the name when another type is picked.
 `-2`, `-3`… is added if another device in the organization has that name. The same
 rules apply if the approval has no name and to token registration. A name typed
 when approving is used as it is; repeated names are allowed, and the console warns
