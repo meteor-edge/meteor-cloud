@@ -18,8 +18,6 @@ type Props = {
   token: string;
   organizationId: string;
   deviceId: string;
-  /** device.network: owners and admins by default. Others see the state but cannot change it. */
-  canChange: boolean;
 };
 
 type Row = {
@@ -90,7 +88,8 @@ function changeNote(change: DeviceWifiNetwork): { text: string; tone: string } |
 }
 
 /** Wi-Fi networks of one device: what it reports, and changes ordered from here. */
-export function DeviceWifiPanel({ token, organizationId, deviceId, canChange }: Props) {
+/** Shown only with device.network (owners and admins by default): the API refuses everyone else. */
+export function DeviceWifiPanel({ token, organizationId, deviceId }: Props) {
   const queryClient = useQueryClient();
   const queryKey = ["device-wifi", organizationId, deviceId];
   const [editing, setEditing] = useState<string | null>(null); // "" = a new network
@@ -236,40 +235,32 @@ export function DeviceWifiPanel({ token, organizationId, deviceId, canChange }: 
                   </p>
                   {note && <p className={`mt-1 text-xs ${note.tone}`}>{note.text}</p>}
                 </div>
-                {canChange && (
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => startEditing(row.ssid)}>
-                      Change password
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={removeMutation.isPending}
-                      onClick={() => onRemove(row.ssid)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                )}
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => startEditing(row.ssid)}>
+                    Change password
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={removeMutation.isPending}
+                    onClick={() => onRemove(row.ssid)}
+                  >
+                    Remove
+                  </Button>
+                </div>
               </li>
             );
           })}
         </ul>
       )}
 
-      {!canChange && wifi && (
-        <p className="text-sm text-muted-foreground">
-          Only owners and admins can change a device's Wi-Fi.
-        </p>
-      )}
-
-      {canChange && wifi && editing === null && (
+      {wifi && editing === null && (
         <Button variant="outline" onClick={() => startEditing("")}>
           Add a network
         </Button>
       )}
 
-      {canChange && editing !== null && (
+      {editing !== null && (
         <form onSubmit={onSubmit} className="space-y-3 rounded-md border border-border p-4">
           <h3 className="text-sm font-semibold">
             {editing ? `Change the password of "${editing}"` : "Add a network"}

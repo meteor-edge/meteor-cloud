@@ -52,17 +52,12 @@ function network(
   };
 }
 
-function setup(wifi: DeviceWifi, canChange = true) {
+function setup(wifi: DeviceWifi) {
   vi.mocked(getDeviceWifi).mockResolvedValue(wifi);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <DeviceWifiPanel
-        token="token"
-        organizationId="org-1"
-        deviceId="dev-1"
-        canChange={canChange}
-      />
+      <DeviceWifiPanel token="token" organizationId="org-1" deviceId="dev-1" />
     </QueryClientProvider>,
   );
   return userEvent.setup();
@@ -159,10 +154,8 @@ describe("DeviceWifiPanel", () => {
     );
   });
 
-  it("explains a device that has not reported, and is read-only without the permission", async () => {
-    setup({ status: null, networks: [] }, false);
+  it("explains a device that has not reported", async () => {
+    setup({ status: null, networks: [] });
     expect(await screen.findByText(/needs meteorcli 0.3.0 or newer/)).toBeInTheDocument();
-    expect(screen.getByText(/Only owners and admins/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add a network" })).not.toBeInTheDocument();
   });
 });

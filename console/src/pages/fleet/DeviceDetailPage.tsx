@@ -34,7 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import {
-  canChangeDeviceWifi,
+  canManageDeviceWifi,
   canManageDeployments,
   canManageEndpoints,
   canManageFleet,
@@ -115,7 +115,7 @@ export function DeviceDetailPage() {
     : canViewDeviceLogs(orgQuery.data?.current_user_role);
   const canWifi = orgAccess
     ? orgAccess.permissions.includes("device.network")
-    : canChangeDeviceWifi(orgQuery.data?.current_user_role);
+    : canManageDeviceWifi(orgQuery.data?.current_user_role);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
@@ -308,7 +308,7 @@ export function DeviceDetailPage() {
 
       {activeTab === "network" && (
         <>
-          {token && (
+          {canWifi && token && (
             <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
               <h2 className="text-lg font-semibold">Connection</h2>
               <DeviceUplinkPanel token={token} organizationId={organizationId} deviceId={deviceId} />
@@ -549,13 +549,8 @@ export function DeviceDetailPage() {
         </div>
       )}
 
-      {activeTab === "settings" && canManage && token && (
-        <DeviceWifiPanel
-          token={token}
-          organizationId={organizationId}
-          deviceId={deviceId}
-          canChange={canWifi}
-        />
+      {activeTab === "settings" && canManage && canWifi && token && (
+        <DeviceWifiPanel token={token} organizationId={organizationId} deviceId={deviceId} />
       )}
 
       {rotatedToken && (

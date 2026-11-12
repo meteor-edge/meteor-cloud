@@ -81,8 +81,8 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef(
         "device",
         "network",
-        "Change device Wi-Fi",
-        "Add, change and remove the Wi-Fi networks of a device. A wrong network can take it offline.",
+        "Device Wi-Fi and connection",
+        "See which networks a device uses and add, change or remove its Wi-Fi. A wrong network can take it offline.",
     ),
     PermissionDef("enrollment_key", "read", "View enrollment API keys", "List enrollment API keys."),
     PermissionDef("enrollment_key", "manage", "Manage enrollment API keys", "Create and revoke enrollment API keys."),

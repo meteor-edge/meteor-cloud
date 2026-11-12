@@ -134,17 +134,19 @@ def test_rollback_and_failure_are_shown_and_also_erase_the_password(client: Test
     assert (retry["revision"], retry["connect_now"]) == (2, False)
 
 
-def test_only_owners_and_admins_change_wifi_and_devices_see_only_their_own(
+def test_only_owners_and_admins_see_or_change_wifi_and_devices_see_only_their_own(
     client: TestClient, db_session: Session
 ) -> None:
     org, headers, agent, url = _device(client, db_session)
+    add_member(db_session, org, create_user(db_session, email="admin@example.com"), OrganizationRole.ADMIN)
+    assert client.get(url, headers=auth_header(client, "admin@example.com")).status_code == 200
     for email, role in (
         ("operator@example.com", OrganizationRole.OPERATOR),
         ("viewer@example.com", OrganizationRole.VIEWER),
     ):
         add_member(db_session, org, create_user(db_session, email=email), role)
         member = auth_header(client, email)
-        assert client.get(url, headers=member).status_code == 200
+        assert client.get(url, headers=member).status_code == 403
         refused = client.put(f"{url}/networks", headers=member, json={"ssid": "Evil", "password": PASSWORD})
         assert refused.status_code == 403, refused.text
         assert client.post(f"{url}/networks/remove", headers=member, json={"ssid": "Evil"}).status_code == 403

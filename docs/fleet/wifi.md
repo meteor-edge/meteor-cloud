@@ -54,8 +54,10 @@ and at least every 5 minutes; it does not need NetworkManager or the Wi-Fi helpe
 Rotating `SECRETS_ENCRYPTION_KEY` (or `APP_SECRET_KEY` without it) makes waiting
 passwords unreadable; those changes are marked failed and can be sent again.
 
-Permission: `device.network` (owner and admin by default). Reading the Wi-Fi state needs
-`device.read`. Operators see the section without the buttons.
+Permission: `device.network` (owner and admin by default), for seeing a device's Wi-Fi and
+connection as well as changing them. Network names and the link a device uses are
+sensitive, so other roles do not see the Wi-Fi section or the Connection card, and
+`GET …/wifi` answers `403`. Add `device.network` to a custom role to grant it.
 
 ## On the device
 

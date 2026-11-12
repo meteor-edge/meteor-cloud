@@ -129,7 +129,8 @@ class DeviceWifiService:
 
     # ------------------------------------------------------------- operators
     def get(self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID) -> DeviceWifiResponse:
-        device = self._require_device(actor, organization_id, device_id, "device.read")
+        # Network names and the device's connection are sensitive: same permission as changing them.
+        device = self._require_device(actor, organization_id, device_id, PERMISSION)
         rows = self._rows(device.id)
         if self._erase_uncollected(rows):
             self.session.commit()

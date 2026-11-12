@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
+import { getMyAccess } from "@/api/access";
 import type { Device } from "@/api/fleet/types";
 import { DeviceDetailPage } from "@/pages/fleet/DeviceDetailPage";
 
@@ -71,6 +72,9 @@ vi.mock("@/api/fleet", async () => {
 vi.mock("@/components/fleet/DeviceSoftwarePanel", () => ({ DeviceSoftwarePanel: () => null }));
 vi.mock("@/components/fleet/DeviceEndpointsPanel", () => ({ DeviceEndpointsPanel: () => null }));
 vi.mock("@/components/fleet/DeviceNetworkPanel", () => ({ DeviceNetworkPanel: () => null }));
+vi.mock("@/components/fleet/DeviceUplinkPanel", () => ({
+  DeviceUplinkPanel: () => <p>uplink panel</p>,
+}));
 vi.mock("@/components/fleet/MqttConsole", () => ({ MqttConsole: () => null }));
 vi.mock("@/components/fleet/DeviceLogs", () => ({
   DeviceLogs: () => <p>logs window</p>,
@@ -113,5 +117,23 @@ describe("DeviceDetailPage logs", () => {
 
     expect(await screen.findByText("logs window")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Access" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("DeviceDetailPage network", () => {
+  it("hides the device's connection from users without device.network", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Network" }));
+    expect(await screen.findByText("WireGuard network")).toBeInTheDocument();
+    expect(screen.queryByText("uplink panel")).not.toBeInTheDocument();
+  });
+
+  it("shows it to users with device.network", async () => {
+    vi.mocked(getMyAccess).mockResolvedValueOnce({
+      organizations: [{ organization_id: "org-1", permissions: ["device.network"] }],
+    } as Awaited<ReturnType<typeof getMyAccess>>);
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Network" }));
+    expect(await screen.findByText("uplink panel")).toBeInTheDocument();
   });
 });

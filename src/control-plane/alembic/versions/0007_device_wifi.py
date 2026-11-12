@@ -76,9 +76,10 @@ def upgrade() -> None:
         ),
         {
             "id": permission_id,
-            "label": "Change device Wi-Fi",
+            "label": "Device Wi-Fi and connection",
             "description": (
-                "Add, change and remove the Wi-Fi networks of a device. A wrong network can take it offline."
+                "See which networks a device uses and add, change or remove its Wi-Fi. "
+                "A wrong network can take it offline."
             ),
         },
     )
