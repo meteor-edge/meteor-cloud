@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from app.core.audit_context import set_request_actor
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.exceptions import UnauthorizedError
@@ -59,7 +60,9 @@ def get_current_user(
             "Could not validate credentials.",
         ) from exc
 
-    return service.require_active_user(user_id)
+    user = service.require_active_user(user_id)
+    set_request_actor(actor_type="user", actor_id=user.id, user_id=user.id)
+    return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

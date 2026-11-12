@@ -193,6 +193,7 @@ class ConnectivityService:
             )
 
         row = self.rows.get(device.id)
+        enrolled_key = row is None or row.wg_public_key != public_key
         if row is None:
             row = DeviceConnectivity(
                 device_id=device.id,
@@ -241,6 +242,17 @@ class ConnectivityService:
         if payload.ssh_host_key:
             self._pin_host_key(row, device, payload.ssh_host_key)
         row.ssh_auth = SSH_AUTH_CA if self._trusts_ca(payload.ssh_ca_public_key) else None
+        if enrolled_key:
+            # Reconnects with the same key are routine and not audited; a first or new key is.
+            self.audit.record(
+                organization_id=device.organization_id,
+                action="connectivity.enroll",
+                resource_type="device",
+                resource_id=device.id,
+                actor_type="device",
+                actor_id=device.id,
+                metadata={"provider": row.provider, "wg_address": str(row.wg_address)},
+            )
         self.session.commit()
         self.session.refresh(row)
         return row

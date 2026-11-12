@@ -15,11 +15,15 @@ class AuditEventResponse(BaseModel):
     id: uuid.UUID
     organization_id: uuid.UUID | None
     actor_user_id: uuid.UUID | None
+    actor_type: str | None = None
+    actor_id: str | None = None
+    actor_email: str | None = None
     action: str
     resource_type: str
     resource_id: str | None
     request_id: str | None
     ip: str | None
+    user_agent: str | None = None
     outcome: str
     metadata: dict[str, Any] = Field(validation_alias="metadata_")
     created_at: datetime

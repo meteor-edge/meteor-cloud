@@ -1022,6 +1022,20 @@ class DeploymentService:
                         message=exc.message if isinstance(exc, AppError) else "Could not create this rollback.",
                     )
                 )
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="deployment.rollback",
+            resource_type="deployment",
+            resource_id=original.id,
+            outcome="success" if not failed else "partial",
+            metadata={
+                "created_deployment_ids": [str(item.id) for item in created],
+                "failed_release_ids": [str(item.release_id) for item in failed],
+                "skipped_devices": len(no_previous),
+            },
+        )
+        self.session.commit()
         skipped = [
             RollbackSkippedDevice(
                 device_id=device_id,

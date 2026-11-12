@@ -20,6 +20,7 @@ class AuditEvent(Base, UUIDPrimaryKeyMixin):
     __table_args__ = (
         Index("ix_audit_events_organization_id_created_at", "organization_id", "created_at"),
         Index("ix_audit_events_actor_user_id", "actor_user_id"),
+        Index("ix_audit_events_resource", "resource_type", "resource_id"),
     )
 
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -32,6 +33,10 @@ class AuditEvent(Base, UUIDPrimaryKeyMixin):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Who acted: "user", "device", "enrollment_key", "application", "system", ... and its id.
+    # actor_user_id stays the foreign key for users; actor_id covers every kind.
+    actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    actor_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     action: Mapped[str] = mapped_column(String(80), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(80), nullable=False)
     resource_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.audit.service import AuditRecorder
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError, ConflictError, UnauthorizedError
 from app.core.metrics import ENROLLMENT_POLLS, ENROLLMENT_REQUESTS
@@ -134,6 +135,20 @@ class EnrollmentService:
                 expires_at=expires_at,
             )
             self.requests.create(request)
+            # Retries update the same row and are not audited again; a new row is.
+            AuditRecorder(self.session).record(
+                organization_id=api_key.organization_id,
+                action="enrollment_request.submit",
+                resource_type="enrollment_request",
+                resource_id=request.id,
+                actor_type="enrollment_key",
+                actor_id=api_key.id,
+                metadata={
+                    "key_prefix": api_key.key_prefix,
+                    "hostname": (payload.hostname or "")[:255] or None,
+                    "serial_number": identity.serial_number,
+                },
+            )
 
         api_key.last_used_at = now
         self.api_keys.update(api_key)
@@ -260,6 +275,15 @@ class EnrollmentService:
         request.claimed_at = now
         request.device_id = device.id
         self.requests.update(request)
+        AuditRecorder(self.session).record(
+            organization_id=device.organization_id,
+            action="enrollment_request.claim",
+            resource_type="device",
+            resource_id=device.id,
+            actor_type="enrollment_request",
+            actor_id=request.id,
+            metadata={"name": device.name, "enrollment_request_id": str(request.id)},
+        )
         self.session.commit()
         self.session.refresh(device)
         return AgentEnrollPollResponse(

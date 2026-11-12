@@ -83,6 +83,14 @@ class OrganizationService:
             user_id=actor.id,
             role=OrganizationRole.OWNER,
         )
+        self.audit.record(
+            actor=actor,
+            organization_id=organization.id,
+            action="organization.create",
+            resource_type="organization",
+            resource_id=organization.id,
+            metadata={"name": organization.name, "slug": organization.slug},
+        )
         self.session.commit()
         self.session.refresh(organization)
         self.session.refresh(membership)
@@ -122,6 +130,7 @@ class OrganizationService:
     ) -> OrganizationResponse:
         organization, membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "organization.update")
+        before = {"name": organization.name, "slug": organization.slug, "description": organization.description}
 
         if payload.name is not None:
             organization.name = payload.name
@@ -142,6 +151,17 @@ class OrganizationService:
             self.organizations.change_slug(organization, payload.slug)
 
         self.organizations.update(organization)
+        after = {"name": organization.name, "slug": organization.slug, "description": organization.description}
+        changes = {key: {"from": before[key], "to": after[key]} for key in before if before[key] != after[key]}
+        if changes:
+            self.audit.record(
+                actor=actor,
+                organization_id=organization.id,
+                action="organization.update",
+                resource_type="organization",
+                resource_id=organization.id,
+                metadata={"changes": changes},
+            )
         self.session.commit()
         self.session.refresh(organization)
         return self._to_org_response(
@@ -153,6 +173,17 @@ class OrganizationService:
     def delete_organization(self, *, actor: User, organization_id: uuid.UUID) -> None:
         organization, membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "organization.delete")
+        # The row outlives the organization (organization_id becomes NULL on delete), so the
+        # id is kept in metadata too.
+        self.audit.record(
+            actor=actor,
+            organization_id=organization.id,
+            action="organization.delete",
+            resource_type="organization",
+            resource_id=organization.id,
+            metadata={"name": organization.name, "slug": organization.slug, "organization_id": str(organization.id)},
+        )
+        self.session.flush()
         self.organizations.delete(organization)
         self.session.commit()
 
@@ -361,6 +392,14 @@ class OrganizationService:
                 "last_owner_required",
                 "The last owner cannot leave the organization.",
             )
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="member.leave",
+            resource_type="membership",
+            resource_id=membership.id,
+            metadata={"role_key": membership.role.value},
+        )
         self.memberships.delete(membership)
         self.session.commit()
 
