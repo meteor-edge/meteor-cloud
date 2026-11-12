@@ -73,8 +73,9 @@ function changeNote(change: DeviceWifiNetwork): { text: string; tone: string } |
     };
   }
   if (change.state === "failed") {
+    const reason = change.last_error ?? "The device could not make this change.";
     return {
-      text: change.last_error ?? "The device could not make this change.",
+      text: change.action === "remove" ? `Not removed: ${reason}` : reason,
       tone: "text-destructive",
     };
   }

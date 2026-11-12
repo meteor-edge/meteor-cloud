@@ -144,6 +144,23 @@ describe("DeviceWifiPanel", () => {
     expect(await screen.findByText(/old Wi-Fi settings were put back/)).toBeInTheDocument();
   });
 
+  it("says plainly when the device could not remove a network", async () => {
+    setup({
+      ...reported,
+      networks: [
+        network({
+          action: "remove",
+          state: "failed",
+          password_pending: false,
+          last_error: "NetworkManager did not answer in time.",
+        }),
+      ],
+    });
+    expect(
+      await screen.findByText("Not removed: NetworkManager did not answer in time."),
+    ).toBeInTheDocument();
+  });
+
   it("removes a network after confirmation", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(removeDeviceWifiNetwork).mockResolvedValue(reported);

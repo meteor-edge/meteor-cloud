@@ -236,21 +236,103 @@ def test_remove_refuses_to_cut_the_device_off(nm, monkeypatch, capsys) -> None:
     assert _run(monkeypatch, capsys, "remove", {"ssid": "Home"}) == (0, {"removed": True, "found": False})
 
 
-def test_a_network_from_the_os_configuration_is_not_deleted(nm, monkeypatch, capsys) -> None:
+class FakeNetplan:
+    """`netplan set <key>=null` and `generate`: generated profiles go once their definition does."""
+
+    def __init__(self, nm: FakeNetworkManager, *, refuse: bool = False) -> None:
+        self.nm = nm
+        self.refuse = refuse
+        self.calls: list[tuple[str, ...]] = []
+        self.removed: set[str] = set()
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        code = 0
+        if args[0] == "set":
+            code = 1 if self.refuse else 0
+            if not self.refuse:
+                self.removed.add(args[1].removesuffix("=null"))
+        elif args == ("generate",):
+            self.nm.extra = [p for p in self.nm.extra if not self._gone(p)]
+        return subprocess.CompletedProcess(list(args), code, "", "")
+
+    def _gone(self, profile: dict[str, str]) -> bool:
+        definition = helper.netplan_definition(profile)
+        return f"wifis.{definition}" in self.removed or (
+            f"wifis.{definition}.access-points.{profile['ssid']}" in self.removed
+        )
+
+
+def _netplan_profile(nm: FakeNetworkManager, ssid: str, definition: str = "wlan0") -> None:
+    name = f"netplan-{definition}-{ssid}"
     nm.extra.append(
         {
-            "name": "netplan-wlan0-Cafe",
-            "uuid": "uuid-cafe",
-            "file": "/run/NetworkManager/system-connections/c",
-            "ssid": "Cafe",
+            "name": name,
+            "uuid": f"uuid-{ssid.lower()}",
+            "file": f"/run/NetworkManager/system-connections/{name}.nmconnection",
+            "ssid": ssid,
             "psk": "x",
         }
     )
     nm.reload()
+
+
+@pytest.fixture
+def netplan(nm: FakeNetworkManager, monkeypatch: pytest.MonkeyPatch) -> FakeNetplan:
+    fake = FakeNetplan(nm)
+    monkeypatch.setattr(helper, "NETPLAN", sys.executable)  # only so that "is it installed" passes
+    monkeypatch.setattr(helper, "netplan", fake)
+    return fake
+
+
+def test_a_network_from_the_os_configuration_is_removed_from_netplan(nm, netplan, monkeypatch, capsys) -> None:
+    # What Raspberry Pi Imager leaves: the network in use comes from /etc/netplan, a cable is in too.
+    _netplan_profile(nm, "TP-Link_DEB9")
+    nm.active, nm.wired = "uuid-tp-link_deb9", True
+    assert _run(monkeypatch, capsys, "remove", {"ssid": "TP-Link_DEB9"}) == (0, {"removed": True, "found": True})
+    assert netplan.calls == [("set", "wifis.wlan0=null"), ("generate",)]
+    assert "uuid-tp-link_deb9" not in nm.profiles
+    assert nm.active is None
+    assert "uuid-home" in nm.profiles
+
+
+def test_only_that_network_goes_when_the_definition_has_others(nm, netplan, monkeypatch, capsys) -> None:
+    _netplan_profile(nm, "Cafe")
+    _netplan_profile(nm, "Shop")
+    assert _run(monkeypatch, capsys, "remove", {"ssid": "Cafe"}) == (0, {"removed": True, "found": True})
+    assert ("set", "wifis.wlan0.access-points.Cafe=null") in netplan.calls
+    assert "uuid-cafe" not in nm.profiles
+    assert "uuid-shop" in nm.profiles
+
+
+def test_a_network_netplan_will_not_drop_is_reported(nm, netplan, monkeypatch, capsys) -> None:
+    netplan.refuse = True
+    _netplan_profile(nm, "Cafe")
     code, out = _run(monkeypatch, capsys, "remove", {"ssid": "Cafe"})
     assert code == helper.EXIT_UNSUPPORTED
     assert "netplan-wlan0-Cafe" in out["error"]
-    assert not any(call[:2] == ("connection", "delete") for call in nm.calls)
+    assert "could not be removed" in out["error"]
+
+
+def test_without_netplan_a_generated_network_is_reported(nm, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(helper, "NETPLAN", "/nonexistent/netplan")
+    _netplan_profile(nm, "Cafe")
+    code, out = _run(monkeypatch, capsys, "remove", {"ssid": "Cafe"})
+    assert code == helper.EXIT_UNSUPPORTED
+    assert "netplan-wlan0-Cafe" in out["error"]
+
+
+@pytest.mark.parametrize(
+    ("name", "file", "expected"),
+    [
+        ("netplan-wlan0-Cafe", "/run/NetworkManager/system-connections/netplan-wlan0-Cafe.nmconnection", "wlan0"),
+        ("Cafe", "/run/NetworkManager/system-connections/netplan-NM-1b2c.nmconnection", "NM-1b2c"),
+        ("preconfigured", "/etc/NetworkManager/system-connections/preconfigured.nmconnection", None),
+        ("netplan-a.b-Cafe", "/run/NetworkManager/system-connections/netplan-a.b-Cafe.nmconnection", None),
+    ],
+)
+def test_netplan_definition_of_a_profile(name: str, file: str, expected: str | None) -> None:
+    assert helper.netplan_definition({"name": name, "file": file, "ssid": "Cafe"}) == expected
 
 
 @pytest.mark.parametrize(

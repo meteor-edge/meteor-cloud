@@ -12,6 +12,10 @@ stdin, so the password is never on a command line, and it is never printed.
   meteorcli-wifi rollback    undo it: old settings back, reconnect
   meteorcli-wifi remove      forget a network                        (JSON on stdin)
 
+A network the operating system's netplan configuration defines (Raspberry Pi Imager
+and cloud-init write one) is NetworkManager-generated at every boot, so `remove`
+deletes it from the netplan YAML with `netplan set …=null` and regenerates.
+
 `apply` with "connect_now" switches to the network at once and keeps the old
 settings aside until `confirm`. If the network cannot be joined it puts them back
 itself; if the caller then finds it cannot reach MeteorCloud it calls `rollback`.
@@ -27,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,6 +40,10 @@ import uuid
 # sudo usually sets secure_path, but do not rely on it for the tools run as root.
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 NMCLI = "nmcli"
+NETPLAN = "netplan"
+NETPLAN_PREFIX = "netplan-"
+# Netplan definition ids are interface names or NM-<uuid>; no dots, which `netplan set` paths use.
+NETPLAN_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 CONNECTIONS_DIR = "/etc/NetworkManager/system-connections"
 STATE_DIR = "/var/lib/meteorcli-wifi"
 PENDING = os.path.join(STATE_DIR, "pending.json")
@@ -245,6 +254,62 @@ def reload_connections() -> None:
     nmcli("connection", "reload")
 
 
+# --- netplan -------------------------------------------------------------------
+
+
+def netplan(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([NETPLAN, *args], capture_output=True, text=True, timeout=60, check=False)
+
+
+def netplan_definition(profile: dict[str, str]) -> str | None:
+    """The netplan definition a generated profile comes from, or None if it is not one.
+
+    Netplan names a Wi-Fi profile ``netplan-<definition>-<ssid>``; one NetworkManager saved
+    through netplan lives in ``netplan-NM-<uuid>.nmconnection``.
+    """
+    base = os.path.basename(profile["file"])
+    if not base.startswith(NETPLAN_PREFIX):
+        return None
+    stem = base[len(NETPLAN_PREFIX) :].removesuffix(".nmconnection")
+    name, suffix = profile["name"], f"-{profile['ssid']}"
+    if stem.startswith("NM-"):
+        definition = stem
+    elif name.startswith(NETPLAN_PREFIX) and name.endswith(suffix):
+        definition = name[len(NETPLAN_PREFIX) : -len(suffix)]
+    else:
+        return None
+    return definition if NETPLAN_ID.match(definition) else None
+
+
+def forget_in_netplan(profiles: list[dict[str, str]], ssid: str) -> bool:
+    """Delete ``ssid`` from the netplan definitions behind ``profiles``. False if one could not be."""
+    if shutil.which(NETPLAN) is None:
+        return False
+    everything = wifi_profiles()
+    done = True
+    for profile in profiles:
+        definition = netplan_definition(profile)
+        if definition is None:
+            done = False
+            continue
+        others = [other for other in everything if other["ssid"] != ssid and netplan_definition(other) == definition]
+        if not others:
+            key = f"wifis.{definition}"
+        elif re.fullmatch(r"[^.=]+", ssid):
+            # The definition has other networks: drop only this one.
+            key = f"wifis.{definition}.access-points.{ssid}"
+        else:
+            done = False
+            continue
+        if netplan("set", f"{key}=null").returncode != 0:
+            done = False
+    netplan("generate")
+    for profile in profiles:
+        nmcli("connection", "delete", "uuid", profile["uuid"])
+    reload_connections()
+    return done
+
+
 # --- pending change (connect_now) ------------------------------------------------
 
 
@@ -415,16 +480,20 @@ def command_remove(request: dict) -> dict:
             "Add another network first, or connect a cable.",
             EXIT_WOULD_CUT_OFF,
         )
-    kept = [profile["name"] for profile in profiles if not in_connections_dir(profile["file"])]
+    generated = [profile for profile in profiles if not in_connections_dir(profile["file"])]
     for profile in profiles:
         if in_connections_dir(profile["file"]):
             nmcli("connection", "delete", "uuid", profile["uuid"])
-    if kept:
-        raise HelperError(
-            "This network was set up by the operating system's own configuration "
-            f"({', '.join(kept)}), which this device recreates at boot. Remove it there.",
-            EXIT_UNSUPPORTED,
-        )
+    if generated:
+        forget_in_netplan(generated, ssid)
+        kept = [profile["name"] for profile in wifi_profiles() if profile["ssid"] == ssid]
+        if kept:
+            raise HelperError(
+                "This network was set up by the operating system's own configuration "
+                f"({', '.join(kept)}), which this device recreates at boot, and it could not be "
+                "removed from there.",
+                EXIT_UNSUPPORTED,
+            )
     return {"removed": True, "found": True}
 
 

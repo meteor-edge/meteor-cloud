@@ -73,7 +73,14 @@ between, the agent puts the old settings back when it starts again and reports t
 
 Networks written at image time (`meteor-wifi`, `preconfigured`) are listed too. Changing
 the password of one replaces its profile. A network that the operating system's own
-configuration creates at every boot (netplan) cannot be removed from the console.
+netplan configuration defines (Raspberry Pi Imager and cloud-init write
+`/etc/netplan/50-cloud-init.yaml`) is removed from that YAML with `netplan set` and
+the configuration regenerated, so it does not come back at boot. Without `netplan`
+on the device such a network cannot be removed from the console.
+
+**Remove** forgets the network and disconnects from it at once if it is in use. It is
+refused while that network is the device's only connection: add another network or
+plug in a cable first.
 
 ## API
 
