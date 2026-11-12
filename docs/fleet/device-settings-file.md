@@ -59,6 +59,9 @@ Differences, all on the outside:
 does not log the body.
 
 The console can create an enrollment key for the file (owners and admins), or you
-paste an existing one.
+use an existing one: pick it from the list of active keys (name and prefix, with
+`enrollment_key.read`) and paste it. MeteorCloud keeps no copy of a key after it
+is shown, so the key itself always has to be pasted; the console checks it is the
+one picked and refuses keys that are revoked or expired.
 
 To change Wi-Fi on a device that is already enrolled, see [Wi-Fi](wifi.md).

@@ -1,10 +1,13 @@
+import { useQuery } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
 
 import {
   createDeviceConfig,
   createEnrollmentKey,
+  listEnrollmentKeys,
   type Artifact,
   type DeviceConfigPayload,
+  type EnrollmentApiKey,
 } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
@@ -48,6 +51,12 @@ function saveTextFile(fileName: string, content: string) {
 }
 
 const FIELDSET = "space-y-3 rounded-md border border-border p-3";
+const SELECT =
+  "flex h-10 w-full rounded-md border border-input bg-field px-3 text-sm text-foreground";
+
+function isActive(key: EnrollmentApiKey, now: number): boolean {
+  return key.revoked_at === null && (key.expires_at === null || Date.parse(key.expires_at) > now);
+}
 const HINT = "text-xs text-muted-foreground";
 
 /**
@@ -66,6 +75,9 @@ export function DeviceSetupDialog({
   const [domain, setDomain] = useState(defaultDomain);
   const [newKey, setNewKey] = useState(canCreateKey);
   const [apiKey, setApiKey] = useState("");
+  const [keyId, setKeyId] = useState("");
+  // Made by this dialog: newer than the list, so it is not checked against it.
+  const [madeKey, setMadeKey] = useState("");
   const [deviceName, setDeviceName] = useState("");
   const [useWifi, setUseWifi] = useState(false);
   const [ssid, setSsid] = useState("");
@@ -86,12 +98,36 @@ export function DeviceSetupDialog({
 
   const title = image ? `Download ${image.name} ${image.version}` : "Set up a device";
 
+  // Only names and prefixes: the server keeps no copy of a key, so it still has to be pasted.
+  // Without enrollment_key.read this fails and the dialog keeps just the paste box.
+  const keysQuery = useQuery({
+    queryKey: ["enrollment-keys", organizationId, token],
+    queryFn: () => listEnrollmentKeys(token, organizationId),
+    enabled: useEnroll && !newKey,
+    retry: false,
+  });
+  const activeKeys = (keysQuery.data ?? []).filter((key) => isActive(key, Date.now()));
+  const chosenKey = activeKeys.find((key) => key.id === keyId);
+
   function problems(): string[] {
     const found: string[] = [];
     if (useEnroll) {
       if (!domain.trim()) found.push("Enter the address devices use to reach MeteorCloud.");
-      if (!newKey && !/^key_\S{4,}$/.test(apiKey.trim())) {
+      const pasted = apiKey.trim();
+      if (!newKey && !/^key_\S{4,}$/.test(pasted)) {
         found.push("Enter an enrollment key (starts with key_).");
+      } else if (!newKey && chosenKey && !pasted.startsWith(chosenKey.key_prefix)) {
+        found.push(
+          `This is not the key "${chosenKey.name}": that one starts with ${chosenKey.key_prefix}.`,
+        );
+      } else if (
+        !newKey &&
+        !chosenKey &&
+        pasted !== madeKey &&
+        keysQuery.data &&
+        !activeKeys.some((key) => pasted.startsWith(key.key_prefix))
+      ) {
+        found.push("No active enrollment key starts like this one. It may be revoked or expired.");
       }
     }
     if (useWifi) {
@@ -148,6 +184,7 @@ export function DeviceSetupDialog({
           key = created.api_key;
           // Keep it for another download from this dialog instead of making a key per click.
           setApiKey(key);
+          setMadeKey(key);
           setNewKey(false);
         }
         payload.enrollment = {
@@ -253,20 +290,37 @@ export function DeviceSetupDialog({
                   <input type="radio" checked={!newKey} onChange={() => setNewKey(false)} />
                   Use an enrollment key I have
                 </label>
+                {!newKey && activeKeys.length > 0 && (
+                  <select
+                    aria-label="Which enrollment key"
+                    className={SELECT}
+                    value={keyId}
+                    onChange={(event) => setKeyId(event.target.value)}
+                  >
+                    <option value="">Choose a key…</option>
+                    {activeKeys.map((key) => (
+                      <option key={key.id} value={key.id}>
+                        {key.name} · {key.key_prefix}…
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {!newKey && (
                   <Input
                     aria-label="Enrollment key"
                     type="password"
                     value={apiKey}
                     onChange={(event) => setApiKey(event.target.value)}
-                    placeholder="key_…"
+                    placeholder={chosenKey ? `${chosenKey.key_prefix}…` : "key_…"}
                     autoComplete="new-password"
                     spellCheck={false}
                   />
                 )}
                 <p className={HINT}>
-                  Keys are listed under Devices, Enrollment keys. Revoke the key when the batch of
-                  devices is done.
+                  {!newKey && activeKeys.length > 0
+                    ? "MeteorCloud shows a key only once, when it is made, so paste the key itself. "
+                    : "Keys are listed under Devices, Enrollment keys. "}
+                  Revoke the key when the batch of devices is done.
                 </p>
               </div>
               <div>
