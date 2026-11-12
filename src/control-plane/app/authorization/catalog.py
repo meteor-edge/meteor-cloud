@@ -140,8 +140,7 @@ _OPERATOR = _VIEWER | frozenset(
         "team.read",
         "device.create",
         "device.update",
-        "device.reboot",
-        # device.shell is owner/admin only: a root-capable shell on the device.
+        # device.reboot / device.shell / device.users are owner/admin only.
         "device.logs",
         "deployment.create",
         "deployment.cancel",

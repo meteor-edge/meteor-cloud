@@ -106,8 +106,9 @@ def test_add_user_and_permissions(client: TestClient, db_session: Session) -> No
     operator = auth_header(client, "operator@example.com")
     viewer = auth_header(client, "viewer@example.com")
 
-    assert client.post(f"{url}/reboot", headers=operator).status_code == 200
+    assert client.post(f"{url}/reboot", headers=operator).status_code == 403
     assert client.post(f"{url}/shutdown", headers=viewer).status_code == 403
+    assert client.post(f"{url}/reboot", headers=admin).status_code == 200
     assert (
         client.post(f"{url}/set-password", headers=operator, json={"username": "pi", "password": PASSWORD}).status_code
         == 403

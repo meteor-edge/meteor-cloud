@@ -143,9 +143,9 @@ export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, 
       <div>
         <h2 className="text-lg font-semibold">Power and SSH users</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Restart or shut the device down, change a user&apos;s password, or add an SSH user. The
-          device picks the action up on its next heartbeat. Passwords are sent encrypted and never
-          shown again.
+          Restart or shut the device down, change a user&apos;s password, or add an SSH user
+          (owners and admins). The device picks the action up on its next heartbeat. Passwords are
+          sent encrypted and never shown again.
         </p>
       </div>
 

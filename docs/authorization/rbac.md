@@ -174,7 +174,7 @@ System roles: `organization_id IS NULL`, `is_system = true`, immutable via API.
 | device.create | ✓ | ✓ | ✓ | | |
 | device.update | ✓ | ✓ | ✓ | | |
 | device.delete | ✓ | ✓ | | | |
-| device.reboot | ✓ | ✓ | ✓ | | |
+| device.reboot | ✓ | ✓ | | | |
 | device.shell | ✓ | ✓ | | | |
 | device.logs | ✓ | ✓ | ✓ | ✓ | |
 | device.network | ✓ | ✓ | | | |
@@ -350,11 +350,11 @@ Same shape as one org entry above, plus:
   "full_name": "...",
   "permissions_detail": [
     {
-      "id": "device.reboot",
-      "label": "Reboot devices",
+      "id": "device.update",
+      "label": "Update devices",
       "description": "...",
       "resource": "device",
-      "action": "reboot",
+      "action": "update",
       "granted": true,
       "source": "role",
       "role_key": "operator",
@@ -410,7 +410,7 @@ Response:
   "allowed": false,
   "steps": [
     { "ok": true, "detail": "Alice is an active member of Acme Energy" },
-    { "ok": true, "detail": "Role Operator includes device.reboot" },
+    { "ok": true, "detail": "Role Operator includes device.update" },
     { "ok": false, "detail": "Device is in Munich; Alice is scoped to Berlin only" }
   ]
 }
@@ -547,7 +547,7 @@ Fields already on audit: actor, organization_id, resource_type=`membership` (or 
 |---|------|--------|
 | 1 | No membership | 403/404 on org routes |
 | 2 | Viewer + `device.update` | 403 |
-| 3 | Operator + `device.reboot` in Berlin | 200 |
+| 3 | Admin + `device.reboot` in Berlin | 200 |
 | 4 | Operator + `device.delete` | 403 |
 | 5 | Operator scoped Berlin, device in Berlin | allow |
 | 6 | Operator scoped Berlin, device in Munich | 404/403 |

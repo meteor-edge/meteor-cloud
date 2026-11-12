@@ -5,8 +5,7 @@ without logging into the device.
 
 ## How it works
 
-1. An owner, admin or operator (restart / shut down) or owner or admin (SSH users)
-   orders the action on the device's Settings tab.
+1. An owner or admin orders the action on the device's Settings tab.
 2. The next heartbeat tells the device something is waiting (`actions_pending`).
 3. The device collects the action once with its own credential. A password is
    erased from the server at that moment. The same action is never handed out
@@ -24,7 +23,7 @@ An action the device never collects is cancelled after
 
 | Action | Permission | Default roles |
 |--------|------------|---------------|
-| Restart, shut down | `device.reboot` | owner, admin, operator |
+| Restart, shut down | `device.reboot` | owner, admin |
 | Change password, add SSH user | `device.users` | owner, admin |
 
 Passwords never appear in API responses, logs or the audit trail. The audit log

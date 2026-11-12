@@ -66,9 +66,9 @@ export function canManageDeviceWifi(role: string | undefined): boolean {
   return role === "owner" || role === "admin";
 }
 
-/** Restart or shut down a device (device.reboot): owners, admins and operators. */
+/** Restart or shut down a device (device.reboot): owners and admins only. */
 export function canRebootDevice(role: string | undefined): boolean {
-  return role === "owner" || role === "admin" || role === "operator";
+  return role === "owner" || role === "admin";
 }
 
 /** Change SSH passwords or add SSH users (device.users): as sensitive as a shell. */
