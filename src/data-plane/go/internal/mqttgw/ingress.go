@@ -74,7 +74,7 @@ func (g *Ingress) identityFor(t bus.Topic) (*identity.Identity, bool) {
 }
 
 // Message stores one client message, or dead-letters it.
-func (g *Ingress) Message(ctx context.Context, t bus.Topic, payload []byte) {
+func (g *Ingress) Message(ctx context.Context, t bus.Topic, payload []byte) bool {
 	g.Metrics.MessagesReceived.WithLabelValues("mqtt").Inc()
 	reject := func(reason, detail string) {
 		g.Metrics.MessagesRejected.WithLabelValues("mqtt", reason).Inc()
@@ -83,22 +83,22 @@ func (g *Ingress) Message(ctx context.Context, t bus.Topic, payload []byte) {
 	id, ok := g.identityFor(t)
 	if !ok {
 		reject("unknown_application", "no enabled application "+t.App)
-		return
+		return true
 	}
 	if len(payload) > g.Limits.MaxPayloadBytes+1024 {
 		reject(envelope.CodePayloadTooLarge, "message is larger than the payload limit")
-		return
+		return true
 	}
 	var msg mqttMessage
 	if err := json.Unmarshal(payload, &msg); err != nil {
 		reject(envelope.CodeInvalidPayload, "message is not a JSON object with a data field")
-		return
+		return true
 	}
 	ev, rej := envelope.Normalize(&envelope.Message{ID: msg.ID, Kind: t.Kind, Type: msg.Type, Stream: t.Stream,
 		Time: msg.Time, Seq: msg.Seq, Data: msg.Data}, id, time.Now(), g.Limits)
 	if rej != nil {
 		reject(rej.Code, rej.Message)
-		return
+		return true
 	}
 	// Storage or queue trouble: hold the message (the broker is not acknowledged yet,
 	// which is the backpressure) and retry with backoff.
@@ -113,19 +113,19 @@ func (g *Ingress) Message(ctx context.Context, t bus.Topic, payload []byte) {
 		_, err := g.Pipeline.Submit(sctx, []*envelope.Event{ev})
 		cancel()
 		if err == nil {
-			return
+			return true
 		}
 		if ctx.Err() != nil || errors.Is(err, ingest.ErrStopped) {
 			// Shutting down: not acknowledged to the broker, so it is redelivered.
-			return
+			return false
 		}
 		if time.Now().After(deadline) {
 			g.deadLetter(ctx, t, "storage_unavailable", "event "+ev.ID+" could not be stored: "+err.Error(), payload)
-			return
+			return true
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-time.After(backoff):
 		}
 		if backoff < 5*time.Second {
@@ -142,18 +142,19 @@ type mqttAck struct {
 }
 
 // CommandAck applies a command acknowledgement published over MQTT.
-func (g *Ingress) CommandAck(ctx context.Context, t bus.Topic, payload []byte) {
+func (g *Ingress) CommandAck(ctx context.Context, t bus.Topic, payload []byte) bool {
 	id, ok := g.identityFor(t)
 	if !ok {
 		g.deadLetter(ctx, t, "unknown_application", "command acknowledgement from "+t.App, payload)
-		return
+		return true
 	}
 	var ack mqttAck
 	if err := json.Unmarshal(payload, &ack); err != nil || ack.CommandID == "" {
 		g.deadLetter(ctx, t, "invalid_ack", "acknowledgement needs command_id and status", payload)
-		return
+		return true
 	}
 	if _, err := g.Commands.Ack(ctx, id, ack.CommandID, ack.Status, ack.Result, ack.Error); err != nil {
 		g.deadLetter(ctx, t, "rejected_ack", err.Error(), payload)
 	}
+	return true
 }

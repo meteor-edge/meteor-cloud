@@ -27,12 +27,13 @@ import (
 const SharedGroup = "meteor-dataplane"
 
 // IngressHandler receives what clients publish over MQTT. Both methods are called
-// from a bounded worker pool and must return only when the message is durably
-// handled (stored, acknowledged, or written to the dead-letter table): the broker
-// acknowledgement is sent after they return.
+// from a bounded worker pool. They return true once the message is durably handled
+// (stored, applied, or written to the dead-letter table); only then is the broker
+// acknowledged. False (shutting down) leaves it unacknowledged, so the broker
+// delivers it again to this or another instance.
 type IngressHandler interface {
-	Message(ctx context.Context, t Topic, payload []byte)
-	CommandAck(ctx context.Context, t Topic, payload []byte)
+	Message(ctx context.Context, t Topic, payload []byte) bool
+	CommandAck(ctx context.Context, t Topic, payload []byte) bool
 }
 
 // MQTTConfig configures the EMQX transport.
@@ -270,10 +271,14 @@ func (m *MQTT) ingressWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case item := <-m.work:
+			var handled bool
 			if item.topic.Kind == "ack" {
-				m.ingress.CommandAck(ctx, item.topic, item.pub.Payload)
+				handled = m.ingress.CommandAck(ctx, item.topic, item.pub.Payload)
 			} else {
-				m.ingress.Message(ctx, item.topic, item.pub.Payload)
+				handled = m.ingress.Message(ctx, item.topic, item.pub.Payload)
+			}
+			if !handled {
+				continue
 			}
 			// Acknowledge to the broker only now: an unacknowledged QoS 1 message is
 			// redelivered after a crash, and ingestion is idempotent.
