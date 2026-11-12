@@ -23,6 +23,7 @@ from edge_agent.credentials import read_device_token, read_registration_token_fi
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.registration import register
 from edge_agent.software import reconcile_software
+from edge_agent.wifi import WifiSync
 
 logger = logging.getLogger("edge_agent")
 
@@ -132,6 +133,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             sleep=time.sleep,
             should_continue=lambda: True,
             payload_factory=_payload,
+            on_response=WifiSync(client, device_token).on_heartbeat,
         )
     except AgentApiError:
         return 1

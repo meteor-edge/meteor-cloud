@@ -6,9 +6,9 @@ import os
 import shutil
 import stat
 import subprocess
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 FIRSTBOOT = Path(__file__).resolve().parents[1] / "packaging" / "firstboot"
 

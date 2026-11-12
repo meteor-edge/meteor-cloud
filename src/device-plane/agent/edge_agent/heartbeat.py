@@ -43,19 +43,23 @@ def run_loop(
     sleep: Callable[[float], None],
     should_continue: Callable[[], bool],
     payload_factory: Callable[[], dict[str, Any]] | None = None,
+    on_response: Callable[[dict[str, Any]], None] | None = None,
     jitter: Callable[[float, float], float] = random.uniform,
 ) -> None:
     """Run the heartbeat loop until ``should_continue`` returns False.
 
     ``sleep`` and ``should_continue`` are injected so tests can bound iterations
-    deterministically without real time delays.
+    deterministically without real time delays. ``on_response`` gets each
+    heartbeat answer (the server uses it to say that work is waiting).
     """
     backoff = _INITIAL_BACKOFF
     while should_continue():
         try:
             payload = payload_factory() if payload_factory else {}
-            send_heartbeat(client, device_token, payload)
+            response = send_heartbeat(client, device_token, payload)
             backoff = _INITIAL_BACKOFF
+            if on_response is not None:
+                on_response(response)
             sleep(interval_seconds)
         except AgentApiError as error:
             if _fatal(error):

@@ -38,6 +38,7 @@ from edge_agent.inventory import collect_inventory
 from edge_agent.registration import register
 from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_as_service, service_state
 from edge_agent.software import reconcile_software
+from edge_agent.wifi import WifiSync
 from meteorcli import __version__
 from meteorcli import config as cli_config
 from meteorcli.config import (
@@ -169,10 +170,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     if dropped:
-        print(
-            "Cleared previous enrollment "
-            f"({', '.join(dropped)}); register again on this server."
-        )
+        print(f"Cleared previous enrollment ({', '.join(dropped)}); register again on this server.")
     print(f"Next: verify with '{PROG} test'.")
     return 0
 
@@ -971,6 +969,7 @@ def _run_agent(paths: CliPaths, args: argparse.Namespace) -> int:
             sleep=time.sleep,
             should_continue=lambda: True,
             payload_factory=_payload,
+            on_response=WifiSync(client, device_token).on_heartbeat,
         )
     except AgentApiError:
         return 1
