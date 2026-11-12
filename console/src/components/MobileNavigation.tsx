@@ -131,6 +131,11 @@ export function MobileNavigation() {
                                 Teams
                               </NavLink>
                             )}
+                            {canManageMembers(role) && (
+                              <NavLink to={`${organizationPath}/audit-log`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("audit-log"))}>
+                                Audit log
+                              </NavLink>
+                            )}
                           </MobileSubnav>
                         </>
                       )}

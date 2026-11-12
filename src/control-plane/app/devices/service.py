@@ -73,6 +73,10 @@ from app.tenancy.repository import OrganizationRepository
 from app.tenancy.schemas import slugify
 
 
+def _jsonable(value: Any) -> Any:
+    return str(value) if isinstance(value, uuid.UUID) else value
+
+
 class FleetService:
     def __init__(self, session: Session, settings: Settings | None = None) -> None:
         self.session = session
@@ -97,6 +101,7 @@ class FleetService:
         resource_type: str,
         resource_id: uuid.UUID | str | None = None,
         metadata: dict[str, Any] | None = None,
+        outcome: str = "success",
     ) -> None:
         self.audit.record(
             actor=actor,
@@ -105,6 +110,7 @@ class FleetService:
             resource_type=resource_type,
             resource_id=resource_id,
             metadata=metadata,
+            outcome=outcome,
         )
 
     # ---------------------------------------------------------------- helpers
@@ -251,6 +257,14 @@ class FleetService:
             metadata_=payload.metadata,
         )
         self.device_types.create(device_type)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device_type.create",
+            resource_type="device_type",
+            resource_id=device_type.id,
+            metadata={"name": device_type.name, "slug": device_type.slug},
+        )
         self.session.commit()
         self.session.refresh(device_type)
         return self._to_device_type_response(device_type, device_count=0, artifact_count=0)
@@ -303,6 +317,14 @@ class FleetService:
             device_type.metadata_ = payload.metadata
 
         self.device_types.update(device_type)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device_type.update",
+            resource_type="device_type",
+            resource_id=device_type.id,
+            metadata={"name": device_type.name, "fields": sorted(payload.model_fields_set)},
+        )
         self.session.commit()
         self.session.refresh(device_type)
         return self._to_device_type_response(device_type)
@@ -333,6 +355,14 @@ class FleetService:
                 "device_type_has_artifacts",
                 "This device type still has artifacts. Delete them first.",
             )
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device_type.delete",
+            resource_type="device_type",
+            resource_id=type_id,
+            metadata={"name": device_type.name},
+        )
         self.device_types.delete(device_type)
         self.session.commit()
 
@@ -426,6 +456,14 @@ class FleetService:
             metadata_=payload.metadata,
         )
         self.device_groups.create(group)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device_group.create",
+            resource_type="device_group",
+            resource_id=group.id,
+            metadata={"name": group.name, "slug": group.slug},
+        )
         self.session.commit()
         self.session.refresh(group)
         return self._to_device_group_response(group, device_count=0)
@@ -476,6 +514,14 @@ class FleetService:
             group.metadata_ = payload.metadata
 
         self.device_groups.update(group)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device_group.update",
+            resource_type="device_group",
+            resource_id=group.id,
+            metadata={"name": group.name, "fields": sorted(payload.model_fields_set)},
+        )
         self.session.commit()
         self.session.refresh(group)
         return self._to_device_group_response(group)
@@ -495,6 +541,14 @@ class FleetService:
                 "device_group_in_use",
                 "This device group is still assigned to devices.",
             )
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device_group.delete",
+            resource_type="device_group",
+            resource_id=group_id,
+            metadata={"name": group.name},
+        )
         self.device_groups.delete(group)
         self.session.commit()
 
@@ -918,6 +972,11 @@ class FleetService:
         membership = self._require_membership(organization_id, actor.id)
         device = self._require_device(organization_id, device_id)
         self._require(membership, "device.update", device_group_id=device.device_group_id)
+        before = {
+            "name": device.name,
+            "device_type_id": device.device_type_id,
+            "device_group_id": device.device_group_id,
+        }
 
         if payload.name is not None:
             device.name = payload.name
@@ -939,6 +998,27 @@ class FleetService:
             device.metadata_ = payload.metadata
 
         self.devices.update(device)
+        after = {
+            "name": device.name,
+            "device_type_id": device.device_type_id,
+            "device_group_id": device.device_group_id,
+        }
+        changes = {
+            key: {"from": _jsonable(before[key]), "to": _jsonable(after[key])}
+            for key in before
+            if before[key] != after[key]
+        }
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.update",
+            resource_type="device",
+            resource_id=device.id,
+            metadata={
+                "changes": changes,
+                "fields": sorted(payload.model_fields_set),
+            },
+        )
         self.session.commit()
         self.session.refresh(device)
         return self._to_device_response(device)
@@ -976,8 +1056,18 @@ class FleetService:
         membership = self._require_membership(organization_id, actor.id)
         device = self._require_device(organization_id, device_id)
         self._require(membership, "device.update", device_group_id=device.device_group_id)
+        changed = device.is_enabled != enabled
         device.is_enabled = enabled
         self.devices.update(device)
+        if changed:
+            self._record_audit(
+                actor=actor,
+                organization_id=organization_id,
+                action="device.enable" if enabled else "device.disable",
+                resource_type="device",
+                resource_id=device.id,
+                metadata={"name": device.name},
+            )
         self.session.commit()
         self.session.refresh(device)
         return self._to_device_response(device)
@@ -996,6 +1086,14 @@ class FleetService:
         device.credential_hash = generated.token_hash
         device.credential_prefix = generated.display_prefix
         self.devices.update(device)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.credential.rotate",
+            resource_type="device",
+            resource_id=device.id,
+            metadata={"name": device.name, "credential_prefix": generated.display_prefix},
+        )
         self.session.commit()
         return DeviceCredentialResponse(
             device_id=device.id,
@@ -1016,6 +1114,14 @@ class FleetService:
         device.credential_hash = None
         device.credential_prefix = None
         self.devices.update(device)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.credential.revoke",
+            resource_type="device",
+            resource_id=device.id,
+            metadata={"name": device.name},
+        )
         self.session.commit()
         self.session.refresh(device)
         return self._to_device_response(device)
@@ -1036,6 +1142,14 @@ class FleetService:
         if cred.revoked_at is None:
             cred.revoked_at = datetime.now(UTC)
             self.session.add(cred)
+            self._record_audit(
+                actor=actor,
+                organization_id=organization_id,
+                action="device.mqtt_credential.revoke",
+                resource_type="device",
+                resource_id=device.id,
+                metadata={"name": device.name},
+            )
             self.session.commit()
         self.session.refresh(device)
         return self._to_device_response(device)
@@ -1051,11 +1165,22 @@ class FleetService:
         membership = self._require_membership(organization_id, actor.id)
         device = self._require_device(organization_id, device_id)
         self._require(membership, "device.reboot", device_group_id=device.device_group_id)
-        return MqttService(self.session, settings=self.settings).send_ping(
+        response = MqttService(self.session, settings=self.settings).send_ping(
             organization_id=organization_id,
             device_id=device_id,
             publisher=publisher,
         )
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.command.ping",
+            resource_type="device",
+            resource_id=device_id,
+            metadata={"name": device.name},
+            outcome="failure" if response.status == "failed" else "success",
+        )
+        self.session.commit()
+        return response
 
     def require_mqtt_listener(
         self,
@@ -1111,6 +1236,15 @@ class FleetService:
                 "mqtt_unavailable",
                 "Could not publish to the MQTT broker.",
             ) from exc
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="mqtt.test_publish",
+            resource_type="mqtt_topic",
+            resource_id=str(device_id) if device_id is not None else None,
+            metadata={"topic": resolved[:255], "bytes": len(text.encode())},
+        )
+        self.session.commit()
         return MqttTestPublishResponse(topic=resolved, payload=text)
 
     def _require_device(self, organization_id: uuid.UUID, device_id: uuid.UUID) -> Device:

@@ -22,6 +22,7 @@ import {
   UserRound,
   Users,
   UsersRound,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -295,7 +296,7 @@ export function Sidebar() {
                   <NavSection
                     icon={Users}
                     label="People"
-                    active={["members", "teams"].some(isPage)}
+                    active={["members", "teams", "audit-log"].some(isPage)}
                     collapsed={collapsed}
                     onExpand={() => setCollapsed(false)}
                   >
@@ -307,6 +308,11 @@ export function Sidebar() {
                     {showTeams && (
                       <SubLink to={`${orgPath}/teams`} icon={UsersRound} active={isPage("teams")}>
                         Teams
+                      </SubLink>
+                    )}
+                    {showMembers && (
+                      <SubLink to={`${orgPath}/audit-log`} icon={ScrollText} active={isPage("audit-log")}>
+                        Audit log
                       </SubLink>
                     )}
                   </NavSection>

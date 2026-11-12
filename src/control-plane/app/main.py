@@ -18,6 +18,7 @@ from app.applications.router import agent_router as applications_agent_router
 from app.applications.router import router as applications_router
 from app.artifacts.public_router import router as public_os_images_router
 from app.artifacts.router import router as artifacts_router
+from app.audit.denials import record_forbidden
 from app.audit.router import router as audit_router
 from app.authorization.router import router as authorization_router
 from app.connectivity.internal_router import router as connectivity_internal_router
@@ -91,7 +92,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    register_exception_handlers(application)
+    register_exception_handlers(application, on_forbidden=record_forbidden)
     application.include_router(health_router)
     application.include_router(identity_router)
     application.include_router(authorization_router)

@@ -24,6 +24,7 @@ How to use the product day to day.
 | --- | --- |
 | Users, organizations, members | [Identity and organizations](identity-and-organizations.md) |
 | Roles and access | [Authorization (RBAC)](authorization/rbac.md) |
+| Who did what (audit trail) | [Audit log](audit-log.md) |
 | Device types and groups | [Device types and groups](fleet/device-types.md) |
 | Admin-initiated enroll | [Registration tokens](fleet/registration-tokens.md) · [Device registration](fleet/device-registration.md) |
 | Device-initiated enroll | [Enrollment API keys](fleet/enrollment-api-keys.md) · [Request / approve / claim](fleet/device-request-enrollment.md) · [First-boot image](../src/device-plane/agent/packaging/firstboot/README.md) |
