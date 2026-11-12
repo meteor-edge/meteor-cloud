@@ -17,7 +17,9 @@ A root install also installs, enables and **starts** `meteorcli.service`. Until 
 device is configured and registered the service only waits (it logs what to run
 next). As soon as a token is stored or an enrollment request is approved, it
 connects: heartbeats, MQTT and WireGuard, with no `meteorcli run`. Re-running the
-installer upgrades and restarts the service.
+installer still upgrades, but it replaces the install in place. To keep the
+previous version and roll back if the new service does not stay up, use
+[Update](#update).
 
 The service does not exit on its own. If the server refuses the device credential (the
 device was deleted or its token revoked), or something unexpected fails, it logs the reason
@@ -60,6 +62,46 @@ the directory the service reads, so run enrollment commands with `sudo`
 (without it, meteorcli says so). Without the service: `~/.config/meteorcli`, or
 `/etc/meteorcli` as root.
 
+## Update
+
+Use this when a newer `agent-vX.Y.Z` release is published. The updater checks
+`SHA256SUMS` (it stops if that file is missing or does not match), builds the
+new install beside the current one, and switches over only after
+`meteorcli --version` reports the new version. `meteorcli.service` is stopped
+only for that switch. If it was running and does not stay active for about 15
+seconds, the previous install is restored and started again. Device config
+(`/etc/meteorcli`, including the device token) is not modified.
+
+`meteorcli update` is in meteorcli **0.3.4** and later. On an older install, run
+the release script once; after that the command is on the device.
+
+```bash
+sudo meteorcli update --check          # exit 10 when a newer release exists
+sudo meteorcli update --yes
+# same procedure, including on a meteorcli that has no update command yet:
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/update-meteorcli.sh | sudo bash -s -- --check
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/update-meteorcli.sh | sudo bash -s -- --yes
+```
+
+Install a specific version, or put back the previous one:
+
+```bash
+sudo meteorcli update --to 0.3.4 --yes
+sudo meteorcli update --to 0.3.3 --allow-downgrade --yes
+sudo meteorcli update --rollback --yes
+```
+
+`--to` refuses to replace a newer install unless `--allow-downgrade` is set.
+`METEORCLI_VERSION=0.3.4` is the same as `--to`. A local tarball works when
+`SHA256SUMS` is in the same directory:
+
+```bash
+sudo METEORCLI_DIST_URL=http://192.168.0.118:8090/meteorcli-0.3.4.tar.gz meteorcli update --yes
+```
+
+Without `--yes`, a terminal prompts before changing the device. A non-interactive
+shell stops and asks you to pass `--yes`.
+
 ## Commands
 
 | Command | Purpose |
@@ -73,6 +115,7 @@ the directory the service reads, so run enrollment commands with `sudo`
 | `status` | Show non-secret local config, including systemd and WireGuard |
 | `mqtt-test` / `mqtt-listen` | MQTT diagnostics |
 | `logs` | List log sources (`--json`), or print one: `meteorcli logs systemd:nginx.service -f --grep error`. See [Device logs](fleet/logs.md) |
+| `update` | Install a newer meteorcli, or restore the previous one (`--check`, `--yes`, `--to`, `--rollback`). See [Update](#update) |
 
 Env overrides: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`, `METEORCLI_TOKEN`, `METEORCLI_CONFIG_DIR`.
 
