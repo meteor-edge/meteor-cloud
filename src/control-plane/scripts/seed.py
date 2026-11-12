@@ -373,7 +373,7 @@ def _seed_demo_software(
                 continue
             existing_artifact = artifact_repo.find_duplicate(
                 organization_id=organization.id,
-                device_type_id=None,
+                device_type_ids=[],
                 type=item.artifact_type,
                 name=item.name,
                 version=item.version,
@@ -399,7 +399,7 @@ def _seed_demo_software(
                 except ConflictError:
                     existing_artifact = artifact_repo.find_duplicate(
                         organization_id=organization.id,
-                        device_type_id=None,
+                        device_type_ids=[],
                         type=item.artifact_type,
                         name=item.name,
                         version=item.version,

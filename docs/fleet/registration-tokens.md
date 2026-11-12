@@ -15,7 +15,10 @@ Tokens are one of two ways a new device joins the fleet. The other is a
 
 When creating a token you may set:
 
-- `name` — required label for identification.
+- `name` — required label for identification. With `max_uses: 1` (what **Add
+  device** creates) it is also the device's name when it registers, unless
+  `meteorcli register --name` gives another. Multi-use tokens name devices like
+  enrollment does (`raspberrypi5-a1b2c3`).
 - `device_type_id` / `device_group_id` — bind the token so every device that
   registers with it inherits the type/group. Both must belong to the same
   organization.
@@ -26,7 +29,9 @@ When creating a token you may set:
 
 - `use_count` increments on each successful registration.
 - A token is invalid once revoked, expired, or its `max_uses` is reached. All of
-  these return `401 invalid_registration_token` at registration time.
+  these return `401 invalid_registration_token` at registration time. A device
+  already registered does not need its token again: check with
+  `sudo meteorcli info`.
 - Revoke a token at any time; revocation is immediate and irreversible.
 
 ## API

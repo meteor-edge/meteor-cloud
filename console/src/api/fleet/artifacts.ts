@@ -7,7 +7,8 @@ export type ArtifactUploadPayload = {
   name: string;
   version: string;
   type: ArtifactType;
-  device_type_id?: string | null;
+  /** Device types the artifact is for; none means not hardware-specific. */
+  device_type_ids?: string[];
   description?: string | null;
   /** OS images only: list it in Meteor Imager (public, no login). */
   published?: boolean;
@@ -65,6 +66,20 @@ export function setArtifactPublished(
   });
 }
 
+/** Change which device types an artifact is for; an empty list means any device. */
+export function setArtifactDeviceTypes(
+  token: string,
+  organizationId: string,
+  artifactId: string,
+  deviceTypeIds: string[],
+): Promise<Artifact> {
+  return apiRequest<Artifact>(`/api/v1/organizations/${organizationId}/artifacts/${artifactId}`, {
+    method: "PATCH",
+    token,
+    body: { device_type_ids: deviceTypeIds },
+  });
+}
+
 /** Delete artifact metadata and request content cleanup; reject on API, network, or parsing errors. */
 export function deleteArtifact(
   token: string,
@@ -100,8 +115,8 @@ export function uploadArtifact(
   form.set("name", payload.name);
   form.set("version", payload.version);
   form.set("type", payload.type);
-  if (payload.device_type_id) {
-    form.set("device_type_id", payload.device_type_id);
+  for (const deviceTypeId of payload.device_type_ids ?? []) {
+    form.append("device_type_ids", deviceTypeId);
   }
   if (payload.description) {
     form.set("description", payload.description);

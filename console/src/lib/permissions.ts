@@ -61,6 +61,21 @@ export function canOpenDeviceShell(role: string | undefined): boolean {
   return role === "owner" || role === "admin";
 }
 
+/** See and change a device's Wi-Fi and connection (device.network): sensitive, so owners and admins only. */
+export function canManageDeviceWifi(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
+/** Restart or shut down a device (device.reboot): owners and admins only. */
+export function canRebootDevice(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
+/** Change SSH passwords or add SSH users (device.users): as sensitive as a shell. */
+export function canManageDeviceUsers(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 /** Read device logs (device.logs): everyone but viewers. */
 export function canViewDeviceLogs(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "operator" || role === "developer";

@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { uploadArtifact, type Artifact, type ArtifactType, type DeviceType } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { ARTIFACT_TYPE_LABELS, ARTIFACT_TYPES } from "@/components/artifacts/artifactTypes";
+import { DeviceTypeChecklist } from "@/components/artifacts/DeviceTypeChecklist";
 import { UploadProgress, type UploadProgressState } from "@/components/artifacts/UploadProgress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +49,9 @@ export function ArtifactUploadDialog({
   const [name, setName] = useState("");
   const [version, setVersion] = useState("");
   const [type, setType] = useState<ArtifactType>(defaultType);
-  const [deviceTypeId, setDeviceTypeId] = useState(fixedDeviceType?.id ?? "");
+  const [deviceTypeIds, setDeviceTypeIds] = useState<string[]>(
+    fixedDeviceType ? [fixedDeviceType.id] : [],
+  );
   const [description, setDescription] = useState("");
   const [published, setPublished] = useState(false);
   const [progress, setProgress] = useState<UploadProgressState | null>(null);
@@ -107,7 +110,7 @@ export function ArtifactUploadDialog({
           name,
           version,
           type,
-          device_type_id: deviceTypeId || null,
+          device_type_ids: deviceTypeIds,
           description: description || null,
           published: canPublish && type === "os_image" && published,
         },
@@ -209,26 +212,16 @@ export function ArtifactUploadDialog({
               ))}
             </select>
           </div>
-          {!fixedDeviceType && (
-            <div>
-              <Label htmlFor="artifact-device-type">Device type</Label>
-              <select
-                id="artifact-device-type"
-                className={SELECT_CLASS}
-                value={deviceTypeId}
-                onChange={(event) => setDeviceTypeId(event.target.value)}
-                disabled={uploading}
-              >
-                <option value="">Any (not hardware-specific)</option>
-                {deviceTypes.map((deviceType) => (
-                  <option key={deviceType.id} value={deviceType.id}>
-                    {deviceType.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
         </div>
+
+        {!fixedDeviceType && (
+          <DeviceTypeChecklist
+            deviceTypes={deviceTypes}
+            selected={deviceTypeIds}
+            onChange={setDeviceTypeIds}
+            disabled={uploading}
+          />
+        )}
 
         <div>
           <Label htmlFor="artifact-description">Description</Label>

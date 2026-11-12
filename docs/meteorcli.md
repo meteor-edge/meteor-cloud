@@ -30,15 +30,26 @@ damaged `config.json` is ignored with a warning, and the service waits for `mete
   service; use `meteorcli run` in the foreground. `--with-service` makes that an
   error instead of a note.
 
-Pin a version: `METEORCLI_VERSION=0.2.0` (must match a published `agent-v*` tag).
+Pin a version: `METEORCLI_VERSION=0.3.0` (must match a published `agent-v*` tag).
+
+Local build (`make agent-dist`, then `python -m http.server 8090` in `dist/`):
+
+```bash
+curl -fsSL http://192.168.0.118:8090/install-meteorcli.sh | sudo bash -s -- http://192.168.0.118:8090/meteorcli-0.3.2.tar.gz
+# or: sudo METEORCLI_DIST_URL=http://192.168.0.118:8090/meteorcli.tar.gz bash < install-meteorcli.sh
+```
+
+Use the **local** `install-meteorcli.sh` (or a release that accepts a URL argument). A
+URL after `bash -s --` is the tarball; do not pass it to an old installer that only
+understands `METEORCLI_DIST_URL`.
 
 **Publish a release** (maintainers): set the version in
 `src/device-plane/agent/pyproject.toml`, then:
 
 ```bash
 make agent-dist          # optional local check; writes dist/
-git tag agent-v0.2.0     # must match the pyproject version
-git push origin agent-v0.2.0
+git tag agent-v0.3.0     # must match the pyproject version
+git push origin agent-v0.3.0
 ```
 
 CI packs agent + `src/device-plane/runtime` (no tests, no secrets) and creates
@@ -105,7 +116,11 @@ meteorcli request-token --name edge-01
 
 With `meteorcli.service` running, `request-token` returns right away and the
 service waits for the approval (every 10 seconds, across reboots; an expired
-request is resubmitted with the stored API key), then connects. Follow it with
+request is resubmitted with the stored API key), then connects. From **0.3.2**, if
+there is no pending request yet, the service also reads `meteorenv.txt` (or
+`.meteorenv`) on `/boot/firmware` or `/boot`, saves domain and API key, and
+submits the enrollment request itself—so you do not need a manual
+`request-token` when that file is present. Follow progress with
 `journalctl -u meteorcli -f`. Pass `--wait SECONDS` to wait in the terminal
 instead. A rejected request sends the service back to waiting for a new one.
 `request-token` waits in the terminal itself when the service is already
@@ -126,6 +141,9 @@ meteorcli run --once                    # one heartbeat (allowed even if the ser
 Foreground `meteorcli run` is unprivileged. systemd Deploys go through
 `meteorcli-systemd` (installed by `sudo ./installcli.sh`). `meteorcli.service`
 already runs as root and does not need that helper.
+
+Wi-Fi changes ordered from the console go through `meteorcli-wifi` (same installer,
+NetworkManager only). See [Wi-Fi](fleet/wifi.md).
 
 ## Related
 

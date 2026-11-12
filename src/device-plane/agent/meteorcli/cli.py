@@ -29,15 +29,18 @@ import sys
 import time
 from pathlib import Path
 
+from edge_agent.actions import ActionSync
 from edge_agent.capabilities import collect_capabilities
 from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.config import AgentConfig, load_config, save_config
 from edge_agent.credentials import read_device_token, read_registration_token_file
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
+from edge_agent.platform import combine_heartbeat_handlers
 from edge_agent.registration import register
 from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_as_service, service_state
 from edge_agent.software import reconcile_software
+from edge_agent.wifi import WifiSync
 from meteorcli import __version__
 from meteorcli import config as cli_config
 from meteorcli.config import (
@@ -50,6 +53,7 @@ from meteorcli.config import (
     resolve_server_url,
 )
 from meteorcli.credentials import read_secret, remove_secret, write_secret
+from meteorcli.meteorenv import consume_meteorenv, find_meteorenv_files, read_enrollment
 
 logger = logging.getLogger("meteorcli")
 
@@ -69,6 +73,8 @@ MIN_POLL_INTERVAL_SECONDS = 10
 RATE_LIMIT_BACKOFF_SECONDS = 30
 # meteorcli.service checks the config dir this often while the device is not registered.
 SERVICE_IDLE_CHECK_SECONDS = 10
+# After a failed auto enrollment from meteorenv / saved key, wait this long before trying again.
+SERVICE_AUTO_ENROLL_BACKOFF_SECONDS = 60
 
 
 def _normalize_secret(value: str | None) -> str | None:
@@ -169,10 +175,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     if dropped:
-        print(
-            "Cleared previous enrollment "
-            f"({', '.join(dropped)}); register again on this server."
-        )
+        print(f"Cleared previous enrollment ({', '.join(dropped)}); register again on this server.")
     print(f"Next: verify with '{PROG} test'.")
     return 0
 
@@ -679,6 +682,57 @@ def _enrolled(paths: CliPaths) -> bool:
     return bool(config and config.device_id) and read_device_token(paths.token_path) is not None
 
 
+def _apply_meteorenv_enrollment(paths: CliPaths) -> str | None:
+    """Load domain / API key / name from a boot meteorenv file into ``paths``.
+
+    Returns the optional device name from the file, or None when nothing usable was found.
+    """
+    files = find_meteorenv_files()
+    if not files:
+        return None
+    path = files[0]
+    enrollment = read_enrollment(path)
+    domain = (enrollment.get("METEOR_DOMAIN") or "").strip()
+    api_base = (enrollment.get("METEOR_API_BASE") or "").strip()
+    api_key = _normalize_secret(enrollment.get("METEOR_API_KEY"))
+    name = (enrollment.get("METEOR_NAME") or "").strip() or None
+    if not domain and not api_base and not api_key:
+        return None
+    if domain or api_base:
+        persist_connection(paths, domain=domain or None, api_base=api_base or None)
+    if api_key:
+        write_secret(paths.api_key_path, api_key)
+    _finish_config_write(paths)
+    consume_meteorenv(path)
+    logger.info(
+        "Read enrollment settings from %s. Approve this device in MeteorCloud when the request appears.",
+        path,
+    )
+    return name
+
+
+def _submit_enrollment_request(paths: CliPaths, *, name: str | None) -> bool:
+    """Submit one enrollment request using the saved server and API key. True when a claim is stored."""
+    server = resolve_server_url(_load(paths))
+    api_key = _normalize_secret(read_secret(paths.api_key_path))
+    if not server or not api_key:
+        return False
+    if _load_pending_claim(paths) is not None:
+        return True
+    client = EdgeClient(server)
+    try:
+        submitted = client.enroll_request(api_key=api_key, inventory=collect_inventory(), name=name)
+    except AgentApiError as error:
+        logger.warning("Enrollment request failed (%s).", error.message)
+        return False
+    stored = _store_pending_claim(paths, submitted, name)
+    logger.info(
+        "Enrollment request %s submitted; waiting for approval in MeteorCloud.",
+        stored["request_id"],
+    )
+    return True
+
+
 def _service_wait_until_enrolled(paths: CliPaths, *, sleep) -> None:
     """meteorcli.service: idle until this device is registered, then return.
 
@@ -687,8 +741,13 @@ def _service_wait_until_enrolled(paths: CliPaths, *, sleep) -> None:
     seconds, so it checks the config dir instead: a pending token request is
     waited on (and collected), a registration token written by ``register`` is
     picked up on the next check. A rejected or expired request goes back to idle.
+
+    If a ``meteorenv.txt`` (or ``.meteorenv``) is on the boot partition, the service
+    reads the enrollment fields, saves them under ``/etc/meteorcli``, submits
+    ``request-token`` itself, and removes the file.
     """
     announced: str | None = None
+    next_auto_enroll_at = 0.0
     while not _enrolled(paths):
         if _load_pending_claim(paths) is not None:
             announced = None
@@ -697,23 +756,38 @@ def _service_wait_until_enrolled(paths: CliPaths, *, sleep) -> None:
                 break
             # The request ended without a credential (rejected, refused key, no server,
             # or a token whose config write was interrupted): back to waiting.
-        elif not resolve_server_url(_load(paths)):
-            if announced != "unconfigured":
+            next_auto_enroll_at = 0.0
+        else:
+            now = time.monotonic()
+            name: str | None = None
+            if now >= next_auto_enroll_at:
+                name = _apply_meteorenv_enrollment(paths)
+                server = resolve_server_url(_load(paths))
+                api_key = _normalize_secret(read_secret(paths.api_key_path))
+                if server and api_key:
+                    if _submit_enrollment_request(paths, name=name):
+                        announced = None
+                        continue
+                    next_auto_enroll_at = now + SERVICE_AUTO_ENROLL_BACKOFF_SECONDS
+            if not resolve_server_url(_load(paths)):
+                if announced != "unconfigured":
+                    logger.info(
+                        "Waiting for setup. Put meteorenv.txt on the boot partition, or run "
+                        "'sudo %s config --domain <host> --api-key key_…' and "
+                        "'sudo %s request-token'.",
+                        PROG,
+                        PROG,
+                    )
+                    announced = "unconfigured"
+            elif announced != "unregistered":
                 logger.info(
-                    "Waiting for setup. Run 'sudo %s config --domain <host> --api-key key_…' "
-                    "and 'sudo %s request-token'.",
+                    "Waiting for registration. Put meteorenv.txt on the boot partition, or run "
+                    "'sudo %s request-token' (or 'sudo %s register'); "
+                    "this service connects as soon as the device is approved.",
                     PROG,
                     PROG,
                 )
-                announced = "unconfigured"
-        elif announced != "unregistered":
-            logger.info(
-                "Waiting for registration. Run 'sudo %s request-token' (or 'sudo %s register'); "
-                "this service connects as soon as the device is approved.",
-                PROG,
-                PROG,
-            )
-            announced = "unregistered"
+                announced = "unregistered"
         sleep(SERVICE_IDLE_CHECK_SECONDS)
 
 
@@ -971,6 +1045,10 @@ def _run_agent(paths: CliPaths, args: argparse.Namespace) -> int:
             sleep=time.sleep,
             should_continue=lambda: True,
             payload_factory=_payload,
+            on_response=combine_heartbeat_handlers(
+                WifiSync(client, device_token).on_heartbeat,
+                ActionSync(client, device_token).on_heartbeat,
+            ),
         )
     except AgentApiError:
         return 1

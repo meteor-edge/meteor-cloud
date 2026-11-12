@@ -16,19 +16,22 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Column,
     Enum,
     ForeignKey,
     Index,
     String,
+    Table,
     Text,
     UniqueConstraint,
     func,
 )
 from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.devices.models import DeviceType
 
 
 class ArtifactType(enum.StrEnum):
@@ -49,11 +52,12 @@ class Artifact(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # Optional: some artifacts (e.g. configuration) are not hardware-specific.
-    device_type_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("device_types.id", ondelete="RESTRICT"),
-        nullable=True,
+    # Device types this artifact is for (an OS image often fits several boards).
+    # None: not hardware-specific.
+    device_types: Mapped[list[DeviceType]] = relationship(
+        secondary=lambda: artifact_device_types,
+        lazy="selectin",
+        order_by=lambda: DeviceType.name,
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     version: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -93,19 +97,35 @@ class Artifact(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint("NOT published OR type = 'os_image'", name="ck_artifacts_published_os_image"),
-        # Case-insensitive name/version; NULLS NOT DISTINCT so org-wide rows stay unique.
+        # Duplicates (same type, name and version on a shared device type) are refused in the
+        # service; this index only makes that lookup fast.
         Index(
-            "uq_artifacts_org_type_name_version",
+            "ix_artifacts_org_type_name_version",
             "organization_id",
-            "device_type_id",
             "type",
             func.lower(name),
             func.lower(version),
-            unique=True,
-            postgresql_nulls_not_distinct=True,
         ),
         UniqueConstraint("storage_key", name="uq_artifacts_storage_key"),
         Index("ix_artifacts_organization_id", "organization_id"),
-        Index("ix_artifacts_org_device_type_id", "organization_id", "device_type_id"),
         Index("ix_artifacts_org_type", "organization_id", "type"),
     )
+
+    @property
+    def device_type_ids(self) -> list[uuid.UUID]:
+        return [device_type.id for device_type in self.device_types]
+
+    @property
+    def device_type_id(self) -> uuid.UUID | None:
+        """The only device type, for clients from before artifacts could have several."""
+        return self.device_types[0].id if len(self.device_types) == 1 else None
+
+
+artifact_device_types = Table(
+    "artifact_device_types",
+    Base.metadata,
+    Column("artifact_id", UUID(as_uuid=True), ForeignKey("artifacts.id", ondelete="CASCADE"), primary_key=True),
+    # RESTRICT: a device type that artifacts are built for cannot be deleted.
+    Column("device_type_id", UUID(as_uuid=True), ForeignKey("device_types.id", ondelete="RESTRICT"), primary_key=True),
+    Index("ix_artifact_device_types_device_type_id", "device_type_id"),
+)

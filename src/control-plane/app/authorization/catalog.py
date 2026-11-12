@@ -53,7 +53,12 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("device", "create", "Create devices", "Create registration tokens and approve enrollment."),
     PermissionDef("device", "update", "Update devices", "Edit device metadata, type, group, and enablement."),
     PermissionDef("device", "delete", "Delete devices", "Remove devices within scope."),
-    PermissionDef("device", "reboot", "Reboot devices", "Send reboot and similar operate commands within scope."),
+    PermissionDef(
+        "device",
+        "reboot",
+        "Restart and shut down devices",
+        "Restart or shut down a device from the console.",
+    ),
     PermissionDef("device_type", "read", "View device types", "List and open device types."),
     PermissionDef("device_type", "create", "Create device types", "Create hardware models."),
     PermissionDef("device_type", "update", "Update device types", "Edit device types."),
@@ -78,6 +83,18 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("endpoint", "delete", "Delete endpoints", "Remove public application endpoints."),
     PermissionDef("device", "shell", "Open device terminal", "Open a browser SSH session to a device."),
     PermissionDef("device", "logs", "View device logs", "Read service, container and system logs on a device."),
+    PermissionDef(
+        "device",
+        "network",
+        "Device Wi-Fi and connection",
+        "See which networks a device uses and add, change or remove its Wi-Fi. A wrong network can take it offline.",
+    ),
+    PermissionDef(
+        "device",
+        "users",
+        "Manage device SSH users",
+        "Change a user's password or add an SSH user on a device. As sensitive as a shell session.",
+    ),
     PermissionDef("enrollment_key", "read", "View enrollment API keys", "List enrollment API keys."),
     PermissionDef("enrollment_key", "manage", "Manage enrollment API keys", "Create and revoke enrollment API keys."),
     PermissionDef("mqtt", "test", "Use MQTT test tools", "Publish and listen in the organization MQTT test UI."),
@@ -123,8 +140,7 @@ _OPERATOR = _VIEWER | frozenset(
         "team.read",
         "device.create",
         "device.update",
-        "device.reboot",
-        # device.shell is owner/admin only: a root-capable shell on the device.
+        # device.reboot / device.shell / device.users are owner/admin only.
         "device.logs",
         "deployment.create",
         "deployment.cancel",

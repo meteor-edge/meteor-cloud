@@ -1,0 +1,530 @@
+#!/usr/bin/python3 -I
+"""Root helper that lets an unprivileged meteorcli change this device's Wi-Fi, and nothing else.
+
+installcli.sh installs this root-owned and grants passwordless sudo for this file
+only. It talks to NetworkManager: it writes a keyfile for one Wi-Fi network (name,
+password, hidden) and runs fixed `nmcli` commands. The request arrives as JSON on
+stdin, so the password is never on a command line, and it is never printed.
+
+  meteorcli-wifi status      Wi-Fi state and saved networks, as JSON (no passwords)
+  meteorcli-wifi apply       add a network or change its password   (JSON on stdin)
+  meteorcli-wifi confirm     keep what the last `apply` with connect_now changed
+  meteorcli-wifi rollback    undo it: old settings back, reconnect
+  meteorcli-wifi remove      forget a network                        (JSON on stdin)
+
+A network the operating system's netplan configuration defines (Raspberry Pi Imager
+and cloud-init write one) is NetworkManager-generated at every boot, so `remove`
+deletes it from the netplan YAML with `netplan set …=null` and regenerates.
+
+`apply` with "connect_now" switches to the network at once and keeps the old
+settings aside until `confirm`. If the network cannot be joined it puts them back
+itself; if the caller then finds it cannot reach MeteorCloud it calls `rollback`.
+If the device loses power in between, `status` shows the change as "pending" and
+the agent rolls it back when it starts.
+
+Exit codes: 0 done, 2 bad request, 3 the network could not be joined (rolled back),
+4 refused because it would cut the device off, 5 Wi-Fi cannot be managed here.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import uuid
+
+# sudo usually sets secure_path, but do not rely on it for the tools run as root.
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+NMCLI = "nmcli"
+NETPLAN = "netplan"
+NETPLAN_PREFIX = "netplan-"
+# Netplan definition ids are interface names or NM-<uuid>; no dots, which `netplan set` paths use.
+NETPLAN_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+CONNECTIONS_DIR = "/etc/NetworkManager/system-connections"
+STATE_DIR = "/var/lib/meteorcli-wifi"
+PENDING = os.path.join(STATE_DIR, "pending.json")
+BACKUP_DIR = os.path.join(STATE_DIR, "backup")
+PROFILE_PREFIX = "meteor-wifi"
+# Above profiles written at image time or by hand, so a changed password wins.
+AUTOCONNECT_PRIORITY = 10
+ACTIVATE_TIMEOUT_SECONDS = 45
+MAX_REQUEST_BYTES = 4096
+SECURITIES = frozenset({"wpa-psk", "open"})
+
+EXIT_BAD_REQUEST = 2
+EXIT_NOT_JOINED = 3
+EXIT_WOULD_CUT_OFF = 4
+EXIT_UNSUPPORTED = 5
+
+
+class HelperError(Exception):
+    def __init__(self, message: str, code: int = EXIT_BAD_REQUEST) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# --- nmcli -------------------------------------------------------------------
+
+
+def nmcli(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([NMCLI, *args], capture_output=True, text=True, timeout=timeout, check=False)
+
+
+def split_terse(line: str) -> list[str]:
+    """Fields of one `nmcli -t` line: ':' separates, '\\:' and '\\\\' are literal."""
+    fields: list[str] = []
+    current: list[str] = []
+    chars = iter(line)
+    for char in chars:
+        if char == "\\":
+            current.append(next(chars, ""))
+        elif char == ":":
+            fields.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    fields.append("".join(current))
+    return fields
+
+
+def terse(*args: str) -> list[list[str]]:
+    result = nmcli("-t", *args)
+    if result.returncode != 0:
+        return []
+    return [split_terse(line) for line in result.stdout.splitlines() if line]
+
+
+def unsupported_reason() -> str | None:
+    if shutil.which(NMCLI) is None:
+        return "NetworkManager is not installed on this device."
+    running = nmcli("-t", "-f", "RUNNING", "general")
+    if running.returncode != 0 or running.stdout.strip() != "running":
+        return "NetworkManager is not running on this device."
+    if not wifi_interface():
+        return "This device has no Wi-Fi adapter."
+    return None
+
+
+def devices() -> list[dict[str, str]]:
+    rows = terse("-f", "DEVICE,TYPE,STATE,CONNECTION", "device")
+    return [dict(zip(("device", "type", "state", "connection"), row, strict=False)) for row in rows if len(row) >= 3]
+
+
+def wifi_interface() -> str | None:
+    return next((row["device"] for row in devices() if row["type"] == "wifi"), None)
+
+
+def wired_connected() -> bool:
+    return any(row["type"] == "ethernet" and row["state"].startswith("connected") for row in devices())
+
+
+def active_wifi() -> tuple[str | None, int | None]:
+    """(SSID, signal percent) of the network in use."""
+    for row in terse("-f", "ACTIVE,SSID,SIGNAL", "device", "wifi", "list", "--rescan", "no"):
+        if len(row) >= 3 and row[0] == "yes":
+            return row[1] or None, int(row[2]) if row[2].isdigit() else None
+    return None, None
+
+
+def wifi_profiles() -> list[dict[str, str]]:
+    """Saved Wi-Fi connections: name, uuid, file, ssid."""
+    profiles = []
+    for row in terse("-f", "NAME,UUID,TYPE,FILENAME", "connection", "show"):
+        if len(row) < 4 or row[2] != "802-11-wireless":
+            continue
+        # -e no: a single value, so ':' and '\\' in a network name come back as they are.
+        shown = nmcli("-e", "no", "-g", "802-11-wireless.ssid", "connection", "show", "uuid", row[1])
+        if shown.returncode != 0:
+            continue
+        profiles.append({"name": row[0], "uuid": row[1], "file": row[3], "ssid": shown.stdout.rstrip("\n")})
+    return profiles
+
+
+def active_wifi_uuid() -> str | None:
+    for row in terse("-f", "UUID,TYPE", "connection", "show", "--active"):
+        if len(row) >= 2 and row[1] == "802-11-wireless":
+            return row[0]
+    return None
+
+
+def is_managed(profile: dict[str, str]) -> bool:
+    return profile["name"].startswith(PROFILE_PREFIX)
+
+
+def in_connections_dir(path: str) -> bool:
+    return os.path.dirname(os.path.realpath(path)) == os.path.realpath(CONNECTIONS_DIR)
+
+
+# --- requests ------------------------------------------------------------------
+
+
+def read_request() -> dict:
+    raw = sys.stdin.read(MAX_REQUEST_BYTES + 1)
+    if len(raw) > MAX_REQUEST_BYTES:
+        raise HelperError("request too large")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise HelperError("request is not JSON") from None
+    if not isinstance(data, dict):
+        raise HelperError("request must be a JSON object")
+    return data
+
+
+def valid_ssid(value: object) -> str:
+    if not isinstance(value, str) or not 1 <= len(value.encode()) <= 32:
+        raise HelperError("ssid must be 1 to 32 bytes")
+    if any(char in value for char in "\x00\r\n"):
+        raise HelperError("ssid must not contain line breaks")
+    return value
+
+
+def valid_password(value: object) -> str:
+    if not isinstance(value, str) or not 8 <= len(value) <= 63:
+        raise HelperError("password must be 8 to 63 characters")
+    if any(char in value for char in "\x00\r\n"):
+        raise HelperError("password must not contain line breaks")
+    return value
+
+
+def valid_change_id(value: object) -> str:
+    try:
+        return str(uuid.UUID(str(value)))
+    except ValueError:
+        raise HelperError("id must be a UUID") from None
+
+
+# --- keyfile -------------------------------------------------------------------
+
+
+def keyfile_escape(value: str) -> str:
+    """A value for a NetworkManager keyfile: ';' separates lists, '\\' escapes, edges keep their spaces."""
+    out = value.replace("\\", "\\\\").replace(";", "\\;")
+    if out.startswith(" "):
+        out = "\\s" + out[1:]
+    if out.endswith(" "):
+        out = out[:-1] + "\\s"
+    return out
+
+
+def profile_name(ssid: str) -> str:
+    return f"{PROFILE_PREFIX}-{hashlib.sha256(ssid.encode()).hexdigest()[:10]}"
+
+
+def keyfile(*, ssid: str, security: str, password: str | None, hidden: bool) -> str:
+    lines = [
+        "[connection]",
+        f"id={profile_name(ssid)}",
+        f"uuid={uuid.uuid4()}",
+        "type=wifi",
+        "autoconnect=true",
+        f"autoconnect-priority={AUTOCONNECT_PRIORITY}",
+        "",
+        "[wifi]",
+        "mode=infrastructure",
+        f"ssid={keyfile_escape(ssid)}",
+    ]
+    if hidden:
+        lines.append("hidden=true")
+    if security == "wpa-psk":
+        lines += ["", "[wifi-security]", "key-mgmt=wpa-psk", f"psk={keyfile_escape(password or '')}"]
+    lines += ["", "[ipv4]", "method=auto", "", "[ipv6]", "method=auto", ""]
+    return "\n".join(lines)
+
+
+def write_private(path: str, content: str) -> None:
+    """Create ``path`` readable by root only; the content holds a password."""
+    tmp = f"{path}.tmp-{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def reload_connections() -> None:
+    nmcli("connection", "reload")
+
+
+# --- netplan -------------------------------------------------------------------
+
+
+def netplan(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([NETPLAN, *args], capture_output=True, text=True, timeout=60, check=False)
+
+
+def netplan_definition(profile: dict[str, str]) -> str | None:
+    """The netplan definition a generated profile comes from, or None if it is not one.
+
+    Netplan names a Wi-Fi profile ``netplan-<definition>-<ssid>``; one NetworkManager saved
+    through netplan lives in ``netplan-NM-<uuid>.nmconnection``.
+    """
+    base = os.path.basename(profile["file"])
+    if not base.startswith(NETPLAN_PREFIX):
+        return None
+    stem = base[len(NETPLAN_PREFIX) :].removesuffix(".nmconnection")
+    name, suffix = profile["name"], f"-{profile['ssid']}"
+    if stem.startswith("NM-"):
+        definition = stem
+    elif name.startswith(NETPLAN_PREFIX) and name.endswith(suffix):
+        definition = name[len(NETPLAN_PREFIX) : -len(suffix)]
+    else:
+        return None
+    return definition if NETPLAN_ID.match(definition) else None
+
+
+def forget_in_netplan(profiles: list[dict[str, str]], ssid: str) -> bool:
+    """Delete ``ssid`` from the netplan definitions behind ``profiles``. False if one could not be."""
+    if shutil.which(NETPLAN) is None:
+        return False
+    everything = wifi_profiles()
+    done = True
+    for profile in profiles:
+        definition = netplan_definition(profile)
+        if definition is None:
+            done = False
+            continue
+        others = [other for other in everything if other["ssid"] != ssid and netplan_definition(other) == definition]
+        if not others:
+            key = f"wifis.{definition}"
+        elif re.fullmatch(r"[^.=]+", ssid):
+            # The definition has other networks: drop only this one.
+            key = f"wifis.{definition}.access-points.{ssid}"
+        else:
+            done = False
+            continue
+        if netplan("set", f"{key}=null").returncode != 0:
+            done = False
+    netplan("generate")
+    for profile in profiles:
+        nmcli("connection", "delete", "uuid", profile["uuid"])
+    reload_connections()
+    return done
+
+
+# --- pending change (connect_now) ------------------------------------------------
+
+
+def read_pending() -> dict | None:
+    try:
+        with open(PENDING, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def clear_pending() -> None:
+    shutil.rmtree(BACKUP_DIR, ignore_errors=True)
+    try:
+        os.unlink(PENDING)
+    except FileNotFoundError:
+        pass
+
+
+def restore(pending: dict) -> None:
+    """Old profiles back, the new one gone, and reconnect to what was in use."""
+    new_file = pending.get("new_file")
+    if isinstance(new_file, str) and in_connections_dir(new_file) and os.path.exists(new_file):
+        os.unlink(new_file)
+    for name in pending.get("backups", []):
+        source = os.path.join(BACKUP_DIR, os.path.basename(str(name)))
+        if os.path.isfile(source):
+            target = os.path.join(CONNECTIONS_DIR, os.path.basename(source))
+            shutil.copyfile(source, target)
+            os.chmod(target, 0o600)
+    reload_connections()
+    previous = pending.get("previous_uuid")
+    interface = wifi_interface()
+    if isinstance(previous, str) and previous:
+        if nmcli("connection", "up", "uuid", previous, timeout=ACTIVATE_TIMEOUT_SECONDS + 15).returncode == 0:
+            return
+    if interface:
+        nmcli("device", "connect", interface, timeout=ACTIVATE_TIMEOUT_SECONDS + 15)
+
+
+# --- commands ------------------------------------------------------------------
+
+
+def command_status() -> dict:
+    reason = unsupported_reason()
+    if reason is not None:
+        return {"supported": False, "unsupported_reason": reason, "saved_networks": [], "wired_connected": False}
+    ssid, signal = active_wifi()
+    saved: dict[str, bool] = {}
+    for profile in wifi_profiles():
+        if profile["ssid"]:
+            saved[profile["ssid"]] = saved.get(profile["ssid"], False) or is_managed(profile)
+    pending = read_pending()
+    status = {
+        "supported": True,
+        "unsupported_reason": None,
+        "connected_ssid": ssid,
+        "signal_percent": signal,
+        "interface": wifi_interface(),
+        "wired_connected": wired_connected(),
+        "saved_networks": [{"ssid": name, "managed": managed} for name, managed in sorted(saved.items())],
+    }
+    if pending is not None:
+        status["pending"] = {"id": pending.get("id"), "revision": pending.get("revision")}
+    return status
+
+
+def require_supported() -> None:
+    reason = unsupported_reason()
+    if reason is not None:
+        raise HelperError(reason, EXIT_UNSUPPORTED)
+
+
+def command_apply(request: dict) -> dict:
+    ssid = valid_ssid(request.get("ssid"))
+    security = request.get("security", "wpa-psk")
+    if security not in SECURITIES:
+        raise HelperError("security must be wpa-psk or open")
+    password = valid_password(request.get("password")) if security == "wpa-psk" else None
+    hidden = request.get("hidden") is True
+    connect_now = request.get("connect_now") is True
+    change_id = valid_change_id(request.get("id")) if connect_now else None
+    revision = request.get("revision")
+    require_supported()
+    if read_pending() is not None:
+        raise HelperError("an earlier change is still waiting for confirm or rollback")
+
+    name = profile_name(ssid)
+    new_file = os.path.join(CONNECTIONS_DIR, f"{name}.nmconnection")
+    # Older profiles for this network (one written at image time, or our own) are replaced;
+    # ones NetworkManager only generated at boot (netplan, in /run) stay, with a lower priority.
+    replaced = [
+        profile
+        for profile in wifi_profiles()
+        if profile["ssid"] == ssid and in_connections_dir(profile["file"]) and os.path.isfile(profile["file"])
+    ]
+    previous_uuid = active_wifi_uuid()
+    os.makedirs(CONNECTIONS_DIR, mode=0o755, exist_ok=True)
+
+    if connect_now:
+        shutil.rmtree(BACKUP_DIR, ignore_errors=True)
+        os.makedirs(BACKUP_DIR, mode=0o700)
+        os.chmod(STATE_DIR, 0o700)
+        for profile in replaced:
+            target = os.path.join(BACKUP_DIR, os.path.basename(profile["file"]))
+            shutil.copyfile(profile["file"], target)
+            os.chmod(target, 0o600)
+        pending = {
+            "id": change_id,
+            "revision": revision if isinstance(revision, int) else None,
+            "new_file": new_file,
+            "backups": [os.path.basename(profile["file"]) for profile in replaced],
+            "previous_uuid": previous_uuid,
+        }
+        write_private(PENDING, json.dumps(pending))
+
+    for profile in replaced:
+        if os.path.realpath(profile["file"]) != os.path.realpath(new_file):
+            os.unlink(profile["file"])
+    write_private(new_file, keyfile(ssid=ssid, security=security, password=password, hidden=hidden))
+    reload_connections()
+
+    if not connect_now:
+        return {"applied": True, "connected": False}
+
+    interface = wifi_interface()
+    target = ["ifname", interface] if interface else []
+    up = nmcli(
+        *("--wait", str(ACTIVATE_TIMEOUT_SECONDS), "connection", "up", "id", name, *target),
+        timeout=ACTIVATE_TIMEOUT_SECONDS + 15,
+    )
+    if up.returncode != 0:
+        restore(read_pending() or {})
+        clear_pending()
+        raise HelperError(
+            "The device could not join this network (wrong password, or out of range). "
+            "The old Wi-Fi settings were put back.",
+            EXIT_NOT_JOINED,
+        )
+    return {"applied": True, "connected": True}
+
+
+def command_confirm() -> dict:
+    clear_pending()
+    return {"confirmed": True}
+
+
+def command_rollback() -> dict:
+    pending = read_pending()
+    if pending is None:
+        return {"rolled_back": False}
+    restore(pending)
+    clear_pending()
+    return {"rolled_back": True, "id": pending.get("id"), "revision": pending.get("revision")}
+
+
+def command_remove(request: dict) -> dict:
+    ssid = valid_ssid(request.get("ssid"))
+    require_supported()
+    profiles = [profile for profile in wifi_profiles() if profile["ssid"] == ssid]
+    if not profiles:
+        return {"removed": True, "found": False}
+    current, _signal = active_wifi()
+    if current == ssid and not wired_connected():
+        raise HelperError(
+            "The device is connected through this network and has no other connection. "
+            "Add another network first, or connect a cable.",
+            EXIT_WOULD_CUT_OFF,
+        )
+    generated = [profile for profile in profiles if not in_connections_dir(profile["file"])]
+    for profile in profiles:
+        if in_connections_dir(profile["file"]):
+            nmcli("connection", "delete", "uuid", profile["uuid"])
+    if generated:
+        forget_in_netplan(generated, ssid)
+        kept = [profile["name"] for profile in wifi_profiles() if profile["ssid"] == ssid]
+        if kept:
+            raise HelperError(
+                "This network was set up by the operating system's own configuration "
+                f"({', '.join(kept)}), which this device recreates at boot, and it could not be "
+                "removed from there.",
+                EXIT_UNSUPPORTED,
+            )
+    return {"removed": True, "found": True}
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        print("meteorcli-wifi: must run as root (via sudo)", file=sys.stderr)
+        return EXIT_BAD_REQUEST
+    os.environ["PATH"] = SAFE_PATH
+    os.umask(0o077)
+    try:
+        if argv == ["status"]:
+            result = command_status()
+        elif argv == ["apply"]:
+            result = command_apply(read_request())
+        elif argv == ["confirm"]:
+            result = command_confirm()
+        elif argv == ["rollback"]:
+            result = command_rollback()
+        elif argv == ["remove"]:
+            result = command_remove(read_request())
+        else:
+            raise HelperError("unsupported command")
+    except HelperError as error:
+        print(json.dumps({"error": str(error)}))
+        return error.code
+    except subprocess.TimeoutExpired:
+        print(json.dumps({"error": "NetworkManager did not answer in time."}))
+        return EXIT_UNSUPPORTED
+    print(json.dumps(result))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

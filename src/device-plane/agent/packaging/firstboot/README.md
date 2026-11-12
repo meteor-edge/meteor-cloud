@@ -86,6 +86,11 @@ also gets `meteorcli-settings.service`. Early in boot, before the network starts
 values to `/etc/meteorcli-firstboot.env` (root only) and **deletes `.meteorenv` from the
 card**. Without `.meteorenv` it does nothing. Log: `/var/log/meteorcli-settings.log`.
 
+The file may also be named `meteorenv.txt`, `meteorenv` or `.meteorenv.txt` (the console's
+download is `meteorenv.txt`, since Windows and macOS make dot-files awkward); Windows line
+ends and a byte-order mark are accepted. See
+[Device settings file](../../../../../docs/fleet/device-settings-file.md).
+
 Config partition, first match: a FAT partition labelled `METEORCFG` (for Jetson, NUC and
 other device types), `/boot/firmware` (Raspberry Pi OS Bookworm+), `/boot`, `/boot/efi`.
 The installer writes `.meteor-settings` there, which tells Meteor Imager to write only

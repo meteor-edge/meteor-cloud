@@ -421,7 +421,8 @@ prompt_if_missing() {
       echo "error: METEOR_DOMAIN and METEOR_API_KEY must be set (${ENV_FILE}, .meteorenv, or the boot partition) for background poll." >&2
       exit 1
     fi
-    METEOR_NAME="${METEOR_NAME:-$(hostname)}"
+    # No name chosen: MeteorCloud names the device (<type>-<last 3 MAC bytes>).
+    METEOR_NAME="${METEOR_NAME:-}"
     return 0
   fi
   if [[ -z "${METEOR_DOMAIN:-}" || -z "${METEOR_API_KEY:-}" ]]; then
@@ -430,9 +431,9 @@ prompt_if_missing() {
   fi
   ask_on_this_terminal METEOR_DOMAIN "Control-plane host (e.g. 192.168.0.118:8000): "
   ask_on_this_terminal METEOR_API_KEY "Enrollment API key (key_…): "
-  METEOR_NAME="${METEOR_NAME:-$(hostname)}"
+  METEOR_NAME="${METEOR_NAME:-}"
   log "Server (METEOR_DOMAIN)=${METEOR_DOMAIN}"
-  log "Device name=${METEOR_NAME}"
+  log "Device name=${METEOR_NAME:-(chosen by MeteorCloud)}"
   log "API key is set (not printed)"
 }
 
@@ -551,14 +552,23 @@ install_firstboot_unit() {
   fi
 }
 
+# Ask for a name only when one was chosen; otherwise MeteorCloud names the device.
+request_token() {
+  if [[ -n "${METEOR_NAME:-}" ]]; then
+    meteorcli request-token --name "${METEOR_NAME}" --wait 0
+  else
+    meteorcli request-token --wait 0
+  fi
+}
+
 submit_request() {
   export METEORCLI_CONFIG_DIR="${CONFIG_DIR}"
   if [[ -f "${CLAIM_FILE}" ]]; then
     log "Pending request already on disk (${CLAIM_FILE})."
     return 0
   fi
-  log "Submitting enrollment request (meteorcli request-token --name ${METEOR_NAME} --wait 0)…"
-  meteorcli request-token --name "${METEOR_NAME}" --wait 0
+  log "Submitting enrollment request (meteorcli request-token --wait 0)…"
+  request_token
 }
 
 # `meteorcli request-token` exit code for a rejected key (meteorcli/cli.py); 75 means retry later.
@@ -585,7 +595,7 @@ retry_delay() {
 request_token_once() {
   local out rc server_wait
   set +e
-  out="$(meteorcli request-token --name "${METEOR_NAME}" --wait 0 2>&1)"
+  out="$(request_token 2>&1)"
   rc=$?
   set -e
   [[ -n "${out}" ]] && printf '%s\n' "${out}" | grep -v '^retry-after:' | while IFS= read -r line; do log "  ${line}"; done || true

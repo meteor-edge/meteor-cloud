@@ -340,6 +340,9 @@ export type DeviceSoftware = {
 export type Artifact = {
   id: string;
   organization_id: string;
+  /** Device types the artifact is for; none means not hardware-specific. */
+  device_type_ids?: string[];
+  /** The only device type, or null with none or several. Prefer `device_type_ids`. */
   device_type_id: string | null;
   name: string;
   version: string;
@@ -475,6 +478,11 @@ export type DeviceEnrollmentRequest = {
   requested_name: string | null;
   assigned_name: string | null;
   suggested_name?: string | null;
+  /** Set when the suggestion is `<kind>-<name_suffix>`: the kind follows the device type picked at approval. */
+  name_suffix?: string | null;
+  /** Catalog device type that fits the board model the device reported. */
+  suggested_device_type_id?: string | null;
+  hardware_model?: string | null;
   device_type_id: string | null;
   device_group_id: string | null;
   serial_number: string | null;

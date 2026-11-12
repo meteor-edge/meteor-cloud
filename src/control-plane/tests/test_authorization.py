@@ -221,7 +221,8 @@ def test_member_access_and_preview(client: TestClient, db_session: Session) -> N
     assert body["role"]["key"] == "operator"
     assert body["scope"]["mode"] == "device_groups"
     assert "Berlin" in body["scope"]["device_group_names"]
-    assert any(item["id"] == "device.reboot" and item["granted"] for item in body["permissions_detail"])
+    assert any(item["id"] == "device.update" and item["granted"] for item in body["permissions_detail"])
+    assert any(item["id"] == "device.reboot" and not item["granted"] for item in body["permissions_detail"])
     assert any(item["id"] == "device.delete" and not item["granted"] for item in body["permissions_detail"])
 
     device = Device(
@@ -247,7 +248,7 @@ def test_member_access_and_preview(client: TestClient, db_session: Session) -> N
         },
     )
     assert preview.status_code == 200, preview.text
-    assert preview.json()["allowed"] is True
+    assert preview.json()["allowed"] is False
 
 
 def test_only_owner_and_admin_may_open_a_device_shell(db_session: Session) -> None:
