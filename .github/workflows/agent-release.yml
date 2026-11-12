@@ -56,10 +56,16 @@ jobs:
           \`\`\`bash
           curl -fsSLO https://github.com/${{ github.repository }}/releases/latest/download/meteorcli-prepare-image.sh && sudo bash meteorcli-prepare-image.sh
           \`\`\`
-          Pin a version with \`METEORCLI_VERSION=${ver}\`." \
+          Pin a version with \`METEORCLI_VERSION=${ver}\`.
+          Update an existing device (checksum, keep the previous install, roll back if the new service does not stay up):
+          \`\`\`bash
+          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/update-meteorcli.sh | sudo bash -s -- --check
+          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/update-meteorcli.sh | sudo bash -s -- --yes
+          \`\`\`" \
             dist/meteorcli.tar.gz \
             "dist/meteorcli-${ver}.tar.gz" \
             dist/install-meteorcli.sh \
             dist/install-meteorcli-firstboot.sh \
             dist/meteorcli-prepare-image.sh \
+            dist/update-meteorcli.sh \
             dist/SHA256SUMS

@@ -60,6 +60,14 @@ def shutdown_device(
     return service.shutdown(actor=current_user, organization_id=organization_id, device_id=device_id)
 
 
+@router.post(f"{_DEVICE}/update-agent", response_model=DeviceActionsResponse)
+def update_device_agent(
+    organization_id: uuid.UUID, device_id: uuid.UUID, current_user: CurrentUser, service: ActionSvc
+) -> DeviceActionsResponse:
+    """Install the latest published meteorcli on the device's next heartbeat."""
+    return service.update_agent(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
 @router.post(f"{_DEVICE}/set-password", response_model=DeviceActionsResponse)
 def set_device_password(
     organization_id: uuid.UUID,

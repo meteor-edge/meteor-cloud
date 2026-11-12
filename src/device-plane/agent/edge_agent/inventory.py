@@ -23,6 +23,16 @@ def _read_text(path: str) -> str | None:
     return text or None
 
 
+def _agent_version() -> str | None:
+    """Installed meteorcli version (X.Y.Z), or None when the package is missing."""
+    try:
+        from meteorcli import __version__
+    except ImportError:
+        return None
+    version = str(__version__).strip()
+    return version or None
+
+
 def read_os_release() -> tuple[str | None, str | None]:
     """Return (os_name, os_version) parsed from /etc/os-release."""
     content = _read_text("/etc/os-release")
@@ -379,4 +389,5 @@ def collect_inventory() -> dict[str, Any]:
         "cpu_cores": cpu_cores,
         "memory_mb": read_memory_mb(),
         "local_ip": read_local_ipv4(),
+        "agent_version": _agent_version(),
     }

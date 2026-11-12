@@ -8,7 +8,7 @@ Board and OS differences go behind **platform ports** in
 
 | Port | Common contract | Linux default |
 |------|-----------------|---------------|
-| Inventory | `serial_number`, `mac_addresses`, `hostname`, `os_*`, `kernel_version`, `architecture`, `hardware_model`, `cpu_model`, `cpu_cores`, `memory_mb`, `local_ip` | `/proc`, device-tree (Pi/Jetson), DMI (NUC), interface IPv4 |
+| Inventory | `serial_number`, `mac_addresses`, `hostname`, `os_*`, `kernel_version`, `architecture`, `hardware_model`, `cpu_model`, `cpu_cores`, `memory_mb`, `local_ip`, `agent_version` | `/proc`, device-tree (Pi/Jetson), DMI (NUC), interface IPv4; agent_version from meteorcli |
 | Metrics | `cpu_percent`, `memory_percent`, `disk_percent`, optional `temperature_c` | `/proc`, `statvfs`, thermal zones |
 | Capabilities | `systemd`, `docker`, `docker_compose`, `wireguard`, `ssh` | command probes |
 | Host actions | `reboot`, `shutdown`, `set_password`, `add_user` | `meteorcli-action` → `systemctl` / `useradd` |

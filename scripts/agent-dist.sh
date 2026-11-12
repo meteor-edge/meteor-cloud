@@ -7,7 +7,7 @@
 # Writes dist/meteorcli-<version>.tar.gz, dist/meteorcli.tar.gz (stable name
 # for .../releases/latest/download/), dist/install-meteorcli.sh,
 # dist/install-meteorcli-firstboot.sh, dist/meteorcli-prepare-image.sh,
-# dist/SHA256SUMS.
+# dist/update-meteorcli.sh, dist/SHA256SUMS.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,6 +16,7 @@ RUNTIME_SRC="${ROOT}/src/device-plane/runtime"
 INSTALLER_SRC="${ROOT}/scripts/install-meteorcli.sh"
 FIRSTBOOT_INSTALLER_SRC="${ROOT}/src/device-plane/agent/packaging/firstboot/install-meteorcli-firstboot.sh"
 PREPARE_IMAGE_SRC="${ROOT}/src/device-plane/agent/packaging/firstboot/meteorcli-prepare-image.sh"
+UPDATE_SRC="${ROOT}/src/device-plane/agent/packaging/update-meteorcli.sh"
 DEST="${AGENT_DIST_DIR:-${ROOT}/dist}"
 
 if ! command -v rsync >/dev/null 2>&1; then
@@ -30,7 +31,7 @@ if [[ ! -f "${INSTALLER_SRC}" ]]; then
   echo "error: missing ${INSTALLER_SRC}" >&2
   exit 1
 fi
-for src in "${FIRSTBOOT_INSTALLER_SRC}" "${PREPARE_IMAGE_SRC}"; do
+for src in "${FIRSTBOOT_INSTALLER_SRC}" "${PREPARE_IMAGE_SRC}" "${UPDATE_SRC}"; do
   if [[ ! -f "${src}" ]]; then
     echo "error: missing ${src}" >&2
     exit 1
@@ -75,12 +76,14 @@ cp -f "${DEST}/meteorcli-${VERSION}.tar.gz" "${DEST}/meteorcli.tar.gz"
 cp -f "${INSTALLER_SRC}" "${DEST}/install-meteorcli.sh"
 cp -f "${FIRSTBOOT_INSTALLER_SRC}" "${DEST}/install-meteorcli-firstboot.sh"
 cp -f "${PREPARE_IMAGE_SRC}" "${DEST}/meteorcli-prepare-image.sh"
-chmod 0755 "${DEST}/install-meteorcli.sh" "${DEST}/install-meteorcli-firstboot.sh" "${DEST}/meteorcli-prepare-image.sh"
+cp -f "${UPDATE_SRC}" "${DEST}/update-meteorcli.sh"
+chmod 0755 "${DEST}/install-meteorcli.sh" "${DEST}/install-meteorcli-firstboot.sh" "${DEST}/meteorcli-prepare-image.sh" \
+  "${DEST}/update-meteorcli.sh"
 
 (
   cd "${DEST}"
   sha256sum "meteorcli-${VERSION}.tar.gz" "meteorcli.tar.gz" "install-meteorcli.sh" "install-meteorcli-firstboot.sh" \
-    "meteorcli-prepare-image.sh" > SHA256SUMS
+    "meteorcli-prepare-image.sh" "update-meteorcli.sh" > SHA256SUMS
 )
 
 rm -rf "${STAGE}"
@@ -91,7 +94,8 @@ echo "  ${DEST}/meteorcli.tar.gz"
 echo "  ${DEST}/install-meteorcli.sh"
 echo "  ${DEST}/install-meteorcli-firstboot.sh"
 echo "  ${DEST}/meteorcli-prepare-image.sh"
+echo "  ${DEST}/update-meteorcli.sh"
 echo "  ${DEST}/SHA256SUMS"
 echo
 echo "Publish: git tag agent-v${VERSION} && git push origin agent-v${VERSION}"
-echo "Or: gh release create agent-v${VERSION} ${DEST}/meteorcli.tar.gz ${DEST}/meteorcli-${VERSION}.tar.gz ${DEST}/install-meteorcli.sh ${DEST}/install-meteorcli-firstboot.sh ${DEST}/meteorcli-prepare-image.sh ${DEST}/SHA256SUMS"
+echo "Or: gh release create agent-v${VERSION} ${DEST}/meteorcli.tar.gz ${DEST}/meteorcli-${VERSION}.tar.gz ${DEST}/install-meteorcli.sh ${DEST}/install-meteorcli-firstboot.sh ${DEST}/meteorcli-prepare-image.sh ${DEST}/update-meteorcli.sh ${DEST}/SHA256SUMS"

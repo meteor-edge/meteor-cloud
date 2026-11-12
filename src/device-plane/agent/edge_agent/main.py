@@ -31,11 +31,11 @@ from edge_agent.wifi import WifiSync
 logger = logging.getLogger("edge_agent")
 
 
-def _on_heartbeat(client: EdgeClient, device_token: str):
+def _on_heartbeat(client: EdgeClient, device_token: str, config_dir: Path):
     """Run Wi-Fi and one-off action sync after each heartbeat response."""
     return combine_heartbeat_handlers(
         WifiSync(client, device_token).on_heartbeat,
-        ActionSync(client, device_token).on_heartbeat,
+        ActionSync(client, device_token, config_dir=config_dir).on_heartbeat,
     )
 
 
@@ -144,7 +144,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             sleep=time.sleep,
             should_continue=lambda: True,
             payload_factory=_payload,
-            on_response=_on_heartbeat(client, device_token),
+            on_response=_on_heartbeat(client, device_token, paths.config_path.parent),
         )
     except AgentApiError:
         return 1

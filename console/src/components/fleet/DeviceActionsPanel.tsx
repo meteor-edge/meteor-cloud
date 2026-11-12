@@ -30,6 +30,7 @@ const KIND_LABEL: Record<DeviceAction["kind"], string> = {
   shutdown: "Shut down",
   set_password: "Change password",
   add_user: "Add user",
+  update_agent: "Agent update",
 };
 
 function note(action: DeviceAction): { text: string; tone: string } {
@@ -159,7 +160,7 @@ export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, 
     ]);
   };
 
-  const actions = actionsQuery.data?.actions ?? [];
+  const actions = (actionsQuery.data?.actions ?? []).filter((action) => action.kind !== "update_agent");
   const busy =
     rebootMutation.isPending ||
     shutdownMutation.isPending ||

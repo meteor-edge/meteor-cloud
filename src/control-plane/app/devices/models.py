@@ -232,6 +232,8 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     memory_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # LAN address of the primary physical interface. Not a WireGuard address.
     local_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # meteorcli version last reported on a heartbeat (X.Y.Z).
+    agent_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     labels: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
