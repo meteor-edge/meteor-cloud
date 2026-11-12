@@ -76,8 +76,10 @@ the agent sends (serial, CPU, local IP, and the other fields in the body).
 A missing or blank value leaves the stored field unchanged. A serial number or
 MAC address already stored on another device is left unchanged too, so a
 heartbeat cannot copy another device's identity. `local_ip` is the LAN address
-of the primary physical interface (Ethernet, otherwise Wi-Fi). A value that is
-not an IP address is ignored.
+of the primary physical interface (Ethernet, otherwise Wi-Fi). When the agent
+omits it, the server records the private address the heartbeat arrived from.
+A value that is not an IP address is ignored, as are `0.0.0.0`, loopback,
+link-local, and public addresses.
 
 `software_report` updates installed software for known
 workloads (unknown keys are ignored). The response includes current
