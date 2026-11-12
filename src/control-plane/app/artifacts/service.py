@@ -448,6 +448,15 @@ class ArtifactService:
             self.settings.jwt_secret_key,
             algorithm=self.settings.jwt_algorithm,
         )
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="artifact.download_link.create",
+            resource_type="artifact",
+            resource_id=artifact.id,
+            metadata={"name": artifact.name, "expires_at": expires_at.isoformat()},
+        )
+        self.session.commit()
         return ArtifactDownloadLinkResponse(
             url=f"/api/v1/organizations/{organization_id}/artifacts/{artifact.id}/download",
             ticket=ticket,

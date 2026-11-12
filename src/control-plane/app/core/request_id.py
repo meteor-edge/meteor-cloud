@@ -11,6 +11,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from app.core.audit_context import close_request_context, open_request_context
+
 REQUEST_ID_HEADER = "X-Request-ID"
 # Client-supplied ids are kept only when short and plain, so they are safe as a log join key and fit
 # audit_events.request_id (String(64)). Anything else gets a fresh UUID.
@@ -51,11 +53,17 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         request.state.request_id = request_id
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
+        # uvicorn resolves request.client from X-Forwarded-For only for FORWARDED_ALLOW_IPS peers.
+        audit_token = open_request_context(
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
         try:
             response = await call_next(request)
         except Exception:
             response = unhandled_error_response(request_id)
         finally:
+            close_request_context(audit_token)
             structlog.contextvars.clear_contextvars()
         response.headers[REQUEST_ID_HEADER] = request_id
         return response

@@ -22,6 +22,7 @@ import { ApiKeysPage } from "@/pages/fleet/ApiKeysPage";
 import { MqttTestPage } from "@/pages/fleet/MqttTestPage";
 import { OrganizationCreatePage } from "@/pages/organizations/OrganizationCreatePage";
 import { OrganizationListPage } from "@/pages/organizations/OrganizationListPage";
+import { AuditLogPage } from "@/pages/organizations/AuditLogPage";
 import { MemberAccessPage } from "@/pages/organizations/MemberAccessPage";
 import { OrganizationMembersPage } from "@/pages/organizations/OrganizationMembersPage";
 import { OrganizationOverviewPage } from "@/pages/organizations/OrganizationOverviewPage";
@@ -77,6 +78,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <MemberAccessPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/audit-log"
+          element={
+            <ProtectedRoute>
+              <AuditLogPage />
             </ProtectedRoute>
           }
         />
