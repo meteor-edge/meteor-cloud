@@ -21,6 +21,7 @@ USER_BIN="${HOME}/.local/bin"
 PREFIX="${PREFIX:-}"
 BIN_DIR="${BIN_DIR:-}"
 UNINSTALL=0
+HELPERS_ONLY=0
 # auto: a root install starts meteorcli.service when systemd is running.
 # 1 (--with-service): require it. 0 (--no-service): skip it.
 WITH_SERVICE=auto
@@ -36,6 +37,8 @@ Usage:
   sudo $0 --no-service    System-wide, without meteorcli.service
   $0 --uninstall          Remove the install, credentials, and MQTT/WireGuard state
                           (default config locations; a METEORCLI_CONFIG_DIR is listed, not removed)
+  sudo $0 --helpers-only  Refresh root helpers and meteorcli.service without reinstalling
+                          or restarting (used by meteorcli update)
 
 Options:
   --prefix DIR     Virtualenv location
@@ -43,6 +46,8 @@ Options:
   --with-service   Require meteorcli.service (the default for root when systemd runs;
                    fails instead of skipping when it cannot be installed)
   --no-service     Do not install or start meteorcli.service
+  --helpers-only   Refresh root helpers and the unit file; do not touch the venv,
+                   device config, or restart meteorcli.service
   --uninstall      Remove the venv, symlink, unit, and ~/.config/meteorcli (and /etc/meteorcli as root)
   -h, --help       Show this help
 EOF
@@ -68,6 +73,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --uninstall)
       UNINSTALL=1
+      shift
+      ;;
+    --helpers-only)
+      HELPERS_ONLY=1
       shift
       ;;
     -h|--help)
@@ -378,12 +387,28 @@ install_updater() {
     dest="${HOME}/.local/libexec/meteorcli-update"
   fi
   if [[ ! -f "${SCRIPT_DIR}/packaging/update-meteorcli.sh" ]]; then
-    echo "warning: missing packaging/update-meteorcli.sh; remote agent updates will be unavailable." >&2
+    echo "warning: missing packaging/update-meteorcli.sh; meteorcli update will be unavailable." >&2
     return 0
   fi
   install -d -m 0755 "$(dirname "${dest}")"
   install -m 0755 "${SCRIPT_DIR}/packaging/update-meteorcli.sh" "${dest}"
   echo "Installed ${dest}"
+}
+
+# Copy the unit file when the service is already installed. Does not migrate
+# config and does not restart: meteorcli update restarts after its own checks.
+refresh_unit_file() {
+  local unit_src="${SCRIPT_DIR}/packaging/meteorcli.service"
+  local unit_dst="/etc/systemd/system/meteorcli.service"
+  [[ -f "${unit_dst}" && -f "${unit_src}" ]] || return 0
+  cp "${unit_src}" "${unit_dst}"
+  chmod 0644 "${unit_dst}"
+  if [[ "${BIN_DIR}/meteorcli" != "/usr/local/bin/meteorcli" ]]; then
+    sed -i "s|^ExecStart=.*|ExecStart=${BIN_DIR}/meteorcli run|" "${unit_dst}"
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload
+  fi
 }
 
 install_meteorcli() {
@@ -402,6 +427,9 @@ install_meteorcli() {
 
   echo "Using ${python} ($("${python}" --version 2>&1))"
   echo "Installing meteorcli into ${PREFIX}"
+  if [[ -x "${PREFIX}/bin/meteorcli" ]]; then
+    echo "note: replacing ${PREFIX} in place. To keep the previous version and roll back if the new service does not stay up, use meteorcli update."
+  fi
 
   mkdir -p "${PREFIX}" "${BIN_DIR}"
   "${python}" -m venv "${PREFIX}"
@@ -452,6 +480,17 @@ install_meteorcli() {
     echo "     It also starts meteorcli.service, so the device connects without 'meteorcli run'."
   fi
 }
+
+if [[ "${HELPERS_ONLY}" -eq 1 ]]; then
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "note: --helpers-only is only for a root install." >&2
+    exit 0
+  fi
+  install_root_helpers
+  install_updater
+  refresh_unit_file
+  exit 0
+fi
 
 if [[ "${UNINSTALL}" -eq 1 ]]; then
   if ! need_writable "${PREFIX}" || ! need_writable "${BIN_DIR}"; then
