@@ -172,6 +172,12 @@ func TestCommandLifecycle(t *testing.T) {
 			if err != nil || ok || existing.ID != c.ID {
 				t.Fatalf("idempotency key must return the first command: %v %v %+v", ok, err, existing)
 			}
+			// The key belongs to its sender: another sender with the same key gets its own command.
+			other := *c
+			other.ID, other.IssuedBy, other.State, other.NextCheckAt = uuid.NewString(), "app:other", StateSucceeded, now.Add(time.Hour)
+			if got, ok, err := s.CreateCommand(ctx, &other); err != nil || !ok || got.ID != other.ID {
+				t.Fatalf("another sender must not receive or suppress this command: %v %v", ok, err)
+			}
 			if _, err := s.GetCommand(ctx, "other-org", c.ID); err != ErrNotFound {
 				t.Fatalf("organization isolation: %v", err)
 			}

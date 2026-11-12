@@ -77,6 +77,11 @@ var migrations = []string{
 		WHERE state IN ('PENDING','DISPATCHED','RECEIVED','EXECUTING');
 	CREATE INDEX commands_target ON dataplane.commands (organization_id, application_id)
 		WHERE state IN ('PENDING','DISPATCHED');`,
+	// An idempotency key belongs to its sender: two senders in one organization may
+	// use the same key without seeing or suppressing each other's commands.
+	`DROP INDEX dataplane.commands_idempotency;
+	CREATE UNIQUE INDEX commands_idempotency ON dataplane.commands (organization_id, issued_by, idempotency_key)
+		WHERE idempotency_key IS NOT NULL;`,
 }
 
 // Postgres is the durable Store.
@@ -299,13 +304,16 @@ func (p *Postgres) Aggregate(ctx context.Context, q AggregateQuery) ([]Bucket, e
 	where := q.Query.where(&args)
 	args = append(args, q.Field, fmt.Sprintf("%d microseconds", q.Bucket.Microseconds()))
 	pathArg, bucketArg := len(args)-1, len(args)
-	// Non-numeric values are ignored instead of failing the query.
+	// Non-numeric values, and numbers too large for a float, are ignored instead of
+	// failing the query.
 	sql := fmt.Sprintf(`
 		SELECT bucket, %s, count(v) FROM (
 			SELECT date_bin($%d::interval, ts, TIMESTAMPTZ 'epoch') AS bucket,
-				CASE WHEN jsonb_typeof(data #> $%d::text[]) = 'number' THEN (data #>> $%d::text[])::float8 END AS v
+				CASE WHEN jsonb_typeof(data #> $%d::text[]) = 'number'
+					AND abs((data #> $%d::text[])::numeric) < 1e308
+					THEN (data #>> $%d::text[])::float8 END AS v
 			FROM dataplane.events WHERE %s
-		) s GROUP BY bucket ORDER BY bucket`, expr, bucketArg, pathArg, pathArg, where)
+		) s GROUP BY bucket ORDER BY bucket`, expr, bucketArg, pathArg, pathArg, pathArg, where)
 	var out []Bucket
 	err := p.bounded(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sql, args...)
@@ -372,7 +380,7 @@ func (p *Postgres) CreateCommand(ctx context.Context, c *Command) (*Command, boo
 		(id, organization_id, application_id, application, device_id, name, payload, state, issued_by, idempotency_key,
 		 attempts, max_attempts, timeout_seconds, created_at, updated_at, expires_at, next_check_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,0,$11,$12,$13,$13,$14,$15)
-		ON CONFLICT (organization_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+		ON CONFLICT (organization_id, issued_by, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 		RETURNING `+commandColumns,
 		c.ID, c.OrganizationID, c.ApplicationID, c.Application, c.DeviceID, c.Name, string(c.Payload), c.State,
 		c.IssuedBy, key, c.MaxAttempts, c.TimeoutSeconds, c.CreatedAt, c.ExpiresAt, c.NextCheckAt)
@@ -384,7 +392,7 @@ func (p *Postgres) CreateCommand(ctx context.Context, c *Command) (*Command, boo
 		return nil, false, err
 	}
 	existing, err := scanCommand(p.pool.QueryRow(ctx, `SELECT `+commandColumns+` FROM dataplane.commands
-		WHERE organization_id = $1 AND idempotency_key = $2`, c.OrganizationID, c.IdempotencyKey))
+		WHERE organization_id = $1 AND issued_by = $2 AND idempotency_key = $3`, c.OrganizationID, c.IssuedBy, c.IdempotencyKey))
 	return existing, false, err
 }
 

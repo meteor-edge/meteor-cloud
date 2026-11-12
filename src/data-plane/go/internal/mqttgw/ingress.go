@@ -46,7 +46,9 @@ type mqttMessage struct {
 	Data json.RawMessage `json:"data"`
 }
 
-func (g *Ingress) deadLetter(ctx context.Context, t bus.Topic, reason, detail string, payload []byte) {
+// deadLetter records a message that cannot be processed. It reports false when the
+// record could not be written: the message is then not acknowledged to the broker.
+func (g *Ingress) deadLetter(ctx context.Context, t bus.Topic, reason, detail string, payload []byte) bool {
 	g.Metrics.DeadLetters.WithLabelValues(reason).Inc()
 	if len(payload) > g.Limits.MaxPayloadBytes+1024 {
 		payload = payload[:g.Limits.MaxPayloadBytes+1024]
@@ -56,9 +58,11 @@ func (g *Ingress) deadLetter(ctx context.Context, t bus.Topic, reason, detail st
 	if err != nil {
 		g.Metrics.StorageErrors.WithLabelValues("dead_letter").Inc()
 		// Last resort: the loss is at least visible. Never log the payload.
-		g.Log.Error("message lost: dead-letter write failed", "reason", reason, "organization_id", t.OrgID,
-			"stream", t.Stream, "error", err.Error())
+		g.Log.Error("dead-letter write failed; the message is left unacknowledged for redelivery", "reason", reason,
+			"organization_id", t.OrgID, "stream", t.Stream, "error", err.Error())
+		return false
 	}
+	return true
 }
 
 // identityFor rebuilds the publisher's identity from the topic. The broker ACL
@@ -76,29 +80,25 @@ func (g *Ingress) identityFor(t bus.Topic) (*identity.Identity, bool) {
 // Message stores one client message, or dead-letters it.
 func (g *Ingress) Message(ctx context.Context, t bus.Topic, payload []byte) bool {
 	g.Metrics.MessagesReceived.WithLabelValues("mqtt").Inc()
-	reject := func(reason, detail string) {
+	reject := func(reason, detail string) bool {
 		g.Metrics.MessagesRejected.WithLabelValues("mqtt", reason).Inc()
-		g.deadLetter(ctx, t, reason, detail, payload)
+		return g.deadLetter(ctx, t, reason, detail, payload)
 	}
 	id, ok := g.identityFor(t)
 	if !ok {
-		reject("unknown_application", "no enabled application "+t.App)
-		return true
+		return reject("unknown_application", "no enabled application "+t.App)
 	}
 	if len(payload) > g.Limits.MaxPayloadBytes+1024 {
-		reject(envelope.CodePayloadTooLarge, "message is larger than the payload limit")
-		return true
+		return reject(envelope.CodePayloadTooLarge, "message is larger than the payload limit")
 	}
 	var msg mqttMessage
 	if err := json.Unmarshal(payload, &msg); err != nil {
-		reject(envelope.CodeInvalidPayload, "message is not a JSON object with a data field")
-		return true
+		return reject(envelope.CodeInvalidPayload, "message is not a JSON object with a data field")
 	}
 	ev, rej := envelope.Normalize(&envelope.Message{ID: msg.ID, Kind: t.Kind, Type: msg.Type, Stream: t.Stream,
 		Time: msg.Time, Seq: msg.Seq, Data: msg.Data}, id, time.Now(), g.Limits)
 	if rej != nil {
-		reject(rej.Code, rej.Message)
-		return true
+		return reject(rej.Code, rej.Message)
 	}
 	// Storage or queue trouble: hold the message (the broker is not acknowledged yet,
 	// which is the backpressure) and retry with backoff.
@@ -120,8 +120,7 @@ func (g *Ingress) Message(ctx context.Context, t bus.Topic, payload []byte) bool
 			return false
 		}
 		if time.Now().After(deadline) {
-			g.deadLetter(ctx, t, "storage_unavailable", "event "+ev.ID+" could not be stored: "+err.Error(), payload)
-			return true
+			return g.deadLetter(ctx, t, "storage_unavailable", "event "+ev.ID+" could not be stored: "+err.Error(), payload)
 		}
 		select {
 		case <-ctx.Done():
@@ -145,16 +144,21 @@ type mqttAck struct {
 func (g *Ingress) CommandAck(ctx context.Context, t bus.Topic, payload []byte) bool {
 	id, ok := g.identityFor(t)
 	if !ok {
-		g.deadLetter(ctx, t, "unknown_application", "command acknowledgement from "+t.App, payload)
-		return true
+		return g.deadLetter(ctx, t, "unknown_application", "command acknowledgement from "+t.App, payload)
 	}
 	var ack mqttAck
 	if err := json.Unmarshal(payload, &ack); err != nil || ack.CommandID == "" {
-		g.deadLetter(ctx, t, "invalid_ack", "acknowledgement needs command_id and status", payload)
-		return true
+		return g.deadLetter(ctx, t, "invalid_ack", "acknowledgement needs command_id and status", payload)
 	}
 	if _, err := g.Commands.Ack(ctx, id, ack.CommandID, ack.Status, ack.Result, ack.Error); err != nil {
-		g.deadLetter(ctx, t, "rejected_ack", err.Error(), payload)
+		var invalid *commands.InvalidError
+		if errors.Is(err, commands.ErrForbidden) || errors.Is(err, storage.ErrNotFound) || errors.As(err, &invalid) {
+			return g.deadLetter(ctx, t, "rejected_ack", err.Error(), payload)
+		}
+		// The command store is in trouble: leave the acknowledgement with the broker.
+		g.Metrics.StorageErrors.WithLabelValues("command_ack").Inc()
+		g.Log.Warn("command acknowledgement not applied; left for redelivery", "error", err.Error())
+		return false
 	}
 	return true
 }
