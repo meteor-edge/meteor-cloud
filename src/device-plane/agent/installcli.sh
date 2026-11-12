@@ -370,6 +370,22 @@ want_service() {
   return 0
 }
 
+install_updater() {
+  local dest
+  if [[ "${EUID}" -eq 0 ]]; then
+    dest=/usr/local/libexec/meteorcli-update
+  else
+    dest="${HOME}/.local/libexec/meteorcli-update"
+  fi
+  if [[ ! -f "${SCRIPT_DIR}/packaging/update-meteorcli.sh" ]]; then
+    echo "warning: missing packaging/update-meteorcli.sh; remote agent updates will be unavailable." >&2
+    return 0
+  fi
+  install -d -m 0755 "$(dirname "${dest}")"
+  install -m 0755 "${SCRIPT_DIR}/packaging/update-meteorcli.sh" "${dest}"
+  echo "Installed ${dest}"
+}
+
 install_meteorcli() {
   local python
   python="$(find_python)" || {
@@ -405,6 +421,7 @@ install_meteorcli() {
     echo "Add ${BIN_DIR} to PATH if meteorcli is not found."
   fi
   # Packages and helpers first: the service may bring up WireGuard as soon as it starts.
+  install_updater
   install_host_packages
   install_root_helpers
   local service=0

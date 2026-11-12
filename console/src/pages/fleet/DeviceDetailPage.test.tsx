@@ -43,6 +43,7 @@ const device: Device = {
   cpu_cores: 4,
   memory_mb: 3795,
   local_ip: "192.168.1.20",
+  agent_version: "0.3.4",
   serial_number: "10000000abcd1234",
   labels: {},
   metadata: {},
@@ -106,6 +107,8 @@ describe("DeviceDetailPage logs", () => {
     expect(screen.getByText("ARM Cortex-A76")).toBeInTheDocument();
     expect(screen.getByText("192.168.1.20")).toBeInTheDocument();
     expect(screen.getByText("Local IP")).toBeInTheDocument();
+    expect(screen.getByText("Agent version")).toBeInTheDocument();
+    expect(screen.getByText("0.3.4")).toBeInTheDocument();
   });
 
   it("opens logs from the Access tab only when the user asks", async () => {

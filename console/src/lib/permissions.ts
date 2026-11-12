@@ -71,6 +71,11 @@ export function canRebootDevice(role: string | undefined): boolean {
   return role === "owner" || role === "admin";
 }
 
+/** Order meteorcli to install the latest release (device.update_agent): owners and admins only. */
+export function canUpdateDeviceAgent(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 /** Change SSH passwords or add SSH users (device.users): as sensitive as a shell. */
 export function canManageDeviceUsers(role: string | undefined): boolean {
   return role === "owner" || role === "admin";

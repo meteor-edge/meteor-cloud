@@ -1047,7 +1047,7 @@ def _run_agent(paths: CliPaths, args: argparse.Namespace) -> int:
             payload_factory=_payload,
             on_response=combine_heartbeat_handlers(
                 WifiSync(client, device_token).on_heartbeat,
-                ActionSync(client, device_token).on_heartbeat,
+                ActionSync(client, device_token, config_dir=paths.config_path.parent).on_heartbeat,
             ),
         )
     except AgentApiError:

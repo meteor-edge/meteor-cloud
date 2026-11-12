@@ -24,6 +24,7 @@ def test_me_access_lists_permissions_for_each_org(client: TestClient, db_session
     assert entry["organization_id"] == str(org.id)
     assert entry["role"]["key"] == "owner"
     assert "device.reboot" in entry["permissions"]
+    assert "device.update_agent" in entry["permissions"]
     assert "organization.delete" in entry["permissions"]
     assert entry["scope"]["mode"] == "organization"
 

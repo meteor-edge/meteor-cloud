@@ -21,8 +21,10 @@ KIND_REBOOT = "reboot"
 KIND_SHUTDOWN = "shutdown"
 KIND_SET_PASSWORD = "set_password"
 KIND_ADD_USER = "add_user"
+KIND_UPDATE_AGENT = "update_agent"
 POWER_KINDS = frozenset({KIND_REBOOT, KIND_SHUTDOWN})
 USER_KINDS = frozenset({KIND_SET_PASSWORD, KIND_ADD_USER})
+UPDATE_AGENT_KINDS = frozenset({KIND_UPDATE_AGENT})
 
 STATE_PENDING = "pending"  # waiting for the device
 STATE_SENT = "sent"  # collected by the device, no answer yet
@@ -42,6 +44,8 @@ class DeviceAction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default=STATE_PENDING)
+    # Version on the device when update_agent was ordered (X.Y.Z).
+    from_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # User actions only.
     username: Mapped[str | None] = mapped_column(String(32), nullable=True)
     sudo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_false())

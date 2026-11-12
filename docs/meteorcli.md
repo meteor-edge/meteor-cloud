@@ -60,6 +60,18 @@ the directory the service reads, so run enrollment commands with `sudo`
 (without it, meteorcli says so). Without the service: `~/.config/meteorcli`, or
 `/etc/meteorcli` as root.
 
+## Agent version and console update
+
+Each heartbeat sends the installed meteorcli version. The console device
+**Overview** shows it as **Agent version**.
+
+On **Manage device**, owners and admins can click **Update to latest**. That
+orders the device to run the safe updater (`update-meteorcli.sh --yes`): it
+checks `SHA256SUMS`, installs beside the current copy, and restores the previous
+install if `meteorcli.service` does not stay up. The control plane does not
+download the release. Until the device has reported a version (and has the
+updater installed, meteorcli **0.3.4**+), the update reports a clear failure.
+
 ## Commands
 
 | Command | Purpose |

@@ -45,9 +45,11 @@ def test_collect_inventory_has_all_keys() -> None:
         "cpu_cores",
         "memory_mb",
         "local_ip",
+        "agent_version",
     }
     assert expected.issubset(data.keys())
     assert isinstance(data["mac_addresses"], list)
+    assert data["agent_version"] is None or isinstance(data["agent_version"], str)
 
 
 def test_read_os_release_parses_fields(monkeypatch) -> None:
