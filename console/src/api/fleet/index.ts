@@ -13,3 +13,4 @@ export * from "@/api/fleet/deployments";
 export * from "@/api/fleet/endpoints";
 export * from "@/api/fleet/deviceConfig";
 export * from "@/api/fleet/wifi";
+export * from "@/api/fleet/actions";

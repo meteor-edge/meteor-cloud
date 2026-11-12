@@ -115,10 +115,11 @@ Stored as `resource` + `action` columns; id is derived.
 | `device.create` | Create / enroll devices | Create tokens, approve enrollment, register devices. |
 | `device.update` | Update devices | Edit device metadata, type, group, enable/disable. |
 | `device.delete` | Delete devices | Remove devices. |
-| `device.reboot` | Reboot devices | Send reboot (and similar operate) commands. |
+| `device.reboot` | Restart and shut down devices | Restart or shut down a device from the console. See [Device actions](../fleet/device-actions.md). |
 | `device.shell` | Open device terminal | Open a browser SSH session over WireGuard. |
 | `device.logs` | View device logs | Read logs over WireGuard (read-only). Without `device.shell`, only the logs of workloads MeteorCloud deployed; see [Device logs](../fleet/logs.md#who-sees-which-logs). |
 | `device.network` | Device Wi-Fi and connection | See which networks a device uses (Wi-Fi, Ethernet, mobile) and add, change or remove its Wi-Fi. A wrong network can take it offline. See [Wi-Fi](../fleet/wifi.md). |
+| `device.users` | Manage device SSH users | Change a user's password or add an SSH user on a device. As sensitive as a shell. See [Device actions](../fleet/device-actions.md). |
 | `endpoint.read` | View endpoints | List and open public application URLs. |
 | `endpoint.create` | Create endpoints | Register public application hostnames. |
 | `endpoint.update` | Update endpoints | Change or disable public application endpoints. |
@@ -177,6 +178,7 @@ System roles: `organization_id IS NULL`, `is_system = true`, immutable via API.
 | device.shell | ✓ | ✓ | | | |
 | device.logs | ✓ | ✓ | ✓ | ✓ | |
 | device.network | ✓ | ✓ | | | |
+| device.users | ✓ | ✓ | | | |
 | endpoint.read | ✓ | ✓ | ✓ | ✓ | ✓ |
 | endpoint.create | ✓ | ✓ | ✓ | ✓ | |
 | endpoint.update | ✓ | ✓ | ✓ | ✓ | |

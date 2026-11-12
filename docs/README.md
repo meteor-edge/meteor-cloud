@@ -35,6 +35,7 @@ How to use the product day to day.
 | Deployments (send a release) | [Deployments](fleet/deployments.md) · [Rollout strategies](fleet/deployments.md#rollout-strategies) |
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
 | Device Wi-Fi from the console | [Wi-Fi](fleet/wifi.md) |
+| Restart, shut down, SSH users | [Device actions](fleet/device-actions.md) |
 | Settings file for a card (Wi-Fi, SSH, enrollment) | [Device settings file](fleet/device-settings-file.md) |
 | Device logs (journal, systemd, Docker, nginx) | [Device logs](fleet/logs.md) |
 | Public app URLs | [Endpoints](fleet/endpoints.md) |

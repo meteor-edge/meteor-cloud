@@ -282,6 +282,7 @@ class RegistrationService:
     ) -> AgentHeartbeatResponse:
         from app.deployments.software_schemas import SoftwareReportItem
         from app.deployments.software_service import DeviceSoftwareService
+        from app.device_actions.service import DeviceActionService
         from app.network.service import DeviceWifiService
 
         now = datetime.now(UTC)
@@ -327,4 +328,5 @@ class RegistrationService:
             server_time=now,
             desired_software=desired,
             wifi_pending=DeviceWifiService(self.session, self.settings).has_pending(device.id),
+            actions_pending=DeviceActionService(self.session, self.settings).has_pending(device.id),
         )

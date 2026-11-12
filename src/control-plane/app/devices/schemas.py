@@ -347,6 +347,8 @@ class AgentHeartbeatResponse(BaseModel):
     desired_software: list[dict[str, Any]] = Field(default_factory=list)
     # Wi-Fi changes are waiting: collect them from GET /api/v1/agent/network/wifi.
     wifi_pending: bool = False
+    # Restart, shut-down or SSH-user actions are waiting: collect from GET /api/v1/agent/actions.
+    actions_pending: bool = False
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,59 @@
+# Device actions
+
+Restart, shut down, change an SSH password, or add an SSH user from the console
+without logging into the device.
+
+## How it works
+
+1. An owner, admin or operator (restart / shut down) or owner or admin (SSH users)
+   orders the action on the device's Settings tab.
+2. The next heartbeat tells the device something is waiting (`actions_pending`).
+3. The device collects the action once with its own credential. A password is
+   erased from the server at that moment. The same action is never handed out
+   again, so a restart ordered while the device was offline does not run hours
+   later after an unrelated reboot.
+4. On the device the agent passes the request to the root-owned helper
+   `/usr/local/libexec/meteorcli-action` (installed by `sudo ./installcli.sh`).
+5. The device reports what happened. Restart and shut-down are reported before
+   the system goes down.
+
+An action the device never collects is cancelled after
+`DEVICE_ACTION_TTL_SECONDS` (default 1 hour).
+
+## Permissions
+
+| Action | Permission | Default roles |
+|--------|------------|---------------|
+| Restart, shut down | `device.reboot` | owner, admin, operator |
+| Change password, add SSH user | `device.users` | owner, admin |
+
+Passwords never appear in API responses, logs or the audit trail. The audit log
+records who ordered which action on which device (and which username for user
+actions).
+
+## On the device
+
+`meteorcli-action` accepts:
+
+- `reboot` / `shutdown` — starts `systemctl reboot` or `poweroff`
+- `set-password` — JSON `{username, password}` on stdin; runs `chpasswd -e`
+- `add-user` — JSON `{username, password, sudo?, authorized_key?}`; creates a
+  login user with a home directory, optional passwordless sudo, optional
+  authorized key
+
+Reserved accounts (`root`, `daemon`, `sshd`, …) cannot be changed from the
+console. The username must match Debian's default `useradd` rules.
+
+Needs meteorcli **0.3.1** or newer (the `meteorcli-action` helper).
+
+## API
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/v1/organizations/{org}/devices/{id}/actions` | recent actions; never a password |
+| `POST` | `…/actions/reboot` | |
+| `POST` | `…/actions/shutdown` | |
+| `POST` | `…/actions/set-password` | body: `{username, password}` |
+| `POST` | `…/actions/add-user` | body: `{username, password, sudo?, authorized_key?}` |
+| `GET` | `/api/v1/agent/actions` | device credential; passwords included once |
+| `POST` | `/api/v1/agent/actions/report` | body: `{results:[{id, state, error?}]}` |

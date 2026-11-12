@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.core.models import Base
 from app.deployments import models as deployment_models  # noqa: F401
 from app.deployments import software_models  # noqa: F401
+from app.device_actions import models as device_action_models  # noqa: F401
 from app.devices import models as fleet_models  # noqa: F401
 from app.endpoints import models as endpoint_models  # noqa: F401
 from app.identity import models as identity_models  # noqa: F401

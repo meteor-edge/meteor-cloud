@@ -178,6 +178,15 @@ class EdgeClient:
     def report_wifi(self, *, device_token: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._post("/api/v1/agent/network/wifi/report", payload, bearer=device_token)
 
+    def get_actions(self, *, device_token: str) -> list[dict[str, Any]]:
+        """Actions waiting for this device. The answer can hold a password: do not log it."""
+        result = self._get("/api/v1/agent/actions", bearer=device_token)
+        actions = result.get("actions") if isinstance(result, dict) else None
+        return actions if isinstance(actions, list) else []
+
+    def report_actions(self, *, device_token: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/api/v1/agent/actions/report", payload, bearer=device_token)
+
     def get_software(self, *, device_token: str) -> list[dict[str, Any]]:
         """Fetch desired software for this device."""
         result = self._get("/api/v1/agent/software", bearer=device_token)

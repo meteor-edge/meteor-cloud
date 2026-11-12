@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     secrets_encryption_key: str = Field(default="", alias="SECRETS_ENCRYPTION_KEY")
     # How long an undelivered Wi-Fi password is kept before it is erased.
     wifi_password_ttl_seconds: int = Field(default=7 * 24 * 3600, alias="WIFI_PASSWORD_TTL_SECONDS", ge=60)
+    # How long a waiting restart, shut-down or SSH-user change is kept before it is cancelled.
+    # A restart ordered for a device that was offline must not run hours later.
+    device_action_ttl_seconds: int = Field(default=3600, alias="DEVICE_ACTION_TTL_SECONDS", ge=60)
 
     backend_host: str = Field(default="0.0.0.0", alias="BACKEND_HOST")
     backend_port: int = Field(default=8000, alias="BACKEND_PORT")

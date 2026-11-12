@@ -23,9 +23,22 @@ from edge_agent.credentials import read_device_token, read_registration_token_fi
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.registration import register
 from edge_agent.software import reconcile_software
+from edge_agent.actions import ActionSync
 from edge_agent.wifi import WifiSync
 
 logger = logging.getLogger("edge_agent")
+
+
+def _on_heartbeat(client: EdgeClient, device_token: str):
+    """Run Wi-Fi and one-off action sync after each heartbeat response."""
+    wifi = WifiSync(client, device_token)
+    actions = ActionSync(client, device_token)
+
+    def handle(response: dict) -> None:
+        wifi.on_heartbeat(response)
+        actions.on_heartbeat(response)
+
+    return handle
 
 
 def _paths_from_args(args: argparse.Namespace) -> AgentPaths:
@@ -133,7 +146,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             sleep=time.sleep,
             should_continue=lambda: True,
             payload_factory=_payload,
-            on_response=WifiSync(client, device_token).on_heartbeat,
+            on_response=_on_heartbeat(client, device_token),
         )
     except AgentApiError:
         return 1

@@ -165,7 +165,8 @@ uninstall() {
     rm -f /etc/sudoers.d/meteorcli-wireguard /usr/local/libexec/meteorcli-wg \
       /etc/sudoers.d/meteorcli-logs /usr/local/libexec/meteorcli-logs \
       /etc/sudoers.d/meteorcli-systemd /usr/local/libexec/meteorcli-systemd \
-      /etc/sudoers.d/meteorcli-wifi /usr/local/libexec/meteorcli-wifi
+      /etc/sudoers.d/meteorcli-wifi /usr/local/libexec/meteorcli-wifi \
+      /etc/sudoers.d/meteorcli-action /usr/local/libexec/meteorcli-action
     rm -rf /var/lib/meteorcli-wifi
     remove_config_dir /etc/meteorcli
     if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
@@ -256,6 +257,9 @@ install_root_helpers() {
   # profile (network name, password, hidden) and runs fixed nmcli argv.
   install_root_helper meteorcli-wifi /etc/sudoers.d/meteorcli-wifi \
     'change Wi-Fi networks from the console'
+  # Restart, shut down, and SSH user changes ordered from the console.
+  install_root_helper meteorcli-action /etc/sudoers.d/meteorcli-action \
+    'restart, shut down, or change SSH users from the console'
 }
 
 # meteorcli.service always uses /etc/meteorcli. If the operator enrolled as a
@@ -427,7 +431,7 @@ install_meteorcli() {
     echo "Next: meteorcli config --domain <host> --api-key key_..."
     echo "      meteorcli test"
     echo "      meteorcli register|request-token, then meteorcli run"
-    echo "Tip: sudo ./installcli.sh installs wireguard-tools, meteorcli-wg, meteorcli-logs, meteorcli-systemd, and meteorcli-wifi."
+    echo "Tip: sudo ./installcli.sh installs wireguard-tools, meteorcli-wg, meteorcli-logs, meteorcli-systemd, meteorcli-wifi, and meteorcli-action."
     echo "     It also starts meteorcli.service, so the device connects without 'meteorcli run'."
   fi
 }
