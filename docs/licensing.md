@@ -12,6 +12,7 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | Traefik (open-source Proxy) | HTTPS proxy | [MIT](https://github.com/traefik/traefik/blob/master/LICENSE.md) | **Yes** | Fine to ship as default |
 | Redis **7.2** (pinned) | Optional cache / rate limits | [BSD-3-Clause](https://redis.io/legal/licenses/) (≤7.2) | **Yes** | OK when enabled. Pin `redis:7.2-alpine`. Do **not** use floating `redis:7` / `7-alpine` (tracks 7.4+ RSALv2/SSPLv1) |
 | EMQX **5.8.6** (single node) | Optional MQTT | Apache 2.0 | **Yes** | OK as shipped. Details: [MQTT → EMQX licensing](fleet/mqtt.md#emqx-version-and-licensing) |
+| ClickHouse **25.8** (`clickhouse/clickhouse-server:25.8-alpine`) | Optional store for application data (profile `clickhouse`) | [Apache 2.0](https://github.com/ClickHouse/ClickHouse/blob/master/LICENSE) | **Yes** | Unmodified image, reached over its HTTP interface; no ClickHouse library is linked into MeteorCloud. ClickHouse Cloud and its enterprise features are separate products and are not used |
 | Filesystem or customer S3 / R2 / GCS | Artifacts | N/A / cloud contract | **Yes** | **Preferred** production storage |
 | WireGuard / Docker | VPN / runtime | GPL family / Apache 2.0 | **Yes** | Normal host infra |
 | Prometheus / Alertmanager / node_exporter | Metrics / alerts | Apache 2.0 | **Yes** | Optional ops stack; fine |
@@ -49,6 +50,7 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | Redis | `deploy/compose/control-plane.yml` → `redis:7.2-alpine` | `values.yaml` → `cache.redis.bundled.image` |
 | Traefik | `deploy/compose/docker-compose.prod.yml` → `traefik:v3.3` | `values.yaml` → `ingress.traefik.image` |
 | EMQX | `deploy/compose/data-plane.yml` → `emqx/emqx:5.8.6` | `values.yaml` → `mqtt.emqx.image` |
+| ClickHouse | `deploy/compose/data-plane.yml` → `clickhouse/clickhouse-server:25.8-alpine` | not in the chart |
 | Data API base images | `src/data-plane/go/Dockerfile` → `golang:1.24-alpine`, `alpine:3.21` | not in the chart |
 | Data API Go modules | `src/data-plane/go/go.mod` | same |
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |

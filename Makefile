@@ -215,7 +215,7 @@ data-plane-test: ## Run data-plane tests
 	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
 	cd $(DATA_PLANE_DIR) && python -m pytest -q
 
-data-api-test: ## Run application data plane (Go) tests; DATAPLANE_TEST_DATABASE_URL adds the PostgreSQL suite
+data-api-test: ## Run application data plane (Go) tests; DATAPLANE_TEST_DATABASE_URL and DATAPLANE_TEST_CLICKHOUSE_URL add the PostgreSQL and ClickHouse suites
 	cd $(DATA_API_DIR) && go vet ./... && go test -race ./...
 
 sdk-test: ## Run Python SDK tests against the real data plane binary (needs Go)

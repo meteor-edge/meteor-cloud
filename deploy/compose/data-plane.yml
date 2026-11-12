@@ -43,6 +43,25 @@ services:
     networks:
       - meteorcloud
 
+  # Column store for application data (telemetry, events, inference). Reached only by the
+  # data API over the Compose network: no port is published.
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8-alpine
+    profiles: [clickhouse]
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-meteorcloud}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-meteorcloud}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    volumes:
+      - ${CLICKHOUSE_DATA:-clickhouse_data}:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - meteorcloud
+
   data-plane:
     image: ${DATA_PLANE_IMAGE:-meteorcloud/data-plane:dev}
     build:
@@ -84,7 +103,14 @@ services:
       DATA_PLANE_INTERNAL_TOKEN: ${DATA_PLANE_INTERNAL_TOKEN:-}
       DATAPLANE_HTTP_ADDR: ":8082"
       DATAPLANE_OPS_ADDR: ":8092"
-      # Its own schema ("dataplane") in the platform database by default; any PostgreSQL works.
+      # clickhouse: telemetry, events and inference results go to ClickHouse; commands stay in
+      # PostgreSQL. postgres: everything in PostgreSQL (small installations, no clickhouse profile).
+      DATAPLANE_STORAGE: ${DATAPLANE_STORAGE:-clickhouse}
+      DATAPLANE_CLICKHOUSE_URL: ${DATAPLANE_CLICKHOUSE_URL:-http://clickhouse:8123}
+      DATAPLANE_CLICKHOUSE_DATABASE: ${CLICKHOUSE_DB:-meteorcloud}
+      DATAPLANE_CLICKHOUSE_USER: ${CLICKHOUSE_USER:-meteorcloud}
+      DATAPLANE_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      # Commands and dead letters: schema "dataplane" in the platform database by default; any PostgreSQL works.
       DATAPLANE_DATABASE_URL: ${DATAPLANE_DATABASE_URL:-postgres://${POSTGRES_USER:-edge}:${POSTGRES_PASSWORD:-edge}@postgres:5432/${POSTGRES_DB:-edge_platform}}
       # mqtt: events fan out through the broker, so several replicas and direct MQTT clients work.
       # memory: one replica, no broker needed.
@@ -102,5 +128,11 @@ services:
       emqx:
         condition: service_healthy
         required: false
+      clickhouse:
+        condition: service_healthy
+        required: false
     networks:
       - meteorcloud
+
+volumes:
+  clickhouse_data:

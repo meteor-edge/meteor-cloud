@@ -39,14 +39,17 @@ To check a whole installation, `python scripts/data-plane-e2e.py` runs the full 
                   └──────┬──────────┬──────┘
              fan-out bus │          │ storage
                          ▼          ▼
-                      EMQX      PostgreSQL          (optional: MQTT clients ─▶ EMQX)
+                      EMQX      ClickHouse (data) + PostgreSQL (commands)
+                                             (optional: MQTT clients ─▶ EMQX)
 ```
 
 - **Control plane** owns organizations, devices, applications, permissions and credentials. It is the only place they are changed, and every change is in the audit log.
 - **Data API** (`src/data-plane/go`, one Go binary) authenticates applications, validates and stores messages, fans them out to live subscribers, answers queries and delivers commands. It is deployed and scaled on its own.
 - **No call to the control plane per message.** The data API pulls a policy snapshot (applications, permissions, credential hashes) every few seconds and works from memory. If the control plane is down, ingestion, queries and live data keep working with the last snapshot.
 - **EMQX** carries events and commands between data API replicas, and serves clients that choose to speak MQTT. Applications using the SDK do not connect to it.
-- **PostgreSQL** stores events, commands and dead letters in a `dataplane` schema with its own migrations. Storage sits behind an interface.
+- **ClickHouse** stores the data: telemetry, events and inference results. It is a column store built for this shape of data: append only, read by time range, aggregated. The data API creates its database and table at start.
+- **PostgreSQL** keeps what changes after it is written: commands and their state, and dead letters, in a `dataplane` schema with its own migrations. The control plane keeps using PostgreSQL for everything it owns.
+- Storage sits behind an interface. A small installation can keep everything in PostgreSQL with `DATAPLANE_STORAGE=postgres` and run no ClickHouse.
 
 Inside the binary, each concern is a package behind an interface: `identity` (policy), `envelope` (validation), `ingest` (bounded queue, batching, retries), `storage`, `bus` (EMQX or in-memory), `live` (subscriptions), `commands`, `api` (HTTP and WebSocket), `mqttgw` (MQTT ingestion).
 
@@ -58,8 +61,10 @@ These differ from the first plan. Each was chosen to keep the system simple to r
 | --- | --- |
 | The SDK talks HTTPS and WebSocket to one endpoint, not MQTT | One address and one token for edge and cloud, works through proxies and firewalls, and a publish gets a real answer ("stored" or an error). MQTT cannot tell a publisher that a message was rejected |
 | One binary instead of separate ingest, query and command services | The roles are separate packages behind interfaces and can be split when load requires it. Three deployments would add operations work today for no gain |
-| PostgreSQL first, ClickHouse later | PostgreSQL is already part of every installation. The `storage.Store` interface is where a ClickHouse adapter goes when volume calls for it |
-| No Kafka | The ingestion queue is bounded and in process, with backpressure to the caller, and EMQX shared subscriptions split MQTT load between replicas. Kafka becomes worthwhile for replaying streams into several independent consumers or sustained volume beyond what one PostgreSQL can absorb. Neither is needed yet |
+| ClickHouse for data, PostgreSQL for commands | Measurements are written once and read by time range, which is what ClickHouse is fast and cheap at (it compresses them to a fraction of the size). A command changes state several times and needs row locks, which is what PostgreSQL is good at. Each store does the job it fits |
+| ClickHouse is reached over its HTTP interface, with no driver library | No new dependency in the binary. Values travel as typed query parameters, never inside the SQL text |
+| Small publishes are grouped by ClickHouse, and still confirmed | ClickHouse dislikes many tiny inserts. The data API uses its asynchronous inserts and waits for the flush, so a publish still answers only when the data is stored |
+| No Kafka | The ingestion queue is bounded and in process, with backpressure to the caller, and EMQX shared subscriptions split MQTT load between replicas. Kafka becomes worthwhile for replaying streams into several independent consumers or ingestion that must outlive long storage outages. Neither is needed yet |
 | Direct MQTT uses a short-lived signed token with the topic list inside | EMQX 5.8 allows one HTTP authorization source, which the device fleet uses. A signed token needs no call from the broker to the data API and expires on its own |
 | The Go service lives beside the Python data plane | `src/data-plane/data_plane` keeps serving device management topics (`devices/...`). The Go service owns `meteor/v1/...`. Nothing was migrated or broken |
 

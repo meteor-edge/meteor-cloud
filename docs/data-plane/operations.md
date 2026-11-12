@@ -1,14 +1,14 @@
 # Operating the data plane
 
-The data API is one stateless Go binary (`meteorcloud/data-api` image, source `src/data-plane/go`). It needs PostgreSQL, the control plane's policy endpoint and, for more than one replica or for MQTT clients, EMQX.
+The data API is one stateless Go binary (`meteorcloud/data-api` image, source `src/data-plane/go`). It needs ClickHouse for the data, PostgreSQL for commands, the control plane's policy endpoint and, for more than one replica or for MQTT clients, EMQX.
 
 ## Run
 
 | Where | How |
 | --- | --- |
-| Laptop | `make dev` with `data-api` in `COMPOSE_PROFILES` (the default in `.env.example`). API on `http://localhost:8082` |
-| Production Compose | Add `data-api` to `COMPOSE_PROFILES`, set the secrets below. Traefik routes `https://<domain>/v1/...` to it, so `DATA_PLANE_PUBLIC_URL=https://<domain>` |
-| Standalone | Run the binary anywhere it can reach PostgreSQL and the control plane |
+| Laptop | `make dev` with `data-api` and `clickhouse` in `COMPOSE_PROFILES` (the default in `.env.example`). API on `http://localhost:8082` |
+| Production Compose | Add `data-api` and `clickhouse` to `COMPOSE_PROFILES`, set the secrets below, including `CLICKHOUSE_PASSWORD`. Traefik routes `https://<domain>/v1/...` to it, so `DATA_PLANE_PUBLIC_URL=https://<domain>` |
+| Standalone | Run the binary anywhere it can reach ClickHouse, PostgreSQL and the control plane |
 
 Not wired yet: the Ansible installer (`make up`, `make aws-up`) and the Helm chart do not deploy the data API. On an installer-managed server, add the profile and the settings below to the environment file by hand. On Kubernetes, run the image as a Deployment with the settings below.
 
@@ -35,8 +35,11 @@ Data API. Any secret can instead be read from a file by setting `<NAME>_FILE`.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CONTROL_PLANE_URL` | required | Where to pull the policy from |
-| `DATAPLANE_DATABASE_URL` | required | PostgreSQL URL. Tables live in schema `dataplane`; migrations run at start |
-| `DATAPLANE_STORAGE` | `postgres` | `memory` for development: data is lost on restart |
+| `DATAPLANE_STORAGE` | `postgres` (binary), `clickhouse` (Compose) | `clickhouse`: data in ClickHouse, commands in PostgreSQL. `postgres`: everything in PostgreSQL. `memory` for development: data is lost on restart |
+| `DATAPLANE_CLICKHOUSE_URL` | required with `clickhouse` | HTTP address of ClickHouse, for example `http://clickhouse:8123`. Use `https://` when it is not on a private network |
+| `DATAPLANE_CLICKHOUSE_DATABASE`, `DATAPLANE_CLICKHOUSE_USER`, `DATAPLANE_CLICKHOUSE_PASSWORD` | `meteorcloud`, `default`, empty | Login and database. The database and the `events` table are created at start. The password can come from a file with `DATAPLANE_CLICKHOUSE_PASSWORD_FILE` |
+| `DATAPLANE_CLICKHOUSE_ASYNC_INSERT` | `true` | Let ClickHouse group small inserts. A publish is still confirmed only after the flush |
+| `DATAPLANE_DATABASE_URL` | required | PostgreSQL URL for commands and dead letters. Tables live in schema `dataplane`; migrations run at start |
 | `DATAPLANE_BUS` | `mqtt` | `memory` for a single replica without a broker |
 | `DATAPLANE_MQTT_URL` | required with `mqtt` | e.g. `mqtts://emqx:8883` |
 | `MQTT_PLATFORM_USERNAME`, `MQTT_PLATFORM_PASSWORD`, `MQTT_CA_CERT_PATH` | | The platform's broker login, same as the control plane |
@@ -52,7 +55,7 @@ Data API. Any secret can instead be read from a file by setting `<NAME>_FILE`.
 | `DATAPLANE_RATE_LIMIT_PER_SECOND`, `DATAPLANE_RATE_LIMIT_BURST` | `200`, `1000` | Per credential, counted in messages |
 | `DATAPLANE_QUERY_MAX_LIMIT`, `DATAPLANE_QUERY_MAX_BUCKETS`, `DATAPLANE_QUERY_TIMEOUT` | `1000`, `5000`, `10s` | Bounds for history queries |
 | `DATAPLANE_MAX_EVENT_AGE`, `DATAPLANE_MAX_FUTURE_SKEW` | `720h`, `5m` | Accepted window for a message's `time` |
-| `DATAPLANE_RETENTION_DAYS` | `0` | Delete events older than this. 0 keeps everything |
+| `DATAPLANE_RETENTION_DAYS` | `0` | Delete events older than this. 0 keeps everything. With ClickHouse it becomes the table's TTL and ClickHouse removes old data itself |
 | `DATAPLANE_COMMAND_ACK_TIMEOUT` | `5s` | First wait before a command is redelivered |
 | `DATAPLANE_LIFECYCLE_EVENTS` | `true` | Publish `app.connected` / `app.disconnected` on `meteor.lifecycle` |
 | `DATAPLANE_WS_ALLOWED_ORIGINS` | none | Browser origins allowed to open the WebSocket. Empty allows same-origin and non-browser clients only |
@@ -98,10 +101,12 @@ Logs are JSON lines on stdout. Tokens, credentials and message payloads are neve
 
 ## Scaling
 
-- Run several replicas behind a load balancer with `DATAPLANE_BUS=mqtt`. Replicas share nothing but PostgreSQL and the broker. WebSocket connections can land on any replica.
+- Run several replicas behind a load balancer with `DATAPLANE_BUS=mqtt`. Replicas share nothing but ClickHouse, PostgreSQL and the broker. WebSocket connections can land on any replica.
 - The command sweeper claims work with row locks, so replicas do not deliver the same redelivery twice.
 - MQTT ingestion uses a shared subscription, so the broker splits publishes between replicas.
-- First limits you will meet: PostgreSQL write throughput (raise `DATAPLANE_INGEST_WORKERS`, then move events to a column store behind the storage interface) and EMQX 5.8.6 being a single node (see [licensing](../licensing.md)).
+- ClickHouse takes the write load. It needs about 1 GB of memory even when idle; on a very small server use `DATAPLANE_STORAGE=postgres` and leave the `clickhouse` profile off. Moving from PostgreSQL to ClickHouse later does not copy old events: they stay in `dataplane.events` in PostgreSQL.
+- An id is checked before it is stored, so a repeated publish stores nothing twice. Two replicas that receive the same id in the same instant can both store it.
+- First limits you will meet: one ClickHouse server (add replicas or use a managed ClickHouse through `DATAPLANE_CLICKHOUSE_URL`) and EMQX 5.8.6 being a single node (see [licensing](../licensing.md)).
 - Kafka is not part of the design. Add it when several independent consumers must replay the same stream, or when ingestion must outlive long storage outages. The ingestion pipeline is the place to put it.
 
 ## Troubleshooting

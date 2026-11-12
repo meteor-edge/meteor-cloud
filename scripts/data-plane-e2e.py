@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check of the application data plane: the whole developer workflow.
 
-Against a running stack (control plane, data API, PostgreSQL, EMQX) it:
+Against a running stack (control plane, data API, ClickHouse or PostgreSQL, EMQX) it:
 
   1. registers a device and two applications with scoped permissions
   2. deploys a Docker release bound to an application
