@@ -24,6 +24,7 @@ import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceResourceMeters } from "@/components/fleet/DeviceResourceMeters";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
+import { DeviceWifiPanel } from "@/components/fleet/DeviceWifiPanel";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { StatusBadge } from "@/components/fleet/StatusBadge";
@@ -32,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import {
+  canChangeDeviceWifi,
   canManageDeployments,
   canManageEndpoints,
   canManageFleet,
@@ -110,6 +112,9 @@ export function DeviceDetailPage() {
   const canLogs = orgAccess
     ? orgAccess.permissions.includes("device.logs")
     : canViewDeviceLogs(orgQuery.data?.current_user_role);
+  const canWifi = orgAccess
+    ? orgAccess.permissions.includes("device.network")
+    : canChangeDeviceWifi(orgQuery.data?.current_user_role);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
@@ -535,6 +540,15 @@ export function DeviceDetailPage() {
             </Button>
           </div>
         </div>
+      )}
+
+      {activeTab === "settings" && canManage && token && (
+        <DeviceWifiPanel
+          token={token}
+          organizationId={organizationId}
+          deviceId={deviceId}
+          canChange={canWifi}
+        />
       )}
 
       {rotatedToken && (

@@ -61,6 +61,11 @@ export function canOpenDeviceShell(role: string | undefined): boolean {
   return role === "owner" || role === "admin";
 }
 
+/** Change a device's Wi-Fi (device.network): a wrong network takes it offline, so owners and admins only. */
+export function canChangeDeviceWifi(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 /** Read device logs (device.logs): everyone but viewers. */
 export function canViewDeviceLogs(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "operator" || role === "developer";
