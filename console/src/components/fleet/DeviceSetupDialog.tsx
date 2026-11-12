@@ -290,6 +290,14 @@ export function DeviceSetupDialog({
                   <input type="radio" checked={!newKey} onChange={() => setNewKey(false)} />
                   Use an enrollment key I have
                 </label>
+                {!newKey && keysQuery.isSuccess && activeKeys.length === 0 && (
+                  <p className="text-sm text-amber-500">
+                    This organization has no active enrollment keys.{" "}
+                    {canCreateKey
+                      ? "Choose “Create a new enrollment key” above, or make one under Devices, Enrollment keys."
+                      : "Ask an owner or admin for one."}
+                  </p>
+                )}
                 {!newKey && activeKeys.length > 0 && (
                   <select
                     aria-label="Which enrollment key"

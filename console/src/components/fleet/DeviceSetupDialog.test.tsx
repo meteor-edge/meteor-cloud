@@ -143,6 +143,18 @@ describe("DeviceSetupDialog", () => {
     expect(createEnrollmentKey).not.toHaveBeenCalled();
   });
 
+  it("says when there is no key to pick", async () => {
+    vi.mocked(listEnrollmentKeys).mockResolvedValue([
+      enrollmentKey({ revoked_at: "2026-11-02T00:00:00Z" }),
+    ]);
+    const { user } = setup();
+    await user.click(screen.getByRole("radio", { name: "Use an enrollment key I have" }));
+    expect(await screen.findByText(/no active enrollment keys/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Which enrollment key" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("refuses a pasted key that matches no active key", async () => {
     vi.mocked(listEnrollmentKeys).mockResolvedValue([enrollmentKey({})]);
     const { user } = setup();
