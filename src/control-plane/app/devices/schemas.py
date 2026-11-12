@@ -2,15 +2,35 @@
 
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from app.devices.status import ConnectivityStatus
 from app.mqtt.schemas import MqttConnectInfo
 from app.tenancy.schemas import validate_slug
+
+
+def _optional_ip(value: str | None) -> str | None:
+    """Return a canonical IP, or None when the value is blank or not an address.
+
+    A bad value must not fail the heartbeat: the rest of the report still counts.
+    """
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    try:
+        return str(ipaddress.ip_address(cleaned))
+    except ValueError:
+        return None
+
+
+LocalIp = Annotated[str | None, BeforeValidator(_optional_ip)]
 
 
 def _strip_optional(value: str | None) -> str | None:
@@ -242,6 +262,7 @@ class DeviceResponse(BaseModel):
     cpu_model: str | None
     cpu_cores: int | None
     memory_mb: int | None
+    local_ip: str | None = None
     labels: dict[str, Any]
     metadata: dict[str, Any]
     credential_prefix: str | None
@@ -315,6 +336,7 @@ class AgentRegisterRequest(BaseModel):
     cpu_model: str | None = Field(default=None, max_length=255)
     cpu_cores: int | None = Field(default=None, ge=0)
     memory_mb: int | None = Field(default=None, ge=0)
+    local_ip: LocalIp = Field(default=None, max_length=64)
     labels: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -330,8 +352,17 @@ class AgentRegisterResponse(BaseModel):
 
 class AgentHeartbeatRequest(BaseModel):
     hostname: str | None = Field(default=None, max_length=255)
+    os_name: str | None = Field(default=None, max_length=255)
     os_version: str | None = Field(default=None, max_length=255)
     kernel_version: str | None = Field(default=None, max_length=255)
+    architecture: str | None = Field(default=None, max_length=64)
+    serial_number: str | None = Field(default=None, max_length=255)
+    mac_addresses: list[str] = Field(default_factory=list)
+    hardware_model: str | None = Field(default=None, max_length=255)
+    cpu_model: str | None = Field(default=None, max_length=255)
+    cpu_cores: int | None = Field(default=None, ge=0)
+    memory_mb: int | None = Field(default=None, ge=0)
+    local_ip: LocalIp = Field(default=None, max_length=64)
     metrics: dict[str, Any] = Field(default_factory=dict)
     # Agent-reported install capabilities (systemd, docker, docker_compose, …).
     capabilities: dict[str, Any] = Field(default_factory=dict)
@@ -473,6 +504,7 @@ class AgentEnrollRequest(BaseModel):
     cpu_model: str | None = Field(default=None, max_length=255)
     cpu_cores: int | None = Field(default=None, ge=0)
     memory_mb: int | None = Field(default=None, ge=0)
+    local_ip: LocalIp = Field(default=None, max_length=64)
     labels: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

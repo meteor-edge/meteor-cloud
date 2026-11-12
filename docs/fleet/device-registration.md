@@ -25,6 +25,7 @@ Request body (all inventory fields optional except `token`):
   "cpu_model": "…",
   "cpu_cores": 4,
   "memory_mb": 8000,
+  "local_ip": "192.168.1.20",
   "labels": {},
   "metadata": {}
 }

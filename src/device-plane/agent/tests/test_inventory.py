@@ -44,6 +44,7 @@ def test_collect_inventory_has_all_keys() -> None:
         "cpu_model",
         "cpu_cores",
         "memory_mb",
+        "local_ip",
     }
     assert expected.issubset(data.keys())
     assert isinstance(data["mac_addresses"], list)
@@ -141,6 +142,42 @@ def test_arm_cpuinfo_uses_hardware_when_model_name_missing(monkeypatch) -> None:
     model, cores = inventory.read_cpu()
     assert model == "Raspberry Pi 5 Model B Rev 1.0"
     assert cores == 4
+
+
+def test_aarch64_cpu_part_is_reported_as_a_cpu_name(monkeypatch) -> None:
+    sample = (
+        "processor\t: 0\n"
+        "CPU implementer\t: 0x41\n"
+        "CPU part\t: 0xd0b\n"
+        "CPU revision\t: 1\n"
+        "processor\t: 1\n"
+        "processor\t: 2\n"
+        "processor\t: 3\n"
+    )
+    monkeypatch.setattr(inventory, "_read_text", lambda path: sample if path == "/proc/cpuinfo" else None)
+    model, cores = inventory.read_cpu()
+    assert model == "ARM Cortex-A76"
+    assert cores == 4
+
+
+def test_serial_comes_from_cpuinfo_when_the_device_tree_is_missing(monkeypatch) -> None:
+    sample = "processor\t: 0\nSerial\t\t: 10000000abcd1234\n"
+    monkeypatch.setattr(inventory, "_read_text", lambda path: sample if path == "/proc/cpuinfo" else None)
+    assert inventory.read_serial_number() == "10000000abcd1234"
+
+
+def test_local_ip_prefers_wired_and_skips_link_local(monkeypatch, tmp_path) -> None:
+    net = _net_dir(
+        tmp_path,
+        {"docker0": "aa:bb:cc:dd:ee:03", "wlan0": "aa:bb:cc:dd:ee:02", "eth0": "aa:bb:cc:dd:ee:01"},
+    )
+    monkeypatch.setattr(inventory, "_sys_class_net", lambda: net)
+    addresses = {"eth0": "169.254.8.1", "wlan0": "192.168.1.30", "docker0": "172.17.0.1"}
+    monkeypatch.setattr(inventory, "_iface_ipv4", lambda name: addresses.get(name))
+    assert inventory.read_local_ipv4() == "192.168.1.30"
+
+    addresses["eth0"] = "192.168.1.20"
+    assert inventory.read_local_ipv4() == "192.168.1.20"
 
 
 def test_raspberry_pi_reports_model_and_serial_from_the_device_tree(monkeypatch) -> None:

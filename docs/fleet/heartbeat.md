@@ -15,8 +15,17 @@ Optional body:
 ```json
 {
   "hostname": "edge-01",
-  "os_version": "22.04",
-  "kernel_version": "6.2.0",
+  "os_name": "Debian GNU/Linux",
+  "os_version": "13",
+  "kernel_version": "6.18.0",
+  "architecture": "aarch64",
+  "serial_number": "10000000abcd1234",
+  "mac_addresses": ["aa:bb:cc:dd:ee:ff"],
+  "hardware_model": "Raspberry Pi 5 Model B Rev 1.0",
+  "cpu_model": "ARM Cortex-A76",
+  "cpu_cores": 4,
+  "memory_mb": 3795,
+  "local_ip": "192.168.1.20",
   "metrics": {},
   "capabilities": { "systemd": true, "docker": true, "docker_compose": true },
   "software_report": [
@@ -62,8 +71,13 @@ Response:
 }
 ```
 
-Each heartbeat updates the device's `last_seen_at` and may refresh a few
-inventory fields. `software_report` updates installed software for known
+Each heartbeat updates the device's `last_seen_at` and refreshes inventory
+the agent sends (serial, CPU, local IP, and the other fields in the body).
+A missing or blank value leaves the stored field unchanged. `local_ip` is the
+LAN address of the primary physical interface (Ethernet, otherwise Wi-Fi).
+A value that is not an IP address is ignored.
+
+`software_report` updates installed software for known
 workloads (unknown keys are ignored). The response includes current
 `desired_software`. Agents can also poll `GET /api/v1/agent/software`.
 When a desired item has an `artifact_id`, the agent downloads it from
