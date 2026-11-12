@@ -109,6 +109,7 @@ class EnrollmentService:
             request.cpu_model = payload.cpu_model
             request.cpu_cores = payload.cpu_cores
             request.memory_mb = payload.memory_mb
+            request.local_ip = payload.local_ip
             request.labels = payload.labels or {}
             request.metadata_ = payload.metadata or {}
             request.expires_at = expires_at
@@ -133,6 +134,7 @@ class EnrollmentService:
                 cpu_model=payload.cpu_model,
                 cpu_cores=payload.cpu_cores,
                 memory_mb=payload.memory_mb,
+                local_ip=payload.local_ip,
                 labels=payload.labels or {},
                 metadata_=payload.metadata or {},
                 expires_at=expires_at,
@@ -373,6 +375,7 @@ class EnrollmentService:
         device.cpu_model = request.cpu_model
         device.cpu_cores = request.cpu_cores
         device.memory_mb = request.memory_mb
+        device.local_ip = request.local_ip
         if request.labels:
             device.labels = request.labels
         if request.metadata_:

@@ -1006,7 +1006,7 @@ def _run_agent(paths: CliPaths, args: argparse.Namespace) -> int:
                 mqtt.sync(client, device_token)
             except Exception:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
-        payload: dict = {"capabilities": collect_capabilities()}
+        payload: dict = {**collect_inventory(), "capabilities": collect_capabilities()}
         reports = reconcile_software(client, device_token, artifacts_dir)
         # Under sudo, files this pass downloaded are root-owned; hand them back so a later
         # unprivileged run (and the meteorcli-systemd helper's owner check) can use them.

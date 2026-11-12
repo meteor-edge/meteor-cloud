@@ -183,6 +183,102 @@ def test_heartbeat_updates_status(client: TestClient, db_session: Session) -> No
     assert detail["last_seen_at"] is not None
 
 
+def test_heartbeat_refreshes_serial_cpu_and_local_ip(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers)
+    registration = client.post(
+        "/api/v1/agent/register",
+        json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]},
+    ).json()
+    device_headers = {"Authorization": f"Bearer {registration['device_token']}"}
+    device_url = f"/api/v1/organizations/{org.id}/devices/{registration['device_id']}"
+
+    refreshed = client.post(
+        "/api/v1/agent/heartbeat",
+        headers=device_headers,
+        json={
+            "serial_number": "10000000abcd1234",
+            "cpu_model": "ARM Cortex-A76",
+            "cpu_cores": 4,
+            "local_ip": "192.168.1.20",
+            "hardware_model": "Raspberry Pi 5 Model B Rev 1.0",
+        },
+    )
+    assert refreshed.status_code == 200, refreshed.text
+
+    detail = client.get(device_url, headers=headers).json()
+    assert detail["serial_number"] == "10000000abcd1234"
+    assert detail["cpu_model"] == "ARM Cortex-A76"
+    assert detail["cpu_cores"] == 4
+    assert detail["local_ip"] == "192.168.1.20"
+    assert detail["hardware_model"] == "Raspberry Pi 5 Model B Rev 1.0"
+
+    # A later heartbeat that omits inventory, or sends a value that is not an IP, keeps what we have.
+    kept = client.post(
+        "/api/v1/agent/heartbeat",
+        headers=device_headers,
+        json={"local_ip": "not-an-ip"},
+    )
+    assert kept.status_code == 200, kept.text
+    detail = client.get(device_url, headers=headers).json()
+    assert detail["serial_number"] == "10000000abcd1234"
+    assert detail["cpu_model"] == "ARM Cortex-A76"
+    assert detail["local_ip"] == "192.168.1.20"
+
+    # Whitespace is not a serial, and a non-string address is not an IP. Neither clears inventory.
+    blank = client.post(
+        "/api/v1/agent/heartbeat",
+        headers=device_headers,
+        json={"serial_number": "   ", "local_ip": 123},
+    )
+    assert blank.status_code == 200, blank.text
+    detail = client.get(device_url, headers=headers).json()
+    assert detail["serial_number"] == "10000000abcd1234"
+    assert detail["local_ip"] == "192.168.1.20"
+
+
+def test_heartbeat_keeps_identity_used_by_another_device(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers, max_uses=5)
+    first = client.post(
+        "/api/v1/agent/register",
+        json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"], "serial_number": "serial-a"},
+    ).json()
+    second = client.post(
+        "/api/v1/agent/register",
+        json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:02"]},
+    ).json()
+    second_headers = {"Authorization": f"Bearer {second['device_token']}"}
+    second_url = f"/api/v1/organizations/{org.id}/devices/{second['device_id']}"
+
+    response = client.post(
+        "/api/v1/agent/heartbeat",
+        headers=second_headers,
+        json={
+            "serial_number": "serial-a",
+            "mac_addresses": ["aa:bb:cc:dd:ee:01"],
+            "cpu_model": "ARM Cortex-A76",
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    detail = client.get(second_url, headers=headers).json()
+    assert detail["serial_number"] is None
+    assert detail["mac_addresses"] == ["aa:bb:cc:dd:ee:02"]
+    assert detail["cpu_model"] == "ARM Cortex-A76"
+
+    owner_detail = client.get(
+        f"/api/v1/organizations/{org.id}/devices/{first['device_id']}",
+        headers=headers,
+    ).json()
+    assert owner_detail["serial_number"] == "serial-a"
+    assert owner_detail["mac_addresses"] == ["aa:bb:cc:dd:ee:01"]
+
+
 def test_heartbeat_rejects_user_jwt(client: TestClient, db_session: Session) -> None:
     owner = create_user(db_session, email="owner@example.com")
     create_org_with_owner(db_session, owner)
