@@ -28,7 +28,8 @@ def test_agent_dist_packs_agent_and_runtime(tmp_path: Path) -> None:
     assert (tmp_path / "install-meteorcli.sh").is_file()
     assert (tmp_path / "update-meteorcli.sh").is_file()
     assert (tmp_path / "SHA256SUMS").is_file()
-    assert "update-meteorcli.sh" in (tmp_path / "SHA256SUMS").read_text(encoding="utf-8")
+    sums = (tmp_path / "SHA256SUMS").read_text(encoding="utf-8")
+    assert "update-meteorcli.sh" in sums
 
     names = tarfile.open(tarball, "r:gz").getnames()
     assert any(n.endswith("agent/installcli.sh") for n in names)
