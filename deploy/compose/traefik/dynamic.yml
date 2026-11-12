@@ -2,12 +2,26 @@
 # PLATFORM_DOMAIN set: HTTPS with a Let's Encrypt certificate and HTTP->HTTPS redirect.
 # PLATFORM_DOMAIN empty: plain HTTP on port 80.
 # Only /api and /health reach the API; /internal and /metrics stay private.
+# /v1 reaches the application data API (profile data-api): its public listener only.
 {{ $domain := env "PLATFORM_DOMAIN" }}
 http:
   routers:
     backend:
       rule: "PathPrefix(`/health`) || PathPrefix(`/api`)"
       service: backend
+      priority: 10
+{{- if $domain }}
+      entryPoints: [websecure]
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "{{ $domain }}"
+{{- else }}
+      entryPoints: [web]
+{{- end }}
+    data-api:
+      rule: "PathPrefix(`/v1/`)"
+      service: data-api
       priority: 10
 {{- if $domain }}
       entryPoints: [websecure]
@@ -49,6 +63,10 @@ http:
       loadBalancer:
         servers:
           - url: http://backend:8000
+    data-api:
+      loadBalancer:
+        servers:
+          - url: http://data-api:8082
     console:
       loadBalancer:
         servers:

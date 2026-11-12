@@ -81,6 +81,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-edge}:${POSTGRES_PASSWORD:-edge}@postgres:5432/${POSTGRES_DB:-edge_platform}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DATA_PLANE_URL: ${DATA_PLANE_URL:-http://data-plane:8081}
+      # Application data API (profile data-api). Empty DATA_PLANE_INTERNAL_TOKEN keeps its policy feed closed.
+      DATA_PLANE_API_URL: ${DATA_PLANE_API_URL:-http://data-api:8092}
+      DATA_PLANE_INTERNAL_TOKEN: ${DATA_PLANE_INTERNAL_TOKEN:-}
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
       # Interpolated like EMQX's copy so the broker and API always agree.
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}

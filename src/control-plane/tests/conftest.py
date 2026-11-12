@@ -18,6 +18,7 @@ os.environ.setdefault(
 os.environ.setdefault("WIREGUARD_SERVER_ENDPOINT", "127.0.0.1:51820")
 os.environ.setdefault("APPS_BASE_DOMAIN", "meteor-edge.com")
 os.environ.setdefault("CONNECTIVITY_INTERNAL_TOKEN", "test-connectivity-internal")
+os.environ.setdefault("DATA_PLANE_INTERNAL_TOKEN", "test-data-plane-internal")
 
 import pytest
 from fastapi.testclient import TestClient

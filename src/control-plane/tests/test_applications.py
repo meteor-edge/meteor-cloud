@@ -347,3 +347,11 @@ def test_broker_hooks_leave_application_logins_to_the_data_plane(client: TestCli
         "/internal/mqtt/authenticate", headers=mqtt_internal, json={"username": "someone", "password": "x"}
     )
     assert unknown.json()["result"] == "deny"
+
+
+def test_policy_endpoint_is_closed_without_a_configured_token(client, monkeypatch):
+    """No DATA_PLANE_INTERNAL_TOKEN (the default) means nobody can read the policy."""
+    monkeypatch.setattr(get_settings(), "data_plane_internal_token", "")
+    for token in (None, "", "dev-data-plane-internal"):
+        headers = {} if token is None else {"X-Data-Plane-Internal-Token": token}
+        assert client.get("/internal/data-plane/policy", headers=headers).status_code == 401

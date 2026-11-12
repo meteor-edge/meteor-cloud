@@ -144,7 +144,7 @@ class Settings(BaseSettings):
     # Public URL handed to applications as METEORCLOUD_ENDPOINT.
     data_plane_public_url: str = Field(default="", alias="DATA_PLANE_PUBLIC_URL")
     # Shared secret for /internal/data-plane/* (policy snapshot) and data-plane /internal/v1/*.
-    data_plane_internal_token: str = Field(default="dev-data-plane-internal", alias="DATA_PLANE_INTERNAL_TOKEN")
+    data_plane_internal_token: str = Field(default="", alias="DATA_PLANE_INTERNAL_TOKEN")
     # Lifetime of credentials the device agent mints for deployed workloads.
     app_credential_ttl_hours: int = Field(default=168, ge=1, le=8760, alias="APP_CREDENTIAL_TTL_HOURS")
 

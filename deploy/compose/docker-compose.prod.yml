@@ -38,6 +38,12 @@ services:
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
     ports: !reset []
 
+  data-api:
+    restart: unless-stopped
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    # Reached through Traefik at /v1 (same host as the console and the API).
+    ports: !reset []
+
   console:
     image: ${CONSOLE_IMAGE:-meteorcloud/console:dev}
     build:

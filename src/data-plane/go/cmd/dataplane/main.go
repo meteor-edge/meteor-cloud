@@ -30,10 +30,37 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "dataplane:", err)
 		os.Exit(1)
 	}
+}
+
+// healthcheck asks the local ops listener whether this instance is ready. It is the
+// container HEALTHCHECK, so the image needs no curl or wget.
+func healthcheck() int {
+	addr := os.Getenv("DATAPLANE_OPS_ADDR")
+	if addr == "" {
+		addr = ":8092"
+	}
+	if addr[0] == ':' {
+		addr = "127.0.0.1" + addr
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + addr + "/readyz")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck:", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintln(os.Stderr, "healthcheck: not ready, status", resp.StatusCode)
+		return 1
+	}
+	return 0
 }
 
 func run() error {

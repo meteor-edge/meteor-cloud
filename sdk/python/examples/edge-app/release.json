@@ -1,0 +1,11 @@
+{
+  "name": "meter",
+  "version": "1.0.0",
+  "kind": "docker",
+  "spec": {
+    "container_name": "meter",
+    "image": "registry.example.com/acme/meter:1.0.0",
+    "env": {"PUBLISH_INTERVAL_SECONDS": "5"},
+    "meteorcloud": {"application": "meter", "environment": "production"}
+  }
+}
