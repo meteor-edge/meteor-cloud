@@ -82,7 +82,7 @@ export function DeviceSetupDialog({
   const [useWifi, setUseWifi] = useState(false);
   const [ssid, setSsid] = useState("");
   const [psk, setPsk] = useState("");
-  const [country, setCountry] = useState("");
+  const [country, setCountry] = useState("DE");
   const [hiddenSsid, setHiddenSsid] = useState(false);
   const [hostname, setHostname] = useState("");
   const [timezone, setTimezone] = useState(browserTimezone);

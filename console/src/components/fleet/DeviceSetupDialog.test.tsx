@@ -76,7 +76,7 @@ describe("DeviceSetupDialog", () => {
     await user.click(screen.getByRole("checkbox", { name: "Connect to Wi-Fi" }));
     await user.type(screen.getByLabelText(/Network name/), "Shop floor");
     await user.type(screen.getByLabelText("Wi-Fi password"), "wifi-password-123");
-    await user.type(screen.getByLabelText("Country"), "de");
+    expect(screen.getByLabelText("Country")).toHaveValue("DE");
     await user.click(screen.getByRole("checkbox", { name: "Set username and password" }));
     await user.type(screen.getByLabelText("Username"), "ops");
     await user.type(screen.getByLabelText("Password"), "login-password");
