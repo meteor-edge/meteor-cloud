@@ -215,6 +215,31 @@ def test_token_registration_uses_the_same_defaults(client: TestClient, db_sessio
         assert response.json()["name"] == expected
 
 
+def test_a_device_defined_in_the_console_keeps_the_name_given_there(client: TestClient, db_session: Session) -> None:
+    org, headers, _token, _release = _setup_release(client, db_session)
+
+    def define(name: str) -> str:
+        response = client.post(
+            f"/api/v1/organizations/{org.id}/registration-tokens", headers=headers, json={"name": name, "max_uses": 1}
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["token"]
+
+    body = {"hostname": "meteoros", "hardware_model": "Raspberry Pi 4 Model B Rev 1.5"}
+    defined = client.post(
+        "/api/v1/agent/register",
+        json={"token": define("pi-01"), "name": "meteoros", "mac_addresses": ["aa:bb:cc:dd:00:30"], **body},
+    )
+    assert defined.status_code in (200, 201), defined.text
+    assert defined.json()["name"] == "pi-01"
+    # A name given on the device itself still wins.
+    named = client.post(
+        "/api/v1/agent/register",
+        json={"token": define("pi-02"), "name": "Lobby", "mac_addresses": ["aa:bb:cc:dd:00:31"], **body},
+    )
+    assert named.json()["name"] == "Lobby"
+
+
 def test_renaming_a_device_keeps_its_public_address(client: TestClient, db_session: Session) -> None:
     org, headers, token, _release = _setup_release(client, db_session)
     device = _register_device(client, token, name="Kiosk 12", mac="aa:bb:cc:dd:00:0a")

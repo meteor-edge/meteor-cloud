@@ -550,7 +550,13 @@ export function DeviceDetailPage() {
       )}
 
       {activeTab === "settings" && canManage && canWifi && token && (
-        <DeviceWifiPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+        <>
+          <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
+            <h2 className="text-lg font-semibold">Connection</h2>
+            <DeviceUplinkPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+          </div>
+          <DeviceWifiPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+        </>
       )}
 
       {rotatedToken && (

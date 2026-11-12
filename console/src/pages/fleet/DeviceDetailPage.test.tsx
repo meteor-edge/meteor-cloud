@@ -75,6 +75,7 @@ vi.mock("@/components/fleet/DeviceNetworkPanel", () => ({ DeviceNetworkPanel: ()
 vi.mock("@/components/fleet/DeviceUplinkPanel", () => ({
   DeviceUplinkPanel: () => <p>uplink panel</p>,
 }));
+vi.mock("@/components/fleet/DeviceWifiPanel", () => ({ DeviceWifiPanel: () => <p>wifi panel</p> }));
 vi.mock("@/components/fleet/MqttConsole", () => ({ MqttConsole: () => null }));
 vi.mock("@/components/fleet/DeviceLogs", () => ({
   DeviceLogs: () => <p>logs window</p>,
@@ -135,5 +136,9 @@ describe("DeviceDetailPage network", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("tab", { name: "Network" }));
     expect(await screen.findByText("uplink panel")).toBeInTheDocument();
+    // Settings shows the link in use next to the Wi-Fi it can change.
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    expect(await screen.findByText("uplink panel")).toBeInTheDocument();
+    expect(screen.getByText("wifi panel")).toBeInTheDocument();
   });
 });

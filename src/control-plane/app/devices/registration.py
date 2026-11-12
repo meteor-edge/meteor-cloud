@@ -151,8 +151,12 @@ class RegistrationService:
     def _resolve_name(self, payload: AgentRegisterRequest, identity: DeviceIdentity, token: RegistrationToken) -> str:
         organization_id = token.organization_id
         self.devices.lock_names(organization_id=organization_id)
+        # A single-use token is how the console defines one device: its name is the device's name.
+        token_name = token.name.strip() if token.max_uses == 1 else ""
         return unique_device_name(
-            default_device_name(
+            chosen_name(payload.name, payload.hostname)
+            or token_name
+            or default_device_name(
                 requested_name=payload.name,
                 hostname=payload.hostname,
                 serial_number=identity.serial_number,
