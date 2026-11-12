@@ -17,6 +17,9 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | Prometheus / Alertmanager / node_exporter | Metrics / alerts | Apache 2.0 | **Yes** | Optional ops stack; fine |
 | kube-prometheus-stack **93.1.1** (Prometheus Operator, kube-state-metrics) | Local k3d monitoring (`make k8s-deploy OBS=1`) | [Apache 2.0](https://github.com/prometheus-community/helm-charts) | **Yes** | Local k3d only, off by default. Its bundled Grafana follows the Grafana row. Production clusters bring their own Prometheus |
 | Grafana / Loki / Alloy | Ops dashboards / logs | AGPLv3 | **Yes, with limits** | Optional **operator** tools on **localhost / SSH** only. Off by default. **Not** a customer-facing MeteorCloud UI feature. See [below](#grafana--loki--alloy-yes-with-limits) |
+| Data API Go modules: `pgx` (MIT), `prometheus/client_golang` (Apache 2.0), `google/uuid` and `golang.org/x/time` (BSD-3-Clause), `coder/websocket` (ISC), `eclipse/paho.golang` (EPL-2.0 **or** EDL-1.0, BSD-3-Clause style) | Application data plane (`src/data-plane/go`) | Permissive | **Yes** | Linked into the `data-api` binary. `paho.golang` is used unmodified under its EDL-1.0 option, like the Python `paho-mqtt` the platform already uses |
+| Python SDK dependencies: `httpx`, `websockets` | `sdk/python` | BSD-3-Clause | **Yes** | Installed by application developers alongside the SDK |
+| `golang:1.24-alpine` (build) / `alpine:3.21` (runtime) images | Data API image | BSD-3-Clause (Go) / MIT and GPL-2.0 userland (Alpine, BusyBox) | **Yes** | Unmodified base image; only the static Go binary is added. Same position as the other Alpine-based images |
 | MinIO | S3-compatible artifacts | [AGPLv3](https://github.com/minio/minio) | **No (as default)** | Dev/lab only. Production Ansible/Helm default to **filesystem** or real S3. Do not make MinIO the commercial default |
 | EMQX **5.9+** cluster | MQTT HA | BSL 1.1 | **Only with commercial license** | Multi-node / some commercial cases need an [EMQ deal](https://www.emqx.com/en/contact). Do not bump casually |
 
@@ -45,6 +48,8 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | Redis | `deploy/compose/control-plane.yml` → `redis:7.2-alpine` | `values.yaml` → `cache.redis.bundled.image` |
 | Traefik | `deploy/compose/docker-compose.prod.yml` → `traefik:v3.3` | `values.yaml` → `ingress.traefik.image` |
 | EMQX | `deploy/compose/data-plane.yml` → `emqx/emqx:5.8.6` | `values.yaml` → `mqtt.emqx.image` |
+| Data API base images | `src/data-plane/go/Dockerfile` → `golang:1.24-alpine`, `alpine:3.21` | not in the chart |
+| Data API Go modules | `src/data-plane/go/go.mod` | same |
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |
 | Observability | `deploy/compose/docker-compose.observability.yml` | not in the chart |
 

@@ -42,6 +42,7 @@ Together this starts:
 | Console | http://localhost:5173 |
 | Control plane | http://localhost:8000 |
 | Data plane health | http://localhost:8081/health |
+| Application data API | http://localhost:8082/healthz ([data plane](data-plane/README.md)) |
 | OpenAPI | http://localhost:8000/docs |
 | PostgreSQL | localhost:5432 |
 | MQTT TLS | mqtts://localhost:8883 |
@@ -53,7 +54,7 @@ Compose files:
 | File | Services |
 | --- | --- |
 | `deploy/compose/control-plane.yml` | `backend`; profiles `postgres`, `redis`, `minio` |
-| `deploy/compose/data-plane.yml` | profiles `mqtt` (`data-plane`), `emqx` |
+| `deploy/compose/data-plane.yml` | profiles `mqtt` (`data-plane`), `emqx`, `data-api` (Go application data plane) |
 | `deploy/compose/console.yml` | `console` (Vite dev server) |
 | `deploy/compose/docker-compose.yml` | `include:` of those three |
 | `deploy/compose/docker-compose.dev.yml` | Source mounts and hot reload (`make dev`). Console runs `npm install` on start so new packages (for example `@xterm/*`) land in the container `node_modules` volume |
@@ -136,6 +137,8 @@ edge-installer validate --config config/examples/installation.yaml
 make test
 make backend-test
 make data-plane-test
+make data-api-test       # Go data plane: go vet + go test -race (set DATAPLANE_TEST_DATABASE_URL for the PostgreSQL suite)
+make sdk-test            # Python SDK against the real data plane binary (needs Go)
 make agent-test
 make console-test
 make check-plane-imports
@@ -199,6 +202,7 @@ Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed
 | `VITE_API_BASE_URL` | Console → control-plane origin |
 | `VITE_DOCS_BASE_URL` | Console → product docs URL |
 | `DATA_PLANE_URL` | Control plane → data-plane HTTP API |
+| `DATA_PLANE_API_URL`, `DATA_PLANE_PUBLIC_URL`, `DATA_PLANE_INTERNAL_TOKEN` | Application data API wiring ([operations](data-plane/operations.md#settings)) |
 | `CONTROL_PLANE_URL` | Data plane → control-plane ingest/auth origin |
 | `TELEMETRY_PROVIDER` | Last-value store (`postgresql` only; timescale/clickhouse reserved) |
 | `DATABASE_PROVIDER` | Persistence adapter (`postgresql` only) |

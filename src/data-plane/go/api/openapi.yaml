@@ -1,0 +1,322 @@
+openapi: 3.0.3
+info:
+  title: MeteorCloud data plane API
+  version: "1"
+  description: >
+    Application API of the MeteorCloud data plane: publish messages, query history,
+    exchange commands. Live subscriptions use the WebSocket at /v1/stream, described in
+    contracts/data-plane-v1.md together with delivery semantics and MQTT topics.
+servers:
+  - url: https://cloud.example.com
+security:
+  - applicationToken: []
+paths:
+  /healthz:
+    get:
+      summary: Liveness
+      security: []
+      responses:
+        "200": { description: The process is up }
+  /v1/whoami:
+    get:
+      summary: Identity and permissions of the token
+      responses:
+        "200":
+          description: Identity
+          content: { application/json: { schema: { $ref: "#/components/schemas/Identity" } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/messages:
+    post:
+      summary: Publish up to 500 messages
+      description: >
+        Answers 200 only after every message with status stored or duplicate is durably
+        written. On 503 nothing from the request may be assumed stored; retry with the same ids.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: "#/components/schemas/Message" }
+      responses:
+        "200":
+          description: One result per message, in order
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: { type: integer }
+                  rejected: { type: integer }
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/MessageResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/streams/{stream}/data:
+    get:
+      summary: Historical data of one stream, raw or aggregated
+      parameters:
+        - { name: stream, in: path, required: true, schema: { type: string }, example: energy.metrics }
+        - { name: start, in: query, schema: { type: string, format: date-time }, description: Inclusive }
+        - { name: end, in: query, schema: { type: string, format: date-time }, description: Exclusive }
+        - { name: kind, in: query, schema: { type: string, enum: [telemetry, event, inference] } }
+        - { name: device_id, in: query, schema: { type: string } }
+        - { name: application, in: query, schema: { type: string }, description: Slug of the publishing application }
+        - { name: filter, in: query, schema: { type: string }, description: 'JSON object the event data must contain, e.g. {"severity":"warning"}' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+        - { name: cursor, in: query, schema: { type: string }, description: next_cursor of the previous page }
+        - { name: aggregate, in: query, schema: { type: string, enum: [avg, min, max, sum, count] }, description: Switches to the aggregate response }
+        - { name: field, in: query, schema: { type: string }, description: Numeric field of data, dots for nesting }
+        - { name: bucket, in: query, schema: { type: string, default: 1m }, description: "Bucket width: 30s, 5m, 1h, 1d" }
+      responses:
+        "200":
+          description: A page of events, or buckets when aggregate is set
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/EventPage"
+                  - $ref: "#/components/schemas/AggregateResult"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+  /v1/stream:
+    get:
+      summary: WebSocket for live subscriptions and command delivery
+      description: Upgrade with the Authorization header. Frames are described in contracts/data-plane-v1.md.
+      responses:
+        "101": { description: Switching protocols }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/commands:
+    post:
+      summary: Send a command to an application of the same organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [application, name]
+              properties:
+                application: { type: string, description: Slug of the target application }
+                device_id: { type: string, description: Only the instance on this device }
+                name: { type: string, maxLength: 128 }
+                payload: { type: object }
+                timeout_seconds: { type: integer, default: 60, maximum: 86400 }
+                expires_in_seconds: { type: integer, default: 3600, maximum: 604800 }
+                max_attempts: { type: integer, default: 0, maximum: 1000, description: 0 redelivers until the command expires }
+                idempotency_key: { type: string, maxLength: 128 }
+      responses:
+        "202":
+          description: The command (the existing one when the idempotency key was used before)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Command" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/commands/pending:
+    get:
+      summary: Commands waiting for this application (polling fallback)
+      responses:
+        "200":
+          description: Pending commands
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commands: { type: array, items: { $ref: "#/components/schemas/Command" } }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/commands/{id}:
+    get:
+      summary: A command, for its issuer or its target
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The command
+          content: { application/json: { schema: { $ref: "#/components/schemas/Command" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/commands/{id}/ack:
+    post:
+      summary: Acknowledge a command (target only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [received, executing, succeeded, failed] }
+                result: { type: object }
+                error: { type: string }
+      responses:
+        "200":
+          description: The command after the acknowledgement
+          content: { application/json: { schema: { $ref: "#/components/schemas/Command" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/mqtt/credentials:
+    post:
+      summary: Exchange the token for a short-lived MQTT login
+      responses:
+        "200":
+          description: Broker login with the allowed topic filters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string }
+                  username: { type: string }
+                  password: { type: string }
+                  client_id: { type: string }
+                  expires_at: { type: string, format: date-time }
+                  topic_root: { type: string }
+                  live_root: { type: string }
+                  publish: { type: array, items: { type: string } }
+                  subscribe: { type: array, items: { type: string } }
+        "404": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    applicationToken:
+      type: http
+      scheme: bearer
+      description: Application token (mca_...)
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string, example: forbidden_stream }
+                  message: { type: string }
+  schemas:
+    Permissions:
+      type: object
+      properties:
+        publish: { type: array, items: { type: string } }
+        subscribe: { type: array, items: { type: string } }
+        read: { type: array, items: { type: string } }
+        receive_commands: { type: boolean }
+        send_commands: { type: array, items: { type: string } }
+    Identity:
+      type: object
+      properties:
+        organization_id: { type: string }
+        application_id: { type: string }
+        application: { type: string }
+        environment: { type: string }
+        device_id: { type: string, nullable: true }
+        credential_id: { type: string }
+        expires_at: { type: string, format: date-time }
+        permissions: { $ref: "#/components/schemas/Permissions" }
+    Message:
+      type: object
+      required: [stream, data]
+      properties:
+        id: { type: string, maxLength: 64, description: Idempotency key; generated when absent }
+        kind: { type: string, enum: [telemetry, event, inference], default: telemetry }
+        type: { type: string, maxLength: 128 }
+        stream: { type: string, example: energy.metrics }
+        time: { type: string, format: date-time }
+        seq: { type: integer, format: int64 }
+        data: { type: object }
+    MessageResult:
+      type: object
+      properties:
+        index: { type: integer }
+        id: { type: string }
+        status: { type: string, enum: [stored, duplicate, rejected] }
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+    Event:
+      type: object
+      properties:
+        id: { type: string }
+        schema_version: { type: integer, example: 1 }
+        kind: { type: string, enum: [telemetry, event, inference, lifecycle] }
+        type: { type: string }
+        stream: { type: string }
+        organization_id: { type: string }
+        application_id: { type: string }
+        application: { type: string }
+        device_id: { type: string }
+        environment: { type: string }
+        time: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+        seq: { type: integer, format: int64 }
+        data: { type: object }
+    EventPage:
+      type: object
+      properties:
+        stream: { type: string }
+        events: { type: array, items: { $ref: "#/components/schemas/Event" } }
+        next_cursor: { type: string, nullable: true }
+    AggregateResult:
+      type: object
+      properties:
+        stream: { type: string }
+        aggregate:
+          type: object
+          properties:
+            function: { type: string }
+            field: { type: string }
+            bucket_seconds: { type: integer }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        buckets:
+          type: array
+          items:
+            type: object
+            properties:
+              start: { type: string, format: date-time }
+              value: { type: number, nullable: true }
+              count: { type: integer }
+    Command:
+      type: object
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        application_id: { type: string }
+        application: { type: string }
+        device_id: { type: string }
+        name: { type: string }
+        payload: { type: object }
+        state: { type: string, enum: [PENDING, DISPATCHED, RECEIVED, EXECUTING, SUCCEEDED, FAILED, TIMEOUT] }
+        issued_by: { type: string }
+        idempotency_key: { type: string }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        timeout_seconds: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        dispatched_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        result: { type: object }
+        error: { type: string }

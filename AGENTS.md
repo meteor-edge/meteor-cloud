@@ -27,7 +27,7 @@ Shortcuts: pin Redis to **7.2**; EMQX **5.8.6** only unless BSL is reviewed; no 
 ## Architecture (must follow)
 
 - **Control plane** stays Python (`src/control-plane/`, package `app`).
-- **Data plane** and **device plane** may use other languages later. Do not start that migration here.
+- **Data plane** and **device plane** may use other languages later. Do not start that migration here. The **application data plane** in `src/data-plane/go/` is Go by design; the Python data plane beside it stays Python.
 - Planes must not import one another’s private Python packages. Talk over HTTP, MQTT, and documented contracts ([`contracts/mqtt-http.md`](contracts/mqtt-http.md)).
 - PostgreSQL is the control-plane database. Vendor clients stay behind ports/adapters.
 - Kubernetes, Terraform, Ansible, and WireGuard belong under `deploy/` / `infrastructure/`, not domain modules.
@@ -43,6 +43,8 @@ Shortcuts: pin Redis to **7.2**; EMQX **5.8.6** only unless BSL is reviewed; no 
 | `console/` | Browser → control-plane HTTP only. Never call the data plane or import device code. |
 | `src/control-plane/` | No vendor SDKs in domain services. Data plane is HTTP (`DATA_PLANE_URL`). |
 | `src/data-plane/` | MQTT ingest; HTTP to the control plane only. Do not import `app`. |
+| `src/data-plane/go/` | Application data plane (Go): `meteor/v1/...` topics, `/v1` API. Reads control-plane state only through the policy snapshot. Contract: `contracts/data-plane-v1.md`. |
+| `sdk/python/` | Public SDK. Talks to the data plane API only; no imports from `src/`. |
 | `src/device-plane/agent/` | `meteorcli` on the device. HTTP/MQTT to the API. Needs sibling `src/device-plane/runtime/` at install time. |
 | `src/device-plane/gateway/` | Host process: poll `/internal/connectivity/*`, `wg set`. HTTP only. |
 | `deploy/` | Images, Compose, Ansible, Helm, env. Not business logic. |
@@ -53,7 +55,7 @@ Shortcuts: pin Redis to **7.2**; EMQX **5.8.6** only unless BSL is reviewed; no 
 - Preserve existing HTTP/MQTT compatibility unless a breaking change is explicitly requested.
 - Add or update tests for behavior changes.
 - When install, config, contracts, or operator workflows change, update the matching page under `docs/` ([docs/README.md](docs/README.md)).
-- Run the relevant tests (`make test`, or `make backend-test` / `data-plane-test` / `agent-test` / `console-test` / `make check-plane-imports`). Report exactly what ran and what did not.
+- Run the relevant tests (`make test`, or `make backend-test` / `data-plane-test` / `data-api-test` / `sdk-test` / `agent-test` / `console-test` / `make check-plane-imports`). Report exactly what ran and what did not.
 - Do not claim tests, deploys, or installs succeeded unless they actually ran and passed.
 
 ## Cursor Cloud

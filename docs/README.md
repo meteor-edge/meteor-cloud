@@ -35,6 +35,7 @@ How to use the product day to day.
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
 | Device logs (journal, systemd, Docker, nginx) | [Device logs](fleet/logs.md) |
 | Public app URLs | [Endpoints](fleet/endpoints.md) |
+| Application data: publish, subscribe, query, commands | [Data plane](data-plane/README.md) · [SDK for Python](../sdk/python/README.md) · [Applications and credentials](data-plane/applications.md) · [Operations](data-plane/operations.md) |
 | Operator console | [Console](console.md) |
 
 ## Reference
