@@ -5,9 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"meteorcloud/dataplane/internal/bus"
 	"meteorcloud/dataplane/internal/commands"
-	"meteorcloud/dataplane/internal/identity"
 	"meteorcloud/dataplane/internal/storage"
 )
 
@@ -159,81 +157,4 @@ func (s *Server) handleInternalCommandGet(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, cmd)
-}
-
-// ---- broker hooks (EMQX HTTP authentication / authorization) ----------------
-
-type mqttAuthBody struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Topic    string `json:"topic"`
-	Action   string `json:"action"`
-}
-
-func credentialFromUsername(username string) (string, bool) {
-	if len(username) <= len(bus.AppUsernamePrefix) || username[:len(bus.AppUsernamePrefix)] != bus.AppUsernamePrefix {
-		return "", false
-	}
-	return username[len(bus.AppUsernamePrefix):], true
-}
-
-// handleMQTTAuthenticate answers the broker for application logins
-// (username "app_<credential id>", password = application token). Any other
-// username is "ignore", so the broker asks the next authenticator (devices and the
-// platform user stay with the control plane).
-func (s *Server) handleMQTTAuthenticate(w http.ResponseWriter, r *http.Request) {
-	var body mqttAuthBody
-	if !decodeBody(w, r, 8192, &body) {
-		return
-	}
-	credentialID, ok := credentialFromUsername(body.Username)
-	if !ok {
-		s.metrics.MQTTAuth.WithLabelValues("authenticate", "ignore").Inc()
-		writeJSON(w, http.StatusOK, map[string]any{"result": "ignore"})
-		return
-	}
-	id, err := s.policy.Authenticate(body.Password)
-	if err != nil || id.CredentialID != credentialID {
-		s.metrics.MQTTAuth.WithLabelValues("authenticate", "deny").Inc()
-		writeJSON(w, http.StatusOK, map[string]any{"result": "deny"})
-		return
-	}
-	s.metrics.MQTTAuth.WithLabelValues("authenticate", "allow").Inc()
-	// expire_at makes the broker drop the connection when the credential expires.
-	writeJSON(w, http.StatusOK, map[string]any{"result": "allow", "is_superuser": false, "expire_at": id.ExpiresAt.Unix()})
-}
-
-func normalizeAction(action string) string {
-	if len(action) >= 3 {
-		switch action[:3] {
-		case "pub", "PUB":
-			return "publish"
-		case "sub", "SUB":
-			return "subscribe"
-		}
-	}
-	return ""
-}
-
-// handleMQTTAuthorize is the per-identity topic ACL for application connections.
-func (s *Server) handleMQTTAuthorize(w http.ResponseWriter, r *http.Request) {
-	var body mqttAuthBody
-	if !decodeBody(w, r, 8192, &body) {
-		return
-	}
-	credentialID, ok := credentialFromUsername(body.Username)
-	if !ok {
-		s.metrics.MQTTAuth.WithLabelValues("authorize", "ignore").Inc()
-		writeJSON(w, http.StatusOK, map[string]any{"result": "ignore"})
-		return
-	}
-	var id *identity.Identity
-	id, err := s.policy.ByCredentialID(credentialID)
-	if err != nil || !bus.Authorize(id, normalizeAction(body.Action), body.Topic) {
-		s.metrics.MQTTAuth.WithLabelValues("authorize", "deny").Inc()
-		writeJSON(w, http.StatusOK, map[string]any{"result": "deny"})
-		return
-	}
-	s.metrics.MQTTAuth.WithLabelValues("authorize", "allow").Inc()
-	writeJSON(w, http.StatusOK, map[string]any{"result": "allow"})
 }

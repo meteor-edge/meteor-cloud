@@ -17,6 +17,10 @@ import (
 //	meteor/v1/orgs/{org}/apps/{app}/devices/{device|cloud}/commands             platform -> client
 //	meteor/v1/orgs/{org}/apps/{app}/commands                                    platform -> client
 //	meteor/v1/orgs/{org}/live/{stream}                                          platform -> client
+//
+// In a topic the dots of a stream name become levels ("energy.power" is
+// "energy/power"), so a stream permission pattern is an ordinary MQTT topic filter:
+// "energy.*" is "energy/+" and "energy.**" is "energy/#".
 const (
 	TopicPrefix = "meteor/v1/orgs/"
 	// CloudDevice stands in for the device segment of cloud-hosted instances.
@@ -38,9 +42,42 @@ func deviceSegment(deviceID string) string {
 	return deviceID
 }
 
+// StreamLevels turns a stream name or pattern into topic levels.
+func StreamLevels(pattern string) string {
+	parts := strings.Split(pattern, ".")
+	for i, p := range parts {
+		switch p {
+		case "*":
+			parts[i] = "+"
+		case "**":
+			parts[i] = "#"
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+func streamFromLevels(levels []string) (string, bool) {
+	if len(levels) == 0 {
+		return "", false
+	}
+	name := strings.Join(levels, ".")
+	return name, streams.ValidateName(name) == nil
+}
+
 // LiveTopic is where stored events of a stream are published.
 func LiveTopic(orgID, stream string) string {
-	return TopicPrefix + orgID + "/live/" + stream
+	return TopicPrefix + orgID + "/live/" + StreamLevels(stream)
+}
+
+// IngressTopic is where an application instance publishes messages of a kind
+// ("telemetry", "events" or "inference") for a stream name or pattern.
+func IngressTopic(orgID, app, deviceID, kindSegment, stream string) string {
+	return TopicPrefix + orgID + "/apps/" + app + "/devices/" + deviceSegment(deviceID) + "/" + kindSegment + "/" + StreamLevels(stream)
+}
+
+// AckTopic is where an application instance acknowledges commands.
+func AckTopic(orgID, app, deviceID string) string {
+	return TopicPrefix + orgID + "/apps/" + app + "/devices/" + deviceSegment(deviceID) + "/commands/ack"
 }
 
 // CommandTopic is where a command for the target is published.
@@ -77,9 +114,11 @@ func ParseTopic(topic string) (Topic, bool) {
 	}
 	t := Topic{OrgID: parts[0]}
 	switch {
-	case len(parts) == 3 && parts[1] == "live":
-		t.Kind, t.Stream = "live", parts[2]
-		return t, streams.ValidateName(t.Stream) == nil
+	case len(parts) >= 3 && parts[1] == "live":
+		t.Kind = "live"
+		var ok bool
+		t.Stream, ok = streamFromLevels(parts[2:])
+		return t, ok
 	case len(parts) == 4 && parts[1] == "apps" && parts[3] == "commands":
 		t.App, t.Kind = parts[2], "commands"
 		return t, true
@@ -96,40 +135,88 @@ func ParseTopic(topic string) (Topic, bool) {
 		case len(rest) == 2 && rest[0] == "commands" && rest[1] == "ack":
 			t.Kind = "ack"
 			return t, true
-		case len(rest) == 2:
+		case len(rest) >= 2:
 			kind, ok := ingressKinds[rest[0]]
 			if !ok {
 				return Topic{}, false
 			}
-			t.Kind, t.Stream = kind, rest[1]
-			return t, streams.ValidateName(t.Stream) == nil
+			t.Kind = kind
+			t.Stream, ok = streamFromLevels(rest[1:])
+			return t, ok
 		}
 	}
 	return Topic{}, false
 }
 
-// Authorize is the per-identity MQTT ACL. Anything not explicitly allowed is denied;
-// wildcard filters never match because ParseTopic rejects them.
-func Authorize(id *identity.Identity, action, topic string) bool {
-	t, ok := ParseTopic(topic)
-	if !ok || t.OrgID != id.OrganizationID {
+// ACL is the complete list of topic filters one application instance may use. It is
+// embedded in the short-lived MQTT token the broker verifies, so the broker enforces
+// it without calling anyone. Anything not listed is denied.
+type ACL struct {
+	Publish   []string `json:"pub"`
+	Subscribe []string `json:"sub"`
+}
+
+// BuildACL derives the per-identity topic ACL from the application's permissions.
+func BuildACL(id *identity.Identity) ACL {
+	acl := ACL{Publish: []string{}, Subscribe: []string{}}
+	for _, pattern := range id.Permissions.Publish {
+		if streams.ValidatePattern(pattern) != nil || streams.IsReserved(strings.Split(pattern, ".")[0]) {
+			continue
+		}
+		for _, kind := range []string{"telemetry", "events", "inference"} {
+			acl.Publish = append(acl.Publish, IngressTopic(id.OrganizationID, id.Application, id.DeviceID, kind, pattern))
+		}
+	}
+	for _, pattern := range id.Permissions.Subscribe {
+		if streams.ValidatePattern(pattern) != nil {
+			continue
+		}
+		acl.Subscribe = append(acl.Subscribe, LiveTopic(id.OrganizationID, pattern))
+	}
+	if id.Permissions.ReceiveCommands {
+		acl.Publish = append(acl.Publish, AckTopic(id.OrganizationID, id.Application, id.DeviceID))
+		acl.Subscribe = append(acl.Subscribe, CommandTopic(id.OrganizationID, id.Application, ""))
+		if id.DeviceID != "" {
+			acl.Subscribe = append(acl.Subscribe, CommandTopic(id.OrganizationID, id.Application, id.DeviceID))
+		}
+	}
+	return acl
+}
+
+// FilterMatches reports whether an MQTT topic filter matches a topic or, for
+// subscriptions, covers a requested filter.
+func FilterMatches(filter, topic string) bool {
+	fp := strings.Split(filter, "/")
+	tp := strings.Split(topic, "/")
+	for i, f := range fp {
+		if f == "#" {
+			return true
+		}
+		if i >= len(tp) {
+			return false
+		}
+		if tp[i] == "#" || (tp[i] == "+" && f != "+") {
+			return false // the request is wider than the grant
+		}
+		if f != "+" && f != tp[i] {
+			return false
+		}
+	}
+	return len(fp) == len(tp)
+}
+
+// Allows reports whether the ACL permits the action on the topic (tests and tools;
+// the broker does the real enforcement from the same lists).
+func (a ACL) Allows(action, topic string) bool {
+	list := a.Publish
+	if action == "subscribe" {
+		list = a.Subscribe
+	} else if strings.ContainsAny(topic, "+#") {
 		return false
 	}
-	own := t.App == id.Application && (!t.HasDevice || t.Device == id.DeviceID)
-	switch action {
-	case "publish":
-		switch t.Kind {
-		case envelope.KindTelemetry, envelope.KindEvent, envelope.KindInference:
-			return own && id.CanPublish(t.Stream)
-		case "ack":
-			return own && id.Permissions.ReceiveCommands
-		}
-	case "subscribe":
-		switch t.Kind {
-		case "live":
-			return id.CanSubscribe(t.Stream)
-		case "commands":
-			return own && id.Permissions.ReceiveCommands
+	for _, f := range list {
+		if FilterMatches(f, topic) {
+			return true
 		}
 	}
 	return false

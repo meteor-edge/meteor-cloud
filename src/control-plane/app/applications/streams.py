@@ -19,7 +19,7 @@ class StreamPatternError(ValueError):
     """A stream name or pattern does not follow the contract."""
 
 
-def validate_stream_pattern(pattern: str) -> str:
+def validate_stream_pattern(pattern: str, *, allow_reserved: bool = False) -> str:
     value = pattern.strip()
     if not value or len(value) > MAX_STREAM_LENGTH:
         raise StreamPatternError(f"stream pattern {pattern!r} must be 1-{MAX_STREAM_LENGTH} characters")
@@ -39,8 +39,8 @@ def validate_stream_pattern(pattern: str) -> str:
             raise StreamPatternError(
                 f"stream pattern {pattern!r}: segments use a-z, 0-9, '_' or '-' and start with a letter or digit"
             )
-    if parts[0] == RESERVED_PREFIX:
-        raise StreamPatternError(f"streams under '{RESERVED_PREFIX}.' are reserved for the platform")
+    if parts[0] == RESERVED_PREFIX and not allow_reserved:
+        raise StreamPatternError(f"only the platform publishes to streams under '{RESERVED_PREFIX}.'")
     return value
 
 

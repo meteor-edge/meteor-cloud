@@ -40,6 +40,11 @@ type Options struct {
 	QueryTimeout     time.Duration
 	LifecycleEvents  bool
 	AllowedWSOrigins []string
+	// Direct MQTT access for applications: the secret shared with the broker's JWT
+	// authenticator (empty disables it), the broker URL clients use, and token lifetime.
+	MQTTJWTSecret string
+	MQTTPublicURL string
+	MQTTTokenTTL  time.Duration
 	// Ready reports whether dependencies (storage, transport) are usable.
 	Ready func(ctx context.Context) map[string]error
 }
@@ -94,6 +99,7 @@ func (s *Server) PublicHandler() http.Handler {
 	mux.Handle("POST /v1/messages", s.auth("messages", s.handleMessages))
 	mux.Handle("GET /v1/streams/{stream}/data", s.auth("stream_data", s.handleStreamData))
 	mux.Handle("GET /v1/stream", s.auth("stream_ws", s.handleStream))
+	mux.Handle("POST /v1/mqtt/credentials", s.auth("mqtt_credentials", s.handleMQTTCredentials))
 	mux.Handle("POST /v1/commands", s.auth("commands_create", s.handleCommandCreate))
 	mux.Handle("GET /v1/commands/pending", s.auth("commands_pending", s.handleCommandsPending))
 	mux.Handle("GET /v1/commands/{id}", s.auth("commands_get", s.handleCommandGet))
@@ -109,8 +115,6 @@ func (s *Server) OpsHandler() http.Handler {
 	mux.Handle("GET /metrics", s.metrics.Handler())
 	mux.Handle("POST /internal/v1/commands", s.internal("internal_commands_create", s.handleInternalCommandCreate))
 	mux.Handle("GET /internal/v1/organizations/{org}/commands/{id}", s.internal("internal_commands_get", s.handleInternalCommandGet))
-	mux.Handle("POST /internal/mqtt/authenticate", s.internal("mqtt_authenticate", s.handleMQTTAuthenticate))
-	mux.Handle("POST /internal/mqtt/authorize", s.internal("mqtt_authorize", s.handleMQTTAuthorize))
 	return mux
 }
 

@@ -16,13 +16,13 @@ ENVIRONMENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 MAX_PATTERNS = 64
 
 
-def _patterns(values: list[str]) -> list[str]:
+def _patterns(values: list[str], *, allow_reserved: bool) -> list[str]:
     if len(values) > MAX_PATTERNS:
         raise ValueError(f"at most {MAX_PATTERNS} stream patterns")
     out: list[str] = []
     for value in values:
         try:
-            cleaned = validate_stream_pattern(value)
+            cleaned = validate_stream_pattern(value, allow_reserved=allow_reserved)
         except StreamPatternError as exc:
             raise ValueError(str(exc)) from exc
         if cleaned not in out:
@@ -43,10 +43,16 @@ class ApplicationPermissions(BaseModel):
         default_factory=list, description="Application slugs this app may send commands to."
     )
 
-    @field_validator("publish", "subscribe", "read")
+    @field_validator("publish")
+    @classmethod
+    def _check_publish(cls, value: list[str]) -> list[str]:
+        return _patterns(value, allow_reserved=False)
+
+    @field_validator("subscribe", "read")
     @classmethod
     def _check_patterns(cls, value: list[str]) -> list[str]:
-        return _patterns(value)
+        # Platform streams such as meteor.lifecycle can be received, never published.
+        return _patterns(value, allow_reserved=True)
 
     @field_validator("send_commands")
     @classmethod
@@ -137,7 +143,8 @@ class CommandCreate(BaseModel):
     device_id: uuid.UUID | None = None
     timeout_seconds: int = Field(default=60, ge=1, le=86_400)
     expires_in_seconds: int = Field(default=3600, ge=1, le=604_800)
-    max_attempts: int = Field(default=5, ge=1, le=20)
+    # 0: redeliver until the command expires.
+    max_attempts: int = Field(default=0, ge=0, le=1000)
     idempotency_key: str | None = Field(default=None, max_length=128)
 
 

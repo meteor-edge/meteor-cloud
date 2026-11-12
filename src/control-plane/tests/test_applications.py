@@ -317,3 +317,33 @@ def test_commands_are_authorized_here_and_forwarded(client: TestClient, db_sessi
         client.post(base, headers=auth_header(client, "viewer@example.com"), json={"name": "restart"}).status_code
         == 403
     )
+
+
+def test_reserved_streams_can_be_received_but_not_published(client: TestClient, db_session: Session) -> None:
+    org, headers = _org(client, db_session)
+    app = _app(client, org, headers, subscribe=["meteor.lifecycle"], read=["meteor.*"])
+    assert app["permissions"]["subscribe"] == ["meteor.lifecycle"]
+    bad = client.post(
+        f"/api/v1/organizations/{org.id}/applications",
+        headers=headers,
+        json={"slug": "spoofer", "name": "x", "permissions": {"publish": ["meteor.lifecycle"]}},
+    )
+    assert bad.status_code == 422
+
+
+def test_broker_hooks_leave_application_logins_to_the_data_plane(client: TestClient) -> None:
+    mqtt_internal = {"X-MQTT-Internal-Token": get_settings().mqtt_internal_token}
+    auth = client.post(
+        "/internal/mqtt/authenticate", headers=mqtt_internal, json={"username": "app_1234", "password": "mca_x"}
+    )
+    assert auth.json()["result"] == "ignore"
+    acl = client.post(
+        "/internal/mqtt/authorize",
+        headers=mqtt_internal,
+        json={"username": "app_1234", "action": "publish", "topic": "devices/x/status"},
+    )
+    assert acl.json()["result"] == "ignore"
+    unknown = client.post(
+        "/internal/mqtt/authenticate", headers=mqtt_internal, json={"username": "someone", "password": "x"}
+    )
+    assert unknown.json()["result"] == "deny"

@@ -3,6 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -687,59 +690,60 @@ func TestInternalAPI(t *testing.T) {
 	}
 }
 
-func TestBrokerHooks(t *testing.T) {
-	e := newEnv(t, nil)
-	auth := func(username, password string) string {
-		_, body := e.internal("POST", "/internal/mqtt/authenticate", internalTok, map[string]any{"username": username, "password": password})
-		return fmt.Sprint(body["result"])
+func TestMQTTCredentials(t *testing.T) {
+	disabled := newEnv(t, nil)
+	if code, body := disabled.do("POST", "/v1/mqtt/credentials", tokCollector, nil); code != 404 || errCode(body) != "mqtt_not_enabled" {
+		t.Fatalf("disabled: %d %v", code, body)
 	}
-	if got := auth("app_cred-collector", tokCollector); got != "allow" {
-		t.Fatalf("valid application login: %s", got)
+	secret := "0123456789abcdef0123456789abcdef"
+	e := newEnv(t, func(o *Options) {
+		o.MQTTJWTSecret, o.MQTTPublicURL, o.MQTTTokenTTL = secret, "mqtts://broker:8883", 10*time.Minute
+	})
+	code, body := e.do("POST", "/v1/mqtt/credentials", tokCollector, nil)
+	if code != 200 || body["username"] != "app_cred-collector" || body["url"] != "mqtts://broker:8883" {
+		t.Fatalf("%d %v", code, body)
 	}
-	if got := auth("app_cred-collector", tokDetector); got != "deny" {
-		t.Fatalf("token of another credential: %s", got)
+	parts := strings.Split(body["password"].(string), ".")
+	if len(parts) != 3 {
+		t.Fatal("password must be a JWT")
 	}
-	if got := auth("app_cred-collector", "mca_wrong"); got != "deny" {
-		t.Fatalf("wrong token: %s", got)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	if base64.RawURLEncoding.EncodeToString(mac.Sum(nil)) != parts[2] {
+		t.Fatal("signature does not verify with the shared secret")
 	}
-	// Devices and the platform user belong to the control plane's authenticator.
-	if got := auth("device_1234", "mqtt_x"); got != "ignore" {
-		t.Fatalf("device login must be ignored here: %s", got)
+	raw, _ := base64.RawURLEncoding.DecodeString(parts[1])
+	var claims struct {
+		Username string  `json:"username"`
+		Exp      int64   `json:"exp"`
+		ACL      bus.ACL `json:"acl"`
 	}
-	if got := auth("platform", "x"); got != "ignore" {
-		t.Fatalf("platform login must be ignored here: %s", got)
+	json.Unmarshal(raw, &claims)
+	if claims.Username != "app_cred-collector" || time.Until(time.Unix(claims.Exp, 0)) > 11*time.Minute {
+		t.Fatalf("claims: %+v", claims)
 	}
-
-	acl := func(username, action, topic string) string {
-		_, body := e.internal("POST", "/internal/mqtt/authorize", internalTok, map[string]any{"username": username, "action": action, "topic": topic})
-		return fmt.Sprint(body["result"])
+	own := bus.TopicPrefix + orgA + "/apps/collector/devices/" + dev1
+	if !claims.ACL.Allows("publish", own+"/telemetry/energy/power") {
+		t.Fatal("own topic must be allowed")
 	}
-	base := bus.TopicPrefix + orgA
-	if got := acl("app_cred-collector", "publish", base+"/apps/collector/devices/"+dev1+"/telemetry/energy.power"); got != "allow" {
-		t.Fatalf("own topic: %s", got)
-	}
-	for _, c := range [][2]string{
-		{"publish", base + "/apps/collector/devices/" + dev2 + "/telemetry/energy.power"},
-		{"publish", bus.TopicPrefix + orgB + "/apps/collector/devices/" + dev1 + "/telemetry/energy.power"},
-		{"publish", base + "/apps/collector/devices/" + dev1 + "/telemetry/water.flow"},
-		{"subscribe", base + "/live/energy.power"},
-		{"subscribe", "#"},
-		{"subscribe", base + "/live/#"},
+	for _, topic := range []string{
+		bus.TopicPrefix + orgA + "/apps/collector/devices/" + dev2 + "/telemetry/energy/power",
+		bus.TopicPrefix + orgB + "/apps/collector/devices/" + dev1 + "/telemetry/energy/power",
+		own + "/telemetry/water/flow",
 	} {
-		if got := acl("app_cred-collector", c[0], c[1]); got != "deny" {
-			t.Errorf("%s %s: %s", c[0], c[1], got)
+		if claims.ACL.Allows("publish", topic) {
+			t.Errorf("must deny %s", topic)
 		}
 	}
-	if got := acl("app_cred-detector", "subscribe", base+"/live/energy.power"); got != "allow" {
-		t.Fatalf("granted live topic: %s", got)
+	if len(claims.ACL.Subscribe) != 0 {
+		t.Fatalf("collector has no subscribe grants: %v", claims.ACL.Subscribe)
 	}
-	if got := acl("device_1234", "publish", "devices/1234/status"); got != "ignore" {
-		t.Fatalf("device ACL must be ignored here: %s", got)
+	// No grants: a token with an empty ACL, which lets the application do nothing.
+	_, none := e.do("POST", "/v1/mqtt/credentials", tokNoGrants, nil)
+	if len(none["publish"].([]any))+len(none["subscribe"].([]any)) != 0 {
+		t.Fatalf("no grants must give an empty ACL: %v", none)
 	}
-	if got := acl("app_unknown", "publish", base+"/apps/collector/devices/"+dev1+"/telemetry/energy.power"); got != "deny" {
-		t.Fatalf("unknown credential: %s", got)
-	}
-	if code, _ := e.internal("POST", "/internal/mqtt/authenticate", "wrong", map[string]any{"username": "app_x"}); code != 401 {
-		t.Fatalf("hooks need the internal token: %d", code)
+	if code, _ := e.do("POST", "/v1/mqtt/credentials", "mca_wrong", nil); code != 401 {
+		t.Fatal("needs a valid application token")
 	}
 }

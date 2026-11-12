@@ -189,7 +189,7 @@ func (m *MQTT) Start(ctx context.Context, h Handlers) error {
 	ctx, m.cancel = context.WithCancel(ctx)
 
 	fanoutFilters := []string{
-		TopicPrefix + "+/live/+",
+		TopicPrefix + "+/live/#",
 		TopicPrefix + "+/apps/+/commands",
 		TopicPrefix + "+/apps/+/devices/+/commands",
 	}
@@ -212,7 +212,7 @@ func (m *MQTT) Start(ctx context.Context, h Handlers) error {
 
 	if m.ingress != nil {
 		share := "$share/" + SharedGroup + "/" + TopicPrefix + "+/apps/+/devices/+/"
-		ingressFilters := []string{share + "telemetry/+", share + "events/+", share + "inference/+", share + "commands/ack"}
+		ingressFilters := []string{share + "telemetry/#", share + "events/#", share + "inference/#", share + "commands/ack"}
 		m.ingest, err = m.connect(ctx, m.cfg.ClientID+"-in", true, func(cm *autopaho.ConnectionManager) {
 			if err := subscribe(cm, ingressFilters); err != nil {
 				m.log.Error("MQTT ingress subscribe failed", "error", err.Error())

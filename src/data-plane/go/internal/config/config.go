@@ -41,6 +41,10 @@ type Config struct {
 	MQTTPassword   string
 	MQTTCACertPath string
 	MQTTClientID   string
+	// Direct MQTT access for applications (optional).
+	MQTTJWTSecret string
+	MQTTPublicURL string
+	MQTTTokenTTL  time.Duration
 
 	// Limits.
 	MaxPayloadBytes  int
@@ -132,6 +136,10 @@ func Load() (*Config, error) {
 	if c.MQTTPassword, err = secret("MQTT_PLATFORM_PASSWORD"); err != nil {
 		return nil, err
 	}
+	if c.MQTTJWTSecret, err = secret("DATAPLANE_MQTT_JWT_SECRET"); err != nil {
+		return nil, err
+	}
+	c.MQTTPublicURL = env("DATAPLANE_MQTT_PUBLIC_URL", "")
 	ints := []struct {
 		dst *int
 		key string
@@ -168,6 +176,7 @@ func Load() (*Config, error) {
 		{&c.MaxFutureSkew, "DATAPLANE_MAX_FUTURE_SKEW", 5 * time.Minute},
 		{&c.MaxEventAge, "DATAPLANE_MAX_EVENT_AGE", 30 * 24 * time.Hour},
 		{&c.CommandAckWait, "DATAPLANE_COMMAND_ACK_TIMEOUT", 5 * time.Second},
+		{&c.MQTTTokenTTL, "DATAPLANE_MQTT_TOKEN_TTL", time.Hour},
 		{&c.ShutdownTimeout, "DATAPLANE_SHUTDOWN_TIMEOUT", 20 * time.Second},
 	}
 	for _, d := range durations {
@@ -207,6 +216,9 @@ func (c *Config) validate() error {
 	case "memory":
 	default:
 		return fmt.Errorf("DATAPLANE_BUS must be mqtt or memory")
+	}
+	if c.MQTTJWTSecret != "" && len(c.MQTTJWTSecret) < 32 {
+		return fmt.Errorf("DATAPLANE_MQTT_JWT_SECRET must be at least 32 characters")
 	}
 	if c.MaxBatch < 1 || c.QueueSize < c.MaxBatch {
 		return fmt.Errorf("DATAPLANE_QUEUE_SIZE must be at least DATAPLANE_MAX_BATCH")

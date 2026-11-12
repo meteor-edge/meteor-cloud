@@ -112,6 +112,7 @@ func run() error {
 		RateLimitPerSec: cfg.RateLimitPerSec, RateLimitBurst: cfg.RateLimitBurst,
 		QueryMaxLimit: cfg.QueryMaxLimit, QueryMaxBuckets: cfg.QueryMaxBuckets, QueryTimeout: cfg.QueryTimeout,
 		LifecycleEvents: cfg.LifecycleEvents, AllowedWSOrigins: cfg.AllowedWSOrigins,
+		MQTTJWTSecret: cfg.MQTTJWTSecret, MQTTPublicURL: cfg.MQTTPublicURL, MQTTTokenTTL: cfg.MQTTTokenTTL,
 		Ready: func(ctx context.Context) map[string]error {
 			checks := map[string]error{"storage": store.Ping(ctx), "transport": nil}
 			if !transport.Ready() {

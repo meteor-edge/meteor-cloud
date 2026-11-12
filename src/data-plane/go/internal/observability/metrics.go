@@ -36,7 +36,6 @@ type Metrics struct {
 	BusConnected   prometheus.Gauge
 	BusReconnects  prometheus.Counter
 	MQTTAuth       *prometheus.CounterVec // action, result
-	MQTTClients    prometheus.Gauge
 	CommandsTotal  *prometheus.CounterVec // state
 	CommandRetries prometheus.Counter
 	DispatcherLag  prometheus.Gauge
@@ -97,8 +96,7 @@ func NewMetrics() *Metrics {
 		FailedDeliveries:  counterVec("failed_deliveries_total", "Events or commands that could not be handed to the transport.", "kind"),
 		BusConnected:      gauge("bus_connected", "1 while the message transport is connected."),
 		BusReconnects:     counter("bus_reconnects_total", "Reconnections to the message transport."),
-		MQTTAuth:          counterVec("mqtt_auth_total", "Broker authentication and ACL decisions for applications.", "action", "result"),
-		MQTTClients:       gauge("mqtt_active_connections", "Application MQTT connections authenticated and not yet disconnected (best effort)."),
+		MQTTAuth:          counterVec("mqtt_tokens_total", "Short-lived MQTT tokens issued to applications.", "action", "result"),
 		CommandsTotal:     counterVec("commands_total", "Commands by state reached.", "state"),
 		CommandRetries:    counter("command_redeliveries_total", "Commands dispatched again because they were not acknowledged."),
 		DispatcherLag:     gauge("command_dispatcher_lag_seconds", "Age of the oldest due command the dispatcher picked up."),

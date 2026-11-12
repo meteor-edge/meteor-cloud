@@ -27,6 +27,10 @@ from app.ports.mqtt import MQTTGateway
 
 logger = logging.getLogger(__name__)
 
+# Application identities ("app_<credential id>") are authenticated and authorized by the
+# data plane, the broker's next authenticator. Without it the broker rejects them.
+APPLICATION_USERNAME_PREFIX = "app_"
+
 MqttPublisher = MQTTGateway
 
 
@@ -64,6 +68,8 @@ class MqttService:
                 return MqttAuthResponse(result="allow", is_superuser=True)
             return MqttAuthResponse(result="deny")
 
+        if username.startswith(APPLICATION_USERNAME_PREFIX):
+            return MqttAuthResponse(result="ignore")
         device_id = device_id_from_username(username)
         if device_id is None:
             return MqttAuthResponse(result="deny")
@@ -87,6 +93,8 @@ class MqttService:
     def _authorize(self, *, username: str, action: str, topic: str) -> MqttAuthorizeResponse:
         if username == self.settings.mqtt_platform_username:
             return MqttAuthorizeResponse(result="allow")
+        if username.startswith(APPLICATION_USERNAME_PREFIX):
+            return MqttAuthorizeResponse(result="ignore")
         device_id = device_id_from_username(username)
         if device_id is None or not can_access_topic(device_id, action, topic):
             return MqttAuthorizeResponse(result="deny")
