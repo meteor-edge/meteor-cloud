@@ -1,5 +1,6 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 
 import {
   addDeviceUser,
@@ -13,7 +14,7 @@ import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 
 type Props = {
   token: string;
@@ -53,36 +54,55 @@ function note(action: DeviceAction): { text: string; tone: string } {
   return { text: `Done${when}.`, tone: "text-muted-foreground" };
 }
 
+function isInFlight(action: DeviceAction): boolean {
+  return action.state === "pending" || action.state === "sent";
+}
+
 /** Restart, shut down, and SSH user changes ordered from the console. */
 export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, canUsers }: Props) {
   const queryClient = useQueryClient();
   const queryKey = ["device-actions", organizationId, deviceId];
+  const deviceKey = ["device", organizationId, deviceId];
   const [userForm, setUserForm] = useState<"password" | "add" | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [sudo, setSudo] = useState(false);
   const [authorizedKey, setAuthorizedKey] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // After an order, keep polling even if the first cache write races; clear once settled.
+  const [watchUntilSettled, setWatchUntilSettled] = useState(false);
 
   const actionsQuery = useQuery({
     queryKey,
     queryFn: () => listDeviceActions(token, organizationId, deviceId),
-    refetchInterval: (query) =>
-      query.state.data?.actions.some(
-        (action) => action.state === "pending" || action.state === "sent",
-      )
-        ? 5000
-        : 30000,
+    refetchInterval: (query) => {
+      const rows = query.state.data?.actions ?? [];
+      if (watchUntilSettled || rows.some(isInFlight)) {
+        return 5000;
+      }
+      return 30000;
+    },
+    refetchOnWindowFocus: true,
   });
+
+  useEffect(() => {
+    const rows = actionsQuery.data?.actions ?? [];
+    if (watchUntilSettled && rows.length > 0 && !rows.some(isInFlight)) {
+      setWatchUntilSettled(false);
+      void queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
+    }
+  }, [actionsQuery.data, watchUntilSettled, queryClient, organizationId, deviceId]);
 
   const onError = (reason: unknown) =>
     setError(reason instanceof ApiError ? reason.message : "The action could not be saved.");
   const onDone = (data: { actions: DeviceAction[] }) => {
     queryClient.setQueryData(queryKey, data);
+    setWatchUntilSettled(true);
     setUserForm(null);
     setPassword("");
     setAuthorizedKey("");
     setError(null);
+    void queryClient.invalidateQueries({ queryKey: deviceKey });
   };
 
   const rebootMutation = useMutation({
@@ -131,22 +151,44 @@ export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, 
     else if (userForm === "add") addUserMutation.mutate();
   };
 
+  const refresh = async () => {
+    await Promise.all([
+      actionsQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: deviceKey }),
+    ]);
+  };
+
   const actions = actionsQuery.data?.actions ?? [];
   const busy =
     rebootMutation.isPending ||
     shutdownMutation.isPending ||
     passwordMutation.isPending ||
     addUserMutation.isPending;
+  const refreshing = actionsQuery.isFetching && !busy;
 
   return (
     <div className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-glow">
-      <div>
-        <h2 className="text-lg font-semibold">Power and SSH users</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Restart or shut the device down, change a user&apos;s password, or add an SSH user
-          (owners and admins). The device picks the action up on its next heartbeat. Passwords are
-          sent encrypted and never shown again.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Power and SSH users</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Restart or shut the device down, change a user&apos;s password, or add an SSH user
+            (owners and admins). The device picks the action up on its next heartbeat. Passwords are
+            sent encrypted and never shown again. This list refreshes while an action is waiting;
+            use Refresh anytime.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 w-10 shrink-0 rounded-full p-0"
+          aria-label="Refresh actions"
+          title="Refresh"
+          disabled={refreshing}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+        </Button>
       </div>
 
       {canPower && (
@@ -259,6 +301,9 @@ export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, 
       )}
 
       {actionsQuery.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {!actionsQuery.isLoading && actions.length === 0 && (
+        <p className="text-sm text-muted-foreground">No recent actions yet.</p>
+      )}
       {actions.length > 0 && (
         <ul className="divide-y divide-border rounded-md border border-border">
           {actions.map((action) => {

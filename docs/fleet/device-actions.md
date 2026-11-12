@@ -21,6 +21,11 @@ without logging into the device.
 An action the device never collects is cancelled after
 `DEVICE_ACTION_TTL_SECONDS` (default 1 hour).
 
+The Settings panel lists recent actions and polls every 5 seconds while one is
+waiting or in progress (otherwise every 30 seconds). Use the refresh control to
+reload immediately; the device overview status is refreshed too. No websocket —
+actions only move on heartbeats.
+
 ## Permissions
 
 | Action | Permission | Default roles |

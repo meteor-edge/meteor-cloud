@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 
 import {
   getDeviceWifi,
@@ -12,7 +13,7 @@ import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 
 type Props = {
   token: string;
@@ -107,6 +108,7 @@ export function DeviceWifiPanel({ token, organizationId, deviceId }: Props) {
     // A change is settled by the device within a heartbeat or two: keep looking while one is open.
     refetchInterval: (query) =>
       query.state.data?.networks.some((network) => network.state === "pending") ? 5000 : 30000,
+    refetchOnWindowFocus: true,
   });
 
   const onError = (reason: unknown) =>
@@ -167,12 +169,26 @@ export function DeviceWifiPanel({ token, organizationId, deviceId }: Props) {
 
   return (
     <div className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-glow">
-      <div>
-        <h2 className="text-lg font-semibold">Wi-Fi</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Add a network or change a password without touching the device. The password is sent
-          encrypted, kept only until the device has it, and never shown again.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Wi-Fi</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Add a network or change a password without touching the device. The password is sent
+            encrypted, kept only until the device has it, and never shown again. Pending changes
+            refresh automatically; use Refresh anytime.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 w-10 shrink-0 rounded-full p-0"
+          aria-label="Refresh Wi-Fi"
+          title="Refresh"
+          disabled={wifiQuery.isFetching}
+          onClick={() => void wifiQuery.refetch()}
+        >
+          <RefreshCw className={cn("h-4 w-4", wifiQuery.isFetching && "animate-spin")} />
+        </Button>
       </div>
 
       {wifiQuery.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}

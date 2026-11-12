@@ -60,6 +60,36 @@ describe("DeviceActionsPanel", () => {
     await waitFor(() => expect(rebootDevice).toHaveBeenCalledWith("token", "org-1", "dev-1"));
   });
 
+  it("refreshes the action list on demand", async () => {
+    const user = setup();
+    await screen.findByRole("button", { name: "Restart" });
+    vi.mocked(listDeviceActions).mockClear();
+    await user.click(screen.getByRole("button", { name: "Refresh actions" }));
+    await waitFor(() => expect(listDeviceActions).toHaveBeenCalled());
+  });
+
+  it("shows a queued restart in the panel after success", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(rebootDevice).mockResolvedValue({
+      actions: [
+        {
+          id: "a1",
+          kind: "reboot",
+          state: "pending",
+          username: null,
+          sudo: false,
+          last_error: null,
+          created_at: "2026-01-01T00:00:00Z",
+          sent_at: null,
+          reported_at: null,
+        },
+      ],
+    });
+    const user = setup();
+    await user.click(await screen.findByRole("button", { name: "Restart" }));
+    expect(await screen.findByText("Waiting for the device (its next heartbeat).")).toBeInTheDocument();
+  });
+
   it("sends a password change", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Change SSH password" }));
