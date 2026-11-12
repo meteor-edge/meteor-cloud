@@ -287,14 +287,15 @@ class RegistrationService:
             device.kernel_version = payload.kernel_version
         if payload.architecture:
             device.architecture = payload.architecture
-        if payload.serial_number:
-            device.serial_number = payload.serial_number.strip()
+        serial = (payload.serial_number or "").strip()
+        if serial and not self._identity_in_use(device, serial_number=serial, mac_addresses=()):
+            device.serial_number = serial
         if payload.mac_addresses:
             macs = DeviceIdentity.from_inventory(
                 serial_number=None,
                 mac_addresses=payload.mac_addresses,
             ).mac_addresses
-            if macs:
+            if macs and not self._identity_in_use(device, serial_number=None, mac_addresses=macs):
                 device.mac_addresses = macs
         if payload.hardware_model:
             device.hardware_model = payload.hardware_model
@@ -306,6 +307,22 @@ class RegistrationService:
             device.memory_mb = payload.memory_mb
         if payload.local_ip:
             device.local_ip = payload.local_ip
+
+    def _identity_in_use(
+        self,
+        device: Device,
+        *,
+        serial_number: str | None,
+        mac_addresses: list[str] | tuple[str, ...],
+    ) -> bool:
+        """Whether some other device already stores this serial or any of these MACs."""
+        return any(
+            candidate.id != device.id
+            for candidate in self.devices.list_candidates_for_identity(
+                serial_number=serial_number,
+                mac_addresses=mac_addresses,
+            )
+        )
 
     def heartbeat(
         self,

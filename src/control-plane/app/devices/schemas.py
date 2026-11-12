@@ -14,12 +14,14 @@ from app.mqtt.schemas import MqttConnectInfo
 from app.tenancy.schemas import validate_slug
 
 
-def _optional_ip(value: str | None) -> str | None:
+def _optional_ip(value: object) -> str | None:
     """Return a canonical IP, or None when the value is blank or not an address.
 
     A bad value must not fail the heartbeat: the rest of the report still counts.
+    BeforeValidator runs before the field type is checked, so a non-string
+    (for example a JSON number) is discarded here instead of raising.
     """
-    if value is None:
+    if not isinstance(value, str):
         return None
     cleaned = value.strip()
     if not cleaned:
