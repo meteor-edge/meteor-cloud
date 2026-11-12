@@ -29,17 +29,17 @@ import sys
 import time
 from pathlib import Path
 
+from edge_agent.actions import ActionSync
 from edge_agent.capabilities import collect_capabilities
 from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.config import AgentConfig, load_config, save_config
 from edge_agent.credentials import read_device_token, read_registration_token_file
 from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
+from edge_agent.platform import combine_heartbeat_handlers
 from edge_agent.registration import register
 from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_as_service, service_state
 from edge_agent.software import reconcile_software
-from edge_agent.actions import ActionSync
-from edge_agent.platform import combine_heartbeat_handlers
 from edge_agent.wifi import WifiSync
 from meteorcli import __version__
 from meteorcli import config as cli_config

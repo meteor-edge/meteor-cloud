@@ -103,7 +103,14 @@ def test_custom_host_actions_adapter() -> None:
         def set_password(self, username: str, password: str) -> None:
             raise AssertionError("unused")
 
-        def add_user(self, username: str, password: str, *, sudo: bool = False, authorized_key: str | None = None) -> None:
+        def add_user(
+            self,
+            username: str,
+            password: str,
+            *,
+            sudo: bool = False,
+            authorized_key: str | None = None,
+        ) -> None:
             raise AssertionError("unused")
 
     client = FakeClient([{"id": "a4", "kind": "reboot"}])
