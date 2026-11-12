@@ -2,7 +2,7 @@ import { Download, Plus, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import type { Artifact } from "@/api/fleet";
-import { ARTIFACT_TYPE_LABELS } from "@/components/artifacts/artifactTypes";
+import { ARTIFACT_TYPE_LABELS, artifactDeviceTypeIds } from "@/components/artifacts/artifactTypes";
 import {
   createReleaseFromArtifactPath,
   releaseKindForArtifactType,
@@ -23,6 +23,8 @@ type ArtifactTableProps = {
   /** Omit on pages already scoped to one type / one device type. */
   showType?: boolean;
   deviceTypeNames?: Map<string, string>;
+  /** Set to let managers change which device types an artifact is for. */
+  onEditDeviceTypes?: (artifact: Artifact) => void;
   emptyMessage?: string;
   /** Set to show which releases use each artifact and a "Create release" action. */
   organizationId?: string;
@@ -37,6 +39,7 @@ export function ArtifactTable({
   canPublish = false,
   showType = false,
   deviceTypeNames,
+  onEditDeviceTypes,
   emptyMessage = "No artifacts yet.",
   organizationId,
 }: ArtifactTableProps) {
@@ -50,8 +53,27 @@ export function ArtifactTable({
     (deviceTypeColumn ? 1 : 0) +
     (showReleases ? 1 : 0) +
     (showImager ? 1 : 0);
-  const deviceTypeLabel = (artifact: Artifact) =>
-    artifact.device_type_id ? (deviceTypeNames?.get(artifact.device_type_id) ?? "—") : "Any device";
+  const deviceTypeLabel = (artifact: Artifact) => {
+    const ids = artifactDeviceTypeIds(artifact);
+    const label =
+      ids.length === 0
+        ? "Any device"
+        : ids.map((id) => deviceTypeNames?.get(id) ?? "—").join(", ");
+    if (!canManage || !onEditDeviceTypes) {
+      return label;
+    }
+    return (
+      <button
+        type="button"
+        className="text-left underline decoration-dotted underline-offset-2 hover:text-foreground"
+        title="Change device types"
+        aria-label={`Change device types of ${artifact.name} ${artifact.version}: ${label}`}
+        onClick={() => onEditDeviceTypes(artifact)}
+      >
+        {label}
+      </button>
+    );
+  };
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-glow">
@@ -112,11 +134,15 @@ export function ArtifactTable({
                 {showType && (
                   <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
                     <p>{ARTIFACT_TYPE_LABELS[artifact.type]}</p>
-                    {deviceTypeNames && <p className="text-xs">{deviceTypeLabel(artifact)}</p>}
+                    {deviceTypeNames && (
+                      <p className="max-w-[14rem] whitespace-normal text-xs">
+                        {deviceTypeLabel(artifact)}
+                      </p>
+                    )}
                   </td>
                 )}
                 {deviceTypeColumn && (
-                  <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
+                  <td className="max-w-[14rem] px-3 py-3 text-muted-foreground">
                     {deviceTypeLabel(artifact)}
                   </td>
                 )}

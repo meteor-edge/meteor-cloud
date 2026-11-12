@@ -1,0 +1,207 @@
+#!/usr/bin/python3 -I
+"""Root helper that applies one-off console actions: restart, shut down, SSH users.
+
+installcli.sh installs this root-owned and grants passwordless sudo for this file
+only. Passwords arrive as JSON on stdin (never on a command line, never printed).
+
+  meteorcli-action reboot
+  meteorcli-action shutdown
+  meteorcli-action set-password   JSON on stdin: {username, password}
+  meteorcli-action add-user       JSON on stdin: {username, password, sudo?, authorized_key?}
+
+Exit codes: 0 done, 2 bad request, 5 not supported here.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pwd
+import re
+import shutil
+import subprocess
+import sys
+
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+MAX_REQUEST_BYTES = 8192
+USERNAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+RESERVED = frozenset({"root", "daemon", "bin", "sys", "sync", "nobody", "sshd", "systemd-network"})
+KEY = re.compile(
+    r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|"
+    r"sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^\r\n]*)?$"
+)
+SUDOERS_DIR = "/etc/sudoers.d"
+EXIT_BAD_REQUEST = 2
+EXIT_UNSUPPORTED = 5
+
+
+class HelperError(Exception):
+    def __init__(self, message: str, code: int = EXIT_BAD_REQUEST) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def run(*args: str, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(list(args), capture_output=True, text=True, timeout=timeout, check=False)
+
+
+def read_request() -> dict:
+    raw = sys.stdin.read(MAX_REQUEST_BYTES + 1)
+    if len(raw) > MAX_REQUEST_BYTES:
+        raise HelperError("request too large")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise HelperError("request is not JSON") from None
+    if not isinstance(data, dict):
+        raise HelperError("request must be a JSON object")
+    return data
+
+
+def valid_username(value: object) -> str:
+    if not isinstance(value, str) or not USERNAME.match(value):
+        raise HelperError("username must start with a lowercase letter or _ and use a-z, 0-9, _ or -")
+    if value in RESERVED:
+        raise HelperError(f"The account {value!r} cannot be changed from the console")
+    return value
+
+
+def valid_password(value: object) -> str:
+    if not isinstance(value, str) or not 8 <= len(value) <= 128:
+        raise HelperError("password must be 8 to 128 characters")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise HelperError("password must not contain line breaks or control characters")
+    return value
+
+
+def valid_key(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HelperError("authorized_key must be a string")
+    value = value.strip()
+    if not value:
+        return None
+    if len(value) > 4096 or not KEY.match(value):
+        raise HelperError("authorized_key must be one SSH public key line")
+    return value
+
+
+def user_exists(username: str) -> bool:
+    try:
+        pwd.getpwnam(username)
+        return True
+    except KeyError:
+        return False
+
+
+def set_password(username: str, password: str) -> None:
+    if not user_exists(username):
+        raise HelperError(f"There is no user named {username!r} on this device.")
+    # Plain chpasswd on stdin: the password is never on a command line.
+    done = subprocess.run(
+        ["chpasswd"],
+        input=f"{username}:{password}\n",
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if done.returncode != 0:
+        raise HelperError((done.stderr or "chpasswd failed").strip()[:200] or "chpasswd failed")
+
+
+def add_user(username: str, password: str, *, sudo: bool, authorized_key: str | None) -> None:
+    if user_exists(username):
+        raise HelperError(f"A user named {username!r} already exists.")
+    if shutil.which("useradd") is None:
+        raise HelperError("useradd is not installed on this device.", EXIT_UNSUPPORTED)
+    create = run("useradd", "-m", "-s", "/bin/bash", username)
+    if create.returncode != 0:
+        raise HelperError((create.stderr or "useradd failed").strip()[:200] or "useradd failed")
+    try:
+        set_password(username, password)
+        if sudo:
+            path = os.path.join(SUDOERS_DIR, f"90-meteorcli-{username}")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", os.path.basename(path)):
+                raise HelperError("bad sudoers path")
+            content = f"{username} ALL=(ALL) NOPASSWD:ALL\n"
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o440)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content)
+        if authorized_key:
+            home = os.path.expanduser(f"~{username}")
+            if home.startswith("~"):
+                raise HelperError("could not resolve the user's home directory")
+            ssh_dir = os.path.join(home, ".ssh")
+            os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+            auth = os.path.join(ssh_dir, "authorized_keys")
+            with open(auth, "a", encoding="utf-8") as handle:
+                handle.write(authorized_key + "\n")
+            os.chmod(auth, 0o600)
+            info = pwd.getpwnam(username)
+            os.chown(ssh_dir, info.pw_uid, info.pw_gid)
+            os.chown(auth, info.pw_uid, info.pw_gid)
+    except Exception:
+        run("userdel", "-r", username)
+        sudoers = os.path.join(SUDOERS_DIR, f"90-meteorcli-{username}")
+        if os.path.exists(sudoers):
+            os.unlink(sudoers)
+        raise
+
+
+def command_reboot() -> dict:
+    # Detach so the helper can answer before the system goes down.
+    subprocess.Popen(["systemctl", "reboot"], start_new_session=True)
+    return {"started": True}
+
+
+def command_shutdown() -> dict:
+    subprocess.Popen(["systemctl", "poweroff"], start_new_session=True)
+    return {"started": True}
+
+
+def command_set_password(request: dict) -> dict:
+    set_password(valid_username(request.get("username")), valid_password(request.get("password")))
+    return {"changed": True}
+
+
+def command_add_user(request: dict) -> dict:
+    add_user(
+        valid_username(request.get("username")),
+        valid_password(request.get("password")),
+        sudo=request.get("sudo") is True,
+        authorized_key=valid_key(request.get("authorized_key")),
+    )
+    return {"created": True}
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        print("meteorcli-action: must run as root (via sudo)", file=sys.stderr)
+        return EXIT_BAD_REQUEST
+    os.environ["PATH"] = SAFE_PATH
+    os.umask(0o077)
+    try:
+        if argv == ["reboot"]:
+            result = command_reboot()
+        elif argv == ["shutdown"]:
+            result = command_shutdown()
+        elif argv == ["set-password"]:
+            result = command_set_password(read_request())
+        elif argv == ["add-user"]:
+            result = command_add_user(read_request())
+        else:
+            raise HelperError("unsupported command")
+    except HelperError as error:
+        print(json.dumps({"error": str(error)}))
+        return error.code
+    except subprocess.TimeoutExpired:
+        print(json.dumps({"error": "The action did not finish in time."}))
+        return EXIT_UNSUPPORTED
+    print(json.dumps(result))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

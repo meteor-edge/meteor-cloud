@@ -225,6 +225,8 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     os_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     kernel_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     architecture: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Board model as the device reports it, e.g. "Raspberry Pi 5 Model B Rev 1.0".
+    hardware_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cpu_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cpu_cores: Mapped[int | None] = mapped_column(Integer, nullable=True)
     memory_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -390,6 +392,8 @@ class DeviceEnrollmentRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     os_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     kernel_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     architecture: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Board model as the device reports it, e.g. "Raspberry Pi 5 Model B Rev 1.0".
+    hardware_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cpu_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cpu_cores: Mapped[int | None] = mapped_column(Integer, nullable=True)
     memory_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)

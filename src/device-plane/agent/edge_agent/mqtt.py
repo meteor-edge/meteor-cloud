@@ -20,7 +20,7 @@ from edge_agent.mqtt_config import MqttConfig, resolve_mqtt_broker_host
 
 logger = logging.getLogger("edge_agent")
 
-AGENT_VERSION = "0.2.0"
+AGENT_VERSION = "0.3.0"
 COMMANDS_QOS = 1
 STATUS_QOS = 1
 METRICS_INTERVAL_SECONDS = 60.0
@@ -373,8 +373,7 @@ def _wait_for_connect(
     reason_code = connect_result.get("reason_code")
     if getattr(reason_code, "is_failure", False):
         raise RuntimeError(
-            f"MQTT connect refused: {reason_code}. "
-            "If this device was re-registered, mqtt.json has a stale password."
+            f"MQTT connect refused: {reason_code}. If this device was re-registered, mqtt.json has a stale password."
         )
     if "disconnect" in connect_result and reason_code is None:
         raise RuntimeError(

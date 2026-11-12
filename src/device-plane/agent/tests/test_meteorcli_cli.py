@@ -1578,3 +1578,72 @@ def test_unit_always_restarts_the_agent() -> None:
     unit = (Path(__file__).resolve().parents[1] / "packaging" / "meteorcli.service").read_text(encoding="utf-8")
     assert "Restart=always" in unit
     assert "StartLimitIntervalSec=0" in unit
+
+
+def test_meteorcli_run_wires_action_sync() -> None:
+    """Restart from the console only works if meteorcli run listens for actions_pending."""
+    source = (Path(__file__).resolve().parents[1] / "meteorcli" / "cli.py").read_text(encoding="utf-8")
+    assert "ActionSync" in source
+    assert "combine_heartbeat_handlers" in source
+    assert "actions_pending" not in source  # handled inside ActionSync, not ignored in cli
+
+
+def test_service_auto_enrolls_from_boot_meteorenv(tmp_path, run_env, monkeypatch, caplog) -> None:
+    client, _, loops = run_env
+    _as_service(monkeypatch)
+    config_dir = tmp_path / "meteorcli"
+    boot = tmp_path / "boot"
+    boot.mkdir()
+    env_file = boot / "meteorenv.txt"
+    env_file.write_text(
+        "METEOR_ENV_VERSION=2\n"
+        "METEOR_DOMAIN=cloud.example.com\n"
+        "METEOR_API_KEY=key_from_card\n"
+        "METEOR_NAME=pi-from-card\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("METEOR_BOOT_DIR", str(boot))
+    client.enroll_poll_responses = [{"status": "pending", "poll_interval_seconds": 10}, dict(_APPROVED)]
+
+    with caplog.at_level("INFO", logger="meteorcli"):
+        assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+
+    assert client.enroll_request_calls == [
+        {"api_key": "key_from_card", "inventory": {"hostname": "pi"}, "name": "pi-from-card"}
+    ]
+    assert not env_file.exists()
+    assert (config_dir / "api-key").read_text(encoding="utf-8") == "key_from_card"
+    assert "Read enrollment settings" in caplog.text
+    assert loops and loops[0]["token"] == "dev_secret-value"
+
+
+def test_service_auto_enrolls_from_saved_api_key(tmp_path, run_env, monkeypatch) -> None:
+    client, _, loops = run_env
+    _as_service(monkeypatch)
+    config_dir = tmp_path / "meteorcli"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text('{"server_url": "http://localhost:8000"}', encoding="utf-8")
+    (config_dir / "api-key").write_text("key_saved", encoding="utf-8")
+    monkeypatch.setenv("METEOR_BOOT_DIR", str(tmp_path / "empty-boot"))
+    client.enroll_poll_responses = [dict(_APPROVED)]
+
+    assert meteorcli.main(["--config-dir", str(config_dir), "run"]) == 0
+
+    assert client.enroll_request_calls == [
+        {"api_key": "key_saved", "inventory": {"hostname": "pi"}, "name": None}
+    ]
+    assert loops
+
+
+def test_parse_meteorenv_strips_quotes_and_bom() -> None:
+    from meteorcli.meteorenv import parse_meteorenv
+
+    parsed = parse_meteorenv(
+        "\ufeffMETEOR_DOMAIN='cloud.example.com'\r\n"
+        'METEOR_API_KEY="key_quoted"\n'
+        "# comment\n"
+        "METEOR_NAME=edge-01\n"
+    )
+    assert parsed["METEOR_DOMAIN"] == "cloud.example.com"
+    assert parsed["METEOR_API_KEY"] == "key_quoted"
+    assert parsed["METEOR_NAME"] == "edge-01"

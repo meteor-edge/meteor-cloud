@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { uploadArtifact, type Artifact } from "@/api/fleet";
+import { uploadArtifact, type Artifact, type DeviceType } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { ArtifactUploadDialog } from "@/components/artifacts/ArtifactUploadDialog";
 
@@ -11,6 +11,10 @@ vi.mock("@/api/fleet", () => ({ uploadArtifact: vi.fn() }));
 beforeEach(() => vi.mocked(uploadArtifact).mockReset());
 afterEach(() => vi.restoreAllMocks());
 
+const deviceTypes = ["Raspberry Pi 3", "Raspberry Pi 4", "Raspberry Pi 5"].map(
+  (name, index) => ({ id: `type-${index + 3}`, name }) as DeviceType,
+);
+
 function setup({ canPublish = false } = {}) {
   const onClose = vi.fn();
   const onUploaded = vi.fn();
@@ -18,7 +22,7 @@ function setup({ canPublish = false } = {}) {
     <ArtifactUploadDialog
       token="token"
       organizationId="org-1"
-      deviceTypes={[]}
+      deviceTypes={deviceTypes}
       canPublish={canPublish}
       onClose={onClose}
       onUploaded={onUploaded}
@@ -43,6 +47,22 @@ describe("ArtifactUploadDialog", () => {
     expect(vi.mocked(uploadArtifact).mock.calls[0][2]).toMatchObject({
       type: "os_image",
       published: true,
+    });
+  });
+
+  it("uploads one image for several device types, or for any device when none is ticked", async () => {
+    vi.mocked(uploadArtifact).mockResolvedValue({ id: "a" } as Artifact);
+    const { user } = setup();
+    expect(screen.getByText(/None selected: any device/)).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Raspberry Pi 3" }));
+    await user.click(screen.getByRole("checkbox", { name: "Raspberry Pi 5" }));
+    await user.click(screen.getByRole("checkbox", { name: "Raspberry Pi 4" }));
+    await user.click(screen.getByRole("checkbox", { name: "Raspberry Pi 3" }));
+    expect(screen.getByText(/For 2 device types/)).toBeInTheDocument();
+    await beginUpload(user);
+    await waitFor(() => expect(uploadArtifact).toHaveBeenCalled());
+    expect(vi.mocked(uploadArtifact).mock.calls[0][2]).toMatchObject({
+      device_type_ids: ["type-5", "type-4"],
     });
   });
 

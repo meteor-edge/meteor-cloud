@@ -4,8 +4,15 @@ An **artifact** is a versioned file that can later be deployed to devices: an
 OS image, firmware, a Docker Compose bundle, a systemd unit, a configuration
 file, or something else. OS images are the MVP use case.
 
-Artifacts are organization-scoped. Most belong to a [device type](device-types.md);
-`device_type_id = null` means the artifact applies to any device type.
+Artifacts are organization-scoped. An artifact is for one or several
+[device types](device-types.md) (`device_type_ids`), for example one OS image for
+Raspberry Pi 3, 4 and 5. An empty list means it applies to any device type. The
+types can be changed after upload (**Device types** in the artifact's row).
+`device_type_id` is still returned (the only type, or null) for older clients.
+
+Name and version are unique among the artifacts of one kind that share a device
+type: uploading "Meteor OS 1.0" twice for Raspberry Pi 5 is refused, also when the
+second upload lists more types.
 
 ## Storage
 
@@ -62,9 +69,9 @@ Publishing an OS image (`published`, at upload or with `PATCH`) also needs
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET` | `/api/v1/organizations/{org}/artifacts` | Filters: `type`, `device_type_id`, `version` (substring), `search`, `page`, `page_size` |
-| `POST` | `/api/v1/organizations/{org}/artifacts` | `multipart/form-data`: `file`, `name`, `version`, `type` (default `os_image`), optional `device_type_id`, `description`, `metadata` (JSON string), `published` (OS images only) |
+| `POST` | `/api/v1/organizations/{org}/artifacts` | `multipart/form-data`: `file`, `name`, `version`, `type` (default `os_image`), optional `device_type_ids` (repeat the field, or separate IDs with commas; `device_type_id` is still accepted), `description`, `metadata` (JSON string), `published` (OS images only) |
 | `GET` | `/api/v1/organizations/{org}/artifacts/{id}` | |
-| `PATCH` | `/api/v1/organizations/{org}/artifacts/{id}` | JSON `{"published": true}`: show or hide an OS image in [Meteor Imager](#meteor-imager-public-os-images) |
+| `PATCH` | `/api/v1/organizations/{org}/artifacts/{id}` | JSON `{"published": true}`: show or hide an OS image in [Meteor Imager](#meteor-imager-public-os-images). `{"device_type_ids": [...]}`: change the device types |
 | `DELETE` | `/api/v1/organizations/{org}/artifacts/{id}` | Removes the row, then the stored object |
 | `GET` | `/api/v1/organizations/{org}/artifacts/{id}/download` | Bearer auth; streams the file |
 | `POST` | `/api/v1/organizations/{org}/artifacts/{id}/download-link` | Returns `url` and a short-lived `ticket` for browser downloads |
@@ -86,7 +93,7 @@ writes them to the card; it never sends them to these routes.
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `GET` | `/api/v1/os-images` | No auth. Published OS images of every organization on this server, newest first: `id`, `name`, `version`, `description`, `device_type` (name), `file_name`, `size_bytes`, `checksum_sha256`, `download_url` |
+| `GET` | `/api/v1/os-images` | No auth. Published OS images of every organization on this server, newest first: `id`, `name`, `version`, `description`, `device_type` (name of the first type), `device_types` (`id`, `name`, `slug` of each), `file_name`, `size_bytes`, `checksum_sha256`, `download_url` |
 | `GET` | `/api/v1/os-images/{id}/download` | No auth. Streams the image from storage (MinIO, S3 or filesystem) with `Content-Length` and `X-Checksum-SHA256`. Unpublished or unknown IDs return 404 |
 
 Both routes are rate-limited per source IP: `PUBLIC_OS_IMAGE_RATE_LIMIT_REQUESTS`

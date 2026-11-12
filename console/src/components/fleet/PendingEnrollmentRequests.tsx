@@ -14,6 +14,7 @@ import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { typedDefaultName } from "@/lib/deviceNames";
 import { useDebounced } from "@/lib/useDebounced";
 import { formatDateTime } from "@/lib/utils";
 
@@ -59,6 +60,7 @@ export function PendingEnrollmentRequests({
   const [approveName, setApproveName] = useState("");
   const [approveDefaultName, setApproveDefaultName] = useState("");
   const [approveTypeId, setApproveTypeId] = useState("");
+  const [approveSuggestedName, setApproveSuggestedName] = useState("");
   const [approveGroupId, setApproveGroupId] = useState("");
 
   const requestsQuery = useQuery({
@@ -97,6 +99,20 @@ export function PendingEnrollmentRequests({
       activeRequests.some(
         (entry) => entry.id !== approveId && sameName(displayName(entry), typedName),
       ));
+
+  /** A generated name follows the chosen type until someone types their own. */
+  function onApproveTypeChange(typeId: string) {
+    setApproveTypeId(typeId);
+    const entry = activeRequests.find((item) => item.id === approveId);
+    if (!entry?.name_suffix || approveName !== approveDefaultName) {
+      return;
+    }
+    const type = (typesQuery.data ?? []).find((item) => item.id === typeId);
+    const name =
+      (type && typedDefaultName(type.slug, entry.name_suffix)) || approveSuggestedName;
+    setApproveName(name);
+    setApproveDefaultName(name);
+  }
 
   if (hideWhenEmpty && activeRequests.length === 0) {
     return null;
@@ -164,7 +180,12 @@ export function PendingEnrollmentRequests({
                 <td className="px-4 py-3 font-medium">
                   {displayName(entry)}
                 </td>
-                <td className="px-4 py-3 text-muted-foreground">{entry.hostname ?? "—"}</td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {entry.hostname ?? "—"}
+                  {entry.hardware_model && (
+                    <span className="block text-xs">{entry.hardware_model}</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 font-mono text-xs">{primaryMac(entry.mac_addresses) ?? "—"}</td>
                 <td className="px-4 py-3 text-muted-foreground">{enrollmentKeyLabel(entry)}</td>
                 <td className="px-4 py-3 text-muted-foreground">{entry.architecture ?? "—"}</td>
@@ -193,7 +214,10 @@ export function PendingEnrollmentRequests({
                             const name = entry.suggested_name ?? entry.requested_name ?? "";
                             setApproveName(name);
                             setApproveDefaultName(name);
-                            setApproveTypeId(entry.device_type_id ?? "");
+                            setApproveSuggestedName(name);
+                            setApproveTypeId(
+                              entry.device_type_id ?? entry.suggested_device_type_id ?? "",
+                            );
                             setApproveGroupId(entry.device_group_id ?? "");
                           }}
                         >
@@ -250,7 +274,12 @@ export function PendingEnrollmentRequests({
                 value={approveName}
                 onChange={(event) => setApproveName(event.target.value)}
               />
-              <p className="mt-1 text-xs text-muted-foreground">You can rename it later.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {approveName === approveDefaultName &&
+                activeRequests.find((item) => item.id === approveId)?.name_suffix
+                  ? "Device type and the end of its MAC address. It follows the device type below; you can rename it later."
+                  : "You can rename it later."}
+              </p>
               {nameInUse && (
                 <p className="mt-1 text-xs text-destructive">
                   Another device already has this name. You can still use it.
@@ -263,7 +292,7 @@ export function PendingEnrollmentRequests({
                 id="approve-type"
                 className="flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm"
                 value={approveTypeId}
-                onChange={(event) => setApproveTypeId(event.target.value)}
+                onChange={(event) => onApproveTypeChange(event.target.value)}
               >
                 <option value="">None</option>
                 {(typesQuery.data ?? []).map((type) => (

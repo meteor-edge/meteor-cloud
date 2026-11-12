@@ -107,3 +107,8 @@ duplicated (`--once` is still allowed).
 
 The loop uses bounded exponential backoff on transient failures and stops if the
 credential is rejected so the device can be re-registered.
+
+## Work waiting for the device
+
+The heartbeat response includes `wifi_pending`. When it is true the agent fetches
+the waiting [Wi-Fi change](wifi.md) and reports the outcome.

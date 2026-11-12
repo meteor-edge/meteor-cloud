@@ -127,6 +127,11 @@ A second, independent service in [`src/data-plane/go/`](../src/data-plane/go/) s
 
 Source: [`src/device-plane/agent/`](../src/device-plane/agent/). Runtime adapters (systemd, docker, compose) live in sibling [`src/device-plane/runtime/`](../src/device-plane/runtime/) and are force-included in the wheel.
 
+**Platform ports** (inventory, metrics, capabilities, host actions) live under
+`edge_agent/platform/`. Raspberry Pi, NUC, and Jetson share one agent binary and
+the same field names / action kinds; a board-specific OS only swaps the Linux
+default adapters. See [Device platform](fleet/device-platform.md).
+
 **On a device:** `curl` `install-meteorcli.sh` from GitHub Releases (`latest` or `METEORCLI_VERSION=`). The tarball is agent + `runtime` + `installcli.sh` only (`make agent-dist`). SHA256SUMS is checked when `sha256sum` is present. First-boot enroll (request-token + poll until approved): `install-meteorcli-firstboot.sh` from the same release or [packaging/firstboot](../src/device-plane/agent/packaging/firstboot/README.md).
 
 **Publish:** tag `agent-v<version>` matching [`pyproject.toml`](../src/device-plane/agent/pyproject.toml); workflow [`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml). From a checkout: `./installcli.sh` in the agent directory.

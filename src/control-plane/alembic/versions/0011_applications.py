@@ -1,7 +1,7 @@
 """applications and application_credentials: application identities for the data plane.
 
-Revision ID: 0005_applications
-Revises: 0004_audit_actor
+Revision ID: 0011_applications
+Revises: 0010_reboot_owners_admins
 Create Date: 2026-11-12 00:00:00.000000
 """
 
@@ -15,8 +15,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0005_applications"
-down_revision: str | Sequence[str] | None = "0004_audit_actor"
+revision: str = "0011_applications"
+down_revision: str | Sequence[str] | None = "0010_reboot_owners_admins"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

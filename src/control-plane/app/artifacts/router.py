@@ -56,14 +56,18 @@ def upload_artifact(
     name: Annotated[str, Form()],
     version: Annotated[str, Form()],
     type: Annotated[str, Form()] = ArtifactType.OS_IMAGE.value,
-    device_type_id: Annotated[str | None, Form()] = None,
+    device_type_ids: Annotated[
+        list[str] | None,
+        Form(description="Device types the artifact is for: repeat the field, or separate with commas"),
+    ] = None,
+    device_type_id: Annotated[str | None, Form(description="One device type; use device_type_ids")] = None,
     description: Annotated[str | None, Form()] = None,
     metadata: Annotated[str | None, Form(description="JSON object")] = None,
     published: Annotated[bool, Form(description="OS images only: list it in Meteor Imager")] = False,
 ) -> ArtifactResponse:
     """Validate multipart metadata and upload the file for an owner or admin.
 
-    Metadata is a JSON object; an empty device type means no assignment.
+    Metadata is a JSON object; no device types means not hardware-specific.
     Raise RequestValidationError for invalid JSON or metadata fields;
     upload and authorization errors propagate from the service.
     """
@@ -74,7 +78,12 @@ def upload_artifact(
             version=version,
             type=type,
             # HTML forms send "" for an unselected option.
-            device_type_id=device_type_id or None,
+            device_type_ids=[
+                value.strip()
+                for field in [*(device_type_ids or []), device_type_id or ""]
+                for value in field.split(",")
+                if value.strip()
+            ],
             description=description,
             metadata=parsed_metadata,
             published=published,
@@ -118,7 +127,7 @@ def update_artifact(
     current_user: CurrentUser,
     service: ArtifactSvc,
 ) -> ArtifactResponse:
-    """Show or hide an OS image in Meteor Imager (owner or admin)."""
+    """Change an artifact's device types, or show or hide an OS image in Meteor Imager."""
     return service.update_artifact(
         actor=current_user, organization_id=organization_id, artifact_id=artifact_id, payload=payload
     )

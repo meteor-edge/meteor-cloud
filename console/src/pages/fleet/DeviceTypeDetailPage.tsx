@@ -20,11 +20,18 @@ import { ArtifactUploadDialog } from "@/components/artifacts/ArtifactUploadDialo
 import { ARTIFACT_TYPE_SECTION_LABELS, ARTIFACT_TYPES } from "@/components/artifacts/artifactTypes";
 import { useArtifactActions } from "@/components/artifacts/useArtifactActions";
 import { DeviceListTable } from "@/components/fleet/DeviceListTable";
+import { DeviceSetupDialog } from "@/components/fleet/DeviceSetupDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs } from "@/components/ui/tabs";
-import { canManageArtifacts, canManageDeviceTypes, canPublishOsImages } from "@/lib/permissions";
+import {
+  canManageArtifacts,
+  canManageDeviceTypes,
+  canManageEnrollmentKeys,
+  canManageFleet,
+  canPublishOsImages,
+} from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
 type Tab = "overview" | "devices" | "artifacts";
@@ -78,6 +85,8 @@ export function DeviceTypeDetailPage() {
   const canManageType = canManageDeviceTypes(orgQuery.data?.current_user_role);
   const canManage = canManageArtifacts(orgQuery.data?.current_user_role);
   const canPublish = canPublishOsImages(orgQuery.data?.current_user_role);
+  const canSetUpDevices = canManageFleet(orgQuery.data?.current_user_role);
+  const [setupImage, setSetupImage] = useState<Artifact | null>(null);
   const { onDownload, onDelete, onTogglePublished, refresh } = useArtifactActions(
     token,
     organizationId,
@@ -206,7 +215,11 @@ export function DeviceTypeDetailPage() {
               <ArtifactTable
                 artifacts={artifactsByType.get(type) ?? []}
                 canManage={canManage}
-                onDownload={onDownload}
+                onDownload={(artifact) =>
+                  artifact.type === "os_image" && canSetUpDevices
+                    ? setSetupImage(artifact)
+                    : onDownload(artifact)
+                }
                 onDelete={onDelete}
                 onTogglePublished={type === "os_image" ? onTogglePublished : undefined}
                 canPublish={canPublish}
@@ -227,6 +240,17 @@ export function DeviceTypeDetailPage() {
             </p>
           )}
         </div>
+      )}
+
+      {setupImage && token && (
+        <DeviceSetupDialog
+          token={token}
+          organizationId={organizationId}
+          canCreateKey={canManageEnrollmentKeys(orgQuery.data?.current_user_role)}
+          image={setupImage}
+          onDownloadImage={onDownload}
+          onClose={() => setSetupImage(null)}
+        />
       )}
 
       {uploadType && token && (

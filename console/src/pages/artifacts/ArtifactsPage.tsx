@@ -5,19 +5,27 @@ import { useParams, useSearchParams } from "react-router-dom";
 import {
   listArtifacts,
   listDeviceTypes,
+  type Artifact,
   type ArtifactListParams,
   type ArtifactType,
 } from "@/api/fleet";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
+import { ArtifactDeviceTypesDialog } from "@/components/artifacts/ArtifactDeviceTypesDialog";
 import { ArtifactTable } from "@/components/artifacts/ArtifactTable";
 import { ArtifactUploadDialog } from "@/components/artifacts/ArtifactUploadDialog";
 import { ARTIFACT_TYPE_SECTION_LABELS, ARTIFACT_TYPES } from "@/components/artifacts/artifactTypes";
 import { useArtifactActions } from "@/components/artifacts/useArtifactActions";
+import { DeviceSetupDialog } from "@/components/fleet/DeviceSetupDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
-import { canManageArtifacts, canPublishOsImages } from "@/lib/permissions";
+import {
+  canManageArtifacts,
+  canManageEnrollmentKeys,
+  canManageFleet,
+  canPublishOsImages,
+} from "@/lib/permissions";
 
 const PAGE_SIZE = 20;
 
@@ -44,6 +52,8 @@ export function ArtifactsPage() {
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
   const [page, setPage] = useState(1);
   const [showUpload, setShowUpload] = useState(false);
+  const [editTypesOf, setEditTypesOf] = useState<Artifact | null>(null);
+  const [setupImage, setSetupImage] = useState<Artifact | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const orgQuery = useQuery({
@@ -73,6 +83,8 @@ export function ArtifactsPage() {
 
   const canManage = canManageArtifacts(orgQuery.data?.current_user_role);
   const canPublish = canPublishOsImages(orgQuery.data?.current_user_role);
+  // Whoever may add devices gets the settings file offered with an OS image.
+  const canSetUpDevices = canManageFleet(orgQuery.data?.current_user_role);
   const { onDownload, onDelete, onTogglePublished, refresh } = useArtifactActions(
     token,
     organizationId,
@@ -148,12 +160,17 @@ export function ArtifactsPage() {
       <ArtifactTable
         artifacts={artifactsQuery.data?.items ?? []}
         canManage={canManage}
-        onDownload={onDownload}
+        onDownload={(artifact) =>
+          artifact.type === "os_image" && canSetUpDevices
+            ? setSetupImage(artifact)
+            : onDownload(artifact)
+        }
         onDelete={onDelete}
         onTogglePublished={onTogglePublished}
         canPublish={canPublish}
         showType={!type}
         deviceTypeNames={deviceTypeNames}
+        onEditDeviceTypes={setEditTypesOf}
         organizationId={organizationId}
         emptyMessage={artifactsQuery.isLoading ? "Loading artifacts…" : "No artifacts found."}
       />
@@ -193,6 +210,31 @@ export function ArtifactsPage() {
           onClose={() => setShowUpload(false)}
           onUploaded={async () => {
             setShowUpload(false);
+            await refresh();
+          }}
+        />
+      )}
+
+      {setupImage && token && (
+        <DeviceSetupDialog
+          token={token}
+          organizationId={organizationId}
+          canCreateKey={canManageEnrollmentKeys(orgQuery.data?.current_user_role)}
+          image={setupImage}
+          onDownloadImage={onDownload}
+          onClose={() => setSetupImage(null)}
+        />
+      )}
+
+      {editTypesOf && token && (
+        <ArtifactDeviceTypesDialog
+          token={token}
+          organizationId={organizationId}
+          artifact={editTypesOf}
+          deviceTypes={typesQuery.data ?? []}
+          onClose={() => setEditTypesOf(null)}
+          onSaved={async () => {
+            setEditTypesOf(null);
             await refresh();
           }}
         />

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Apply the settings Meteor Imager (or a person) put in .meteorenv on the card's
-# config partition, early in boot, before the network starts:
+# config partition, early in boot, before the network starts. The file may also be
+# called meteorenv.txt (the MeteorCloud console's download), meteorenv or .meteorenv.txt:
 #
 #   Wi-Fi (NetworkManager, or wpa_supplicant without it), hostname, timezone,
 #   login user and password (as a crypt hash), SSH on/off, password login and an
@@ -71,11 +72,16 @@ find_settings_file() {
     fi
   fi
   dirs+=("${ROOT}/boot/firmware" "${ROOT}/boot" "${ROOT}/boot/efi")
+  # meteorenv.txt is what the MeteorCloud console downloads: dot files are hidden on
+  # macOS and renamed by browsers, so a person copying the file by hand needs a plain name.
+  local name
   for dir in "${dirs[@]}"; do
-    if [[ -f "${dir}/.meteorenv" ]]; then
-      SETTINGS_PATH="${dir}/.meteorenv"
-      return 0
-    fi
+    for name in .meteorenv meteorenv.txt meteorenv .meteorenv.txt; do
+      if [[ -f "${dir}/${name}" ]]; then
+        SETTINGS_PATH="${dir}/${name}"
+        return 0
+      fi
+    done
   done
   return 1
 }
@@ -89,6 +95,7 @@ parse_settings() {
   local path="$1" line key val
   while IFS= read -r line || [[ -n "${line}" ]]; do
     line="${line%$'\r'}"
+    line="${line#$'\xef\xbb\xbf'}"   # a byte order mark from a Windows editor
     [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]] && continue
     [[ "${line}" == *=* ]] || continue
     key="${line%%=*}"

@@ -119,3 +119,100 @@ def test_primary_mac_ignores_virtual_interfaces_only_system(monkeypatch, tmp_pat
     net = _net_dir(tmp_path, {"docker0": "aa:bb:cc:dd:ee:03"})
     _patch_net(monkeypatch, net, None)
     assert inventory.read_mac_addresses() == []
+
+
+def _files(monkeypatch, files: dict[str, str]) -> None:
+    monkeypatch.setattr(inventory, "_read_text", lambda path: files.get(path))
+
+
+def test_arm_cpuinfo_uses_hardware_when_model_name_missing(monkeypatch) -> None:
+    sample = (
+        "processor\t: 0\n"
+        "model name\t: \n"
+        "Hardware\t: BCM2712\n"
+        "Revision\t: d04170\n"
+        "Serial\t\t: 10000000abcd1234\n"
+        "Model\t\t: Raspberry Pi 5 Model B Rev 1.0\n"
+        "processor\t: 1\n"
+        "processor\t: 2\n"
+        "processor\t: 3\n"
+    )
+    monkeypatch.setattr(inventory, "_read_text", lambda path: sample if path == "/proc/cpuinfo" else None)
+    model, cores = inventory.read_cpu()
+    assert model == "Raspberry Pi 5 Model B Rev 1.0"
+    assert cores == 4
+
+
+def test_raspberry_pi_reports_model_and_serial_from_the_device_tree(monkeypatch) -> None:
+    _files(
+        monkeypatch,
+        {
+            "/sys/firmware/devicetree/base/model": "Raspberry Pi 5 Model B Rev 1.0\x00",
+            "/sys/firmware/devicetree/base/serial-number": "10000000abcd1234\x00",
+        },
+    )
+    assert inventory.read_hardware_model() == "Raspberry Pi 5 Model B Rev 1.0"
+    assert inventory.read_serial_number() == "10000000abcd1234"
+
+
+def test_pc_reports_dmi_model_and_skips_placeholders(monkeypatch) -> None:
+    _files(
+        monkeypatch,
+        {
+            "/sys/class/dmi/id/product_name": "System Product Name",
+            "/sys/class/dmi/id/board_name": "NUC13ANHi5",
+            "/sys/class/dmi/id/product_serial": "To Be Filled By O.E.M.",
+            "/sys/class/dmi/id/board_serial": "0000000000",
+        },
+    )
+    assert inventory.read_hardware_model() == "NUC13ANHi5"
+    assert inventory.read_serial_number() is None
+
+
+ROUTE_HEADER = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+
+
+def _route(*rows: tuple[str, int]) -> str:
+    """Default routes: (interface, metric)."""
+    lines = [f"{iface}\t00000000\t0100A8C0\t0003\t0\t0\t{metric}\t00000000\t0\t0\t0" for iface, metric in rows]
+    return ROUTE_HEADER + "\n".join([*lines, "eth0\t0000A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0"])
+
+
+def _links(tmp_path: Path) -> Path:
+    net = _net_dir(tmp_path, {"eth0": "aa:aa:aa:aa:aa:01", "wlan0": "aa:aa:aa:aa:aa:02", "wwan0": "aa:aa:aa:aa:aa:03"})
+    for iface in ("eth0", "wlan0", "wwan0"):
+        (net / iface / "type").write_text("1\n")
+        (net / iface / "device").mkdir()
+    (net / "wlan0" / "uevent").write_text("DEVTYPE=wlan\nINTERFACE=wlan0\n")
+    (net / "wwan0" / "uevent").write_text("DEVTYPE=wwan\n")
+    (net / "wg0").mkdir()
+    return net
+
+
+def test_uplink_is_the_default_route_with_the_lowest_metric(monkeypatch, tmp_path) -> None:
+    net = _links(tmp_path)
+    # NetworkManager: Ethernet 100, Wi-Fi 600. With the cable in, traffic uses Ethernet.
+    _patch_net(monkeypatch, net, _route(("wlan0", 600), ("eth0", 100)))
+    assert inventory.read_uplink() == {"uplink_type": "ethernet", "uplink_interface": "eth0"}
+    _patch_net(monkeypatch, net, _route(("wlan0", 600)))
+    assert inventory.read_uplink() == {"uplink_type": "wifi", "uplink_interface": "wlan0"}
+    _patch_net(monkeypatch, net, _route(("wwan0", 700)))
+    assert inventory.read_uplink()["uplink_type"] == "cellular"
+    _patch_net(monkeypatch, net, _route(("wg0", 50)))
+    assert inventory.read_uplink() == {"uplink_type": "other", "uplink_interface": "wg0"}
+
+
+def test_no_default_route_means_no_uplink(monkeypatch, tmp_path) -> None:
+    net = _links(tmp_path)
+    _patch_net(monkeypatch, net, _route())
+    assert inventory.read_uplink() == {}
+    _patch_net(monkeypatch, net, None)
+    assert inventory.read_uplink() == {}
+
+
+def test_wifi_is_recognised_without_a_uevent_devtype(monkeypatch, tmp_path) -> None:
+    net = _links(tmp_path)
+    (net / "wlan0" / "uevent").unlink()
+    (net / "wlan0" / "wireless").mkdir()
+    _patch_net(monkeypatch, net, _route(("wlan0", 600)))
+    assert inventory.read_uplink()["uplink_type"] == "wifi"
