@@ -162,8 +162,10 @@ To publish an image with Docker, packages and meteorcli already installed:
    `meteor-imager backup --device /dev/sdX --out golden.img.gz`), upload it as an `os_image`
    artifact and publish it ([artifacts](../../../../../docs/fleet/artifacts.md#meteor-imager-public-os-images)).
 
-On each new card's first boot, `meteorcli-settings` grows the root partition to the card (once),
-creates new SSH host keys, applies `.meteorenv` and first boot sends one token request.
+On Linux, Meteor Imager extends the root partition to the card while writing and grows the
+filesystem when `e2fsprogs` is installed. On each new card's first boot, `meteorcli-settings`
+still grows the filesystem once (the partition may already fill the card), creates new SSH host
+keys, applies `.meteorenv` and first boot sends one token request.
 
 ## Request limits and retries
 

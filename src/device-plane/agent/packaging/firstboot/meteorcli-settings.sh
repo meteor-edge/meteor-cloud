@@ -456,8 +456,8 @@ ensure_ssh_host_keys() {
   fi
 }
 
-# Grow the root partition and filesystem to the card, once, after a prepared
-# image (often shrunk by Meteor Imager's backup) is written to a larger card.
+# Grow the root filesystem to the card, once. Meteor Imager may already have
+# extended the partition while writing; resize2fs still runs in that case.
 expand_rootfs_once() {
   [[ -f "${EXPAND_FLAG}" ]] || return 0
   # Removed first: a failure must not repeat on every boot.
@@ -481,9 +481,10 @@ expand_rootfs_once() {
     log "warning: sfdisk or resize2fs missing; root filesystem not resized"
     return 0
   fi
-  if echo ", +" | sfdisk --no-reread --no-tell-kernel -q -N "${num}" "/dev/${disk}" >/dev/null 2>&1 \
-    && partx -u -n "${num}" "/dev/${disk}" \
-    && resize2fs "${src}" >/dev/null 2>&1; then
+  # A no-op when the imager already extended the partition. resize2fs still runs.
+  echo ", +" | sfdisk --no-reread --no-tell-kernel -q -N "${num}" "/dev/${disk}" >/dev/null 2>&1 \
+    && partx -u -n "${num}" "/dev/${disk}" || true
+  if resize2fs "${src}" >/dev/null 2>&1; then
     log "root filesystem ${src} grown to the card"
   else
     log "warning: could not grow ${src}; run: sudo raspi-config nonint do_expand_rootfs"
