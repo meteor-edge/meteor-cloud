@@ -61,24 +61,44 @@ def upgrade() -> None:
         },
     )
 
-    permission_id = uuid.uuid4()
-    op.get_bind().execute(
-        sa.text(
-            "INSERT INTO permissions (id, resource, action, label, description) "
-            "VALUES (:id, 'device', 'users', :label, :description)"
-        ),
-        {
-            "id": permission_id,
-            "label": "Manage device SSH users",
-            "description": (
-                "Change a user's password or add an SSH user on a device. As sensitive as a shell session."
+    bind = op.get_bind()
+    existing = bind.execute(
+        sa.text("SELECT id FROM permissions WHERE resource = 'device' AND action = 'users'")
+    ).scalar()
+    permission_id = existing or uuid.uuid4()
+    if existing is None:
+        bind.execute(
+            sa.text(
+                "INSERT INTO permissions (id, resource, action, label, description) "
+                "VALUES (:id, 'device', 'users', :label, :description)"
             ),
-        },
-    )
-    op.get_bind().execute(
+            {
+                "id": permission_id,
+                "label": "Manage device SSH users",
+                "description": (
+                    "Change a user's password or add an SSH user on a device. As sensitive as a shell session."
+                ),
+            },
+        )
+    else:
+        bind.execute(
+            sa.text("UPDATE permissions SET label = :label, description = :description WHERE id = :id"),
+            {
+                "id": permission_id,
+                "label": "Manage device SSH users",
+                "description": (
+                    "Change a user's password or add an SSH user on a device. As sensitive as a shell session."
+                ),
+            },
+        )
+    bind.execute(
         sa.text(
             "INSERT INTO role_permissions (role_id, permission_id) "
-            "SELECT id, :permission_id FROM roles WHERE is_system AND organization_id IS NULL AND key IN :keys"
+            "SELECT id, :permission_id FROM roles WHERE is_system AND organization_id IS NULL AND key IN :keys "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM role_permissions rp "
+            "  WHERE rp.role_id = roles.id AND rp.permission_id = :permission_id"
+            ")"
         ).bindparams(sa.bindparam("keys", expanding=True)),
         {"permission_id": permission_id, "keys": list(ROLES)},
     )
