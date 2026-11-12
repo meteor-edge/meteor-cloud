@@ -238,6 +238,47 @@ def test_heartbeat_refreshes_serial_cpu_and_local_ip(client: TestClient, db_sess
     assert detail["serial_number"] == "10000000abcd1234"
     assert detail["local_ip"] == "192.168.1.20"
 
+    unspecified = client.post(
+        "/api/v1/agent/heartbeat",
+        headers=device_headers,
+        json={"local_ip": "0.0.0.0"},
+    )
+    assert unspecified.status_code == 200, unspecified.text
+    detail = client.get(device_url, headers=headers).json()
+    assert detail["local_ip"] == "192.168.1.20"
+
+
+def test_heartbeat_uses_the_private_address_it_arrived_from(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers)
+    registration = client.post(
+        "/api/v1/agent/register",
+        json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:09"]},
+    ).json()
+    device_headers = {"Authorization": f"Bearer {registration['device_token']}"}
+    device_url = f"/api/v1/organizations/{org.id}/devices/{registration['device_id']}"
+
+    client._transport.client = ("192.168.0.112", 50000)
+    arrived = client.post("/api/v1/agent/heartbeat", headers=device_headers, json={})
+    assert arrived.status_code == 200, arrived.text
+    assert client.get(device_url, headers=headers).json()["local_ip"] == "192.168.0.112"
+
+    client._transport.client = ("8.8.8.8", 50000)
+    public = client.post("/api/v1/agent/heartbeat", headers=device_headers, json={})
+    assert public.status_code == 200, public.text
+    assert client.get(device_url, headers=headers).json()["local_ip"] == "192.168.0.112"
+
+    client._transport.client = ("192.168.0.50", 50000)
+    reported = client.post(
+        "/api/v1/agent/heartbeat",
+        headers=device_headers,
+        json={"local_ip": "10.1.1.5"},
+    )
+    assert reported.status_code == 200, reported.text
+    assert client.get(device_url, headers=headers).json()["local_ip"] == "10.1.1.5"
+
 
 def test_heartbeat_keeps_identity_used_by_another_device(client: TestClient, db_session: Session) -> None:
     owner = create_user(db_session, email="owner@example.com")
