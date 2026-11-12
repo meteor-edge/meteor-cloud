@@ -1,7 +1,7 @@
 """artifact_device_types: an artifact can be for several device types (one OS image, several boards).
 
-Revision ID: 0005_artifact_device_types
-Revises: 0004_hardware_model
+Revision ID: 0006_artifact_device_types
+Revises: 0005_hardware_model
 Create Date: 2026-11-12 00:00:00.000000
 """
 
@@ -14,8 +14,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0005_artifact_device_types"
-down_revision: str | Sequence[str] | None = "0004_hardware_model"
+revision: str = "0006_artifact_device_types"
+down_revision: str | Sequence[str] | None = "0005_hardware_model"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -1,7 +1,7 @@
 """device_wifi_status.uplink_type / uplink_interface: the link a device's traffic uses.
 
-Revision ID: 0007_device_uplink
-Revises: 0006_device_wifi
+Revision ID: 0008_device_uplink
+Revises: 0007_device_wifi
 Create Date: 2026-11-12 10:00:00.000000
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0007_device_uplink"
-down_revision: str | Sequence[str] | None = "0006_device_wifi"
+revision: str = "0008_device_uplink"
+down_revision: str | Sequence[str] | None = "0007_device_wifi"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -1,7 +1,7 @@
 """hardware_model: the board model a device reports, for default names and device type hints.
 
-Revision ID: 0004_hardware_model
-Revises: 0003_artifact_publish_permission
+Revision ID: 0005_hardware_model
+Revises: 0004_audit_actor
 Create Date: 2026-11-11 23:30:00.000000
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0004_hardware_model"
-down_revision: str | Sequence[str] | None = "0003_artifact_publish_permission"
+revision: str = "0005_hardware_model"
+down_revision: str | Sequence[str] | None = "0004_audit_actor"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

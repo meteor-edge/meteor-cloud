@@ -1,7 +1,7 @@
 """device_wifi_networks, device_wifi_status and the device.network permission: Wi-Fi changes from the console.
 
-Revision ID: 0006_device_wifi
-Revises: 0005_artifact_device_types
+Revision ID: 0007_device_wifi
+Revises: 0006_artifact_device_types
 Create Date: 2026-11-12 00:30:00.000000
 """
 
@@ -15,8 +15,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0006_device_wifi"
-down_revision: str | Sequence[str] | None = "0005_artifact_device_types"
+revision: str = "0007_device_wifi"
+down_revision: str | Sequence[str] | None = "0006_artifact_device_types"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
