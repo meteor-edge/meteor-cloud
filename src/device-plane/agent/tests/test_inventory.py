@@ -125,6 +125,24 @@ def _files(monkeypatch, files: dict[str, str]) -> None:
     monkeypatch.setattr(inventory, "_read_text", lambda path: files.get(path))
 
 
+def test_arm_cpuinfo_uses_hardware_when_model_name_missing(monkeypatch) -> None:
+    sample = (
+        "processor\t: 0\n"
+        "model name\t: \n"
+        "Hardware\t: BCM2712\n"
+        "Revision\t: d04170\n"
+        "Serial\t\t: 10000000abcd1234\n"
+        "Model\t\t: Raspberry Pi 5 Model B Rev 1.0\n"
+        "processor\t: 1\n"
+        "processor\t: 2\n"
+        "processor\t: 3\n"
+    )
+    monkeypatch.setattr(inventory, "_read_text", lambda path: sample if path == "/proc/cpuinfo" else None)
+    model, cores = inventory.read_cpu()
+    assert model == "Raspberry Pi 5 Model B Rev 1.0"
+    assert cores == 4
+
+
 def test_raspberry_pi_reports_model_and_serial_from_the_device_tree(monkeypatch) -> None:
     _files(
         monkeypatch,

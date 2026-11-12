@@ -187,7 +187,9 @@ meteorcli run
 Automatic on current Raspberry Pi OS (bootfs has `user-data`). Do **not**
 edit `cmdline.txt`.
 
-1. Copy `.meteorenv` onto **boot** / **bootfs** (`METEOR_DOMAIN`, `METEOR_API_KEY`).
+1. Copy `.meteorenv` / `meteorenv.txt` onto **boot** / **bootfs** (`METEOR_DOMAIN`, `METEOR_API_KEY`).
+   With meteorcli **0.3.2+**, `meteorcli.service` reads that file and submits the
+   request itself (full Wi-Fi/user first-boot still needs the first-boot image).
 2. Append `packages:` and `runcmd:` from
    [`cloud-init-user-data.yaml`](../../src/device-plane/agent/packaging/firstboot/cloud-init-user-data.yaml)
    to `user-data`.

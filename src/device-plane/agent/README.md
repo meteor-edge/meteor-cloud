@@ -14,7 +14,8 @@ There are **two ways** to enroll a device:
 ## Install
 
 **Supported device OS for fleets today:** Raspberry Pi OS (Bookworm). Other
-Debian-like systems work the same way.
+Debian-like systems (Ubuntu on NUC/Jetson, etc.) use the same agent and the same
+inventory/metrics/action contracts via `edge_agent.platform` adapters.
 
 **On a device** (no cloud clone):
 

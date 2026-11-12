@@ -1,50 +1,36 @@
 """One-off actions ordered from the console: restart, shut down, SSH users.
 
 The heartbeat response says when an action is waiting. The agent then fetches it
-(the only moment a password travels), hands it to the root-owned
-``meteorcli-action`` helper, and reports what happened. Each action is collected
-once: a restart is never run again after the device comes back. Passwords are
-never logged or written by the agent itself.
+(the only moment a password travels), hands it to a :class:`~edge_agent.platform.ports.HostActions`
+adapter (Linux default: root-owned ``meteorcli-action``), and reports what happened.
+Each action is collected once: a restart is never run again after the device comes
+back. Passwords are never logged or written by the agent itself.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import subprocess
 from collections.abc import Callable, Sequence
 from typing import Any
 
 from edge_agent.client import AgentApiError, EdgeClient
+from edge_agent.platform.linux import (
+    ACTION_HELPER,
+    SystemdHostActions,
+    helper_command,
+    helper_installed,
+)
+from edge_agent.platform.ports import HostActionError, HostActions
 
 logger = logging.getLogger("edge_agent")
 
-ACTION_HELPER = "/usr/local/libexec/meteorcli-action"
-HELPER_TIMEOUT_SECONDS = 60
-_NOT_INSTALLED = "The device-action helper is not installed on this device. Run the meteorcli installer with sudo."
-
-Runner = Callable[[Sequence[str], str | None], subprocess.CompletedProcess[str]]
-
-
-def helper_installed() -> bool:
-    return os.path.isfile(ACTION_HELPER) and os.access(ACTION_HELPER, os.X_OK)
-
-
-def helper_command(*args: str) -> list[str]:
-    base = [ACTION_HELPER] if os.geteuid() == 0 else ["sudo", "-n", ACTION_HELPER]
-    return [*base, *args]
-
-
-def _default_runner(argv: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(argv),
-        input=stdin,
-        capture_output=True,
-        text=True,
-        timeout=HELPER_TIMEOUT_SECONDS,
-        check=False,
-    )
+# Re-export for packaging tests and older imports.
+__all__ = [
+    "ACTION_HELPER",
+    "ActionSync",
+    "helper_command",
+    "helper_installed",
+]
 
 
 def _result(action_id: object, state: str, error: str | None = None) -> dict[str, Any]:
@@ -62,70 +48,50 @@ class ActionSync:
         client: EdgeClient,
         device_token: str,
         *,
-        runner: Runner = _default_runner,
-        installed: Callable[[], bool] = helper_installed,
+        host: HostActions | None = None,
+        runner: Callable[[Sequence[str], str | None], Any] | None = None,
+        installed: Callable[[], bool] | None = None,
     ) -> None:
         self.client = client
         self.device_token = device_token
-        self._runner = runner
-        self._installed = installed
+        if host is not None:
+            self._host = host
+        else:
+            kwargs: dict[str, Any] = {}
+            if runner is not None:
+                kwargs["runner"] = runner
+            if installed is not None:
+                kwargs["installed"] = installed
+            self._host = SystemdHostActions(**kwargs)
         self._unreported: list[dict[str, Any]] = []
-
-    def _helper(self, command: str, request: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
-        if not self._installed():
-            return 127, {"error": _NOT_INSTALLED}
-        try:
-            done = self._runner(helper_command(command), json.dumps(request) if request is not None else None)
-        except (OSError, subprocess.SubprocessError) as exc:
-            return 126, {"error": f"The action helper could not run ({type(exc).__name__})."}
-        try:
-            answer = json.loads(done.stdout or "{}")
-        except ValueError:
-            answer = {}
-        if not isinstance(answer, dict):
-            answer = {}
-        if done.returncode != 0 and "error" not in answer:
-            answer["error"] = (done.stderr or "").strip()[:300] or "The action helper failed."
-        return done.returncode, answer
 
     def _apply(self, action: dict[str, Any]) -> dict[str, Any]:
         action_id = action.get("id")
         kind = action.get("kind")
-        if kind == "reboot":
-            code, answer = self._helper("reboot")
-            if code == 0:
+        try:
+            if kind == "reboot":
+                self._host.reboot()
                 logger.info("Restart ordered.")
                 return _result(action_id, "done")
-            return _result(action_id, "failed", str(answer.get("error", "")))
-        if kind == "shutdown":
-            code, answer = self._helper("shutdown")
-            if code == 0:
+            if kind == "shutdown":
+                self._host.shutdown()
                 logger.info("Shut-down ordered.")
                 return _result(action_id, "done")
-            return _result(action_id, "failed", str(answer.get("error", "")))
-        if kind == "set_password":
-            code, answer = self._helper(
-                "set-password",
-                {"username": action.get("username"), "password": action.get("password")},
-            )
-            if code == 0:
+            if kind == "set_password":
+                self._host.set_password(str(action.get("username") or ""), str(action.get("password") or ""))
                 logger.info("Password changed for a user.")
                 return _result(action_id, "done")
-            return _result(action_id, "failed", str(answer.get("error", "")))
-        if kind == "add_user":
-            code, answer = self._helper(
-                "add-user",
-                {
-                    "username": action.get("username"),
-                    "password": action.get("password"),
-                    "sudo": action.get("sudo") is True,
-                    "authorized_key": action.get("authorized_key"),
-                },
-            )
-            if code == 0:
+            if kind == "add_user":
+                self._host.add_user(
+                    str(action.get("username") or ""),
+                    str(action.get("password") or ""),
+                    sudo=action.get("sudo") is True,
+                    authorized_key=action.get("authorized_key"),
+                )
                 logger.info("SSH user added.")
                 return _result(action_id, "done")
-            return _result(action_id, "failed", str(answer.get("error", "")))
+        except HostActionError as error:
+            return _result(action_id, "failed", str(error))
         return _result(action_id, "failed", f"Unknown action kind: {kind!r}")
 
     def _report(self, results: list[dict[str, Any]]) -> None:

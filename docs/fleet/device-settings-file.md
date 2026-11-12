@@ -25,6 +25,13 @@ Where to find it:
    settings, deletes the file from the card and sends its enrollment request. Approve
    it under **Devices → Pending**.
 
+On a device that already has **meteorcli 0.3.2+** and `meteorcli.service` (for example
+after `install-meteorcli.sh` on stock Raspberry Pi OS), the service itself reads
+`METEOR_DOMAIN` / `METEOR_API_KEY` / `METEOR_NAME` from that file, saves them under
+`/etc/meteorcli`, submits the enrollment request, and removes the file. Wi-Fi,
+hostname, user, and SSH still need the first-boot **settings** unit (or apply them
+another way).
+
 ## Same result as Meteor Imager
 
 The file is `.meteorenv` version 2, key for key what the imager writes
@@ -40,10 +47,12 @@ Differences, all on the outside:
   `meteorenv.txt`, `meteorenv` and `.meteorenv.txt`, and tolerates Windows line ends
   and a byte-order mark. Images built with meteorcli **before 0.3.0** only read
   `.meteorenv`: rename the file on the card for those.
-- **Base image.** The file only works on an image that has meteorcli and its first-boot
-  service installed ([first-boot image](../../src/device-plane/agent/packaging/firstboot/README.md)).
-  On a stock Raspberry Pi OS image nothing reads it; the imager handles that case with
-  cloud-init, the console does not.
+- **Base image.** Full first-boot (Wi-Fi, user, SSH, hostname, plus enrollment) needs an
+  image with meteorcli and the first-boot units
+  ([first-boot image](../../src/device-plane/agent/packaging/firstboot/README.md)).
+  Enrollment alone also works on stock OS once meteorcli **0.3.2+** is installed:
+  `meteorcli.service` reads the enrollment keys from the boot file. The imager still
+  handles cloud-init on stock images when you use Meteor Imager instead of this file.
 - **Login password.** It is turned into a SHA-512 crypt hash on the server and only the
   hash is in the file, as with the imager. The Wi-Fi password and the enrollment key are
   in the file in plain text (the device needs them), so treat the file like a password

@@ -194,16 +194,37 @@ def read_uplink() -> dict[str, str]:
 
 
 def read_cpu() -> tuple[str | None, int | None]:
-    """Return (cpu_model, cpu_cores)."""
+    """Return (cpu_model, cpu_cores).
+
+    x86 uses ``model name``. Raspberry Pi / Jetson-class ARM boards often only
+    expose ``Hardware``, ``Model``, or ``CPU part`` — try those so enrollments
+    send the same ``cpu_model`` field on every board family.
+    """
     content = _read_text("/proc/cpuinfo")
     model: str | None = None
+    hardware: str | None = None
+    board_model: str | None = None
+    cpu_part: str | None = None
     cores = 0
     if content:
         for line in content.splitlines():
-            if line.startswith("model name") and model is None:
-                model = line.split(":", 1)[1].strip()
-            if line.startswith("processor"):
+            if ":" not in line:
+                continue
+            key, _, raw = line.partition(":")
+            key = key.strip().lower()
+            value = raw.strip()
+            if key == "model name" and not model and value:
+                model = value
+            elif key == "hardware" and not hardware and value:
+                hardware = value
+            elif key == "model" and not board_model and value:
+                board_model = value
+            elif key == "cpu part" and not cpu_part and value:
+                cpu_part = value
+            if key == "processor":
                 cores += 1
+    if not model:
+        model = board_model or hardware or cpu_part
     if cores == 0:
         cores = os.cpu_count() or 0
     return model, (cores or None)

@@ -11,8 +11,10 @@ without logging into the device.
    erased from the server at that moment. The same action is never handed out
    again, so a restart ordered while the device was offline does not run hours
    later after an unrelated reboot.
-4. On the device the agent passes the request to the root-owned helper
+4. On the device `meteorcli.service` (`meteorcli run`) collects the action after
+   the heartbeat. The Linux platform adapter calls the root-owned helper
    `/usr/local/libexec/meteorcli-action` (installed by `sudo ./installcli.sh`).
+   Other boards/OS images can swap that adapter; the action kinds stay the same.
 5. The device reports what happened. Restart and shut-down are reported before
    the system goes down.
 
@@ -35,7 +37,7 @@ actions).
 `meteorcli-action` accepts:
 
 - `reboot` / `shutdown` — starts `systemctl reboot` or `poweroff`
-- `set-password` — JSON `{username, password}` on stdin; runs `chpasswd -e`
+- `set-password` — JSON `{username, password}` on stdin; runs `chpasswd`
 - `add-user` — JSON `{username, password, sudo?, authorized_key?}`; creates a
   login user with a home directory, optional passwordless sudo, optional
   authorized key
@@ -43,7 +45,8 @@ actions).
 Reserved accounts (`root`, `daemon`, `sshd`, …) cannot be changed from the
 console. The username must match Debian's default `useradd` rules.
 
-Needs meteorcli **0.3.1** or newer (the `meteorcli-action` helper).
+Needs meteorcli **0.3.3** or newer (`ActionSync` in `meteorcli run` plus the
+`meteorcli-action` helper).
 
 ## API
 

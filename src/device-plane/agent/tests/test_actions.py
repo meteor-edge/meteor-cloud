@@ -87,3 +87,26 @@ def test_missing_helper_is_reported() -> None:
     # Reported as done before apply, then failed when the helper is missing.
     assert client.reports[-1]["results"][0]["state"] == "failed"
     assert "not installed" in client.reports[-1]["results"][0]["error"]
+
+
+def test_custom_host_actions_adapter() -> None:
+    """Board/OS implementors swap HostActions; ActionSync keeps the same kinds."""
+    calls: list[str] = []
+
+    class FakeHost:
+        def reboot(self) -> None:
+            calls.append("reboot")
+
+        def shutdown(self) -> None:
+            raise AssertionError("unused")
+
+        def set_password(self, username: str, password: str) -> None:
+            raise AssertionError("unused")
+
+        def add_user(self, username: str, password: str, *, sudo: bool = False, authorized_key: str | None = None) -> None:
+            raise AssertionError("unused")
+
+    client = FakeClient([{"id": "a4", "kind": "reboot"}])
+    ActionSync(client, "tok", host=FakeHost()).on_heartbeat({"actions_pending": True})
+    assert calls == ["reboot"]
+    assert client.reports[0]["results"][0]["state"] == "done"

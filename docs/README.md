@@ -36,6 +36,7 @@ How to use the product day to day.
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
 | Device Wi-Fi from the console | [Wi-Fi](fleet/wifi.md) |
 | Restart, shut down, SSH users | [Device actions](fleet/device-actions.md) |
+| Pi / NUC / Jetson platform ports | [Device platform](fleet/device-platform.md) |
 | Settings file for a card (Wi-Fi, SSH, enrollment) | [Device settings file](fleet/device-settings-file.md) |
 | Device logs (journal, systemd, Docker, nginx) | [Device logs](fleet/logs.md) |
 | Public app URLs | [Endpoints](fleet/endpoints.md) |

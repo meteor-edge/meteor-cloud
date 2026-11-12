@@ -90,15 +90,37 @@ def read_disk_percent(path: str = "/") -> float | None:
     return round(min(100.0, used * 100.0 / total), 1)
 
 
+_THERMAL_ROOT = "/sys/class/thermal"
+_PREFERRED_THERMAL_TYPES = ("cpu-thermal", "x86_pkg_temp", "soc-thermal", "cpu")
+
+
 def read_temperature_c() -> float | None:
-    raw = _read_text("/sys/class/thermal/thermal_zone0/temp")
-    if raw is None:
-        return None
+    """SoC temperature when available (Pi, many Jetson/NUC boards).
+
+    Prefer zones typed ``cpu-thermal`` / ``x86_pkg_temp`` / ``soc-thermal``, then
+    fall back to ``thermal_zone0`` so one metrics key works across boards.
+    """
     try:
-        milli = int(raw.strip())
-    except ValueError:
-        return None
-    return round(milli / 1000.0, 1)
+        names = sorted(os.listdir(_THERMAL_ROOT))
+    except OSError:
+        names = []
+    typed: list[str] = []
+    for name in names:
+        if not name.startswith("thermal_zone"):
+            continue
+        zone_type = (_read_text(f"{_THERMAL_ROOT}/{name}/type") or "").strip().lower()
+        if zone_type in _PREFERRED_THERMAL_TYPES:
+            typed.append(name)
+    for name in [*typed, "thermal_zone0"]:
+        raw = _read_text(f"{_THERMAL_ROOT}/{name}/temp")
+        if raw is None:
+            continue
+        try:
+            milli = int(raw.strip())
+        except ValueError:
+            continue
+        return round(milli / 1000.0, 1)
+    return None
 
 
 def read_uptime_seconds() -> int | None:
