@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -89,13 +90,24 @@ class PublishResult:
 
 
 @dataclass(frozen=True)
+class Message:
+    """One message for ``publish_many`` that carries its own time, id, sequence number or type."""
+
+    data: dict[str, Any]
+    time: datetime | str | None = None
+    id: str | None = None
+    seq: int | None = None
+    type: str | None = None
+
+
+@dataclass(frozen=True)
 class Page:
     """One page of historical events. Pass ``next_cursor`` back to get the next page."""
 
     events: list[Event]
     next_cursor: str | None = None
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Event]:
         return iter(self.events)
 
     def __len__(self) -> int:

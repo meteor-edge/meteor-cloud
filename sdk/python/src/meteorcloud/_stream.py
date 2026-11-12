@@ -101,11 +101,17 @@ class Stream:
         self._subs[sub.id] = sub
         sub.confirmed = asyncio.get_running_loop().create_future()
         self.start()
-        if self._ws is not None and self.connected:
-            await self._send({"op": "subscribe", "id": sub.id, **sub.frame})
+        # Set before sending: a refusal can arrive while the send is still yielding.
         sub.waiting = True
         try:
+            if self._ws is not None and self.connected:
+                await self._send({"op": "subscribe", "id": sub.id, **sub.frame})
             await asyncio.wait_for(asyncio.shield(sub.confirmed), timeout)
+        except asyncio.CancelledError:
+            # The caller gave up: nobody will read this subscription.
+            if self._subs.pop(sub.id, None) is not None and self._ws is not None and self.connected:
+                await asyncio.shield(self._send({"op": "unsubscribe", "id": sub.id}))
+            raise
         except asyncio.TimeoutError:
             log.warning("subscription not confirmed yet; it becomes active when MeteorCloud is reachable",
                         extra={"meteorcloud": {"stream": sub.frame.get("stream")}})
@@ -200,7 +206,7 @@ class Stream:
                 self._connected.clear()
             if self._closed:
                 return
-            delay = random.uniform(0.5, 1.0) * min(self._config.reconnect_max_delay, 0.5 * (2**attempt))
+            delay = random.uniform(0.5, 1.0) * min(self._config.reconnect_max_delay, 0.5 * (2 ** min(attempt, 16)))
             attempt += 1
             log.warning("live connection down, reconnecting",
                         extra={"meteorcloud": {"reason": reason, "retry_in_seconds": round(delay, 2)}})

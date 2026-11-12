@@ -2,7 +2,7 @@
 #   mqtt       data-plane service (needed whenever MQTT_ENABLED=true)
 #   emqx       bundled EMQX broker (or point MQTT_BROKER_HOST at an external EMQX)
 #   data-api   application data plane (Go): publish, subscribe, query, commands for
-#              applications that use the MeteorCloud SDK (docs/data-plane/README.md)
+#              applications that use the MeteorCloud SDK (contracts/data-plane-v1.md)
 networks:
   meteorcloud:
     # Shared name so separately started module projects can join each other.

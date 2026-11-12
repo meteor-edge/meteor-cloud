@@ -31,6 +31,7 @@ From a checkout: `pip install ./sdk/python`. The package depends on `httpx` and 
 | `METEORCLOUD_TOKEN` | The token itself. Prefer the file |
 | `METEORCLOUD_APP_ID`, `METEORCLOUD_DEVICE_ID`, `METEORCLOUD_ENVIRONMENT` | Informational. Who you are is decided by the token, never by these |
 | `METEORCLOUD_CA_FILE` | CA bundle when the endpoint uses a private certificate authority |
+| `METEORCLOUD_ALLOW_INSECURE` | `true` accepts an `http://` endpoint on a public address. Without it the SDK refuses, because the token would travel unencrypted. `http://` to this machine, a private network address or a single-word host name is always accepted |
 | `METEORCLOUD_TIMEOUT` | Seconds for one request. Default 10 |
 | `METEORCLOUD_RETRY_TIME` | Seconds a call keeps retrying before it raises. Default 30 |
 
@@ -78,9 +79,11 @@ Options:
 Many at once:
 
 ```python
+from meteorcloud import Message
+
 results = client.telemetry.publish_many("energy.metrics", [
     {"power": 1200},
-    {"data": {"power": 1210}, "time": "2026-11-11T10:00:05Z"},
+    Message({"power": 1210}, time="2026-11-11T10:00:05Z"),   # with its own time, id, seq or type
 ])
 failed = [r for r in results if not r.ok]
 ```
@@ -223,7 +226,10 @@ Your image contains your code and the SDK. No token, no endpoint.
 ```dockerfile
 FROM python:3.13-slim
 WORKDIR /app
-RUN pip install --no-cache-dir "meteorcloud @ git+https://github.com/meteor-edge/meteor-cloud#subdirectory=sdk/python"
+# git is needed only to install the SDK from the repository and is removed again
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && pip install --no-cache-dir "meteorcloud @ git+https://github.com/meteor-edge/meteor-cloud#subdirectory=sdk/python" \
+    && apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 COPY app.py .
 USER 1000
 CMD ["python", "app.py"]
@@ -255,8 +261,10 @@ A complete example is in [examples/edge-app](examples/edge-app). [examples/cloud
 
 The data API runs as a single binary with in-memory storage and a policy file:
 
+From the repository root:
+
 ```bash
-cd src/data-plane/go && go build -o /tmp/dataplane ./cmd/dataplane
+(cd src/data-plane/go && go build -o /tmp/dataplane ./cmd/dataplane)
 
 TOKEN=mca_local_dev
 cat > /tmp/policy.json <<EOF
@@ -270,14 +278,15 @@ EOF
 
 DATAPLANE_STORAGE=memory DATAPLANE_BUS=memory DATAPLANE_POLICY_FILE=/tmp/policy.json /tmp/dataplane &
 
-METEORCLOUD_ENDPOINT=http://localhost:8082 METEORCLOUD_TOKEN=$TOKEN python examples/quickstart.py
+METEORCLOUD_ENDPOINT=http://localhost:8082 METEORCLOUD_TOKEN=$TOKEN python sdk/python/examples/quickstart.py
 ```
 
-With a full local stack (`make dev`), create the application and credential in MeteorCloud instead. See [docs/data-plane](../../docs/data-plane/README.md).
+With a full local stack (`make dev`), create the application and credential in MeteorCloud instead.
 
 ## Tests
 
 ```bash
+cd sdk/python
 pip install -e ".[dev]"
 python -m pytest -q        # starts the real data API binary; needs Go, or METEORCLOUD_DATAPLANE_BIN
 ```

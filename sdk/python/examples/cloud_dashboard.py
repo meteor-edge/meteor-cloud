@@ -25,7 +25,8 @@ with MeteorClient.from_env() as client:
     with client.telemetry.subscribe("energy.*") as live:
         for _, event in zip(range(5), live, strict=False):
             print("live", event.device_id, event.stream, event.data)
-            device_id = event.device_id
+            if event.device_id:  # only a reading from a device names a target
+                device_id = event.device_id
 
     # Command: ask the meter application on that device to publish faster.
     try:
