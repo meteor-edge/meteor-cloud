@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from app.audit.service import AuditRecorder
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
 from app.core.metrics import AGENT_HEARTBEATS, DEVICE_REGISTRATIONS
@@ -92,6 +93,19 @@ class RegistrationService:
         self.tokens.update(token)
 
         mqtt = issue_mqtt_credentials(self.session, device, self.settings)
+        AuditRecorder(self.session).record(
+            organization_id=device.organization_id,
+            action="device.reregister" if match.device is not None else "device.register",
+            resource_type="device",
+            resource_id=device.id,
+            actor_type="registration_token",
+            actor_id=token.id,
+            metadata={
+                "name": device.name,
+                "registration_token_id": str(token.id),
+                "credential_prefix": generated.display_prefix,
+            },
+        )
 
         self.session.commit()
         self.session.refresh(device)
@@ -242,6 +256,14 @@ class RegistrationService:
             raise NotFoundError("mqtt_disabled", "MQTT is not enabled on this server.")
         try:
             info = issue_mqtt_credentials(self.session, device, self.settings)
+            AuditRecorder(self.session).record(
+                organization_id=device.organization_id,
+                action="device.mqtt_credential.issue",
+                resource_type="device",
+                resource_id=device.id,
+                actor_type="device",
+                actor_id=device.id,
+            )
             self.session.commit()
         except Exception:
             self.session.rollback()

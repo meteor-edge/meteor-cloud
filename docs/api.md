@@ -65,7 +65,7 @@ Prefix: `/api/v1/organizations/{organization_id}`
 | Device logs | `GET .../devices/{device_id}/log-sources`, `POST .../devices/{device_id}/log-sessions` then WebSocket `/api/v1/log-sessions/{id}/ws` ([Device logs](fleet/logs.md)) |
 | Endpoints | `/endpoints`, `/endpoints/{id}` |
 | MQTT test | `/mqtt/events` (SSE), `/mqtt/publish` |
-| Audit | `/audit-events` |
+| Audit | `/audit-events` (filters and paging: [Audit log](audit-log.md)) |
 | Artifacts | `/artifacts` (separate router; upload, download, download-link) |
 
 Fleet guides: [docs/fleet/](fleet/).

@@ -11,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.adapters import rate_limiter as build_redis_rate_limiter
+from app.core.audit_context import set_request_actor
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.exceptions import AppError, UnauthorizedError
@@ -183,6 +184,7 @@ def get_current_api_key(
                 "invalid_api_key",
                 "The enrollment API key has expired.",
             )
+    set_request_actor(actor_type="enrollment_key", actor_id=api_key.id)
     return api_key
 
 
@@ -252,6 +254,7 @@ def get_current_device(
             "device_disabled",
             "This device has been disabled.",
         )
+    set_request_actor(actor_type="device", actor_id=device.id)
     return device
 
 
