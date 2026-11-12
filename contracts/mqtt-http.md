@@ -58,7 +58,3 @@ Control-plane applies last-value status/metrics/command results (`TELEMETRY_PROV
 ```json
 { "topic": "devices/+/events" }
 ```
-
-## Application logins (`app_` usernames)
-
-Applications that connect to the broker directly use a username starting with `app_` and a short-lived signed token as password ([data-plane-v1.md](data-plane-v1.md#mqtt)). For these usernames the control plane answers `{"result": "ignore"}` to both `authenticate` and `authorize`: EMQX then falls through to its JWT authenticator, which verifies the token and applies the topic list inside it. A device or platform login never starts with `app_`.

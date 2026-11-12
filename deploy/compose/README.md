@@ -7,7 +7,7 @@ server, and by Ansible (which copies this directory to `/opt/edge-platform/compo
 |------|---------|
 | `docker-compose.yml` | Includes the three module files below |
 | `control-plane.yml` | `backend`; bundled `postgres`, `redis`, `minio` behind profiles |
-| `data-plane.yml` | `data-plane` (profile `mqtt`), bundled `emqx` (profile `emqx`), application data API `data-api` (profile `data-api`, port 8082; [docs](../../docs/data-plane/operations.md)) |
+| `data-plane.yml` | `data-plane` (profile `mqtt`), bundled `emqx` (profile `emqx`) |
 | `console.yml` | Vite dev server for the console |
 | `docker-compose.dev.yml` | Source mounts and hot reload |
 | `docker-compose.prod.yml` | Production: Traefik (80/443, Let's Encrypt), nginx console, restart policies, no internal ports published |
