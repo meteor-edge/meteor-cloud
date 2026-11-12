@@ -20,8 +20,10 @@ def test_registration_is_rate_limited(client: TestClient, db_session: Session) -
         json={"name": "Bootstrap", "max_uses": 100},
     ).json()["token"]
 
-    # Override with a single shared limiter of two requests per window.
-    limiter = InMemoryRateLimiter(limit=2, window_seconds=60)
+    # Override with a single shared limiter of two requests per window. Windows are
+    # cut on the wall clock, so a 60 s window can end between two requests of this
+    # test; one this long cannot.
+    limiter = InMemoryRateLimiter(limit=2, window_seconds=10**10)
     client.app.dependency_overrides[get_rate_limiter] = lambda: limiter
 
     first = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]})
