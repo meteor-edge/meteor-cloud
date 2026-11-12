@@ -1,7 +1,7 @@
 # Device actions
 
-Restart, shut down, change an SSH password, or add an SSH user from the console
-without logging into the device.
+Restart, shut down, change an SSH password, add an SSH user, or update meteorcli
+from the console without logging into the device.
 
 ## How it works
 
@@ -16,7 +16,9 @@ without logging into the device.
    `/usr/local/libexec/meteorcli-action` (installed by `sudo ./installcli.sh`).
    Other boards/OS images can swap that adapter; the action kinds stay the same.
 5. The device reports what happened. Restart and shut-down are reported before
-   the system goes down.
+   the system goes down. An agent update starts `update-meteorcli.sh` as its own
+   process and reports done or failed on a later heartbeat once the version that
+   is running has changed (or the updater finished without changing it).
 
 An action the device never collects is cancelled after
 `DEVICE_ACTION_TTL_SECONDS` (default 1 hour).
@@ -31,6 +33,7 @@ actions only move on heartbeats.
 | Action | Permission | Default roles |
 |--------|------------|---------------|
 | Restart, shut down | `device.reboot` | owner, admin |
+| Update meteorcli to the latest release | `device.update_agent` | owner, admin |
 | Change password, add SSH user | `device.users` | owner, admin |
 
 Passwords never appear in API responses, logs or the audit trail. The audit log

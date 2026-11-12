@@ -15,7 +15,7 @@ class InventoryCollector(Protocol):
     Required shape (all values optional at the wire level):
     ``serial_number``, ``mac_addresses``, ``hostname``, ``os_name``, ``os_version``,
     ``kernel_version``, ``architecture``, ``hardware_model``, ``cpu_model``,
-    ``cpu_cores``, ``memory_mb``, ``local_ip``.
+    ``cpu_cores``, ``memory_mb``, ``local_ip``, ``agent_version``.
     """
 
     def collect(self) -> dict[str, Any]: ...

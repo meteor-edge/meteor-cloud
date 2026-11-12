@@ -63,6 +63,7 @@ def test_restart_is_handed_out_once_and_never_shows_a_password(client: TestClien
         "password": None,
         "sudo": False,
         "authorized_key": None,
+        "from_version": None,
     }
     # Already handed out: a second collect is empty, and the heartbeat flag clears.
     assert _collect(client, agent) == []
@@ -131,6 +132,40 @@ def test_add_user_and_permissions(client: TestClient, db_session: Session) -> No
     assert change["password"] == PASSWORD
     assert change["authorized_key"].startswith("ssh-ed25519 ")
     assert PASSWORD not in client.get(url, headers=headers).text
+
+
+def test_update_agent_requires_permission_and_rejects_a_second_order(
+    client: TestClient, db_session: Session
+) -> None:
+    org, headers, agent, url = _device(client, db_session)
+    add_member(db_session, org, create_user(db_session, email="operator@example.com"), OrganizationRole.OPERATOR)
+    operator = auth_header(client, "operator@example.com")
+
+    assert client.post(f"{url}/update-agent", headers=operator).status_code == 403
+
+    client.post(
+        "/api/v1/agent/heartbeat",
+        headers=agent,
+        json={"agent_version": "0.3.3"},
+    )
+    ordered = client.post(f"{url}/update-agent", headers=headers)
+    assert ordered.status_code == 200, ordered.text
+    [action] = [row for row in ordered.json()["actions"] if row["kind"] == "update_agent"]
+    assert action["state"] == "pending"
+    assert action["from_version"] == "0.3.3"
+
+    again = client.post(f"{url}/update-agent", headers=headers)
+    assert again.status_code == 409, again.text
+    assert again.json()["error"]["code"] == "agent_update_pending"
+
+    [change] = [row for row in _collect(client, agent) if row["kind"] == "update_agent"]
+    assert change["from_version"] == "0.3.3"
+    # Still in flight (sent): another order is refused.
+    assert client.post(f"{url}/update-agent", headers=headers).status_code == 409
+
+    assert _report(client, agent, results=[{"id": action["id"], "state": "done"}]) == {"accepted": 1}
+    events = db_session.scalars(select(AuditEvent).where(AuditEvent.action == "device.action.update_agent")).all()
+    assert len(events) == 1
 
 
 def test_expired_action_is_cancelled(client: TestClient, db_session: Session) -> None:

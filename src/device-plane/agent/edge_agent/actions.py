@@ -1,18 +1,24 @@
-"""One-off actions ordered from the console: restart, shut down, SSH users.
+"""One-off actions ordered from the console: restart, shut down, SSH users, agent update.
 
 The heartbeat response says when an action is waiting. The agent then fetches it
 (the only moment a password travels), hands it to a :class:`~edge_agent.platform.ports.HostActions`
 adapter (Linux default: root-owned ``meteorcli-action``), and reports what happened.
 Each action is collected once: a restart is never run again after the device comes
 back. Passwords are never logged or written by the agent itself.
+
+``update_agent`` starts the safe meteorcli updater in a separate process and reports
+done or failed on a later heartbeat once that process has finished.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
+from edge_agent.agent_update import settle_pending, start_updater
 from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.platform.linux import (
     ACTION_HELPER,
@@ -40,8 +46,17 @@ def _result(action_id: object, state: str, error: str | None = None) -> dict[str
     return row
 
 
+def _default_config_dir() -> Path:
+    env = os.environ.get("METEORCLI_CONFIG_DIR")
+    if env:
+        return Path(env).expanduser()
+    if os.geteuid() == 0:
+        return Path("/etc/meteorcli")
+    return Path.home() / ".config" / "meteorcli"
+
+
 class ActionSync:
-    """Applies waiting restart, shut-down and SSH-user actions."""
+    """Applies waiting restart, shut-down, SSH-user and agent-update actions."""
 
     def __init__(
         self,
@@ -51,9 +66,11 @@ class ActionSync:
         host: HostActions | None = None,
         runner: Callable[[Sequence[str], str | None], Any] | None = None,
         installed: Callable[[], bool] | None = None,
+        config_dir: Path | None = None,
     ) -> None:
         self.client = client
         self.device_token = device_token
+        self.config_dir = Path(config_dir) if config_dir is not None else _default_config_dir()
         if host is not None:
             self._host = host
         else:
@@ -65,7 +82,8 @@ class ActionSync:
             self._host = SystemdHostActions(**kwargs)
         self._unreported: list[dict[str, Any]] = []
 
-    def _apply(self, action: dict[str, Any]) -> dict[str, Any]:
+    def _apply(self, action: dict[str, Any]) -> dict[str, Any] | None:
+        """Apply one action. Returns a report row, or None when a later heartbeat will report."""
         action_id = action.get("id")
         kind = action.get("kind")
         try:
@@ -90,6 +108,16 @@ class ActionSync:
                 )
                 logger.info("SSH user added.")
                 return _result(action_id, "done")
+            if kind == "update_agent":
+                error = start_updater(
+                    config_dir=self.config_dir,
+                    action_id=action_id,
+                    from_version=action.get("from_version"),
+                )
+                if error:
+                    return _result(action_id, "failed", error)
+                # Report after the updater finishes (next heartbeats).
+                return None
         except HostActionError as error:
             return _result(action_id, "failed", str(error))
         return _result(action_id, "failed", f"Unknown action kind: {kind!r}")
@@ -113,14 +141,22 @@ class ActionSync:
             if kind in {"reboot", "shutdown"}:
                 self._report([_result(action.get("id"), "done")])
                 result = self._apply(action)
-                if result.get("state") == "failed":
+                if result is not None and result.get("state") == "failed":
                     self._report([result])
                 continue
-            self._unreported.append(self._apply(action))
+            result = self._apply(action)
+            if result is not None:
+                self._unreported.append(result)
+
+    def _report_settled_update(self) -> None:
+        settled = settle_pending(self.config_dir)
+        if settled is not None:
+            self._report([settled])
 
     def on_heartbeat(self, response: dict[str, Any]) -> None:
         """Called with each heartbeat response. Never raises: actions must not stop heartbeats."""
         try:
+            self._report_settled_update()
             if response.get("actions_pending") is True:
                 self._fetch_and_apply()
                 self._report(self._unreported)
