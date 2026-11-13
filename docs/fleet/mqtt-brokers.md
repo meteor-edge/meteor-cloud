@@ -27,7 +27,7 @@ The broker never decides anything itself. For every login, publish, and subscrib
 
 - Issuing, rotating, or revoking a credential is one database write. There is no "database updated but broker not" state to repair, and the operations are idempotent.
 - Switching broker needs no data migration. Devices keep their credentials.
-- If the control plane is unreachable, brokers deny every new login and every decision they have not cached (fail closed). Mosquitto keeps using decisions it cached before the outage until they expire (allowed: 60 s, denied: 10 s by default; set `MQTT_ACL_CACHE_SECONDS=0` to turn this off). After a failed call it denies at once for 2 seconds instead of waiting on the control plane for every request, because its plugin runs on the broker's event loop.
+- If the control plane is unreachable, brokers deny every new login and every device decision they have not cached (fail closed). Mosquitto keeps using decisions it cached before the outage until they expire: allowed for 60 s (`MQTT_ACL_CACHE_SECONDS`, 0 turns it off) and denied for 10 s (`MQTT_ACL_DENY_CACHE_SECONDS`). Platform users that logged in before the outage skip topic checks, so their sessions keep working. After a failed call it denies at once for 2 seconds instead of waiting on the control plane for every request, because its plugin runs on the broker's event loop.
 
 ```text
 device ──TLS 8883──► broker ──HTTP (private network)──► control plane

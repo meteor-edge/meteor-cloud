@@ -108,6 +108,17 @@ class MqttSession:
         except Exception:
             return False
 
+    def submit(
+        self, topic: str, payload: str, *, qos: int = 1, retain: bool = False
+    ) -> int:
+        """Hand a publish to the client without waiting; returns Paho's rc.
+
+        For denied publishes, where the broker may close the connection instead
+        of acknowledging, so waiting for completion would prove nothing.
+        """
+        assert self._client is not None
+        return self._client.publish(topic, payload=payload, qos=qos, retain=retain).rc
+
     def wait_message(
         self, matcher: Callable[[str, str], bool], timeout: float = 20
     ) -> tuple[str, str] | None:

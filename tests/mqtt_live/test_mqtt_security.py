@@ -64,7 +64,10 @@ def _assert_publish_blocked(
         assert session.wait_connected() is True, (
             "the publishing session never connected"
         )
-        session.publish(topic, json.dumps({"marker": marker}), retain=retain)
+        rc = session.submit(topic, json.dumps({"marker": marker}), retain=retain)
+        assert rc == mqtt.MQTT_ERR_SUCCESS, (
+            f"the publish to {topic} was never sent (rc={rc}), so the broker decided nothing"
+        )
         leaked = observer.wait_message(
             lambda _topic, payload: marker in payload, timeout=3
         )
@@ -459,14 +462,14 @@ def test_old_tls_versions_refused(live_config):
         pytest.skip("This OpenSSL build cannot offer TLS 1.1")
     import socket
 
+    # Connect first and let TCP errors fail the test: only a failure during the
+    # TLS handshake counts as the broker refusing old TLS.
+    raw = socket.create_connection(
+        (live_config.mqtt_host, live_config.mqtt_port), timeout=8
+    )
     refused = False
     try:
-        with (
-            socket.create_connection(
-                (live_config.mqtt_host, live_config.mqtt_port), timeout=8
-            ) as raw,
-            context.wrap_socket(raw),
-        ):
+        with context.wrap_socket(raw):
             pass
     except ssl.SSLError as exc:
         # Only a refusal by the broker counts. If this OpenSSL cannot offer
@@ -474,8 +477,10 @@ def test_old_tls_versions_refused(live_config):
         if "NO_PROTOCOLS_AVAILABLE" in str(exc).upper().replace(" ", "_"):
             pytest.skip("This OpenSSL build cannot offer TLS 1.0 or 1.1")
         refused = True
-    except OSError:
+    except (ConnectionResetError, BrokenPipeError, ssl.SSLEOFError):
         refused = True  # the broker closed the connection during the handshake
+    finally:
+        raw.close()
     assert refused
 
 
