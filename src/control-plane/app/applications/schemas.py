@@ -189,3 +189,16 @@ class PolicySnapshot(BaseModel):
     generated_at: datetime
     applications: list[PolicyApplication]
     credentials: list[PolicyCredential]
+
+
+class DeviceDirectoryEntry(BaseModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+
+
+class DeviceDirectory(BaseModel):
+    """GET /internal/data-plane/devices: which organization owns each enrolled, enabled device."""
+
+    version: str
+    generated_at: datetime
+    devices: list[DeviceDirectoryEntry]

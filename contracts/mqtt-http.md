@@ -35,6 +35,15 @@ Response: `{ "ok": true }`
 
 Control-plane applies last-value status/metrics/command results (`TELEMETRY_PROVIDER=postgresql`).
 
+### `GET /internal/data-plane/devices`
+
+Device ingestion (`device-ingest`) reads which organization owns each enrolled, enabled device. Header `X-Data-Plane-Internal-Token` must match `DATA_PLANE_INTERNAL_TOKEN`. `If-None-Match: "<version>"` returns `304` when nothing changed.
+
+```json
+{ "version": "3f2a…", "generated_at": "2026-11-12T12:00:00Z",
+  "devices": [ { "id": "<device uuid>", "organization_id": "<org uuid>" } ] }
+```
+
 ## Data plane (`DATA_PLANE_URL`)
 
 ### `GET /health`
