@@ -39,7 +39,7 @@ add_host_san() {
   local host="$1"
   [[ -z "$host" ]] && return 0
   case "$host" in
-    localhost|127.0.0.1|emqx) return 0 ;;
+    localhost|127.0.0.1|emqx|mosquitto|mqtt-broker) return 0 ;;
   esac
   if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     add_san "IP:${host}"

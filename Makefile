@@ -1,6 +1,8 @@
 .PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
+# Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
+MQTT_BROKER_SERVICE ?= mosquitto
 ENV_FILE := $(COMPOSE_DIR)/.env
 COMPOSE := docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f $(COMPOSE_DIR)/docker-compose.observability.yml
@@ -69,7 +71,6 @@ else
 	@echo "  Data plane:   http://localhost:8081/health"
 	@echo "  OpenAPI:      http://localhost:8000/docs"
 	@echo "  MQTT TLS:     mqtts://localhost:8883"
-	@echo "  EMQX UI:      http://localhost:18083  (admin / public)"
 	@echo "  MinIO API:    http://localhost:9000   (S3 endpoint for artifacts)"
 	@echo "  MinIO UI:     http://localhost:9001   (meteorcloud / meteorcloud-dev-secret)"
 	@echo "  Seed:         make seed"
@@ -83,7 +84,7 @@ dev-control-plane: ## Start postgres, redis, and the control-plane API
 	@echo "Control plane: http://localhost:8000  (MQTT/ping need the data plane on network meteorcloud)"
 	@echo "MinIO UI:      http://localhost:9001  (meteorcloud / meteorcloud-dev-secret)"
 
-dev-data-plane: ## Start EMQX and the data-plane MQTT gateway
+dev-data-plane: ## Start the MQTT broker and the data-plane MQTT gateway
 	@test -f $(ENV_FILE) || cp $(COMPOSE_DIR)/.env.example $(ENV_FILE)
 	@test -f certs/server.crt || ./scripts/generate-local-mqtt-certs.sh
 	$(DP_COMPOSE) up --build -d
@@ -101,7 +102,7 @@ dev-website: ## Website is not in this repo; clone meteor-ui
 
 mqtt-certs: ## Generate local MQTT CA and broker certificates
 	./scripts/generate-local-mqtt-certs.sh
-	-$(COMPOSE) restart emqx
+	-$(COMPOSE) restart $(MQTT_BROKER_SERVICE)
 
 test-mqtt: ## Start local Compose MQTT stack and run live MQTT tests
 	chmod +x scripts/test-mqtt.sh
@@ -357,9 +358,10 @@ helm-lint: ## Lint the Helm chart and render it with every values file
 		-f $(CHART)/values-monitoring.yaml > /dev/null
 	! helm template meteorcloud $(CHART) -f $(CHART)/values-monitoring.yaml > /dev/null 2>&1
 
-images: ## Build the backend, data-plane, and console images (IMAGE_TAG=dev)
+images: ## Build the backend, data-plane, MQTT broker, and console images (IMAGE_TAG=dev)
 	docker build -t meteorcloud/backend:$(IMAGE_TAG) $(BACKEND_DIR)
 	docker build -t meteorcloud/data-plane:$(IMAGE_TAG) $(DATA_PLANE_DIR)
+	docker build -t meteorcloud/mosquitto:$(IMAGE_TAG) $(DATA_PLANE_DIR)/broker/mosquitto
 	docker build -t meteorcloud/console:$(IMAGE_TAG) $(CONSOLE_DIR)
 
 smoke: ## End-to-end HTTP smoke test (URL=http://localhost:8088)
@@ -373,10 +375,10 @@ k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
 	kubectl config use-context k3d-$(K8S_CLUSTER)
 
 k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (OBS=1 adds Prometheus, Grafana)
-	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
+	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
 	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
 	@test -f $(K8S_CERTS_DIR)/server.crt || MQTT_CERTS_SKIP_CHOWN=1 MQTT_PUBLIC_HOST=localhost \
-		MQTT_EXTRA_SANS=$(K8S_RELEASE)-emqx,$(K8S_RELEASE)-emqx.$(K8S_NAMESPACE).svc \
+		MQTT_EXTRA_SANS=$(K8S_RELEASE)-mqtt,$(K8S_RELEASE)-mqtt.$(K8S_NAMESPACE).svc,$(K8S_RELEASE)-emqx,$(K8S_RELEASE)-emqx.$(K8S_NAMESPACE).svc \
 		./scripts/generate-local-mqtt-certs.sh $(K8S_CERTS_DIR)
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) create secret generic meteorcloud-mqtt-tls \
 		--from-file=ca.crt=$(K8S_CERTS_DIR)/ca.crt --from-file=server.crt=$(K8S_CERTS_DIR)/server.crt \

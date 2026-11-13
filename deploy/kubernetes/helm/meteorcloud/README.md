@@ -1,6 +1,6 @@
 # meteorcloud Helm chart
 
-Installs MeteorCloud (API, console, and optionally the MQTT data plane and EMQX)
+Installs MeteorCloud (API, console, and optionally the MQTT data plane and a broker)
 into an existing Kubernetes cluster. The chart does not create clusters or any
 cloud resources.
 
@@ -15,7 +15,8 @@ helm -n meteorcloud test meteorcloud
 | `postgresql.mode` | `bundled` (StatefulSet), `external` | `bundled` |
 | `objectStorage.provider` | `filesystem` (PVC), `s3` (any S3-compatible API) | `filesystem` |
 | `cache.provider` | `memory`, `redis` (`cache.redis.mode`: `bundled` / `external`) | `memory` |
-| `mqtt.enabled`, `mqtt.broker` | off, or `bundled` EMQX / `external` | off |
+| `mqtt.enabled`, `mqtt.broker` | off, or `bundled` / `external` | off |
+| `mqtt.provider` | `mosquitto`, `emqx` (bundled or external), `vernemq` (external only) | `mosquitto` |
 | `ingress.enabled`, `ingress.className` | any ingress controller | disabled; set `ingress.enabled: true` in an overlay |
 | `secrets.existingSecret` | your own Secret instead of the generated one | empty |
 | `networkPolicy.enabled` | only this release, the ingress namespace, and `networkPolicy.extraFrom` reach the API (needs a CNI that enforces it) | off |

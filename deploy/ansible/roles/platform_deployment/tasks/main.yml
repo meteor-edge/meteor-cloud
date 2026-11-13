@@ -57,7 +57,7 @@
 
     - name: Check for existing application images
       ansible.builtin.command:
-        cmd: docker image inspect {{ ([backend_image, frontend_image] + ([data_plane_image] if mqtt_enabled | bool else [])) | join(' ') }}
+        cmd: docker image inspect {{ ([backend_image, frontend_image] + ([data_plane_image] if mqtt_enabled | bool else []) + ([mosquitto_image] if mqtt_enabled | bool and mqtt_broker == 'bundled' and mqtt_provider == 'mosquitto' else [])) | join(' ') }}
       register: platform_images
       changed_when: false
       failed_when: false
@@ -241,7 +241,7 @@
     cmd: "{{ platform_compose }} restart {{ item }}"
     chdir: "{{ platform_compose_dir }}"
   loop: >-
-    {{ (['emqx'] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
+    {{ ([mqtt_provider] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
        + (platform_observability_services if observability_enabled | bool else []) }}
   vars:
     platform_observability_by_component:
@@ -254,7 +254,7 @@
          | map('extract', platform_observability_by_component) | select('defined') | flatten }}
   when: >-
     (platform_service_config is defined and platform_service_config.changed)
-    or (item == 'emqx' and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
+    or (item == mqtt_provider and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
     or (item == 'alertmanager' and platform_alertmanager_secret is defined and platform_alertmanager_secret.changed)
     or (item == 'alertmanager' and platform_alertmanager_heartbeat_secret is defined
         and platform_alertmanager_heartbeat_secret.changed)

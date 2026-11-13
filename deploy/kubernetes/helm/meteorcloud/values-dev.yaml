@@ -42,7 +42,7 @@ mqtt:
   # Created by `make k8s-deploy` from scripts/generate-local-mqtt-certs.sh.
   tls:
     existingSecret: meteorcloud-mqtt-tls
-  emqx:
+  mosquitto:
     # k3s servicelb publishes it on the k3d load balancer (port 8883 on the host).
     service: { type: LoadBalancer }
 

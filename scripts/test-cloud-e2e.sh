@@ -105,5 +105,5 @@ then
   echo "==> MQTT live tests against deployed broker"
   "$PYTHON" -m pytest -q tests/mqtt_live
 else
-  echo "Cloud MQTT: NOT RUN (:${MQTT_PORT} is not reachable; production compose does not deploy EMQX yet)"
+  echo "Cloud MQTT: NOT RUN (:${MQTT_PORT} is not reachable; production compose does not deploy an MQTT broker here)"
 fi
