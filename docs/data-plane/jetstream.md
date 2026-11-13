@@ -130,7 +130,7 @@ type Handler interface {
 }
 ```
 
-`nil` acks. An error naks with a delay from `RULES_RETRY_BACKOFF` (`1s,5s,30s,2m`, by attempt). `ruleproc.Permanent(err)` terminates the message instead of retrying. The default handler counts and logs events; the rule engine plugs in at `newHandler` in `cmd/rule-processor/main.go`. Handlers see at-least-once delivery and must be idempotent on `ev.ID`; `ruleproc.Dedupe` adds an in-process guard.
+`nil` acks. An error naks with a delay from `RULES_RETRY_BACKOFF` (`1s,5s,30s,2m`, by attempt). `ruleproc.Permanent(err)` terminates the message instead of retrying. With `RULES_DATABASE_URL` set the handler is the rule engine ([Rules and alerts](../rules.md)); without it the handler only counts and logs events. Handlers see at-least-once delivery and must be idempotent on `ev.ID`; `ruleproc.Dedupe` adds an in-process guard.
 
 **ClickHouse writer** (`internal/chwriter`) buffers up to `CLICKHOUSE_WRITER_BATCH_SIZE` (1000) messages or `CLICKHOUSE_WRITER_FLUSH_INTERVAL` (1s), inserts the batch into the `events` table, and only then acks every message in it. Nothing more is pulled while a flush runs, so a slow ClickHouse slows consumption instead of growing memory.
 

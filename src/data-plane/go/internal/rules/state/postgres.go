@@ -77,6 +77,9 @@ var migrations = []string{
 		last_error       text        NOT NULL,
 		failed_at        timestamptz NOT NULL DEFAULT now()
 	);`,
+	// 2: per-key ordering for the dispatcher (an older pending action of the same
+	// rule, device and type is always delivered first).
+	`CREATE INDEX action_outbox_order ON rules.action_outbox (rule_id, device_id, action_type, id) WHERE status = 'pending';`,
 }
 
 // Postgres is the durable Store.

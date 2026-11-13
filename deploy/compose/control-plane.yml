@@ -84,6 +84,8 @@ services:
       # Application data API (profile data-api). Empty DATA_PLANE_INTERNAL_TOKEN keeps its policy feed closed.
       DATA_PLANE_API_URL: ${DATA_PLANE_API_URL:-http://data-api:8092}
       DATA_PLANE_INTERNAL_TOKEN: ${DATA_PLANE_INTERNAL_TOKEN:-}
+      # Rule processor internal API (rule tests, evaluation status; profile nats).
+      RULES_ENGINE_URL: ${RULES_ENGINE_URL:-http://rule-processor:8095}
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
       # Interpolated like EMQX's copy so the broker and API always agree.
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}

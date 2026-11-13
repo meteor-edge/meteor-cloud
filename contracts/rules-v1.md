@@ -128,6 +128,23 @@ still true), `rule_removed` (deleted or disabled), `device_out_of_scope`.
 | `command` | `command`, `params`, `timeout` | firing |
 | `platform_event` | `params` | firing |
 
+How each is delivered (`internal/rules/dispatch`):
+
+- `alert` creates or resolves the alert record in the control plane
+  (`POST /internal/rules/alert-transitions`, idempotent by key).
+- `webhook` and `notification` post to a notification integration of the rule's
+  organization. Kind `webhook` gets the JSON below plus `params`; kind `slack` gets a
+  Slack-compatible `{"text": "..."}`. Headers: `X-MeteorCloud-Event: rule.<transition>`,
+  `X-MeteorCloud-Delivery: <idempotency key>` and, when the integration has a secret,
+  `X-MeteorCloud-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`. Private,
+  loopback and link-local addresses are refused, redirects are not followed, and an
+  active silence skips the delivery.
+- `command` sends `reboot` or `shutdown` (the only commands rules accept in v1) as a
+  device action, as the rule's author and with their current permission
+  (`device.reboot`) and device-group scope. An author who lost it gets the action
+  dead-lettered, never sent.
+- `platform_event` is written to the organization's audit log as `rule.event`.
+
 `on: ["firing", "resolved"]` overrides the default. Actions never run inside
 evaluation: the engine writes them to the outbox in the same transaction as the
 state change, and a separate dispatcher delivers them with retries, timeouts and a

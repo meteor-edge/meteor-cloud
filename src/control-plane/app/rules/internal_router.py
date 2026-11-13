@@ -8,7 +8,15 @@ from fastapi import APIRouter, Depends, Header, Response
 
 from app.applications.internal_router import _require_internal_token
 from app.rules.dependencies import RuleSvc
-from app.rules.schemas import AlertTransitionBatch, AlertTransitionResponse, RulesSnapshot
+from app.rules.schemas import (
+    AlertTransitionBatch,
+    AlertTransitionResponse,
+    CommandResult,
+    DeliveryRequest,
+    DeliveryResponse,
+    EngineAction,
+    RulesSnapshot,
+)
 
 router = APIRouter(
     prefix="/internal/rules",
@@ -37,3 +45,20 @@ def rules_snapshot(
 def alert_transitions(service: RuleSvc, payload: AlertTransitionBatch):
     """Apply ``alert`` actions from the engine outbox. Keyed by idempotency key, so retries are safe."""
     return AlertTransitionResponse(results=service.apply_transitions(payload.items))
+
+
+@router.post("/deliveries", response_model=DeliveryResponse)
+def delivery(service: RuleSvc, payload: DeliveryRequest):
+    """URL, kind and secret of an integration for one webhook, and whether a silence holds it."""
+    return service.delivery(payload)
+
+
+@router.post("/commands", response_model=CommandResult)
+def command(service: RuleSvc, payload: EngineAction):
+    """Send a rule's device command with its author's current permissions (403 when they lost them)."""
+    return service.run_command(payload)
+
+
+@router.post("/platform-events", status_code=204)
+def platform_event(service: RuleSvc, payload: EngineAction) -> None:
+    service.platform_event(payload)

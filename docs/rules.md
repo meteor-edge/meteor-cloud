@@ -26,6 +26,8 @@ Prefix: `/api/v1/organizations/{organization_id}`. Every change is written to th
 | `POST` | `/rules` | `rule.create` | Create from `{"definition": {...}}`; version 1 |
 | `POST` | `/rules/validate` | `rule.read` | Check a definition without saving: `{valid, problems[], condition_hash}` |
 | `POST` | `/rules/preview-devices` | `rule.read` | Devices the definition's scope selects now (first 200 and the total) |
+| `POST` | `/rules/test` | `rule.read` | Run a definition over sample events (`{"definition", "events": [{"time", "data"}], "until"}`) in the engine with a virtual clock; every step comes back. Nothing is stored and no action runs |
+| `GET` | `/rules/{id}/status?after=&limit=` | `rule.read` | The engine's state of the rule per device: phase, episode, last values, next timer |
 | `GET` | `/rules/{id}` | `rule.read` | One rule |
 | `PUT` | `/rules/{id}` | `rule.update` | Save a new version |
 | `POST` | `/rules/{id}/enable`, `/disable` | `rule.update` | Switch without a new version |
@@ -64,11 +66,37 @@ curl -X POST "$API/api/v1/organizations/$ORG/rules" -H "Authorization: Bearer $T
   another organization.
 - **Platform rules** (scope `platform`) exist in the data model but are not accepted from
   this API until there is a platform administrator role.
-- **Commands.** A rule with a `command` action can only be saved by someone who may send
-  that command: `reboot` and `shutdown` need `device.reboot`, others need
-  `application.command`.
+- **Commands.** Rules can send `reboot` and `shutdown`. Saving such a rule needs
+  `device.reboot`, and every delivery re-checks that the author still has it for that
+  device (including device-group scope).
 - **Acknowledged and silenced** are states of the alert record. They never change what
   the engine evaluates. A silence holds notifications; the alert is still recorded.
+
+## Running it
+
+The engine runs inside the `rule-processor` service (Compose profile `nats`, see
+[JetStream](data-plane/jetstream.md)). Settings:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `RULES_DATABASE_URL` | Compose: the platform PostgreSQL | Where schema `rules` lives (created on start). Empty: events are only counted |
+| `CONTROL_PLANE_URL`, `DATA_PLANE_INTERNAL_TOKEN` | | Snapshot, alert records, deliveries |
+| `RULES_SNAPSHOT_INTERVAL` | `15s` | How often the rule snapshot is checked (ETag, so cheap) |
+| `RULES_API_ADDR` | `:8095` | Internal API for rule tests and status; the control plane reaches it at `RULES_ENGINE_URL` |
+| `RULES_DISPATCH` | `true` | Deliver actions in this process (`false` to run delivery elsewhere) |
+| `RULES_DISPATCH_WORKERS`, `RULES_DISPATCH_MAX_ATTEMPTS`, `RULES_DISPATCH_BACKOFF` | `8`, `10`, `5s,30s,2m,10m,30m` | Delivery concurrency and retries |
+| `RULES_WEBHOOK_ALLOW_PRIVATE` | `false` | Allow webhooks to private and loopback addresses (LAN-only installs) |
+| `RULES_COMMIT_BATCH`, `RULES_COMMIT_LINGER`, `RULES_TIMER_INTERVAL` | `64`, `2ms`, `1s` | Group commit and timer pass tuning |
+
+Any number of replicas can run: per-device locks plus compare-and-swap on the state
+rows keep evaluations consistent, timers and outbox rows are claimed with leases
+(`FOR UPDATE SKIP LOCKED`), and idempotency keys make every replay harmless. Failed
+deliveries land in `rules.action_dead_letters` with the last error.
+
+Metrics (on the ops port, `:8094/metrics`): `meteorcloud_rules_*` for evaluation,
+transitions, timers, commits and refused rules, plus
+`meteorcloud_rules_actions_dispatched_total{type,result}` and
+`meteorcloud_rules_action_delivery_seconds`.
 
 ## Internal routes (data plane only)
 
@@ -81,3 +109,12 @@ Both need the `X-Data-Plane-Internal-Token` header (`DATA_PLANE_INTERNAL_TOKEN`)
   of an `alert` action plus its `idempotency_key`. Answers one result per item:
   `applied`, `duplicate` (already applied: safe to retry) or `ignored` (unknown rule or
   device, or another tenant's), with `alert_id` and `silenced`.
+- `POST /internal/rules/deliveries`: URL, kind and secret of an integration for one
+  webhook, only for the integration's own organization, and whether a silence holds it.
+- `POST /internal/rules/commands`: send a rule's `reboot` or `shutdown` as its author
+  (403 when the author lost `device.reboot` for that device).
+- `POST /internal/rules/platform-events`: record a `rule.event` audit row (once per key).
+
+The rule processor serves `POST /internal/rules/simulate`,
+`GET /internal/rules/status/{rule_id}` and `GET /internal/rules/engine` on
+`RULES_API_ADDR`, with the same token.

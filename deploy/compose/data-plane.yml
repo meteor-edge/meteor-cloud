@@ -217,6 +217,14 @@ services:
       NATS_RULES_USER: rules
       NATS_RULES_PASSWORD: ${NATS_RULES_PASSWORD:-}
       RULES_WORKERS: ${RULES_WORKERS:-8}
+      # Rule engine: state, timers and the action outbox live in the PostgreSQL schema "rules".
+      # Empty RULES_DATABASE_URL only counts events (no rules are evaluated).
+      RULES_DATABASE_URL: ${RULES_DATABASE_URL:-postgres://${POSTGRES_USER:-edge}:${POSTGRES_PASSWORD:-edge}@postgres:5432/${POSTGRES_DB:-edge_platform}}
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
+      DATA_PLANE_INTERNAL_TOKEN: ${DATA_PLANE_INTERNAL_TOKEN:-}
+      RULES_API_ADDR: ":8095"
+      # Webhooks to private or loopback addresses are refused unless this is true (LAN-only installs).
+      RULES_WEBHOOK_ALLOW_PRIVATE: ${RULES_WEBHOOK_ALLOW_PRIVATE:-false}
     healthcheck:
       test: ["CMD", "rule-processor", "healthcheck"]
       interval: 10s

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query
 
@@ -20,6 +20,7 @@ from app.rules.schemas import (
     IntegrationResponse,
     IntegrationUpdate,
     RuleResponse,
+    RuleTestRequest,
     RuleVersionResponse,
     RuleWrite,
     SilenceCreate,
@@ -86,6 +87,29 @@ def validate_rule(organization_id: uuid.UUID, current_user: CurrentUser, service
 def preview_devices(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleWrite):
     """Devices the definition's scope selects now (first 200, with the total)."""
     return service.preview_devices(actor=current_user, organization_id=organization_id, definition=payload.definition)
+
+
+@router.post("/rules/test")
+def test_rule(
+    organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleTestRequest
+) -> dict[str, Any]:
+    """Run a definition over sample events in the engine with a virtual clock; returns every step."""
+    return service.test_rule(actor=current_user, organization_id=organization_id, payload=payload)
+
+
+@router.get("/rules/{rule_id}/status")
+def rule_status(
+    organization_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: RuleSvc,
+    after: Annotated[str, Query(max_length=64, description="Page: device_id of the last row already shown.")] = "",
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict[str, Any]:
+    """The engine's evaluation state of this rule per device (phase, episode, last values, timers)."""
+    return service.evaluation_status(
+        actor=current_user, organization_id=organization_id, rule_id=rule_id, after=after, limit=limit
+    )
 
 
 @router.get("/rules/{rule_id}", response_model=RuleResponse)

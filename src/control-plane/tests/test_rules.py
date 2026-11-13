@@ -258,8 +258,9 @@ def test_command_actions_need_the_command_permission(client: TestClient, db_sess
     base = f"/api/v1/organizations/{org.id}/rules"
     reboot = _definition(actions=[{"type": "alert"}, {"type": "command", "command": "reboot"}])
     assert client.post(base, headers=headers, json={"definition": reboot}).status_code == 403
-    restart_app = _definition(actions=[{"type": "command", "command": "restart"}])
-    assert client.post(base, headers=headers, json={"definition": restart_app}).status_code == 201
+    unsupported = _definition(actions=[{"type": "command", "command": "restart"}])
+    response = client.post(f"{base}/validate", headers=headers, json={"definition": unsupported}).json()
+    assert response["problems"] == [{"path": "actions[0].command", "message": "must be one of: reboot, shutdown"}]
 
 
 # ---- engine-facing -------------------------------------------------------
