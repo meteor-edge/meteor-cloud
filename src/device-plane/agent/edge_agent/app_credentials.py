@@ -13,6 +13,7 @@ the new token without a restart.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -70,8 +71,10 @@ class AppCredentialStore:
         self.root = root
 
     def _dir(self, workload_key: str) -> Path:
-        name = _UNSAFE.sub("_", workload_key).strip(".") or "_"
-        return self.root / name
+        # A readable prefix plus a digest of the full key: two keys that differ only in
+        # characters unsafe for a file name never share a directory.
+        prefix = _UNSAFE.sub("_", workload_key).strip(".")[:48] or "_"
+        return self.root / f"{prefix}-{hashlib.sha256(workload_key.encode()).hexdigest()[:12]}"
 
     def token_path(self, workload_key: str) -> Path:
         return self._dir(workload_key) / "token"
@@ -181,6 +184,9 @@ class AppCredentialStore:
                 self.mint(client, device_token, workload_key)
             except AppCredentialError as error:
                 logger.warning("Application token for %s was not rotated: %s", workload_key, error.message)
+            except OSError as error:
+                # A full or read-only disk must not stop the other workloads.
+                logger.warning("Application token for %s could not be written: %s", workload_key, error)
         return True
 
     def prune(self, keep: set[str]) -> None:

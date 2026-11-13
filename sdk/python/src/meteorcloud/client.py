@@ -7,6 +7,7 @@ implementation and behave the same. It is safe to use from several threads.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import signal
 import threading
 from collections.abc import Callable, Coroutine, Iterable, Iterator
@@ -16,9 +17,17 @@ from typing import Any, TypeVar
 import httpx
 
 from . import exceptions as exc
-from .aio import AsyncCommands, AsyncMeteorClient, AsyncStreams, AsyncSubscription, CommandHandler, EventCallback
+from .aio import (
+    IN_HANDLER,
+    AsyncCommands,
+    AsyncMeteorClient,
+    AsyncStreams,
+    AsyncSubscription,
+    CommandHandler,
+    EventCallback,
+)
 from .config import Config
-from .models import Bucket, Command, Event, Identity, Page, PublishResult
+from .models import Bucket, Command, Event, Identity, Message, Page, PublishResult
 
 T = TypeVar("T")
 
@@ -77,7 +86,7 @@ class Streams:
                 id: str | None = None, seq: int | None = None, type: str | None = None) -> PublishResult:
         return self._client._do(self._inner.publish(stream, data, time=time, id=id, seq=seq, type=type))
 
-    def publish_many(self, stream: str, items: Iterable[dict[str, Any]]) -> list[PublishResult]:
+    def publish_many(self, stream: str, items: Iterable[dict[str, Any] | Message]) -> list[PublishResult]:
         return self._client._do(self._inner.publish_many(stream, list(items)))
 
     def subscribe(self, stream: str, callback: EventCallback | None = None, *, device_id: str | None = None,
@@ -86,7 +95,8 @@ class Streams:
             self._inner.subscribe(stream, callback, device_id=device_id, application=application))
         return Subscription(self._client, inner)
 
-    def on(self, stream: str, *, device_id: str | None = None, application: str | None = None):
+    def on(self, stream: str, *, device_id: str | None = None,
+           application: str | None = None) -> Callable[[EventCallback], EventCallback]:
         return self._inner.on(stream, device_id=device_id, application=application)
 
     def query(self, stream: str, *, start: datetime | str | None = None, end: datetime | str | None = None,
@@ -185,6 +195,7 @@ class MeteorClient:
         self._thread = threading.Thread(target=self._loop.run_forever, name="meteorcloud", daemon=True)
         self._thread.start()
         self._closed = False
+        self._lock = threading.Lock()  # guards _closed against calls racing with close()
         self._stop = threading.Event()
         self._async: AsyncMeteorClient = self._do(self._create(config, transport))
         self.telemetry = Streams(self, self._async.telemetry)
@@ -202,15 +213,22 @@ class MeteorClient:
         return cls(Config.from_env(**overrides))
 
     def _do(self, coro: Coroutine[Any, Any, T]) -> T:
-        if self._closed:
-            coro.close()
-            raise exc.ClientClosedError("The client is closed")
         if threading.current_thread() is self._thread:
             coro.close()
             raise RuntimeError(
                 "The blocking client cannot be used from an async callback. Use a plain function as the "
                 "callback, or use AsyncMeteorClient.")
-        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+        # Checked and submitted under one lock: nothing is queued on a loop that
+        # close() is about to stop.
+        with self._lock:
+            if self._closed:
+                coro.close()
+                raise exc.ClientClosedError("The client is closed")
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        try:
+            return future.result()
+        except concurrent.futures.CancelledError:
+            raise exc.ClientClosedError("The client was closed during the call") from None
 
     @property
     def connected(self) -> bool:
@@ -246,18 +264,37 @@ class MeteorClient:
 
     def close(self, timeout: float = 10.0) -> None:
         """Shut down: let running command handlers finish, then close connections."""
-        if self._closed:
+        if IN_HANDLER.get():
+            # Called from a command handler: closing now would wait for this very
+            # handler and then cut off its result. Close once the handler is done.
+            self._stop.set()
+            threading.Thread(target=self.close, args=(timeout,), name="meteorcloud-close", daemon=True).start()
             return
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True  # from here on no new call is accepted
         try:
-            self._do(self._async.close(timeout))
+            asyncio.run_coroutine_threadsafe(self._shutdown(timeout), self._loop).result()
         finally:
-            self._closed = True
             self._stop.set()
             self._loop.call_soon_threadsafe(self._loop.stop)
             if threading.current_thread() is not self._thread:
                 self._thread.join(timeout=5)
             if not self._loop.is_running():
                 self._loop.close()
+
+    async def _shutdown(self, timeout: float) -> None:
+        try:
+            await self._async.close(timeout)
+        finally:
+            # Calls that were still in flight end with ClientClosedError instead of
+            # waiting on a loop that no longer runs.
+            pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
     def __enter__(self) -> MeteorClient:
         return self

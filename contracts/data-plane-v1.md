@@ -219,6 +219,12 @@ Topics (a stream's dots become topic levels; `*` becomes `+`, a trailing `**` be
 
 Rules: organization, application and device come from the topic, which the broker restricts to the caller's own. No wildcard subscription reaches another organization or a stream outside the `subscribe` permission. Nothing is published retained: a command is never a retained message. The data plane itself consumes publishes through a shared subscription (`$share/meteor-dataplane/...`), so several replicas split the load.
 
+Known limits of direct MQTT in v1 (the HTTP and WebSocket paths do not have them):
+
+- Revocation is not immediate. The broker checks the token when the client connects, so a client that is already connected keeps its session until the token expires (`DATAPLANE_MQTT_TOKEN_TTL`, one hour by default), even after its credential is revoked or its permissions shrink. No new token is issued in that time. Shorten the TTL where that window matters.
+- The data plane subscribes with a clean session. A message published while no replica is connected to the broker is not consumed, so at-least-once delivery on this path needs at least two replicas or a client that retries until the data is visible.
+- Messages that arrive over MQTT carry no `environment`, because the broker does not tell the data plane which credential published them.
+
 ## Control plane integration
 
 The data plane never calls the control plane while handling a message. It needs it for two things:

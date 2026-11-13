@@ -15,7 +15,7 @@ import os
 import random
 import threading
 
-from meteorcloud import MeteorClient, MeteorCloudError
+from meteorcloud import Command, MeteorClient, MeteorCloudError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("edge-app")
@@ -26,7 +26,7 @@ stop = threading.Event()
 
 
 @client.commands.handler("set-interval")
-def set_interval(command):
+def set_interval(command: Command) -> dict[str, float]:
     """Sent from the console or another application: {"seconds": 1}."""
     global interval
     interval = max(0.2, float(command.payload["seconds"]))
