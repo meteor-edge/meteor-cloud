@@ -165,7 +165,7 @@ def main() -> int:
     reports = reconcile_software(agent, device_token, artifacts)
     report = next(r for r in reports if r["workload_key"] == CONTAINER)
     assert report["sync_status"] == "in_sync", report
-    token_file = work / "app-credentials" / CONTAINER / "token"
+    token_file = next((work / "app-credentials").glob(f"{CONTAINER}-*/token"))
     first_token = token_file.read_text().strip()
     inspect = json.loads(subprocess.run(["docker", "inspect", CONTAINER], capture_output=True, text=True,
                                         check=True).stdout)[0]

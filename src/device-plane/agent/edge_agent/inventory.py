@@ -14,10 +14,13 @@ from typing import Any
 
 
 def _read_text(path: str) -> str | None:
+    """Read a text or device-tree file. Device-tree values are NUL-terminated."""
     try:
-        return Path(path).read_text(encoding="utf-8").strip()
+        data = Path(path).read_bytes()
     except OSError:
         return None
+    text = data.decode("utf-8", errors="ignore").replace("\x00", "").strip()
+    return text or None
 
 
 def read_os_release() -> tuple[str | None, str | None]:
@@ -51,22 +54,53 @@ _PLACEHOLDER_VALUES = frozenset(
 )
 
 
+def _real_token(value: str | None) -> str | None:
+    cleaned = (value or "").replace("\x00", "").strip()
+    if cleaned and cleaned.lower() not in _PLACEHOLDER_VALUES and cleaned.strip("0"):
+        return cleaned
+    return None
+
+
 def _first_real_value(paths: tuple[str, ...]) -> str | None:
     for path in paths:
-        # Device-tree strings end with a NUL byte.
-        value = (_read_text(path) or "").replace("\x00", "").strip()
-        if value and value.lower() not in _PLACEHOLDER_VALUES and value.strip("0"):
+        value = _real_token(_read_text(path))
+        if value:
             return value
     return None
 
 
+def _cpuinfo_entries() -> list[tuple[str, str]]:
+    content = _read_text("/proc/cpuinfo")
+    if not content:
+        return []
+    entries: list[tuple[str, str]] = []
+    for line in content.splitlines():
+        if ":" not in line:
+            continue
+        key, _, raw = line.partition(":")
+        entries.append((key.strip().lower(), raw.strip()))
+    return entries
+
+
 def read_serial_number() -> str | None:
-    """Board serial: DMI on PCs, the device tree on ARM boards such as the Raspberry Pi."""
+    """Board serial.
+
+    64-bit Raspberry Pi kernels omit ``Serial`` from ``/proc/cpuinfo``; the
+    device tree still has it. PCs expose it through DMI. Placeholder strings
+    (all zeros, "To be filled by O.E.M.") are ignored.
+    """
+    for key, value in _cpuinfo_entries():
+        if key == "serial":
+            serial = _real_token(value)
+            if serial:
+                return serial
+            break
     return _first_real_value(
         (
+            "/sys/firmware/devicetree/base/serial-number",
+            "/proc/device-tree/serial-number",
             "/sys/class/dmi/id/product_serial",
             "/sys/class/dmi/id/board_serial",
-            "/sys/firmware/devicetree/base/serial-number",
         )
     )
 
@@ -193,41 +227,113 @@ def read_uplink() -> dict[str, str]:
     return {"uplink_type": _iface_kind(_sys_class_net(), iface), "uplink_interface": iface[:32]}
 
 
+# ARM Ltd MIDR part numbers. 64-bit Pi kernels have no "model name"; they only
+# report these codes (Pi 4 is Cortex-A72, Pi 5 is Cortex-A76).
+_ARM_CPU_PARTS = {
+    "0xd03": "ARM Cortex-A53",
+    "0xd04": "ARM Cortex-A35",
+    "0xd05": "ARM Cortex-A55",
+    "0xd07": "ARM Cortex-A57",
+    "0xd08": "ARM Cortex-A72",
+    "0xd09": "ARM Cortex-A73",
+    "0xd0a": "ARM Cortex-A75",
+    "0xd0b": "ARM Cortex-A76",
+    "0xd0d": "ARM Cortex-A77",
+    "0xd41": "ARM Cortex-A78",
+    "0xd42": "ARM Cortex-A78AE",
+    "0xd47": "ARM Cortex-A710",
+}
+_ARM_IMPLEMENTER = "0x41"
+
+
+def _cpu_part_name(part: str | None, implementer: str | None) -> str | None:
+    if not part:
+        return None
+    if implementer and implementer.lower() != _ARM_IMPLEMENTER:
+        return None
+    key = part.lower()
+    if not key.startswith("0x"):
+        key = "0x" + key
+    return _ARM_CPU_PARTS.get(key)
+
+
 def read_cpu() -> tuple[str | None, int | None]:
     """Return (cpu_model, cpu_cores).
 
-    x86 uses ``model name``. Raspberry Pi / Jetson-class ARM boards often only
-    expose ``Hardware``, ``Model``, or ``CPU part`` — try those so enrollments
-    send the same ``cpu_model`` field on every board family.
+    x86 uses ``model name``. Aarch64 boards (Raspberry Pi OS 64-bit) usually
+    have only ``CPU part``; known ARM parts are reported as a CPU name such as
+    ``ARM Cortex-A76``. ``Model`` / ``Hardware`` are the last resort.
     """
-    content = _read_text("/proc/cpuinfo")
     model: str | None = None
     hardware: str | None = None
     board_model: str | None = None
     cpu_part: str | None = None
+    implementer: str | None = None
     cores = 0
-    if content:
-        for line in content.splitlines():
-            if ":" not in line:
-                continue
-            key, _, raw = line.partition(":")
-            key = key.strip().lower()
-            value = raw.strip()
-            if key == "model name" and not model and value:
-                model = value
-            elif key == "hardware" and not hardware and value:
-                hardware = value
-            elif key == "model" and not board_model and value:
-                board_model = value
-            elif key == "cpu part" and not cpu_part and value:
-                cpu_part = value
-            if key == "processor":
-                cores += 1
+    for key, value in _cpuinfo_entries():
+        if not value:
+            continue
+        if key == "model name" and not model:
+            model = value
+        elif key == "hardware" and not hardware:
+            hardware = value
+        elif key == "model" and not board_model:
+            board_model = value
+        elif key == "cpu part" and not cpu_part:
+            cpu_part = value
+        elif key == "cpu implementer" and not implementer:
+            implementer = value
+        if key == "processor":
+            cores += 1
     if not model:
-        model = board_model or hardware or cpu_part
+        model = _cpu_part_name(cpu_part, implementer) or board_model or hardware or cpu_part
     if cores == 0:
         cores = os.cpu_count() or 0
     return model, (cores or None)
+
+
+# Linux SIOCGIFADDR: IPv4 address of a named interface. Not in the socket module.
+_SIOCGIFADDR = 0x8915
+
+
+def _iface_ipv4(name: str) -> str | None:
+    import fcntl
+    import struct
+
+    # An immutable buffer is not updated in place: ioctl returns a new one.
+    request = struct.pack("256s", name.encode("utf-8")[:15])
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            packed = fcntl.ioctl(sock.fileno(), _SIOCGIFADDR, request)
+    except OSError:
+        return None
+    if not isinstance(packed, (bytes, bytearray)):
+        return None
+    return socket.inet_ntoa(bytes(packed[20:24]))
+
+
+def _usable_ipv4(address: str | None) -> str | None:
+    if not address or address == "0.0.0.0" or address.startswith("127.") or address.startswith("169.254."):
+        return None
+    return address
+
+
+def read_local_ipv4() -> str | None:
+    """LAN address of the primary physical interface (wired, then Wi-Fi).
+
+    Loopback, link-local, containers, bridges, and WireGuard are skipped.
+    """
+    net_dir = _sys_class_net()
+    try:
+        interfaces = [path.name for path in net_dir.iterdir()]
+    except OSError:
+        return None
+    candidates = [name for name in interfaces if not _is_virtual_iface(name)]
+    for iface in sorted(candidates, key=lambda name: (_iface_preference(name), name)):
+        address = _usable_ipv4(_iface_ipv4(iface))
+        if address:
+            return address
+    return None
 
 
 def read_memory_mb() -> int | None:
@@ -272,4 +378,5 @@ def collect_inventory() -> dict[str, Any]:
         "cpu_model": cpu_model,
         "cpu_cores": cpu_cores,
         "memory_mb": read_memory_mb(),
+        "local_ip": read_local_ipv4(),
     }

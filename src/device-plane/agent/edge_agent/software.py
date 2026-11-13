@@ -298,7 +298,8 @@ def _apply_docker(item: dict[str, Any], tarball: Path | None, app: AppCredential
 
 
 def _apply_compose(
-    item: dict[str, Any], artifact: Path, work_root: Path, app: AppCredential | None = None
+    item: dict[str, Any], artifact: Path, work_root: Path, app: AppCredential | None = None,
+    force_recreate: bool = False,
 ) -> dict[str, Any]:
     from runtime.compose import ComposeAdapter, ComposeError, compose_available
 
@@ -316,8 +317,13 @@ def _apply_compose(
             project_name=project_name,
             artifact=artifact,
             env=dict(spec.get("env") or {}),
-            service_env=_bound_env({}, app) if app is not None else None,
+            # Only the METEORCLOUD_* variables go to the services; a release may set its
+            # own endpoint, as for a docker release. The rest of spec.env stays
+            # substitution input for the compose file.
+            service_env=_bound_env({"env": {k: v for k, v in (spec.get("env") or {}).items()
+                                            if k == "METEORCLOUD_ENDPOINT"}}, app) if app is not None else None,
             service_volumes=[app.volume] if app is not None else None,
+            force_recreate=force_recreate,
         )
         health = adapter.inspect_health(project_name=project_name)
         if health.status in ("unhealthy", "missing"):
@@ -431,7 +437,10 @@ def reconcile_software(
                     artifacts_dir=artifacts_dir,
                 )
                 _report_updating(client, device_token, workload_key=workload_key, progress_percent=100)
-                report = _apply_compose(item, compose_file, compose_work, app)
+                # Same release applied again with a binding: its token file was lost.
+                # The containers must be created again to mount the new file.
+                report = _apply_compose(item, compose_file, compose_work, app,
+                                        force_recreate=app is not None and _already_applied(applied, item))
 
             reports.append(report)
             identity = _desired_identity(item)

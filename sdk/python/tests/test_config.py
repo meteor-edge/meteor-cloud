@@ -63,7 +63,7 @@ def test_retries_overload_then_succeeds_and_never_logs_the_token(caplog):
         return httpx.Response(200, json={"results": [{"index": 0, "id": sent[0]["id"], "status": "stored"}]})
 
     with caplog.at_level("DEBUG"):
-        with MeteorClient(endpoint="http://dataplane.test", token="mca_secret_value",
+        with MeteorClient(endpoint="https://dataplane.test", token="mca_secret_value",
                           transport=httpx.MockTransport(handler)) as client:
             assert client.telemetry.publish("energy.metrics", {"power": 1, "note": "private-payload"}).ok
     assert calls == ["Bearer mca_secret_value"] * 3
@@ -73,7 +73,21 @@ def test_retries_overload_then_succeeds_and_never_logs_the_token(caplog):
 def test_gives_up_when_the_retry_budget_runs_out():
     transport = httpx.MockTransport(lambda request: httpx.Response(
         429, headers={"Retry-After": "1"}, json={"error": {"code": "rate_limited", "message": "slow down"}}))
-    with MeteorClient(endpoint="http://dataplane.test", token="t", retry_time=0.3, transport=transport) as client:
+    with MeteorClient(endpoint="https://dataplane.test", token="t", retry_time=0.3, transport=transport) as client:
         with pytest.raises(meteorcloud.RateLimitedError) as err:
             client.telemetry.publish("energy.metrics", {"power": 1})
     assert err.value.code == "rate_limited" and err.value.status == 429
+
+
+def test_plain_http_is_refused_for_public_addresses():
+    for local in ("http://localhost:8082", "http://127.0.0.1:8082", "http://192.168.1.20:8082", "http://data-api:8082",
+                  "http://[::1]:8082", "https://cloud.example.com"):
+        assert Config(endpoint=local, token="mca_x").endpoint == local
+    for public in ("http://cloud.example.com", "http://8.8.8.8:8082"):
+        with pytest.raises(meteorcloud.ConfigurationError) as refused:
+            Config(endpoint=public, token="mca_x")
+        assert refused.value.code == "insecure_endpoint"
+        assert Config(endpoint=public, token="mca_x", allow_insecure=True).endpoint == public
+    env = {"METEORCLOUD_ENDPOINT": "http://cloud.example.com", "METEORCLOUD_TOKEN": "mca_x",
+           "METEORCLOUD_ALLOW_INSECURE": "true"}
+    assert Config.from_env(env).allow_insecure is True

@@ -1,7 +1,7 @@
 """rules, rule_versions, alerts, alert_events, alert_silences, notification_integrations.
 
-Revision ID: 0012_rules
-Revises: 0011_applications
+Revision ID: 0013_rules
+Revises: 0012_applications
 Create Date: 2026-11-13 00:00:00.000000
 """
 
@@ -15,8 +15,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0012_rules"
-down_revision: str | Sequence[str] | None = "0011_applications"
+revision: str = "0013_rules"
+down_revision: str | Sequence[str] | None = "0012_applications"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import json
 import logging
@@ -20,7 +21,7 @@ from . import exceptions as exc
 from ._http import HTTP
 from ._stream import Stream, StreamSubscription
 from .config import Config, TokenSource
-from .models import Bucket, Command, Event, Identity, Page, PublishResult, format_time, parse_time
+from .models import Bucket, Command, Event, Identity, Message, Page, PublishResult, format_time, parse_time
 
 log = logging.getLogger("meteorcloud")
 
@@ -28,6 +29,8 @@ EventCallback = Callable[[Event], Any]
 CommandHandler = Callable[[Command], Any]
 
 _MAX_BATCH = 500
+#: True inside a command handler (also in the thread a plain handler runs in).
+IN_HANDLER: contextvars.ContextVar[bool] = contextvars.ContextVar("meteorcloud_in_handler", default=False)
 _CLOSED = object()
 
 
@@ -39,7 +42,7 @@ def _check_data(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise exc.ValidationError("data must be a dict (it is sent as a JSON object)", code="invalid_payload")
     try:
-        json.dumps(data)
+        json.dumps(data, allow_nan=False)  # NaN and Infinity are not JSON
     except (TypeError, ValueError) as err:
         raise exc.ValidationError(f"data is not JSON serialisable: {err}", code="invalid_payload") from err
     return data
@@ -49,7 +52,10 @@ async def _call(fn: Callable[..., Any], *args: Any) -> Any:
     """Run a user callback: coroutine functions are awaited, plain functions run in a thread."""
     if inspect.iscoroutinefunction(fn):
         return await fn(*args)
-    return await asyncio.to_thread(fn, *args)
+    result = await asyncio.to_thread(fn, *args)
+    if inspect.isawaitable(result):  # a plain callable that returned a coroutine
+        result = await result
+    return result
 
 
 class AsyncSubscription:
@@ -195,20 +201,18 @@ class AsyncStreams:
             raise exc.PublishError(result.error_message or "The message was rejected", code=result.error_code or "")
         return result
 
-    async def publish_many(self, stream: str, items: Iterable[dict[str, Any]]) -> list[PublishResult]:
+    async def publish_many(self, stream: str, items: Iterable[dict[str, Any] | Message]) -> list[PublishResult]:
         """Publish many messages to one stream.
 
-        Each item is either the data dict itself or ``{"data": {...}, "time": ...,
-        "id": ..., "seq": ..., "type": ...}``. Returns one result per item, in order.
-        Rejected items do not raise: check ``result.ok``.
+        Each item is the data dict itself, or a :class:`Message` when it needs its own
+        ``time``, ``id``, ``seq`` or ``type``. A dict is always sent as data, whatever
+        its keys. Returns one result per item, in order. Rejected items do not raise:
+        check ``result.ok``.
         """
         messages = []
         for item in items:
-            if isinstance(item, dict) and isinstance(item.get("data"), dict) and set(item) <= {
-                "data", "time", "id", "seq", "type"
-            }:
-                messages.append(self._message(stream, item["data"], item.get("time"), item.get("id"),
-                                              item.get("seq"), item.get("type")))
+            if isinstance(item, Message):
+                messages.append(self._message(stream, item.data, item.time, item.id, item.seq, item.type))
             else:
                 messages.append(self._message(stream, item, None, None, None, None))
         results: list[PublishResult] = []
@@ -253,7 +257,8 @@ class AsyncStreams:
             sub._start_consumer()
         return sub
 
-    def on(self, stream: str, *, device_id: str | None = None, application: str | None = None):
+    def on(self, stream: str, *, device_id: str | None = None,
+           application: str | None = None) -> Callable[[EventCallback], EventCallback]:
         """Decorator form of :meth:`subscribe`. The subscription starts with ``client.run()``."""
 
         def register(fn: EventCallback) -> EventCallback:
@@ -423,7 +428,7 @@ class AsyncCommands:
 
     # ---- receiving -----------------------------------------------------------
 
-    def handler(self, name: str = "*"):
+    def handler(self, name: str = "*") -> Callable[[CommandHandler], CommandHandler]:
         """Decorator that registers the function handling commands called ``name``.
 
         The function receives the :class:`Command` and may return a dict, which
@@ -479,16 +484,24 @@ class AsyncCommands:
 
     async def _execute(self, command: Command) -> None:
         handler = self._handlers.get(command.name) or self._handlers.get("*")
-        if not await self._safe_ack(command.id, "received"):
-            return  # it is delivered again later
         if handler is None:
+            if not await self._received(command):
+                return
             outcome: tuple[str, dict[str, Any] | None, str] = (
                 "failed", None, f"This application has no handler for command {command.name!r}")
         else:
+            # A slot first, then "received": the command's time limit starts at
+            # "received", so it must not run out while the command waits for a slot.
             async with self._slots:
+                if not await self._received(command):
+                    return
                 await self._safe_ack(command.id, "executing")
                 try:
-                    result = await _call(handler, command)
+                    token = IN_HANDLER.set(True)
+                    try:
+                        result = await _call(handler, command)
+                    finally:
+                        IN_HANDLER.reset(token)
                     if result is not None and not isinstance(result, dict):
                         result = {"value": result}
                     json.dumps(result)
@@ -501,6 +514,24 @@ class AsyncCommands:
         while len(self._finished) > 1000:
             self._finished.popitem(last=False)
         await self._safe_ack(command.id, *outcome)
+
+    async def _received(self, command: Command) -> bool:
+        """Tell MeteorCloud the command arrived. False means: do not run it.
+
+        Only a clear refusal stops the command. When the answer is lost the service
+        may already have recorded the receipt and will not send the command again, so
+        the command runs and its result is reported.
+        """
+        try:
+            await self._ack(command.id, "received")
+        except (exc.AuthenticationError, exc.PermissionDeniedError, exc.NotFoundError, exc.ValidationError) as err:
+            log.warning("command refused by MeteorCloud; not running it",
+                        extra={"meteorcloud": {"command_id": command.id, "error": err.code}})
+            return False
+        except exc.MeteorCloudError as err:
+            log.warning("command receipt not confirmed; running it anyway",
+                        extra={"meteorcloud": {"command_id": command.id, "error": err.code}})
+        return True
 
     async def _drain(self, timeout: float) -> None:
         tasks = list(self._running.values())

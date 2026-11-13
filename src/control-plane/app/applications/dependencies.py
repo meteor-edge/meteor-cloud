@@ -15,7 +15,8 @@ from app.ports.data_plane import DataPlaneApi
 
 
 def get_data_plane_api(settings: Annotated[Settings, Depends(get_settings)]) -> DataPlaneApi | None:
-    if not settings.data_plane_api_url:
+    # Both are needed: without the shared token the data API refuses every call.
+    if not settings.data_plane_api_url or not settings.data_plane_internal_token:
         return None
     return DataPlaneHttpApi(settings)
 

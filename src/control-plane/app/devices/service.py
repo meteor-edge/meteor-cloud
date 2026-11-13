@@ -1319,6 +1319,7 @@ class FleetService:
             cpu_model=device.cpu_model,
             cpu_cores=device.cpu_cores,
             memory_mb=device.memory_mb,
+            local_ip=device.local_ip,
             labels=device.labels,
             metadata=device.metadata_,
             credential_prefix=device.credential_prefix,

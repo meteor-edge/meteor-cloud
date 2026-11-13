@@ -139,6 +139,11 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 	if len(data) == 0 || data[0] != '{' || !json.Valid(data) {
 		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
 	}
+	// No store can hold a NUL character inside a JSON text; one such message must not
+	// fail the batch it travels in.
+	if hasEscapedNUL(data) {
+		return nil, &Rejection{CodeInvalidPayload, "data must not contain the character \\u0000"}
+	}
 	ts := now
 	if msg.Time != nil {
 		ts = msg.Time.UTC()
@@ -171,4 +176,19 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 		Seq:            msg.Seq,
 		Data:           json.RawMessage(data),
 	}, nil
+}
+
+// hasEscapedNUL reports whether valid JSON contains the escape \u0000 (a backslash
+// that is itself escaped does not count).
+func hasEscapedNUL(data []byte) bool {
+	for i := 0; i+5 < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		if bytes.HasPrefix(data[i+1:], []byte("u0000")) {
+			return true
+		}
+		i++ // skip the escaped character
+	}
+	return false
 }

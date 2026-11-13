@@ -362,6 +362,16 @@ class ApplicationService:
         )
         for old in previous:
             old.expires_at = min(old.expires_at, now + ROTATION_GRACE)
+        # The workload was bound to another application before: that access ends now.
+        for stale in self.session.scalars(
+            select(ApplicationCredential).where(
+                ApplicationCredential.device_id == device.id,
+                ApplicationCredential.workload_key == workload_key,
+                ApplicationCredential.application_id != application.id,
+                ApplicationCredential.revoked_at.is_(None),
+            )
+        ):
+            stale.revoked_at = now
 
         ttl = timedelta(hours=self.settings.app_credential_ttl_hours)
         token, token_hash, prefix = generate_app_token()
@@ -401,6 +411,33 @@ class ApplicationService:
 
     # ---- data plane ---------------------------------------------------
 
+    def _still_bound(
+        self, credentials: list[ApplicationCredential], slugs: dict[uuid.UUID, str]
+    ) -> list[ApplicationCredential]:
+        """Drop tokens the agent obtained for a workload that is no longer bound to that application.
+
+        A token issued for a release stops working when the release is removed from the
+        device or bound to another application or environment. Credentials an operator
+        created by hand have no workload and are kept.
+        """
+        device_ids = {row.device_id for row in credentials if row.workload_key and row.device_id}
+        if not device_ids:
+            return credentials
+        bound = {
+            (device_id, workload_key): application_slug_from_spec(spec)
+            for device_id, workload_key, spec in self.session.execute(
+                select(DeviceSoftware.device_id, DeviceSoftware.workload_key, DeviceSoftware.desired_spec).where(
+                    DeviceSoftware.device_id.in_(device_ids)
+                )
+            )
+        }
+        return [
+            row
+            for row in credentials
+            if not row.workload_key
+            or bound.get((row.device_id, row.workload_key)) == (slugs[row.application_id], row.environment)
+        ]
+
     def policy_snapshot(self) -> PolicySnapshot:
         """Everything the data plane needs to authenticate and authorize applications offline."""
         now = datetime.now(UTC)
@@ -423,6 +460,7 @@ class ApplicationService:
             ).scalars()
             if row.application_id in app_ids
         ]
+        credentials = self._still_bound(credentials, {row.id: row.slug for row in applications})
         apps = [
             PolicyApplication(
                 id=row.id,
@@ -484,7 +522,24 @@ class ApplicationService:
             device = self.session.get(Device, payload.device_id)
             if device is None or device.organization_id != organization_id:
                 raise NotFoundError("device_not_found", "Device was not found.")
-        result = self._require_data_plane().create_command(
+        data_plane = self._require_data_plane()
+        # The audit record is committed before the command leaves: a command is never
+        # sent without one. The key makes a retry of this request the same command.
+        idempotency_key = payload.idempotency_key or uuid.uuid4().hex
+        self.audit.record(
+            action="application.command.send",
+            resource_type="application",
+            actor=actor,
+            organization_id=organization_id,
+            resource_id=application.id,
+            metadata={
+                "name": payload.name,
+                "idempotency_key": idempotency_key,
+                "device_id": str(payload.device_id) if payload.device_id else None,
+            },
+        )
+        self.session.commit()
+        return data_plane.create_command(
             {
                 "organization_id": str(organization_id),
                 "application_id": str(application.id),
@@ -494,20 +549,10 @@ class ApplicationService:
                 "timeout_seconds": payload.timeout_seconds,
                 "expires_in_seconds": payload.expires_in_seconds,
                 "max_attempts": payload.max_attempts,
-                "idempotency_key": payload.idempotency_key,
+                "idempotency_key": idempotency_key,
                 "issued_by": f"user:{actor.id}",
             }
         )
-        self.audit.record(
-            action="application.command.send",
-            resource_type="application",
-            actor=actor,
-            organization_id=organization_id,
-            resource_id=application.id,
-            metadata={"name": payload.name, "command_id": str(result.get("id", ""))},
-        )
-        self.session.commit()
-        return result
 
     def get_command(
         self, *, actor: User, organization_id: uuid.UUID, application_id: uuid.UUID, command_id: uuid.UUID
