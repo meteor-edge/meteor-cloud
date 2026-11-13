@@ -7,11 +7,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.applications.dependencies import get_data_plane_api
 from app.applications.models import ApplicationCredential
 from app.applications.streams import StreamPatternError, stream_matches, validate_stream_pattern
+from app.audit.models import AuditEvent
 from app.core.config import get_settings
 from app.devices.tokens import hash_token
 from app.tenancy.models import OrganizationRole
@@ -35,6 +37,11 @@ def _app(client: TestClient, org, headers, slug: str = "energy-collector", **per
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _audit_count(db_session: Session, action: str) -> int:
+    db_session.expire_all()
+    return db_session.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.action == action))
 
 
 def _policy(client: TestClient) -> dict:
@@ -244,6 +251,17 @@ def test_agent_mints_device_scoped_credential_for_bound_workload(client: TestCli
     assert old.expires_at <= datetime.now(UTC) + timedelta(minutes=11)
     assert len(_policy(client)["credentials"]) == 2
 
+    # Binding the workload to another application ends the old application's access,
+    # in the snapshot at once and for good when the agent mints the new token.
+    other = _app(client, org, headers, slug="other-app", publish=["energy.*"])
+    _deploy_bound(client, org, headers, reg["device_id"], application="other-app")
+    assert _policy(client)["credentials"] == []
+    third = client.post(mint, headers=device_headers, json={"workload_key": "collector"})
+    assert third.status_code == 201, third.text
+    assert [c["application_id"] for c in _policy(client)["credentials"]] == [other["id"]]
+    db_session.refresh(old)
+    assert old.revoked_at is not None
+
     # Disabling the device removes its application credentials from the snapshot.
     disabled = client.post(f"/api/v1/organizations/{org.id}/devices/{reg['device_id']}/disable", headers=headers)
     assert disabled.status_code == 200, disabled.text
@@ -293,7 +311,9 @@ def test_commands_are_authorized_here_and_forwarded(client: TestClient, db_sessi
     app = _app(client, org, headers, receive_commands=True)
     base = f"/api/v1/organizations/{org.id}/applications/{app['id']}/commands"
 
-    # Not configured: explicit 503, nothing pretends to work.
+    # Not configured: explicit 503, nothing pretends to work. Overridden so the test
+    # never reaches a data plane that happens to be configured in the environment.
+    client.app.dependency_overrides[get_data_plane_api] = lambda: None
     assert client.post(base, headers=headers, json={"name": "restart"}).status_code == 503
 
     fake = _FakeDataPlane()
@@ -303,6 +323,19 @@ def test_commands_are_authorized_here_and_forwarded(client: TestClient, db_sessi
     assert fake.created[0]["organization_id"] == str(org.id)
     assert fake.created[0]["application_id"] == app["id"]
     assert fake.created[0]["issued_by"].startswith("user:")
+    # Every command carries a key, so a retry is the same command, and the audit
+    # record exists even when the data plane fails afterwards.
+    assert fake.created[0]["idempotency_key"]
+
+    class _Down(_FakeDataPlane):
+        def create_command(self, body: dict) -> dict:
+            raise RuntimeError("data plane down")
+
+    client.app.dependency_overrides[get_data_plane_api] = lambda: _Down()
+    before = _audit_count(db_session, "application.command.send")
+    assert client.post(base, headers=headers, json={"name": "restart"}).status_code == 500
+    assert _audit_count(db_session, "application.command.send") == before + 1
+    client.app.dependency_overrides[get_data_plane_api] = lambda: fake
     fetched = client.get(f"{base}/{sent.json()['id']}", headers=headers)
     assert fetched.status_code == 200 and fetched.json()["state"] == "SUCCEEDED"
 

@@ -22,7 +22,18 @@ services:
       # Direct MQTT for applications: short-lived tokens signed by the data API. Off unless
       # DATAPLANE_MQTT_JWT_SECRET is set (the same value the data-api service signs with).
       EMQX_AUTHENTICATION__2__ENABLE: ${DATAPLANE_MQTT_ENABLED:-false}
-      EMQX_AUTHENTICATION__2__SECRET: ${DATAPLANE_MQTT_JWT_SECRET:-unset-unset-unset-unset-unset-unset}
+      EMQX_AUTHENTICATION__2__SECRET: ${DATAPLANE_MQTT_JWT_SECRET:-}
+    # Fail closed: with direct MQTT on and no real signing secret, anyone could forge an
+    # application token, so the broker refuses to start instead.
+    command:
+      - sh
+      - -c
+      - |
+        if [ "$$EMQX_AUTHENTICATION__2__ENABLE" = "true" ] && [ "$${#EMQX_AUTHENTICATION__2__SECRET}" -lt 32 ]; then
+          echo "DATAPLANE_MQTT_ENABLED=true needs DATAPLANE_MQTT_JWT_SECRET (32+ characters); refusing to start." >&2
+          exit 1
+        fi
+        exec /opt/emqx/bin/emqx foreground
     ports:
       - "${MQTT_PORT:-8883}:8883"
       - "18083:18083"
@@ -100,6 +111,9 @@ services:
       - "${DATA_API_PORT:-8082}:8082"
     depends_on:
       emqx:
+        condition: service_healthy
+        required: false
+      postgres:
         condition: service_healthy
         required: false
     networks:
