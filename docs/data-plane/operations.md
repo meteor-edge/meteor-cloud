@@ -43,7 +43,7 @@ Data API. Any secret can instead be read from a file by setting `<NAME>_FILE`.
 | `DATAPLANE_BUS` | `mqtt` | `memory` for a single replica without a broker |
 | `DATAPLANE_MQTT_URL` | required with `mqtt` | e.g. `mqtts://emqx:8883` |
 | `MQTT_PLATFORM_USERNAME`, `MQTT_PLATFORM_PASSWORD`, `MQTT_CA_CERT_PATH` | | The platform's broker login, same as the control plane |
-| `DATAPLANE_MQTT_JWT_SECRET` | empty | 32+ characters. Enables `POST /v1/mqtt/credentials`. EMQX must verify with the same value (`EMQX_AUTHENTICATION__2__ENABLE=true`, `EMQX_AUTHENTICATION__2__SECRET`) |
+| `DATAPLANE_MQTT_JWT_SECRET` | empty | 32+ characters. Enables `POST /v1/mqtt/credentials`. EMQX must verify with the same value (`EMQX_AUTHENTICATION__2__ENABLE=true`, `EMQX_AUTHENTICATION__2__SECRET`). In Compose the broker refuses to start when `DATAPLANE_MQTT_ENABLED=true` and this is missing |
 | `DATAPLANE_MQTT_PUBLIC_URL` | | Broker address given to MQTT clients |
 | `DATAPLANE_MQTT_TOKEN_TTL` | `1h` | Lifetime of an MQTT login |
 | `DATAPLANE_POLICY_INTERVAL` | `5s` | How often the policy is pulled. Upper bound for a revocation to take effect |
@@ -91,7 +91,7 @@ Logs are JSON lines on stdout. Tokens, credentials and message payloads are neve
 - **Identity from the token only.** Organization, application, device and environment are taken from the credential. Request bodies and MQTT payloads cannot override them.
 - **Least privilege.** An application can do nothing until permissions are granted, and patterns cannot grant everything (`**` alone is refused).
 - **Tenant isolation.** Every storage query and every live match is bound to the caller's organization. Command targets are resolved inside the sender's organization.
-- **Tokens.** Opaque, 256 bits of randomness, only the SHA-256 hash is stored. They expire, can be rotated and revoked, and revocation reaches open connections within the policy interval.
+- **Tokens.** Opaque, 256 bits of randomness, only the SHA-256 hash is stored. They expire, can be rotated and revoked, and revocation reaches open connections within the policy interval. Direct MQTT is the exception: a connected MQTT client keeps its session until its broker token expires (`DATAPLANE_MQTT_TOKEN_TTL`); see the known limits in the [contract](../../contracts/data-plane-v1.md#mqtt).
 - **Fail closed.** No policy, or a policy older than `DATAPLANE_POLICY_MAX_STALE`, means every request is refused.
 - **TLS.** Terminate TLS in front of port 8082 (Traefik or your ingress). The broker connection is TLS with the platform CA. Use `https://` for `DATA_PLANE_PUBLIC_URL` in production: the token travels in a header.
 - **Secrets.** `DATA_PLANE_INTERNAL_TOKEN`, `DATAPLANE_MQTT_JWT_SECRET`, the database URL and the broker password come from the environment or `_FILE` variants, never from images or committed files. The values in `.env.example` are for local development only.

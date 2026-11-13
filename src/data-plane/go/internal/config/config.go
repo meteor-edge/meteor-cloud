@@ -240,6 +240,9 @@ func (c *Config) validate() error {
 	if c.MQTTJWTSecret != "" && len(c.MQTTJWTSecret) < 32 {
 		return fmt.Errorf("DATAPLANE_MQTT_JWT_SECRET must be at least 32 characters")
 	}
+	if c.PolicyFile == "" && (c.PolicyInterval <= 0 || c.PolicyMaxStale <= 0) {
+		return fmt.Errorf("DATAPLANE_POLICY_INTERVAL and DATAPLANE_POLICY_MAX_STALE must be greater than zero")
+	}
 	if c.MaxBatch < 1 || c.QueueSize < c.MaxBatch {
 		return fmt.Errorf("DATAPLANE_QUEUE_SIZE must be at least DATAPLANE_MAX_BATCH")
 	}

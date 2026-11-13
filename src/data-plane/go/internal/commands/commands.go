@@ -245,7 +245,11 @@ func (s *Service) Ack(ctx context.Context, id *identity.Identity, commandID, sta
 		u = storage.CommandUpdate{From: []string{storage.StatePending, storage.StateDispatched},
 			State: storage.StateReceived, ReceivedAt: &now, NextCheckAt: &deadline}
 	case AckExecuting:
+		// The time to finish counts from the first receipt, not from each progress report.
 		deadline := now.Add(time.Duration(cmd.TimeoutSeconds) * time.Second)
+		if cmd.ReceivedAt != nil {
+			deadline = cmd.ReceivedAt.Add(time.Duration(cmd.TimeoutSeconds) * time.Second)
+		}
 		u = storage.CommandUpdate{From: []string{storage.StatePending, storage.StateDispatched, storage.StateReceived},
 			State: storage.StateExecuting, ReceivedAt: &now, NextCheckAt: &deadline}
 	case AckSucceeded, AckFailed:

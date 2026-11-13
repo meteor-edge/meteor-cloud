@@ -18,7 +18,7 @@ type Memory struct {
 	mu       sync.Mutex
 	events   map[string]*envelope.Event // org + "\x00" + id
 	commands map[string]*Command
-	byKey    map[string]string // org + "\x00" + idempotency key -> command id
+	byKey    map[string]string // org, issuer, idempotency key -> command id
 	Dead     []DeadLetter
 	// FailInserts makes InsertEvents fail n times (tests of retry and backpressure).
 	FailInserts int
@@ -252,10 +252,11 @@ func (m *Memory) CreateCommand(_ context.Context, c *Command) (*Command, bool, e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if c.IdempotencyKey != "" {
-		if id, ok := m.byKey[c.OrganizationID+"\x00"+c.IdempotencyKey]; ok {
+		key := c.OrganizationID + "\x00" + c.IssuedBy + "\x00" + c.IdempotencyKey
+		if id, ok := m.byKey[key]; ok {
 			return cloneCommand(m.commands[id]), false, nil
 		}
-		m.byKey[c.OrganizationID+"\x00"+c.IdempotencyKey] = c.ID
+		m.byKey[key] = c.ID
 	}
 	m.commands[c.ID] = cloneCommand(c)
 	return cloneCommand(c), true, nil

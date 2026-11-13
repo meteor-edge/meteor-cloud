@@ -20,7 +20,7 @@ import (
 //
 // In a topic the dots of a stream name become levels ("energy.power" is
 // "energy/power"), so a stream permission pattern is an ordinary MQTT topic filter:
-// "energy.*" is "energy/+" and "energy.**" is "energy/#".
+// "energy.*" is "energy/+" and "energy.**" is "energy/+/#" (one or more levels below).
 const (
 	TopicPrefix = "meteor/v1/orgs/"
 	// CloudDevice stands in for the device segment of cloud-hosted instances.
@@ -50,7 +50,9 @@ func StreamLevels(pattern string) string {
 		case "*":
 			parts[i] = "+"
 		case "**":
-			parts[i] = "#"
+			// "**" is one or more words. MQTT "#" alone also matches the parent
+			// level, so one level is required first.
+			parts[i] = "+/#"
 		}
 	}
 	return strings.Join(parts, "/")

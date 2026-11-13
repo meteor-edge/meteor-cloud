@@ -68,7 +68,7 @@ Roles: viewers read applications; operators also send commands; developers, admi
 - A credential belongs to one application and is either **device-scoped** (`device_id` set: every message it publishes is attributed to that device) or **cloud-scoped**.
 - `environment` is a label carried on every message (`production`, `staging`, ...).
 - Every credential expires. Console-created ones default to 90 days (1 to 365). Tokens the agent obtains for deployed workloads live `APP_CREDENTIAL_TTL_HOURS` (default 168) and are replaced automatically.
-- Revoking a credential, disabling or deleting its application, or disabling its device cuts access within one policy poll (about 5 seconds), including open live connections.
+- Revoking a credential, disabling or deleting its application, or disabling its device cuts access within one policy poll (about 5 seconds), including open live connections. A workload token also stops working when its release is removed from the device or bound to another application. Direct MQTT sessions are the exception, see [operations](operations.md#security).
 
 ## Applications deployed to devices
 
@@ -83,7 +83,7 @@ Bind a Docker or Docker Compose release to an application by adding `meteorcloud
 When the release is deployed, the agent on each device:
 
 1. asks the control plane for a token for that workload. The control plane issues one only if the device's desired release really is bound to the application, so a device cannot obtain tokens for anything else. The token is scoped to that device;
-2. stores it under `/etc/edge-agent/app-credentials/<workload>/token`, in a directory only root can enter;
+2. stores it under `/etc/edge-agent/app-credentials/<workload>-<hash>/token`, in a directory only root can enter;
 3. starts the container with the file mounted read-only at `/run/secrets/meteorcloud-token` and with `METEORCLOUD_ENDPOINT`, `METEORCLOUD_TOKEN_FILE`, `METEORCLOUD_APP_ID`, `METEORCLOUD_DEVICE_ID`, `METEORCLOUD_ENVIRONMENT` and `METEORCLOUD_ORGANIZATION_ID` set. For Compose, an override file adds this to every service and the project's own compose file is not modified;
 4. replaces the token in place before it expires. The container is not restarted and the SDK picks up the new token. The previous token stays valid for 10 minutes so nothing is interrupted.
 

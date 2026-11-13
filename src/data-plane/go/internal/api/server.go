@@ -234,7 +234,7 @@ func (s *Server) allow(credentialID string, n int) bool {
 		if burst < 1 {
 			burst = int(s.opts.RateLimitPerSec)
 		}
-		entry = &limiterEntry{lim: rate.NewLimiter(rate.Limit(s.opts.RateLimitPerSec), burst)}
+		entry = &limiterEntry{lim: rate.NewLimiter(rate.Limit(s.opts.RateLimitPerSec), burst), seen: now}
 		s.limiters[credentialID] = entry
 		if len(s.limiters) > 50000 { // bound memory: forget idle credentials
 			for k, e := range s.limiters {
@@ -246,6 +246,10 @@ func (s *Server) allow(credentialID string, n int) bool {
 	}
 	entry.seen = now
 	s.limMu.Unlock()
+	// A request larger than the bucket takes the whole bucket instead of failing forever.
+	if b := entry.lim.Burst(); n > b && b > 0 {
+		n = b
+	}
 	return entry.lim.AllowN(now, n)
 }
 
