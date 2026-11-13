@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import uuid
 from typing import Annotated
@@ -42,6 +43,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 
 
+def _observed_lan_ip(request: Request) -> str | None:
+    """Private address the request arrived from, when the agent sent no LAN address.
+
+    A public or proxied address is not the device's Ethernet or Wi-Fi address, so it is ignored.
+    """
+    host = request.client.host if request.client else None
+    if not host:
+        return None
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    if (
+        not address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_unspecified
+        or address.is_multicast
+    ):
+        return None
+    return str(address)
+
+
 @router.post(
     "/register",
     response_model=AgentRegisterResponse,
@@ -75,9 +99,14 @@ def register_device(
 @router.post("/heartbeat", response_model=AgentHeartbeatResponse)
 def device_heartbeat(
     payload: AgentHeartbeatRequest,
+    request: Request,
     device: CurrentDevice,
     service: RegistrationSvc,
 ) -> AgentHeartbeatResponse:
+    if payload.local_ip is None:
+        observed = _observed_lan_ip(request)
+        if observed is not None:
+            payload = payload.model_copy(update={"local_ip": observed})
     return service.heartbeat(device=device, payload=payload)
 
 

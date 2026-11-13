@@ -469,6 +469,7 @@ export function DeviceDetailPage() {
               value={device.memory_mb ? String(device.memory_mb) : null}
             />
             <Detail label="MAC address" value={device.mac_addresses.join(", ")} />
+            <Detail label="Local IP" value={device.local_ip} />
             <Detail
               label="Last seen"
               value={device.last_seen_at ? formatDateTime(device.last_seen_at) : "Never"}
