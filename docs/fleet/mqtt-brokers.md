@@ -131,6 +131,8 @@ One node only. On one 4-core machine a single node carried 20,000 QoS 1 messages
 
 Unchanged from earlier releases: `emqx/emqx:5.8.6` with HTTP authentication and authorization against `/internal/mqtt/authenticate` and `/authorize`. It now also sends the client ID and the retain flag so the same rules apply.
 
+One difference: EMQX checks the topic behind a `$share/<group>/` filter, so a device may share-subscribe to its own command inbox (it still cannot reach any other topic). Mosquitto and VerneMQ refuse every `$share` filter from a device.
+
 Stay on 5.8.6 unless you have an EMQ commercial licence: 5.9.0 and later are under BSL 1.1, which does not allow hosting it for others, embedding it in a product you sell, or clustering without a licence ([EMQX Licensing FAQ](https://www.emqx.com/en/content/license-faq)). The 5.8 open-source line gets no fixes since 2026-02-28.
 
 ## VerneMQ
@@ -147,6 +149,7 @@ VerneMQ asks the control plane through `vmq_webhooks`. The control plane has a t
 - The control plane sends no `cache-control` header, so VerneMQ asks for every publish and subscribe. A revoked device loses access at once; its open connection stays until it reconnects.
 - `vmq_passwd` and `vmq_acl` are off, anonymous access is off, TLS 1.2+ on 8883 is the only published listener (plain 1883 stays on loopback inside the container).
 - Telemetry processing must stay out of webhooks: the hooks only answer allow or deny.
+- A denied publish closes that client's connection (EMQX does the same with `deny_action = disconnect`; Mosquitto drops the message and keeps the connection). Agents reconnect on their own.
 
 Licence: the official `vernemq/vernemq` image starts only with `DOCKER_VERNEMQ_ACCEPT_EULA=yes`. Commercial use of the official builds needs a VerneMQ subscription. The alternative is to build the image yourself from the Apache-2.0 source and set `VERNEMQ_IMAGE`.
 

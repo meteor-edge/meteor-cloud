@@ -45,17 +45,26 @@ def _observer(live_config, topic_filter: str = "#") -> MqttSession:
     return observer
 
 
-def _assert_publish_blocked(observer: MqttSession, session: MqttSession, topic: str, *, retain: bool = False) -> None:
+def _assert_publish_blocked(
+    observer: MqttSession, session: MqttSession, topic: str, *, retain: bool = False
+) -> None:
     marker = f"blocked-{uuid.uuid4().hex}"
     session.publish(topic, json.dumps({"marker": marker}), retain=retain)
     leaked = observer.wait_message(lambda _topic, payload: marker in payload, timeout=3)
     assert leaked is None, f"denied publish to {topic} reached the broker's subscribers"
 
 
-def _assert_publish_delivered(observer: MqttSession, session: MqttSession, topic: str, *, retain: bool = False) -> None:
+def _assert_publish_delivered(
+    observer: MqttSession, session: MqttSession, topic: str, *, retain: bool = False
+) -> None:
     marker = f"allowed-{uuid.uuid4().hex}"
     assert session.publish(topic, json.dumps({"marker": marker}), retain=retain)
-    assert observer.wait_message(lambda t, payload: t == topic and marker in payload, timeout=10) is not None
+    assert (
+        observer.wait_message(
+            lambda t, payload: t == topic and marker in payload, timeout=10
+        )
+        is not None
+    )
 
 
 def test_valid_device_connects(api, live_config):
@@ -124,9 +133,15 @@ def test_own_topics_allowed(api, live_config):
     try:
         assert session.wait_connected() is True
         assert session.wait_subscribed() is True
-        _assert_publish_delivered(observer, session, f"devices/{device.device_id}/status", retain=True)
-        _assert_publish_delivered(observer, session, f"devices/{device.device_id}/metrics")
-        _assert_publish_delivered(observer, session, f"devices/{device.device_id}/commands/result")
+        _assert_publish_delivered(
+            observer, session, f"devices/{device.device_id}/status", retain=True
+        )
+        _assert_publish_delivered(
+            observer, session, f"devices/{device.device_id}/metrics"
+        )
+        _assert_publish_delivered(
+            observer, session, f"devices/{device.device_id}/commands/result"
+        )
     finally:
         session.close()
         observer.close()
@@ -140,9 +155,13 @@ def test_reserved_and_unknown_own_topics_denied(api, live_config):
     try:
         assert session.wait_connected() is True
         for suffix in ("events", "telemetry", "custom", "commands"):
-            _assert_publish_blocked(observer, session, f"devices/{device.device_id}/{suffix}")
+            _assert_publish_blocked(
+                observer, session, f"devices/{device.device_id}/{suffix}"
+            )
         # Only the status topic may be retained.
-        _assert_publish_blocked(observer, session, f"devices/{device.device_id}/metrics", retain=True)
+        _assert_publish_blocked(
+            observer, session, f"devices/{device.device_id}/metrics", retain=True
+        )
     finally:
         session.close()
         observer.close()
@@ -160,7 +179,8 @@ def test_denied_subscriptions(api, live_config):
         "devices/#",
         "#",
         "$SYS/#",
-        f"$share/x/devices/{device_a.device_id}/commands",
+        # EMQX checks the topic behind $share, so only a foreign inbox is denied on every broker.
+        f"$share/x/devices/{device_b.device_id}/commands",
         "meteorcloud/control/#",
     ]
     for topic_filter in filters:
@@ -171,7 +191,9 @@ def test_denied_subscriptions(api, live_config):
             session.subscribe(topic_filter)
             subscribed = session.wait_subscribed(6)
             # Either a failure SUBACK or a disconnect, depending on the broker.
-            assert (not subscribed) or session.disconnect_event.is_set(), f"{topic_filter} was accepted"
+            assert (not subscribed) or session.disconnect_event.is_set(), (
+                f"{topic_filter} was accepted"
+            )
         finally:
             session.close()
 
@@ -185,7 +207,9 @@ def test_other_device_topics_denied(api, live_config):
     try:
         assert session.wait_connected() is True
         for suffix in ("status", "metrics", "commands", "commands/result"):
-            _assert_publish_blocked(observer, session, f"devices/{device_b.device_id}/{suffix}")
+            _assert_publish_blocked(
+                observer, session, f"devices/{device_b.device_id}/{suffix}"
+            )
         _assert_publish_blocked(observer, session, "meteorcloud/control/disconnect")
     finally:
         session.close()
@@ -198,7 +222,9 @@ def test_device_cannot_send_or_read_another_devices_commands(api, live_config):
     device_b = api.register_device("cmd-iso-b")
     commands_a = f"devices/{device_a.device_id}/commands"
     session_a = _session(live_config, device_a, auto_subscribe=[commands_a])
-    session_b = _session(live_config, device_b, auto_subscribe=[f"devices/{device_b.device_id}/commands"])
+    session_b = _session(
+        live_config, device_b, auto_subscribe=[f"devices/{device_b.device_id}/commands"]
+    )
     platform = _observer(live_config, commands_a)
     session_a.start()
     session_b.start()
@@ -206,17 +232,41 @@ def test_device_cannot_send_or_read_another_devices_commands(api, live_config):
         assert session_a.wait_connected() and session_a.wait_subscribed()
         assert session_b.wait_connected() and session_b.wait_subscribed()
 
-        # Device B tries to command device A (and A tries to command itself).
-        forged = json.dumps({"type": "reboot", "marker": "forged-by-b"})
-        session_b.publish(commands_a, forged)
-        session_a.publish(commands_a, json.dumps({"type": "reboot", "marker": "forged-by-a"}))
-        assert session_a.wait_message(lambda _t, payload: "forged-by" in payload, timeout=3) is None
+        # Device B tries to command device A (and A tries to command itself). The
+        # forgers use their own sessions: some brokers (VerneMQ) close the
+        # connection of a client whose publish is denied.
+        for forger, marker in ((device_b, "forged-by-b"), (device_a, "forged-by-a")):
+            forging = _session(live_config, forger)
+            forging.start()
+            try:
+                assert forging.wait_connected() is True
+                forging.publish(
+                    commands_a, json.dumps({"type": "reboot", "marker": marker})
+                )
+                assert (
+                    session_a.wait_message(
+                        lambda _t, payload: "forged-by" in payload, timeout=3
+                    )
+                    is None
+                )
+            finally:
+                forging.close()
 
         # The platform commands A: A receives it, B does not.
         real = json.dumps({"type": "noop", "marker": "from-platform"})
         assert platform.publish(commands_a, real)
-        assert session_a.wait_message(lambda t, payload: t == commands_a and "from-platform" in payload) is not None
-        assert session_b.wait_message(lambda _t, payload: "from-platform" in payload, timeout=3) is None
+        assert (
+            session_a.wait_message(
+                lambda t, payload: t == commands_a and "from-platform" in payload
+            )
+            is not None
+        )
+        assert (
+            session_b.wait_message(
+                lambda _t, payload: "from-platform" in payload, timeout=3
+            )
+            is None
+        )
     finally:
         session_a.close()
         session_b.close()
@@ -238,7 +288,9 @@ def test_cross_tenant_isolation(api, live_config):
         try:
             assert session.wait_connected() is True
             for suffix in ("status", "metrics", "commands", "commands/result"):
-                _assert_publish_blocked(observer, session, f"devices/{device_b.device_id}/{suffix}")
+                _assert_publish_blocked(
+                    observer, session, f"devices/{device_b.device_id}/{suffix}"
+                )
             session.subscribe(f"devices/{device_b.device_id}/commands")
             assert (not session.wait_subscribed(6)) or session.disconnect_event.is_set()
         finally:
@@ -265,7 +317,10 @@ def test_client_id_of_another_device_denied(api, live_config):
                 attacker.close()
         assert not victim.disconnect_event.is_set()
         # meteorcli's own forms still work.
-        for client_id in (f"device-{device_a.device_id}", f"device-{device_a.device_id}-mqtt-test-ab12cd34"):
+        for client_id in (
+            f"device-{device_a.device_id}",
+            f"device-{device_a.device_id}-mqtt-test-ab12cd34",
+        ):
             own = _session(live_config, device_a, client_id=client_id)
             own.start()
             try:
@@ -289,7 +344,9 @@ def test_revoke_cuts_a_connected_device(api, live_config):
         session.disconnect_event.clear()
         api.revoke_mqtt(device.device_id)
         if live_config.instant_disconnect:
-            assert session.disconnect_event.wait(10), "the broker did not drop the revoked device"
+            assert session.disconnect_event.wait(10), (
+                "the broker did not drop the revoked device"
+            )
         # Connected or not, nothing from it gets through any more.
         _assert_publish_blocked(observer, session, status)
         retry = _session(live_config, device)
@@ -314,7 +371,9 @@ def test_disable_cuts_a_connected_device(api, live_config):
         session.disconnect_event.clear()
         api.disable_device(device.device_id)
         if live_config.instant_disconnect:
-            assert session.disconnect_event.wait(10), "the broker did not drop the disabled device"
+            assert session.disconnect_event.wait(10), (
+                "the broker did not drop the disabled device"
+            )
         _assert_publish_blocked(observer, session, status)
     finally:
         session.close()
@@ -354,7 +413,9 @@ def test_old_tls_versions_refused(live_config):
 
     refused = False
     try:
-        with socket.create_connection((live_config.mqtt_host, live_config.mqtt_port), timeout=8) as raw:
+        with socket.create_connection(
+            (live_config.mqtt_host, live_config.mqtt_port), timeout=8
+        ) as raw:
             with context.wrap_socket(raw):
                 pass
     except (ssl.SSLError, OSError):
@@ -367,7 +428,9 @@ def test_plain_tcp_is_not_mqtt(live_config):
     import socket
 
     connect = bytes.fromhex("101000044d5154540402003c000474657374")
-    with socket.create_connection((live_config.mqtt_host, live_config.mqtt_port), timeout=8) as raw:
+    with socket.create_connection(
+        (live_config.mqtt_host, live_config.mqtt_port), timeout=8
+    ) as raw:
         raw.settimeout(4)
         raw.sendall(connect)
         try:
