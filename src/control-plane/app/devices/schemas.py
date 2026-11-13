@@ -27,9 +27,12 @@ def _optional_ip(value: object) -> str | None:
     if not cleaned:
         return None
     try:
-        return str(ipaddress.ip_address(cleaned))
+        address = ipaddress.ip_address(cleaned)
     except ValueError:
         return None
+    if address.is_unspecified or address.is_loopback or address.is_link_local or address.is_multicast:
+        return None
+    return str(address)
 
 
 LocalIp = Annotated[str | None, BeforeValidator(_optional_ip)]

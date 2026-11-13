@@ -166,6 +166,21 @@ def test_serial_comes_from_cpuinfo_when_the_device_tree_is_missing(monkeypatch) 
     assert inventory.read_serial_number() == "10000000abcd1234"
 
 
+def test_iface_ipv4_uses_the_buffer_ioctl_returns(monkeypatch) -> None:
+    import fcntl
+    import socket
+
+    def fake_ioctl(fd, request, buf, mutate_flag=True):
+        # bytes stay unchanged; the address is only in the returned buffer.
+        assert bytes(buf)[20:24] == b"\x00\x00\x00\x00"
+        out = bytearray(buf)
+        out[20:24] = socket.inet_aton("192.168.1.50")
+        return bytes(out)
+
+    monkeypatch.setattr(fcntl, "ioctl", fake_ioctl)
+    assert inventory._iface_ipv4("wlan0") == "192.168.1.50"
+
+
 def test_local_ip_prefers_wired_and_skips_link_local(monkeypatch, tmp_path) -> None:
     net = _net_dir(
         tmp_path,
@@ -178,6 +193,9 @@ def test_local_ip_prefers_wired_and_skips_link_local(monkeypatch, tmp_path) -> N
 
     addresses["eth0"] = "192.168.1.20"
     assert inventory.read_local_ipv4() == "192.168.1.20"
+
+    addresses["eth0"] = "0.0.0.0"
+    assert inventory.read_local_ipv4() == "192.168.1.30"
 
 
 def test_raspberry_pi_reports_model_and_serial_from_the_device_tree(monkeypatch) -> None:

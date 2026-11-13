@@ -300,20 +300,20 @@ def _iface_ipv4(name: str) -> str | None:
     import fcntl
     import struct
 
+    # An immutable buffer is not updated in place: ioctl returns a new one.
+    request = struct.pack("256s", name.encode("utf-8")[:15])
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            packed = fcntl.ioctl(
-                sock.fileno(),
-                _SIOCGIFADDR,
-                struct.pack("256s", name.encode("utf-8")[:15]),
-            )
+            packed = fcntl.ioctl(sock.fileno(), _SIOCGIFADDR, request)
     except OSError:
         return None
-    return socket.inet_ntoa(packed[20:24])
+    if not isinstance(packed, (bytes, bytearray)):
+        return None
+    return socket.inet_ntoa(bytes(packed[20:24]))
 
 
 def _usable_ipv4(address: str | None) -> str | None:
-    if not address or address.startswith("127.") or address.startswith("169.254."):
+    if not address or address == "0.0.0.0" or address.startswith("127.") or address.startswith("169.254."):
         return None
     return address
 

@@ -413,11 +413,13 @@ def test_old_tls_versions_refused(live_config):
 
     refused = False
     try:
-        with socket.create_connection(
-            (live_config.mqtt_host, live_config.mqtt_port), timeout=8
-        ) as raw:
-            with context.wrap_socket(raw):
-                pass
+        with (
+            socket.create_connection(
+                (live_config.mqtt_host, live_config.mqtt_port), timeout=8
+            ) as raw,
+            context.wrap_socket(raw),
+        ):
+            pass
     except (ssl.SSLError, OSError):
         refused = True
     assert refused
