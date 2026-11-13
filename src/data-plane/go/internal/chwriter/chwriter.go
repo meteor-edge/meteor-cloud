@@ -14,8 +14,8 @@ package chwriter
 import (
 	"context"
 	"errors"
-	"net/url"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
