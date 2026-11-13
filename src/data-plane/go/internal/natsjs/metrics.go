@@ -13,17 +13,17 @@ type Metrics struct {
 	Disconnects prometheus.Counter
 	AsyncErrors prometheus.Counter
 
-	Published        *prometheus.CounterVec   // subject_root, result: ok|duplicate|error
-	PublishDuration  prometheus.Histogram
-	Consumed         *prometheus.CounterVec   // consumer
-	Processed        *prometheus.CounterVec   // consumer, result: ack|nak|term
-	Redeliveries     *prometheus.CounterVec   // consumer: messages seen with delivery count > 1
-	ProcessingTime   *prometheus.HistogramVec // consumer
-	BatchSize        *prometheus.HistogramVec // consumer
-	Pending          *prometheus.GaugeVec     // consumer: messages not yet delivered
-	AckPending       *prometheus.GaugeVec     // consumer: delivered, not yet acknowledged
-	Redelivered      *prometheus.GaugeVec     // consumer: currently redelivered, unacknowledged
-	EndToEndLatency  *prometheus.HistogramVec // consumer: stream timestamp to acknowledgement
+	Published       *prometheus.CounterVec // subject_root, result: ok|duplicate|error
+	PublishDuration prometheus.Histogram
+	Consumed        *prometheus.CounterVec   // consumer
+	Processed       *prometheus.CounterVec   // consumer, result: ack|nak|term
+	Redeliveries    *prometheus.CounterVec   // consumer: messages seen with delivery count > 1
+	ProcessingTime  *prometheus.HistogramVec // consumer
+	BatchSize       *prometheus.HistogramVec // consumer
+	Pending         *prometheus.GaugeVec     // consumer: messages not yet delivered
+	AckPending      *prometheus.GaugeVec     // consumer: delivered, not yet acknowledged
+	Redelivered     *prometheus.GaugeVec     // consumer: currently redelivered, unacknowledged
+	EndToEndLatency *prometheus.HistogramVec // consumer: stream timestamp to acknowledgement
 }
 
 const ns = "meteorcloud_nats"

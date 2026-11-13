@@ -51,6 +51,9 @@ func Connect(cfg ConnConfig, m *Metrics, log *slog.Logger) (*nats.Conn, error) {
 			log.Warn("NATS asynchronous error", "subject", subject, "error", err.Error())
 		}),
 	}
+	if cfg.InboxPrefix != "" {
+		opts = append(opts, nats.CustomInboxPrefix(cfg.InboxPrefix))
+	}
 	if cfg.CredsFile != "" {
 		opts = append(opts, nats.UserCredentials(cfg.CredsFile))
 	} else if cfg.User != "" {

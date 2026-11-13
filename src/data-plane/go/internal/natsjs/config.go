@@ -21,11 +21,14 @@ import (
 // ConnConfig is how a service reaches NATS. Each service has its own user (or
 // credentials file), so the server can restrict it to the subjects it needs.
 type ConnConfig struct {
-	URLs          string // comma separated, e.g. nats://nats-1:4222,nats://nats-2:4222
-	Name          string // connection name shown in NATS monitoring
-	User          string
-	Password      string
-	CredsFile     string // NATS decentralized-auth credentials (JWT + nkey), instead of user/password
+	URLs      string // comma separated, e.g. nats://nats-1:4222,nats://nats-2:4222
+	Name      string // connection name shown in NATS monitoring
+	User      string
+	Password  string
+	CredsFile string // NATS decentralized-auth credentials (JWT + nkey), instead of user/password
+	// InboxPrefix replaces "_INBOX" for replies (publish acks, pulled messages), so
+	// the server can let each service subscribe to its own inboxes only.
+	InboxPrefix   string
 	TLSCAFile     string
 	TLSCertFile   string // client certificate (mutual TLS), optional
 	TLSKeyFile    string
@@ -211,6 +214,7 @@ func LoadConnConfig(e *Env, name, prefix string) ConnConfig {
 		User:              e.String(prefix+"_USER", ""),
 		Password:          e.Secret(prefix + "_PASSWORD"),
 		CredsFile:         e.String(prefix+"_CREDS_FILE", ""),
+		InboxPrefix:       e.String(prefix+"_INBOX_PREFIX", "_INBOX_"+name),
 		TLSCAFile:         e.String("NATS_TLS_CA_FILE", ""),
 		TLSCertFile:       e.String(prefix+"_TLS_CERT_FILE", ""),
 		TLSKeyFile:        e.String(prefix+"_TLS_KEY_FILE", ""),
