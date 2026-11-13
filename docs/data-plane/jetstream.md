@@ -47,6 +47,8 @@ An event's organization and device are never read from a payload.
 3. Messages from unknown or disabled devices are rejected (`meteorcloud_device_ingest_rejected_total{reason="unknown_device"}`).
 4. `organization_id` or `device_id` fields inside a payload are ordinary data and never change the subject.
 
+Today's agent publishes `metrics` and `status`. The broker topic policy (PR #42) reserves `devices/<id>/events` and denies it to devices until a `device-events` publish rule is added to `DEVICE_RULES` in `app/mqtt/policy.py`; ingestion already handles that topic when it opens.
+
 The ids in a subject are canonical UUIDs, so they can never contain `.`, `*` or `>`.
 
 ## Subjects and the event envelope
