@@ -31,3 +31,27 @@ DATAPLANE_STORAGE=memory DATAPLANE_BUS=memory DATAPLANE_POLICY_FILE=policy.json 
 | `internal/api` | HTTP and WebSocket API, rate limits, MQTT login exchange |
 | `internal/mqttgw` | Ingestion of messages published directly over MQTT; dead letters |
 | `internal/observability` | Prometheus metrics, JSON logging |
+
+## Rule engine (`internal/rules`)
+
+A stateful rule engine for device telemetry: thresholds, durations, windows,
+rates, missing telemetry, hysteresis and cooldowns, with an alert lifecycle and an
+action outbox. Rule format and semantics: [`contracts/rules-v1.md`](../../../contracts/rules-v1.md).
+
+| Package | Role |
+| --- | --- |
+| `rules` | `Processor`: converts `envelope.Event` and calls the engine (the only envelope-aware code) |
+| `rules/dsl` | rule definition, strict parsing, validation, condition hash |
+| `rules/eval` | compiled condition tree; pure, deterministic evaluation with persisted node state |
+| `rules/state` | durable records and `Store`: memory (tests) and PostgreSQL schema `rules` |
+| `rules/engine` | candidate rules, dedup, ordering, alert state machine, group commit, timers, outbox, rule simulation |
+
+The engine does not depend on any broker or queue. It is wired into the rule
+processor consumer in a follow-up change; until then it is a library with tests.
+
+```bash
+# unit tests (fake clock, memory store)
+go test -race ./internal/rules/...
+# plus the PostgreSQL store and multi-worker tests
+RULES_TEST_DATABASE_URL=postgres://user:pass@localhost:5432/db go test -race ./internal/rules/...
+```
