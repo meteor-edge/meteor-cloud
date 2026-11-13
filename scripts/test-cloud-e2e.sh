@@ -95,10 +95,12 @@ from mqtt_live.http import wait_mqtt_tls
 host = os.environ.get("MQTT_HOST") or ""
 ca = os.environ.get("MQTT_CA_FILE") or ""
 if not host:
+    print("MQTT probe: no MQTT_HOST", file=sys.stderr)
     sys.exit(2)
 try:
     wait_mqtt_tls(host, int(os.environ.get("MQTT_PORT", "8883")), ca, timeout_seconds=45)
-except Exception:
+except Exception as exc:
+    print(f"MQTT probe: {type(exc).__name__}: {exc}", file=sys.stderr)
     sys.exit(2)
 PY
 then

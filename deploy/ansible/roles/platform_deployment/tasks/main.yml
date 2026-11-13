@@ -136,6 +136,33 @@
     chdir: "{{ platform_compose_dir }}"
   changed_when: false
 
+# --remove-orphans keeps containers of services whose profile was switched off
+# (for example cache_provider redis -> memory, or mqtt_provider emqx -> mosquitto),
+# so remove those explicitly. Do it before the stack starts: an old broker still
+# holds the MQTT host ports. Volumes are kept, so switching back keeps the data.
+- name: List services enabled by the current profiles
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} config --services"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_enabled_services
+  changed_when: false
+
+- name: List existing service containers
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} ps --all --services"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_existing_services
+  changed_when: false
+
+- name: Remove containers of disabled services
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} rm --stop --force {{ platform_disabled_services | join(' ') }}"
+    chdir: "{{ platform_compose_dir }}"
+  vars:
+    platform_disabled_services: "{{ platform_existing_services.stdout_lines | difference(platform_enabled_services.stdout_lines) }}"
+  when: platform_disabled_services | length > 0
+  changed_when: true
+
 - name: Start platform stack
   ansible.builtin.command:
     cmd: "{{ platform_compose }} up -d --remove-orphans --wait --wait-timeout {{ platform_start_timeout_seconds | default(300) }}"
@@ -215,31 +242,6 @@
 - name: Apply metadata service guard now
   ansible.builtin.command: /usr/local/sbin/meteorcloud-imds-guard {{ compose_project_name }}
   changed_when: false
-
-# --remove-orphans keeps containers of services whose profile was switched off
-# (for example cache_provider redis -> memory), so remove those explicitly.
-- name: List services enabled by the current profiles
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} config --services"
-    chdir: "{{ platform_compose_dir }}"
-  register: platform_enabled_services
-  changed_when: false
-
-- name: List existing service containers
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} ps --all --services"
-    chdir: "{{ platform_compose_dir }}"
-  register: platform_existing_services
-  changed_when: false
-
-- name: Remove containers of disabled services
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} rm --stop --force {{ platform_disabled_services | join(' ') }}"
-    chdir: "{{ platform_compose_dir }}"
-  vars:
-    platform_disabled_services: "{{ platform_existing_services.stdout_lines | difference(platform_enabled_services.stdout_lines) }}"
-  when: platform_disabled_services | length > 0
-  changed_when: true
 
 # Bind-mounted config files are not part of the Compose config hash.
 - name: Restart services whose mounted configuration changed

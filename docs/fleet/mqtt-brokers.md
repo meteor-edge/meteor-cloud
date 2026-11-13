@@ -171,7 +171,7 @@ Run that cluster yourself (the VerneMQ Helm chart is the usual way) and connect 
 All bundled brokers use the same three files from `MQTT_CERTS_DIR` (`ca.crt`, `server.crt`, `server.key`, key owned by UID 1000). `make mqtt-certs` creates a development CA and server certificate. For production, issue the server certificate from your own CA with these names:
 
 - the public hostname devices use (`MQTT_PUBLIC_HOST`);
-- the internal name the data plane uses: `mqtt-broker` (and `emqx`) on Compose, `<fullname>-mqtt` (Mosquitto) or `<fullname>-emqx` (EMQX) on Kubernetes. `<fullname>` is the chart's full name: `<release>-meteorcloud`, or just `<release>` when the release name contains `meteorcloud`, or `fullnameOverride`. Check it with `kubectl get svc`.
+- the internal name the data plane uses: `mqtt-broker` (and `emqx`) on Compose, `<fullname>-mqtt` (Mosquitto) or `<fullname>-emqx` (EMQX) on Kubernetes. `<fullname>` is the chart's full name: `<release>-meteorcloud` (or `<release>-<nameOverride>`), just `<release>` when the release name already contains that name, or `fullnameOverride` when set; Helm cuts it to 63 characters. Check it with `kubectl get svc`.
 
 Devices verify the broker with the CA they received at registration and log in with their own username and password. Client certificates (mTLS) are not implemented. Only TLS 1.2 and 1.3 are accepted.
 

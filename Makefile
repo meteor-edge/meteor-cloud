@@ -37,6 +37,7 @@ K8S_RELEASE ?= meteorcloud
 K8S_HTTP_PORT ?= 8088
 K8S_MQTT_PORT ?= 18883
 K8S_CERTS_DIR := .k8s/certs
+K8S_MQTT_SANS ?= $(K8S_RELEASE)-mqtt $(K8S_RELEASE)-mqtt.$(K8S_NAMESPACE).svc $(K8S_RELEASE)-emqx $(K8S_RELEASE)-emqx.$(K8S_NAMESPACE).svc
 IMAGE_TAG ?= dev
 # make k8s-deploy OBS=1: kube-prometheus-stack (Apache-2.0; bundles Grafana, AGPLv3) in k3d only.
 K8S_OBS_NAMESPACE ?= monitoring
@@ -377,10 +378,11 @@ k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
 k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (OBS=1 adds Prometheus, Grafana)
 	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
 	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
-	@# Re-issue the server certificate (same CA) when it lacks the broker Service name.
-	@openssl x509 -in $(K8S_CERTS_DIR)/server.crt -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:$(K8S_RELEASE)-mqtt," || MQTT_CERTS_SKIP_CHOWN=1 MQTT_PUBLIC_HOST=localhost \
-		MQTT_EXTRA_SANS=$(K8S_RELEASE)-mqtt,$(K8S_RELEASE)-mqtt.$(K8S_NAMESPACE).svc,$(K8S_RELEASE)-emqx,$(K8S_RELEASE)-emqx.$(K8S_NAMESPACE).svc \
-		./scripts/generate-local-mqtt-certs.sh $(K8S_CERTS_DIR)
+	@# Re-issue the server certificate (same CA) when it lacks any broker Service name.
+	@sans=$$(openssl x509 -in $(K8S_CERTS_DIR)/server.crt -noout -ext subjectAltName 2>/dev/null | tr -d ' ' | tr ',' '\n'); \
+	missing=; for name in $(K8S_MQTT_SANS); do printf '%s\n' "$$sans" | grep -qx "DNS:$$name" || missing=1; done; \
+	if [ -n "$$missing" ]; then MQTT_CERTS_SKIP_CHOWN=1 MQTT_PUBLIC_HOST=localhost \
+		MQTT_EXTRA_SANS=$$(echo $(K8S_MQTT_SANS) | tr ' ' ',') ./scripts/generate-local-mqtt-certs.sh $(K8S_CERTS_DIR); fi
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) create secret generic meteorcloud-mqtt-tls \
 		--from-file=ca.crt=$(K8S_CERTS_DIR)/ca.crt --from-file=server.crt=$(K8S_CERTS_DIR)/server.crt \
 		--from-file=server.key=$(K8S_CERTS_DIR)/server.key --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
@@ -394,7 +396,8 @@ ifeq ($(OBS),1)
 endif
 	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
 		-f $(CHART)/values-dev.yaml $(if $(filter 1,$(OBS)),-f $(CHART)/values-monitoring.yaml) --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
-		--set dataPlane.image.tag=$(IMAGE_TAG) --set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
+		--set dataPlane.image.tag=$(IMAGE_TAG) --set mqtt.mosquitto.image.tag=$(IMAGE_TAG) \
+		--set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
 		--wait --timeout 10m
 	# Restart so pods pick up images re-imported under the same tag.
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) rollout restart deployment

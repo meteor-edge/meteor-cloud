@@ -237,6 +237,9 @@ type kickMessage struct {
 	Username string `json:"username"`
 }
 
+// IsKickTopic reports whether topic is the platform disconnect topic.
+func (e *Engine) IsKickTopic(topic string) bool { return topic == e.cfg.KickTopic }
+
 // KickTarget inspects an inbound publish. When it is a valid disconnect request
 // from a platform superuser it returns the username to disconnect and forgets
 // every cached decision for that user.

@@ -255,3 +255,33 @@ def test_hub_replay_drops_when_queue_is_full() -> None:
             break
     assert got == ["0", "1"]
     hub.unsubscribe(org_id, topic, queue)
+
+
+def test_mqtt_publish_rejects_out_of_scope_topics(db_session: Session) -> None:
+    """The console publishes as the platform, so it must not reach other tenants."""
+    publisher = RecordingPublisher()
+    client = _client_with_publisher(db_session, publisher)
+    headers, body = _register(client, db_session)
+    org_id = body["organization_id"]
+    own = body["device_id"]
+    for topic in (
+        "meteorcloud/control/disconnect",
+        f"devices/{uuid.uuid4()}/commands",
+        "devices/not-a-uuid/commands",
+        "devices",
+    ):
+        denied = client.post(
+            f"/api/v1/organizations/{org_id}/mqtt/publish",
+            headers=headers,
+            json={"device_id": own, "topic": topic, "payload": "x"},
+        )
+        assert denied.status_code == 422, (topic, denied.text)
+        assert denied.json()["error"]["code"] == "mqtt_topic_invalid"
+    assert publisher.published == []
+
+    allowed = client.post(
+        f"/api/v1/organizations/{org_id}/mqtt/publish",
+        headers=headers,
+        json={"topic": f"devices/{own}/commands", "payload": "x"},
+    )
+    assert allowed.status_code == 200, allowed.text

@@ -97,7 +97,7 @@ Subscribe (as the device):
 ```bash
 mosquitto_sub \
   -h localhost -p 8883 --cafile certs/ca.crt \
-  -u device_DEVICE_ID -P MQTT_PASSWORD \
+  -i device-DEVICE_ID-sub -u device_DEVICE_ID -P MQTT_PASSWORD \
   -t devices/DEVICE_ID/commands
 ```
 
@@ -106,12 +106,14 @@ Publish status:
 ```bash
 mosquitto_pub \
   -h localhost -p 8883 --cafile certs/ca.crt \
-  -u device_DEVICE_ID -P MQTT_PASSWORD \
+  -i device-DEVICE_ID-pub -u device_DEVICE_ID -P MQTT_PASSWORD \
   -t devices/DEVICE_ID/status \
   -m '{"status":"online"}'
 ```
 
-A second device username must be **denied** on `devices/OTHER_ID/#`.
+The broker rejects a device whose client id is not `device-DEVICE_ID` or
+`device-DEVICE_ID-<suffix>`. A second device username must be **denied** on
+`devices/OTHER_ID/#`.
 
 ## Topics
 

@@ -1275,6 +1275,7 @@ class FleetService:
                 raise ValidationAppError("mqtt_topic_required", "A topic is required.")
             resolved = topic
         resolved = validate_mqtt_topic(resolved, allow_wildcards=False)
+        self._require_test_publish_topic_in_scope(organization_id, resolved)
         if isinstance(payload, dict):
             text = json.dumps(payload)
         elif payload is None:
@@ -1298,6 +1299,29 @@ class FleetService:
         )
         self.session.commit()
         return MqttTestPublishResponse(topic=resolved, payload=text)
+
+    def _require_test_publish_topic_in_scope(self, organization_id: uuid.UUID, topic: str) -> None:
+        """Keep console test publishes inside the caller's organization.
+
+        The console publishes with the platform (superuser) identity, so the broker
+        does not check these topics. Block the platform control namespace and any
+        ``devices/{id}/...`` topic whose device is not in this organization.
+        """
+        from app.core.exceptions import ValidationAppError
+        from app.mqtt.policy import CONTROL_TOPIC_PREFIX
+
+        denied = ValidationAppError("mqtt_topic_invalid", "That MQTT topic is not allowed.")
+        if topic.startswith(CONTROL_TOPIC_PREFIX):
+            raise denied
+        parts = topic.split("/")
+        if parts[0] != "devices":
+            return
+        try:
+            target = uuid.UUID(parts[1]) if len(parts) > 1 else None
+        except ValueError:
+            target = None
+        if target is None or self.devices.get(organization_id=organization_id, device_id=target) is None:
+            raise denied
 
     def _require_device(self, organization_id: uuid.UUID, device_id: uuid.UUID) -> Device:
         device = self.devices.get(organization_id=organization_id, device_id=device_id)

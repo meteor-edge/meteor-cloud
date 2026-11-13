@@ -74,8 +74,9 @@ You provide:
 
 1. **A cluster** (Kubernetes 1.25+) and `kubectl`/`helm` access to a namespace.
 2. **Images** in a registry the cluster can pull from. Build them from
-   `src/control-plane`, `src/data-plane`, and `console`. Set `imagePullSecrets`
-   if the registry is private.
+   `src/control-plane`, `src/data-plane`, `console`, and the Mosquitto broker
+   image from `src/data-plane/broker/mosquitto` (set `mqtt.mosquitto.image`).
+   Set `imagePullSecrets` if the registry is private.
 3. **PostgreSQL 14+**, reachable from the cluster (Cloud SQL, RDS, Azure Database,
    or self-hosted). Put the SQLAlchemy URL in `DATABASE_URL`, for example
    `postgresql+psycopg://user:pass@host:5432/edge_platform?sslmode=require`.
@@ -85,7 +86,7 @@ You provide:
 6. **For devices (MQTT)**: a way to expose TCP 8883 (a cloud LoadBalancer,
    MetalLB, or k3s servicelb), a DNS name for `mqtt.publicHost`, and a TLS Secret
    with `ca.crt`, `server.crt`, and `server.key`. The server certificate needs
-   SANs for the public host and for the broker Service (`<fullname>-mqtt`, or `<fullname>-emqx` with `mqtt.provider=emqx`; `<fullname>` is `<release>-meteorcloud`, or `<release>` when the release name contains `meteorcloud`, or `fullnameOverride`; for release `fleet` that is `fleet-meteorcloud-mqtt`), because the data plane
+   SANs for the public host and for the broker Service (`<fullname>-mqtt`, or `<fullname>-emqx` with `mqtt.provider=emqx`; `<fullname>` is `<release>-meteorcloud` (or `<release>-<nameOverride>`), just `<release>` when the release name already contains that name, or `fullnameOverride` when set; Helm cuts it to 63 characters; for release `fleet` that is `fleet-meteorcloud-mqtt`), because the data plane
    verifies it inside the cluster.
 7. **Redis** (optional), for consistent rate limits across API replicas.
 

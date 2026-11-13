@@ -142,11 +142,15 @@ func mcKickTarget(username, topic *C.char, payload unsafe.Pointer, payloadLen C.
 	if engine == nil || username == nil || topic == nil {
 		return nil
 	}
+	topicName := C.GoString(topic)
+	if !engine.IsKickTopic(topicName) {
+		return nil // most messages: skip copying the payload
+	}
 	var body []byte
 	if payload != nil && payloadLen > 0 {
 		body = C.GoBytes(payload, payloadLen)
 	}
-	target, ok := engine.KickTarget(C.GoString(username), C.GoString(topic), body)
+	target, ok := engine.KickTarget(C.GoString(username), topicName, body)
 	if !ok {
 		return nil
 	}

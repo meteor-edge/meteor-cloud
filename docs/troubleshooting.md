@@ -96,7 +96,7 @@ helm -n meteorcloud test meteorcloud --logs
 | `helm install` fails with a values error | The chart rejects unsupported combinations; the message names the setting |
 | Backend stuck in `Init` | The `migrate` init container waits for the database; check `DATABASE_URL` and network policies |
 | Console loads but API calls fail | The Ingress must route `/api` to the backend; with `ingress.enabled=false` your own gateway must |
-| Data plane cannot connect to the broker | The broker certificate needs a SAN for the broker Service: `<fullname>-mqtt` (Mosquitto) or `<fullname>-emqx` (EMQX), where `<fullname>` is `<release>-meteorcloud` unless the release name contains `meteorcloud`; `kubectl get svc` shows it |
+| Data plane cannot connect to the broker | The broker certificate needs a SAN for the broker Service: `<fullname>-mqtt` (Mosquitto) or `<fullname>-emqx` (EMQX), where `<fullname>` is `<release>-meteorcloud` (or `<release>-<nameOverride>`), just `<release>` when the release name already contains that name, or `fullnameOverride` when set; Helm cuts it to 63 characters; `kubectl get svc` shows it |
 | `ImagePullBackOff` | Push images to a registry the cluster can reach and set `imagePullSecrets` |
 
 ## VPN
