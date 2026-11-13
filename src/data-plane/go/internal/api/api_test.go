@@ -287,8 +287,8 @@ func TestRateLimitIsPerCredential(t *testing.T) {
 	if !limited {
 		t.Fatal("rate limit never applied")
 	}
-	if code, _ := e.do("GET", "/v1/whoami", tokDetector, nil); code != 200 {
-		t.Fatalf("another credential must not be limited: %d", code)
+	if code, _ := e.publish(tokOtherOrg, msg("energy.power", `{"power":1}`, nil)); code != 200 {
+		t.Fatalf("another credential must not be limited on the same endpoint: %d", code)
 	}
 }
 
@@ -522,15 +522,54 @@ func TestStreamRequiresCredentialAndDropsRevokedConnections(t *testing.T) {
 	if err == nil || resp == nil || resp.StatusCode != 401 {
 		t.Fatalf("unauthenticated stream must be refused: %v", err)
 	}
-	if e.policy.StillValid(&identity.Identity{CredentialID: "cred-detector", OrganizationID: orgA}) != true {
-		t.Fatal("precondition")
+	// closes reports whether an open connection is closed as unauthorized soon after
+	// the policy changes.
+	closes := func(c *wsClient) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		for {
+			_, _, err := c.conn.Read(ctx)
+			if err != nil {
+				return websocket.CloseStatus(err) == closeUnauthorized
+			}
+		}
 	}
-	next := testSnapshot()
-	next.Version = "2"
-	next.Credentials = append(next.Credentials[:1], next.Credentials[2:]...)
-	e.policy.Apply(next)
-	if e.policy.StillValid(&identity.Identity{CredentialID: "cred-detector", OrganizationID: orgA}) {
-		t.Fatal("revoked credential must not stay valid for open connections")
+	apply := func(version string, change func(*identity.Snapshot)) {
+		next := testSnapshot()
+		next.Version = version
+		change(next)
+		e.policy.Apply(next)
+	}
+
+	// An unrelated policy change leaves open connections alone.
+	steady := e.dial(tokDetector)
+	apply("2", func(s *identity.Snapshot) { s.Applications[0].Permissions.Publish = []string{"energy.*", "water.*"} })
+	time.Sleep(1500 * time.Millisecond)
+	steady.send(map[string]any{"op": "ping"})
+	if f := steady.read(); f["type"] != "pong" {
+		t.Fatalf("an unrelated policy change must not close the connection: %v", f)
+	}
+
+	// Narrowed permissions: the connection is closed, the client reconnects with less.
+	apply("3", func(s *identity.Snapshot) { s.Applications[1].Permissions.ReceiveCommands = false })
+	if !closes(steady) {
+		t.Fatal("changed permissions must close the open connection")
+	}
+
+	// Rotated token: the connection opened with the old token is closed.
+	apply("4", func(*identity.Snapshot) {})
+	rotated := e.dial(tokDetector)
+	apply("5", func(s *identity.Snapshot) { s.Credentials[1].TokenHash = identity.HashToken("mca_rotated_token") })
+	if !closes(rotated) {
+		t.Fatal("a rotated token must close the open connection")
+	}
+
+	// Revoked credential.
+	apply("6", func(*identity.Snapshot) {})
+	revoked := e.dial(tokDetector)
+	apply("7", func(s *identity.Snapshot) { s.Credentials = append(s.Credentials[:1], s.Credentials[2:]...) })
+	if !closes(revoked) {
+		t.Fatal("a revoked credential must close the open connection")
 	}
 }
 
@@ -719,7 +758,7 @@ func TestMQTTCredentials(t *testing.T) {
 		ACL      bus.ACL `json:"acl"`
 	}
 	json.Unmarshal(raw, &claims)
-	if claims.Username != "app_cred-collector" || time.Until(time.Unix(claims.Exp, 0)) > 11*time.Minute {
+	if left := time.Until(time.Unix(claims.Exp, 0)); claims.Username != "app_cred-collector" || left <= 0 || left > 11*time.Minute {
 		t.Fatalf("claims: %+v", claims)
 	}
 	own := bus.TopicPrefix + orgA + "/apps/collector/devices/" + dev1
@@ -743,7 +782,59 @@ func TestMQTTCredentials(t *testing.T) {
 	if len(none["publish"].([]any))+len(none["subscribe"].([]any)) != 0 {
 		t.Fatalf("no grants must give an empty ACL: %v", none)
 	}
+	// The signed token is what the broker enforces: it must be empty too.
+	var signed struct {
+		ACL bus.ACL `json:"acl"`
+	}
+	if seg := strings.Split(none["password"].(string), "."); len(seg) == 3 {
+		payload, _ := base64.RawURLEncoding.DecodeString(seg[1])
+		json.Unmarshal(payload, &signed)
+	} else {
+		t.Fatal("password must be a signed token")
+	}
+	if len(signed.ACL.Publish)+len(signed.ACL.Subscribe) != 0 {
+		t.Fatalf("no grants must give an empty signed ACL: %+v", signed.ACL)
+	}
 	if code, _ := e.do("POST", "/v1/mqtt/credentials", "mca_wrong", nil); code != 401 {
 		t.Fatal("needs a valid application token")
+	}
+}
+
+func TestBatchContractBoundaryAndBurstSmallerThanABatch(t *testing.T) {
+	// The public contract: up to 500 messages per request. A burst smaller than a
+	// batch must not make that batch fail forever.
+	e := newEnv(t, func(o *Options) { o.MaxBatch, o.RateLimitPerSec, o.RateLimitBurst = 500, 1000, 100 })
+	batch := func(n int) []map[string]any {
+		out := make([]map[string]any, n)
+		for i := range out {
+			out[i] = msg("energy.power", `{"p":1}`, nil)
+		}
+		return out
+	}
+	if code, body := e.publish(tokCollector, batch(500)...); code != 200 {
+		t.Fatalf("500 messages must be accepted: %d %v", code, body)
+	}
+	if code, body := e.publish(tokCollector, batch(501)...); code != 413 || errCode(body) != "batch_too_large" {
+		t.Fatalf("501 messages must be refused: %d %v", code, body)
+	}
+}
+
+func TestNULCharacterIsRejectedPerMessage(t *testing.T) {
+	e := newEnv(t, nil)
+	code, body := e.publish(tokCollector,
+		msg("energy.power", `{"note":"a\u0000b"}`, nil),
+		msg("energy.power", `{"note":"a\\u0000b"}`, nil), // an escaped backslash, not a NUL
+		msg("energy.power", `{"p":1}`, nil))
+	results, _ := body["results"].([]any)
+	if code != 200 || len(results) != 3 {
+		t.Fatalf("%d %v", code, body)
+	}
+	if r := results[0].(map[string]any); r["status"] == "stored" {
+		t.Fatalf("a NUL character must be rejected: %v", r)
+	}
+	for _, i := range []int{1, 2} {
+		if r := results[i].(map[string]any); r["status"] != "stored" {
+			t.Fatalf("the other messages must be stored: %v", results)
+		}
 	}
 }

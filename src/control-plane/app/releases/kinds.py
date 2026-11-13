@@ -40,7 +40,7 @@ class SystemdSpec(BaseModel):
 
 
 class MeteorCloudBinding(BaseModel):
-    """Binds a workload to an application identity (docs/data-plane/applications.md).
+    """Binds a workload to an application identity (contracts/data-plane-v1.md).
 
     The agent mints a device-scoped data-plane token for the application, mounts it
     into the workload as a file and sets the METEORCLOUD_* environment variables.

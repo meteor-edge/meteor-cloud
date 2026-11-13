@@ -2,7 +2,7 @@
 #   mqtt       data-plane service (needed whenever MQTT_ENABLED=true)
 #   emqx       bundled EMQX broker (or point MQTT_BROKER_HOST at an external EMQX)
 #   data-api   application data plane (Go): publish, subscribe, query, commands for
-#              applications that use the MeteorCloud SDK (docs/data-plane/README.md)
+#              applications that use the MeteorCloud SDK (contracts/data-plane-v1.md)
 networks:
   meteorcloud:
     # Shared name so separately started module projects can join each other.
@@ -22,7 +22,18 @@ services:
       # Direct MQTT for applications: short-lived tokens signed by the data API. Off unless
       # DATAPLANE_MQTT_JWT_SECRET is set (the same value the data-api service signs with).
       EMQX_AUTHENTICATION__2__ENABLE: ${DATAPLANE_MQTT_ENABLED:-false}
-      EMQX_AUTHENTICATION__2__SECRET: ${DATAPLANE_MQTT_JWT_SECRET:-unset-unset-unset-unset-unset-unset}
+      EMQX_AUTHENTICATION__2__SECRET: ${DATAPLANE_MQTT_JWT_SECRET:-}
+    # Fail closed: with direct MQTT on and no real signing secret, anyone could forge an
+    # application token, so the broker refuses to start instead.
+    command:
+      - sh
+      - -c
+      - |
+        if [ "$$EMQX_AUTHENTICATION__2__ENABLE" = "true" ] && [ "$${#EMQX_AUTHENTICATION__2__SECRET}" -lt 32 ]; then
+          echo "DATAPLANE_MQTT_ENABLED=true needs DATAPLANE_MQTT_JWT_SECRET (32+ characters); refusing to start." >&2
+          exit 1
+        fi
+        exec /opt/emqx/bin/emqx foreground
     ports:
       - "${MQTT_PORT:-8883}:8883"
       - "18083:18083"
@@ -129,6 +140,9 @@ services:
         condition: service_healthy
         required: false
       clickhouse:
+        condition: service_healthy
+        required: false
+      postgres:
         condition: service_healthy
         required: false
     networks:

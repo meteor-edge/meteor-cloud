@@ -89,9 +89,12 @@ type Pipeline struct {
 	queue chan *request
 	mu    sync.Mutex
 	depth int // events queued or being written
-	stop  chan struct{}
-	wg    sync.WaitGroup
-	once  sync.Once
+	// gate makes Submit's "not stopped, enqueued" atomic with Stop.
+	gate    sync.RWMutex
+	stopped bool
+	stop    chan struct{}
+	wg      sync.WaitGroup
+	once    sync.Once
 }
 
 // New creates a pipeline; call Start before Submit.
@@ -113,7 +116,12 @@ func (p *Pipeline) Start() {
 
 // Stop drains queued requests, then stops the writers. Submit fails afterwards.
 func (p *Pipeline) Stop(ctx context.Context) {
-	p.once.Do(func() { close(p.stop) })
+	p.once.Do(func() {
+		p.gate.Lock()
+		p.stopped = true
+		p.gate.Unlock()
+		close(p.stop)
+	})
 	done := make(chan struct{})
 	go func() { p.wg.Wait(); close(done) }()
 	select {
@@ -152,12 +160,15 @@ func (p *Pipeline) Submit(ctx context.Context, events []*envelope.Event) ([]stri
 	if len(events) == 0 {
 		return nil, nil
 	}
-	select {
-	case <-p.stop:
+	// The gate makes "not stopped" and "enqueued" one step, so Stop never leaves a
+	// request in the queue that no worker will take.
+	p.gate.RLock()
+	if p.stopped {
+		p.gate.RUnlock()
 		return nil, ErrStopped
-	default:
 	}
 	if !p.reserve(len(events)) {
+		p.gate.RUnlock()
 		return nil, ErrOverloaded
 	}
 	req := &request{events: events, received: time.Now(), done: make(chan struct{})}
@@ -167,8 +178,10 @@ func (p *Pipeline) Submit(ctx context.Context, events []*envelope.Event) ([]stri
 		// Cannot happen while depth accounting holds (the channel is as large as the
 		// event bound), but never block a caller on it.
 		p.release(len(events))
+		p.gate.RUnlock()
 		return nil, ErrOverloaded
 	}
+	p.gate.RUnlock()
 	select {
 	case <-req.done:
 		return req.statuses, req.err
@@ -266,16 +279,18 @@ func (p *Pipeline) write(batch []*request, count int) {
 		return
 	}
 	// Distribute only what was newly stored: a redelivered duplicate is not re-sent.
+	// One deadline for the whole batch: a broker outage costs a worker five seconds,
+	// not five seconds per event.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	for i, ev := range events {
 		if !inserted[i] {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if perr := p.bus.PublishLive(ctx, ev); perr != nil {
 			p.metrics.FailedDeliveries.WithLabelValues("live").Inc()
 			p.log.Warn("live distribution failed; the event is stored and can be queried",
 				"event_id", ev.ID, "error", perr.Error())
 		}
-		cancel()
 	}
 }

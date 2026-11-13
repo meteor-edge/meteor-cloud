@@ -48,7 +48,7 @@ func TestACL(t *testing.T) {
 		{"publish", base + "/apps/collector/devices/dev1/commands/ack"},
 		{"subscribe", base + "/live/temperature/room"},
 		{"subscribe", base + "/live/site/a/b"},
-		{"subscribe", base + "/live/site/#"},
+		{"subscribe", base + "/live/site/+/#"},
 		{"subscribe", base + "/live/site/+"},
 		{"subscribe", base + "/apps/collector/devices/dev1/commands"},
 		{"subscribe", base + "/apps/collector/commands"},
@@ -71,6 +71,8 @@ func TestACL(t *testing.T) {
 		{"publish", base + "/apps/collector/commands"},
 		{"subscribe", base + "/live/energy/power"}, // a publish grant is not a subscribe grant
 		{"subscribe", base + "/live/#"},
+		{"subscribe", base + "/live/site/#"}, // "site.**" is below site, not site itself
+		{"subscribe", base + "/live/site"},
 		{"subscribe", base + "/live/+/room"},
 		{"subscribe", "#"},
 		{"subscribe", "meteor/#"},

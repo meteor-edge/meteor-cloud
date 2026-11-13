@@ -26,6 +26,13 @@ type HTTPSource struct {
 	Client *http.Client
 }
 
+// noRedirectClient never follows a redirect: the internal token must not travel to
+// an address other than the configured control plane.
+var noRedirectClient = &http.Client{
+	Timeout:       30 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 func (h *HTTPSource) Fetch(ctx context.Context, knownVersion string) (*Snapshot, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(h.URL, "/")+"/internal/data-plane/policy", nil)
 	if err != nil {
@@ -37,7 +44,7 @@ func (h *HTTPSource) Fetch(ctx context.Context, knownVersion string) (*Snapshot,
 	}
 	client := h.Client
 	if client == nil {
-		client = http.DefaultClient
+		client = noRedirectClient
 	}
 	resp, err := client.Do(req)
 	if err != nil {

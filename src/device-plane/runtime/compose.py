@@ -96,8 +96,12 @@ class ComposeAdapter:
         env: dict[str, str] | None = None,
         service_env: dict[str, str] | None = None,
         service_volumes: list[str] | None = None,
+        force_recreate: bool = False,
     ) -> None:
         """Bring the project up.
+
+        ``force_recreate`` creates the containers again even when nothing in the
+        project changed (a mounted file was replaced on the host).
 
         ``env`` feeds ``${VAR}`` substitution in the compose file. ``service_env`` and
         ``service_volumes`` are added to every service through an override file, so the
@@ -136,6 +140,8 @@ class ComposeAdapter:
         elif override.exists():
             override.unlink()
         args.extend(["up", "-d", "--remove-orphans"])
+        if force_recreate:
+            args.append("--force-recreate")
 
         self._run(args)
         logger.info("Started compose project %s from %s", name, compose_file)

@@ -42,7 +42,7 @@ Together this starts:
 | Console | http://localhost:5173 |
 | Control plane | http://localhost:8000 |
 | Data plane health | http://localhost:8081/health |
-| Application data API | http://localhost:8082/healthz ([data plane](data-plane/README.md)) |
+| Application data API | http://localhost:8082/healthz ([contract](../contracts/data-plane-v1.md)) |
 | OpenAPI | http://localhost:8000/docs |
 | PostgreSQL | localhost:5432 |
 | MQTT TLS | mqtts://localhost:8883 |
@@ -202,7 +202,9 @@ Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed
 | `VITE_API_BASE_URL` | Console → control-plane origin |
 | `VITE_DOCS_BASE_URL` | Console → product docs URL |
 | `DATA_PLANE_URL` | Control plane → data-plane HTTP API |
-| `DATA_PLANE_API_URL`, `DATA_PLANE_PUBLIC_URL`, `DATA_PLANE_INTERNAL_TOKEN` | Application data API wiring ([operations](data-plane/operations.md#settings)) |
+| `DATA_PLANE_API_URL` | Where the control plane reaches the data API's private listener to send operator commands, for example `http://data-api:8092`. Empty: operator commands answer 503 |
+| `DATA_PLANE_PUBLIC_URL` | Address applications use as `METEORCLOUD_ENDPOINT`, for example `https://cloud.example.com`. Devices must be able to reach it. Empty: the agent cannot hand a bound release its endpoint |
+| `DATA_PLANE_INTERNAL_TOKEN` | Shared secret between the control plane and the data API (policy feed and operator commands). Same value on both. Empty: the policy feed refuses everyone and the data API does not start |
 | `CONTROL_PLANE_URL` | Data plane → control-plane ingest/auth origin |
 | `TELEMETRY_PROVIDER` | Last-value store (`postgresql` only; timescale/clickhouse reserved) |
 | `DATABASE_PROVIDER` | Persistence adapter (`postgresql` only) |

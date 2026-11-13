@@ -188,6 +188,7 @@ class RegistrationService:
         device.cpu_model = payload.cpu_model
         device.cpu_cores = payload.cpu_cores
         device.memory_mb = payload.memory_mb
+        device.local_ip = payload.local_ip
         if payload.labels:
             device.labels = payload.labels
         if payload.metadata:
@@ -274,6 +275,55 @@ class RegistrationService:
             raise
         return AgentMqttCredentialsResponse(**info.model_dump(), config_version=mqtt_config_version(self.settings))
 
+    def _refresh_inventory(self, device: Device, payload: AgentHeartbeatRequest) -> None:
+        """Apply inventory the agent sent. Omitted or blank values stay as they were."""
+        if payload.hostname is not None:
+            device.hostname = payload.hostname
+        if payload.os_name:
+            device.os_name = payload.os_name
+        if payload.os_version is not None:
+            device.os_version = payload.os_version
+        if payload.kernel_version is not None:
+            device.kernel_version = payload.kernel_version
+        if payload.architecture:
+            device.architecture = payload.architecture
+        serial = (payload.serial_number or "").strip()
+        if serial and not self._identity_in_use(device, serial_number=serial, mac_addresses=()):
+            device.serial_number = serial
+        if payload.mac_addresses:
+            macs = DeviceIdentity.from_inventory(
+                serial_number=None,
+                mac_addresses=payload.mac_addresses,
+            ).mac_addresses
+            if macs and not self._identity_in_use(device, serial_number=None, mac_addresses=macs):
+                device.mac_addresses = macs
+        if payload.hardware_model:
+            device.hardware_model = payload.hardware_model
+        if payload.cpu_model:
+            device.cpu_model = payload.cpu_model
+        if payload.cpu_cores:
+            device.cpu_cores = payload.cpu_cores
+        if payload.memory_mb:
+            device.memory_mb = payload.memory_mb
+        if payload.local_ip:
+            device.local_ip = payload.local_ip
+
+    def _identity_in_use(
+        self,
+        device: Device,
+        *,
+        serial_number: str | None,
+        mac_addresses: list[str] | tuple[str, ...],
+    ) -> bool:
+        """Whether some other device already stores this serial or any of these MACs."""
+        return any(
+            candidate.id != device.id
+            for candidate in self.devices.list_candidates_for_identity(
+                serial_number=serial_number,
+                mac_addresses=mac_addresses,
+            )
+        )
+
     def heartbeat(
         self,
         *,
@@ -287,12 +337,7 @@ class RegistrationService:
 
         now = datetime.now(UTC)
         device.last_seen_at = now
-        if payload.hostname is not None:
-            device.hostname = payload.hostname
-        if payload.os_version is not None:
-            device.os_version = payload.os_version
-        if payload.kernel_version is not None:
-            device.kernel_version = payload.kernel_version
+        self._refresh_inventory(device, payload)
         self.devices.update(device)
 
         software = DeviceSoftwareService(self.session)
