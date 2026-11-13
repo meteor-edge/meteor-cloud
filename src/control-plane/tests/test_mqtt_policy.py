@@ -210,12 +210,16 @@ def test_disable_and_revoke_end_topic_access_and_kick(client: TestClient, db_ses
     settings.mqtt_enabled = True
     try:
         assert _authorize(client, a, "publish", status) == "allow"
-        assert client.post(f"/api/v1/organizations/{org}/devices/{device_id}/disable", headers=headers).status_code == 200
+        assert (
+            client.post(f"/api/v1/organizations/{org}/devices/{device_id}/disable", headers=headers).status_code == 200
+        )
         # An already-connected session loses topic access at once.
         assert _authorize(client, a, "publish", status) == "deny"
         assert published == [(KICK_TOPIC, f'{{"username": "device_{device_id}"}}')]
 
-        assert client.post(f"/api/v1/organizations/{org}/devices/{device_id}/enable", headers=headers).status_code == 200
+        assert (
+            client.post(f"/api/v1/organizations/{org}/devices/{device_id}/enable", headers=headers).status_code == 200
+        )
         assert _authorize(client, a, "publish", status) == "allow"
 
         revoke = client.post(f"/api/v1/organizations/{org}/devices/{device_id}/mqtt/revoke", headers=headers)
@@ -302,9 +306,20 @@ def test_vernemq_register_publish_subscribe(client: TestClient, db_session: Sess
     ok, deny = {"result": "ok"}, {"result": {"error": "not_allowed"}}
 
     register = {"peer_addr": "10.0.0.9", "peer_port": 4242, "mountpoint": "", "clean_session": True}
-    assert _vmq(client, f"auth_on_register{suffix}", {**register, "username": user, "password": password, "client_id": cid}) == ok
-    assert _vmq(client, f"auth_on_register{suffix}", {**register, "username": user, "password": "nope", "client_id": cid}) == deny
-    assert _vmq(client, f"auth_on_register{suffix}", {**register, "username": None, "password": None, "client_id": cid}) == deny
+    assert (
+        _vmq(
+            client, f"auth_on_register{suffix}", {**register, "username": user, "password": password, "client_id": cid}
+        )
+        == ok
+    )
+    assert (
+        _vmq(client, f"auth_on_register{suffix}", {**register, "username": user, "password": "nope", "client_id": cid})
+        == deny
+    )
+    assert (
+        _vmq(client, f"auth_on_register{suffix}", {**register, "username": None, "password": None, "client_id": cid})
+        == deny
+    )
     assert (
         _vmq(
             client,
@@ -318,7 +333,14 @@ def test_vernemq_register_publish_subscribe(client: TestClient, db_session: Sess
     assert _vmq(client, f"auth_on_publish{suffix}", {**publish, "topic": f"devices/{a['device_id']}/metrics"}) == ok
     assert _vmq(client, f"auth_on_publish{suffix}", {**publish, "topic": f"devices/{b['device_id']}/metrics"}) == deny
     assert _vmq(client, f"auth_on_publish{suffix}", {**publish, "topic": f"devices/{b['device_id']}/commands"}) == deny
-    assert _vmq(client, f"auth_on_publish{suffix}", {**publish, "topic": f"devices/{a['device_id']}/metrics", "retain": True}) == deny
+    assert (
+        _vmq(
+            client,
+            f"auth_on_publish{suffix}",
+            {**publish, "topic": f"devices/{a['device_id']}/metrics", "retain": True},
+        )
+        == deny
+    )
 
     subscribe = {"username": user, "client_id": cid, "mountpoint": ""}
     answer = _vmq(

@@ -16,8 +16,8 @@ from app.core.metrics import DEVICE_COMMANDS, MQTT_AUTH
 from app.devices.models import Device, DeviceCommand, DeviceMqttCredential
 from app.devices.tokens import hash_token
 from app.mqtt.acl import can_access_topic, device_id_from_username
-from app.mqtt.policy import device_client_id_allowed
 from app.mqtt.payloads import parse_json_object, parse_metrics_payload, parse_status_payload
+from app.mqtt.policy import device_client_id_allowed
 from app.mqtt.schemas import (
     DevicePingResponse,
     MqttAuthorizeResponse,

@@ -13,6 +13,7 @@ from app.mqtt.policy import evaluate_device
 
 DEVICE_USERNAME_PREFIX = "device_"
 
+
 def mqtt_username_for(device_id: uuid.UUID) -> str:
     return f"{DEVICE_USERNAME_PREFIX}{device_id}"
 
