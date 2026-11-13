@@ -45,7 +45,7 @@ services:
     networks: *broker-network
 
   vernemq:
-    image: ${VERNEMQ_IMAGE:-vernemq/vernemq:2.2.1-alpine}
+    image: ${VERNEMQ_IMAGE:-vernemq/vernemq:2.2.1}
     profiles: [vernemq]
     environment:
       # Accepting the EULA is your decision: the official image is free to
