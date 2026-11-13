@@ -13,6 +13,8 @@ package chwriter
 
 import (
 	"context"
+	"errors"
+	"net/url"
 	"log/slog"
 	"time"
 
@@ -205,7 +207,7 @@ func (w *Writer) flush(ctx context.Context, batch []item) {
 		first := batch[0].ev
 		w.Log.Warn("ClickHouse insert failed; batch kept unacknowledged", "consumer", w.Cfg.Name, "events", len(batch),
 			"attempt", attempt, "first_organization_id", first.OrganizationID, "first_device_id", first.DeviceID,
-			"first_event_id", first.ID, "error", err.Error())
+			"first_event_id", first.ID, "error", errText(err))
 		if ctx.Err() != nil || time.Now().Add(backoff).After(giveUp) {
 			break
 		}
@@ -223,4 +225,14 @@ func (w *Writer) flush(ctx context.Context, batch []item) {
 	}
 	w.Log.Warn("ClickHouse unavailable; batch returned to JetStream for redelivery", "consumer", w.Cfg.Name,
 		"events", len(batch), "retry_in", w.Cfg.RetryDelay.String())
+}
+
+// errText drops the request URL (long, and full of query parameters) from
+// transport errors so logs stay readable.
+func errText(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Op + " clickhouse: " + ue.Err.Error()
+	}
+	return err.Error()
 }
