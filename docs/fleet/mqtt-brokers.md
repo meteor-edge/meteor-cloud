@@ -23,11 +23,11 @@ Full licence table: [Licensing](../licensing.md). This page is operator guidance
 | Data plane | The platform MQTT session: publishes commands, forwards device messages to the control plane |
 | Device agent (`meteorcli`) | Connects with the host, port, CA, username, and password it got at registration |
 
-The broker never decides anything itself. For every login, and for each device publish and subscribe it has no cached answer for, it asks the control plane, which answers from one policy (`src/control-plane/app/mqtt/policy.py`). Platform users skip topic checks after login. Because no rules or credentials are copied into the broker:
+The broker never decides anything itself. For every login, and for each device publish and subscribe it has no cached answer for, it asks the control plane, which answers from one policy (`src/control-plane/app/mqtt/policy.py`). On Mosquitto and EMQX, platform users skip topic checks after login; VerneMQ asks for them too. Because no rules or credentials are copied into the broker:
 
 - Issuing, rotating, or revoking a credential is one database write. There is no "database updated but broker not" state to repair, and the operations are idempotent.
 - Switching broker needs no data migration. Devices keep their credentials.
-- If the control plane is unreachable, brokers deny every new login and every device decision they have not cached (fail closed). Mosquitto keeps using decisions it cached before the outage until they expire: allowed for 60 s (`MQTT_ACL_CACHE_SECONDS`, 0 turns it off) and denied for 10 s (`MQTT_ACL_DENY_CACHE_SECONDS`). Platform users that logged in before the outage skip topic checks, so their sessions keep working. After a failed call it denies at once for 2 seconds instead of waiting on the control plane for every request, because its plugin runs on the broker's event loop.
+- If the control plane is unreachable, brokers deny every new login and every device decision they have not cached (fail closed). Mosquitto keeps using decisions it cached before the outage until they expire: allowed for 60 s (`MQTT_ACL_CACHE_SECONDS`, 0 turns it off) and denied for 10 s (`MQTT_ACL_DENY_CACHE_SECONDS`). On Mosquitto, platform users that logged in before the outage skip topic checks, so their sessions keep working; on VerneMQ their publishes and subscribes are denied too. After a failed call it denies at once for 2 seconds instead of waiting on the control plane for every request, because its plugin runs on the broker's event loop.
 
 ```text
 device ──TLS 8883──► broker ──HTTP (private network)──► control plane
