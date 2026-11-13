@@ -83,6 +83,13 @@ class MqttService:
             return MqttAuthResponse(result="deny")
         return MqttAuthResponse(result="allow", is_superuser=False)
 
+    def _device_may_use_mqtt(self, device_id: uuid.UUID) -> bool:
+        device = self.session.get(Device, device_id)
+        if device is None or not device.is_enabled:
+            return False
+        cred = self.session.get(DeviceMqttCredential, device_id)
+        return cred is not None and cred.revoked_at is None
+
     def authorize(
         self,
         *,
@@ -113,6 +120,10 @@ class MqttService:
         if clientid is not None and not device_client_id_allowed(device_id, clientid):
             return MqttAuthorizeResponse(result="deny")
         if not can_access_topic(device_id, action, topic, retain=retain):
+            return MqttAuthorizeResponse(result="deny")
+        # Checked last (it costs a query): a disabled or revoked device loses
+        # topic access at once, even on a session that is still connected.
+        if not self._device_may_use_mqtt(device_id):
             return MqttAuthorizeResponse(result="deny")
         return MqttAuthorizeResponse(result="allow")
 

@@ -36,6 +36,7 @@ from app.endpoints.router import router as endpoints_router
 from app.endpoints.routing import router as routing_internal_router
 from app.identity.router import router as identity_router
 from app.mqtt.internal_router import router as mqtt_internal_router
+from app.mqtt.vernemq_router import router as mqtt_vernemq_router
 from app.mqtt.runtime import start_mqtt_runtime, stop_mqtt_runtime
 from app.network.router import router as network_router
 from app.releases.router import router as releases_router
@@ -109,6 +110,7 @@ def create_app() -> FastAPI:
     application.include_router(audit_router)
     application.include_router(agent_router)
     application.include_router(mqtt_internal_router)
+    application.include_router(mqtt_vernemq_router)
     application.include_router(connectivity_internal_router)
     application.include_router(routing_internal_router)
     if metrics_enabled():

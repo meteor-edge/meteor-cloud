@@ -27,9 +27,12 @@ logger = logging.getLogger(__name__)
 def mqtt_gateway(settings: Settings) -> MQTTGateway:
     if not settings.mqtt_enabled:
         return NoopPublisher()
-    # Both brokers sit behind the data plane's HTTP API, so the adapter is the same.
-    if settings.mqtt_provider not in {"mosquitto", "emqx"}:
-        raise RuntimeError(f"Unsupported mqtt.provider={settings.mqtt_provider!r}; use 'mosquitto' or 'emqx'")
+    # Every broker sits behind the data plane's HTTP API, so the gateway is the same.
+    # Broker-specific behaviour lives in app/adapters/mqtt_brokers.py.
+    if settings.mqtt_provider not in {"mosquitto", "emqx", "vernemq"}:
+        raise RuntimeError(
+            f"Unsupported mqtt.provider={settings.mqtt_provider!r}; use 'mosquitto', 'emqx', or 'vernemq'"
+        )
     if settings.telemetry_provider != "postgresql":
         raise RuntimeError(
             f"Unsupported telemetry.provider={settings.telemetry_provider!r}; only 'postgresql' is implemented"

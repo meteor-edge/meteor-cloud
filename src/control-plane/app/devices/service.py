@@ -1087,6 +1087,12 @@ class FleetService:
         )
         self.session.commit()
 
+    def _mark_mqtt_offline(self, device: Device) -> None:
+        if device.mqtt_status == "online":
+            device.mqtt_status = "offline"
+            device.mqtt_status_at = datetime.now(UTC)
+            self.session.add(device)
+
     def set_device_enabled(
         self,
         *,
@@ -1100,6 +1106,9 @@ class FleetService:
         self._require(membership, "device.update", device_group_id=device.device_group_id)
         changed = device.is_enabled != enabled
         device.is_enabled = enabled
+        if changed and not enabled:
+            # MQTT access ends now, so the device's own "offline" will is refused.
+            self._mark_mqtt_offline(device)
         self.devices.update(device)
         if changed:
             self._record_audit(
@@ -1184,6 +1193,7 @@ class FleetService:
         if cred.revoked_at is None:
             cred.revoked_at = datetime.now(UTC)
             self.session.add(cred)
+            self._mark_mqtt_offline(device)
             self._record_audit(
                 actor=actor,
                 organization_id=organization_id,
