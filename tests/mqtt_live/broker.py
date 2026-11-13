@@ -32,7 +32,9 @@ class MqttSession:
     ca_file: str
     username: str | None = None
     password: str | None = None
-    client_id: str = field(default_factory=lambda: f"live-{uuid.uuid4().hex[:10]}")
+    # Devices must use ``device-<id>[-suffix]`` (the broker refuses anything else);
+    # left empty, start() picks a valid one.
+    client_id: str | None = None
     untrusted_ca: str | None = None
     device_id: str | None = None
     auto_subscribe: list[str] = field(default_factory=list)
@@ -47,6 +49,9 @@ class MqttSession:
     _client: mqtt.Client | None = None
 
     def start(self, *, lwt_topic: str | None = None, lwt_payload: str | None = None) -> None:
+        if self.client_id is None:
+            suffix = uuid.uuid4().hex[:10]
+            self.client_id = f"device-{self.device_id}-live-{suffix}" if self.device_id else f"live-{suffix}"
         client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=self.client_id,
