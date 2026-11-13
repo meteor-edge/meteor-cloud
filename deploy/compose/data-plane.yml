@@ -3,6 +3,8 @@
 #   emqx       bundled EMQX broker (or point MQTT_BROKER_HOST at an external EMQX)
 #   data-api   application data plane (Go): publish, subscribe, query, commands for
 #              applications that use the MeteorCloud SDK (contracts/data-plane-v1.md)
+#   nats       device event path (docs/data-plane/jetstream.md): NATS JetStream plus
+#              device-ingest (MQTT -> JetStream), rule-processor and clickhouse-writer
 networks:
   meteorcloud:
     # Shared name so separately started module projects can join each other.
@@ -148,5 +150,129 @@ services:
     networks:
       - meteorcloud
 
+  # Internal messaging for the device event path. Devices never connect here; only the
+  # data-plane services below do, each with its own user (config/nats/nats.conf).
+  nats:
+    image: nats:2.15.3-alpine
+    profiles: [nats]
+    # Refuse to start with an empty password rather than run an open server.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        : "$${NATS_INGEST_PASSWORD:?is empty: set it in .env (see .env.example)}"
+        : "$${NATS_RULES_PASSWORD:?is empty}" "$${NATS_CHWRITER_PASSWORD:?is empty}" "$${NATS_ADMIN_PASSWORD:?is empty}"
+        exec nats-server -c /etc/nats/nats.conf
+    environment:
+      NATS_INGEST_PASSWORD: ${NATS_INGEST_PASSWORD:-}
+      NATS_RULES_PASSWORD: ${NATS_RULES_PASSWORD:-}
+      NATS_CHWRITER_PASSWORD: ${NATS_CHWRITER_PASSWORD:-}
+      NATS_ADMIN_PASSWORD: ${NATS_ADMIN_PASSWORD:-}
+      NATS_JETSTREAM_MAX_FILE_STORE: ${NATS_JETSTREAM_MAX_FILE_STORE:-20GB}
+    volumes:
+      - ./config/nats/nats.conf:/etc/nats/nats.conf:ro
+      - ${NATS_DATA:-nats_data}:/data
+    ports:
+      # Loopback only: for the nats CLI on this host. Monitoring is never public.
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_PORT:-8222}:8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:8222/healthz?js-enabled-only=true' | grep -q ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - meteorcloud
+
+  # MQTT -> JetStream bridge for device agent topics (devices/<id>/metrics|status|events).
+  device-ingest:
+    image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/go
+    profiles: [nats]
+    entrypoint: ["device-ingest"]
+    environment:
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
+      DATA_PLANE_INTERNAL_TOKEN: ${DATA_PLANE_INTERNAL_TOKEN:-}
+      DEVICE_INGEST_MQTT_URL: ${DEVICE_INGEST_MQTT_URL:-mqtts://${MQTT_BROKER_HOST:-emqx}:${MQTT_BROKER_PORT:-8883}}
+      MQTT_PLATFORM_USERNAME: ${MQTT_PLATFORM_USERNAME:-platform}
+      MQTT_PLATFORM_PASSWORD: ${MQTT_PLATFORM_PASSWORD:-}
+      MQTT_CA_CERT_PATH: /certs/ca.crt
+      NATS_URL: nats://nats:4222
+      NATS_INGEST_USER: ingest
+      NATS_INGEST_PASSWORD: ${NATS_INGEST_PASSWORD:-}
+      NATS_STREAM_REPLICAS: ${NATS_STREAM_REPLICAS:-1}
+      NATS_STREAM_MAX_BYTES: ${NATS_STREAM_MAX_BYTES:-10GB}
+      NATS_STREAM_MAX_AGE: ${NATS_STREAM_MAX_AGE:-168h}
+      NATS_STREAM_STORAGE: ${NATS_STREAM_STORAGE:-file}
+      NATS_STREAM_RETENTION: ${NATS_STREAM_RETENTION:-limits}
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
+    healthcheck:
+      test: ["CMD", "device-ingest", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - meteorcloud
+
+  rule-processor:
+    image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/go
+    profiles: [nats]
+    entrypoint: ["rule-processor"]
+    environment:
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      NATS_URL: nats://nats:4222
+      NATS_RULES_USER: rules
+      NATS_RULES_PASSWORD: ${NATS_RULES_PASSWORD:-}
+      RULES_WORKERS: ${RULES_WORKERS:-8}
+    healthcheck:
+      test: ["CMD", "rule-processor", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - meteorcloud
+
+  clickhouse-writer:
+    image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/go
+    profiles: [nats]
+    entrypoint: ["clickhouse-writer"]
+    environment:
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      NATS_URL: nats://nats:4222
+      NATS_CHWRITER_USER: chwriter
+      NATS_CHWRITER_PASSWORD: ${NATS_CHWRITER_PASSWORD:-}
+      CLICKHOUSE_URL: ${DATAPLANE_CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-meteorcloud}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-meteorcloud}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_WRITER_BATCH_SIZE: ${CLICKHOUSE_WRITER_BATCH_SIZE:-1000}
+      CLICKHOUSE_WRITER_FLUSH_INTERVAL: ${CLICKHOUSE_WRITER_FLUSH_INTERVAL:-1s}
+    healthcheck:
+      test: ["CMD", "clickhouse-writer", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      nats:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+        required: false
+    networks:
+      - meteorcloud
+
 volumes:
   clickhouse_data:
+  nats_data:

@@ -85,7 +85,8 @@ func DefaultLimits() Limits {
 	return Limits{MaxPayloadBytes: 64 << 10, MaxFutureSkew: 5 * time.Minute, MaxAge: 30 * 24 * time.Hour}
 }
 
-func validID(id string) bool {
+// ValidID reports whether id is an acceptable event id.
+func ValidID(id string) bool {
 	if len(id) == 0 || len(id) > 64 {
 		return false
 	}
@@ -128,7 +129,7 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 	eventID := msg.ID
 	if eventID == "" {
 		eventID = NewID()
-	} else if !validID(eventID) {
+	} else if !ValidID(eventID) {
 		return nil, &Rejection{CodeInvalidID, "id must be 1-64 characters of A-Z a-z 0-9 . _ : -"}
 	}
 	if len(msg.Data) > lim.MaxPayloadBytes {
