@@ -139,6 +139,14 @@ Stored as `resource` + `action` columns; id is derived.
 | `deployment.rollback` | Rollback deployments | Roll back a deployment. |
 | `enrollment_key.read` | View enrollment API keys | List enrollment keys. |
 | `enrollment_key.manage` | Manage enrollment API keys | Create and revoke enrollment keys. |
+| `rule.read` | View rules | List rules, their versions and matching devices. See [Rules and alerts](../rules.md). |
+| `rule.create` | Create rules | Create alerting and automation rules. |
+| `rule.update` | Update rules | Change, enable and disable rules. Every save is a new version. |
+| `rule.delete` | Delete rules | Delete rules. Their alert history stays. |
+| `alert.read` | View alerts | List alerts, their history and silences. |
+| `alert.acknowledge` | Acknowledge alerts | Mark firing alerts as acknowledged. |
+| `alert.silence` | Silence alerts | Hold notifications for matching alerts for a while. |
+| `integration.manage` | Manage notification integrations | Add, change and remove the webhooks rules deliver to, including their signing secrets. |
 | `mqtt.test` | Use MQTT test tools | Publish/listen in the org MQTT test UI. |
 
 **v1 rules:**
@@ -198,6 +206,14 @@ System roles: `organization_id IS NULL`, `is_system = true`, immutable via API.
 | deployment.rollback | ✓ | ✓ | | | |
 | enrollment_key.read | ✓ | ✓ | | | |
 | enrollment_key.manage | ✓ | ✓ | | | |
+| rule.read | ✓ | ✓ | ✓ | ✓ | ✓ |
+| rule.create | ✓ | ✓ | | ✓ | |
+| rule.update | ✓ | ✓ | | ✓ | |
+| rule.delete | ✓ | ✓ | | ✓ | |
+| alert.read | ✓ | ✓ | ✓ | ✓ | ✓ |
+| alert.acknowledge | ✓ | ✓ | ✓ | ✓ | |
+| alert.silence | ✓ | ✓ | ✓ | ✓ | |
+| integration.manage | ✓ | ✓ | | ✓ | |
 | mqtt.test | ✓ | ✓ | ✓ | ✓ | |
 
 **Migration of today’s enum:**
