@@ -20,7 +20,7 @@ render Prometheus Operator objects for clusters that already run it
 | PostgreSQL | StatefulSet + PVC (single instance, no backups) | `postgresql.mode=bundled` (default) |
 | Artifact volume | PVC | `objectStorage.provider=filesystem` (default) |
 | Data plane | Deployment (1 replica) | `mqtt.enabled` |
-| EMQX | Deployment + Service (LoadBalancer, 8883 TLS) | `mqtt.enabled` and `mqtt.broker=bundled` |
+| MQTT broker (Mosquitto, or EMQX with `mqtt.provider=emqx`) | Deployment + Service (LoadBalancer, 8883 TLS) | `mqtt.enabled` and `mqtt.broker=bundled` |
 | Redis | Deployment (no persistence) | `cache.provider=redis` and `cache.redis.mode=bundled` |
 | Apps proxy | Traefik Deployment + LoadBalancer Service + PVC (ACME) for public app hostnames | `connectivity.apps.proxy.enabled` |
 | Test pod | `helm test` hook | `helm test` |
@@ -39,7 +39,7 @@ The chart refuses to render unsupported combinations, for example several API re
 | File | Use |
 | --- | --- |
 | `values.yaml` | Defaults: bundled PostgreSQL, filesystem storage, in-memory rate limits, MQTT off, ingress off |
-| `values-dev.yaml` | Local and dev (one model): local images, bundled PostgreSQL and EMQX, Traefik ingress |
+| `values-dev.yaml` | Local and dev (one model): local images, bundled PostgreSQL and MQTT broker, Traefik ingress |
 | `values-staging.yaml` | Example staging: external PostgreSQL, S3, existing Secret, one replica, MQTT off |
 | `values-production.yaml` | Example production: external PostgreSQL, S3, Redis, existing Secret, two replicas, TLS ingress |
 | `values-ci.yaml` | Pull-request CI only: minimal (no Redis, MinIO, MQTT, Kafka, ClickHouse) |
@@ -85,7 +85,7 @@ You provide:
 6. **For devices (MQTT)**: a way to expose TCP 8883 (a cloud LoadBalancer,
    MetalLB, or k3s servicelb), a DNS name for `mqtt.publicHost`, and a TLS Secret
    with `ca.crt`, `server.crt`, and `server.key`. The server certificate needs
-   SANs for the public host and for `<release>-emqx`, because the data plane
+   SANs for the public host and for the broker Service (`<release>-mqtt`, or `<release>-emqx` with `mqtt.provider=emqx`), because the data plane
    verifies it inside the cluster.
 7. **Redis** (optional), for consistent rate limits across API replicas.
 
@@ -208,7 +208,7 @@ The chart itself is the same everywhere; only values differ.
 
 - Bundled PostgreSQL is a single instance without backups or HA; use an external database for production data.
 - The data plane runs as one replica, because MQTT subscriptions are not shared.
-- The bundled EMQX is a single node, and its sessions and retained messages are not persisted.
+- The bundled broker is a single node, and its sessions and retained messages are not persisted.
 - `cache.provider=memory` keeps rate-limit counters per pod.
 - Migrations run in each API pod's init container. With several replicas starting at the same time, one may retry while another migrates.
 - Images are not published by this repository; you build and push them.

@@ -96,7 +96,7 @@ helm -n meteorcloud test meteorcloud --logs
 | `helm install` fails with a values error | The chart rejects unsupported combinations; the message names the setting |
 | Backend stuck in `Init` | The `migrate` init container waits for the database; check `DATABASE_URL` and network policies |
 | Console loads but API calls fail | The Ingress must route `/api` to the backend; with `ingress.enabled=false` your own gateway must |
-| Data plane cannot connect to EMQX | The broker certificate needs a SAN for `<release>-emqx` |
+| Data plane cannot connect to the broker | The broker certificate needs a SAN for the broker Service: `<release>-mqtt` (Mosquitto) or `<release>-emqx` (EMQX) |
 | `ImagePullBackOff` | Push images to a registry the cluster can reach and set `imagePullSecrets` |
 
 ## VPN
