@@ -7,6 +7,7 @@ The data plane lets applications publish data, subscribe to live data, query his
 | Write an application | [SDK guide](../../sdk/python/README.md) |
 | Register applications, permissions and credentials | [Applications and credentials](applications.md) |
 | Run, configure, monitor and troubleshoot it | [Operations](operations.md) |
+| Understand the device event path (MQTT → NATS JetStream → rule processor, ClickHouse writer) | [Device event path](jetstream.md) |
 | Write a client in another language, or use MQTT directly | [Protocol contract](../../contracts/data-plane-v1.md) · [OpenAPI](../../src/data-plane/go/api/openapi.yaml) |
 
 ## Try it

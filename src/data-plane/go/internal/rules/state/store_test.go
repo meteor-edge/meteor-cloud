@@ -32,7 +32,7 @@ func stores(t *testing.T) map[string]Store {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := p.pool.Exec(ctx, `TRUNCATE rules.rule_state, rules.device_cursor, rules.rule_timers, rules.action_outbox`); err != nil {
+		if _, err := p.pool.Exec(ctx, `TRUNCATE rules.rule_state, rules.device_cursor, rules.rule_timers, rules.action_outbox, rules.action_dead_letters`); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(p.Close)
