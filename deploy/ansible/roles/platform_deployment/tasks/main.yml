@@ -57,7 +57,13 @@
 
     - name: Check for existing application images
       ansible.builtin.command:
-        cmd: docker image inspect {{ ([backend_image, frontend_image] + ([data_plane_image] if mqtt_enabled | bool else []) + ([mosquitto_image] if mqtt_enabled | bool and mqtt_broker == 'bundled' and mqtt_provider == 'mosquitto' else [])) | join(' ') }}
+        cmd: docker image inspect {{ platform_built_images | join(' ') }}
+      vars:
+        platform_bundled_mosquitto: "{{ mqtt_enabled | bool and mqtt_broker == 'bundled' and mqtt_provider == 'mosquitto' }}"
+        platform_built_images: >-
+          {{ [backend_image, frontend_image]
+             + ([data_plane_image] if mqtt_enabled | bool else [])
+             + ([mosquitto_image] if platform_bundled_mosquitto | bool else []) }}
       register: platform_images
       changed_when: false
       failed_when: false
