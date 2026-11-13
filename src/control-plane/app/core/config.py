@@ -150,7 +150,7 @@ class Settings(BaseSettings):
     database_provider: Literal["postgresql"] = Field(default="postgresql", alias="DATABASE_PROVIDER")
     # "memory" keeps rate-limit counters per process: fine for one API replica, no Redis needed.
     cache_provider: Literal["redis", "memory"] = Field(default="redis", alias="CACHE_PROVIDER")
-    mqtt_provider: Literal["emqx"] = Field(default="emqx", alias="MQTT_PROVIDER")
+    mqtt_provider: Literal["mosquitto", "emqx"] = Field(default="mosquitto", alias="MQTT_PROVIDER")
     # Who runs fleet deploys. "native" = MeteorCloud engine; "none" disables
     # deploy routes; "mender" reserved (fail fast until implemented).
     deployment_provider: Literal["native", "none", "mender"] = Field(

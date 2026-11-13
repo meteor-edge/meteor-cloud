@@ -16,6 +16,7 @@ from app.core.metrics import DEVICE_COMMANDS, MQTT_AUTH
 from app.devices.models import Device, DeviceCommand, DeviceMqttCredential
 from app.devices.tokens import hash_token
 from app.mqtt.acl import can_access_topic, device_id_from_username
+from app.mqtt.policy import device_client_id_allowed
 from app.mqtt.payloads import parse_json_object, parse_metrics_payload, parse_status_payload
 from app.mqtt.schemas import (
     DevicePingResponse,
@@ -53,12 +54,12 @@ class MqttService:
         self.session = session
         self.settings = settings or get_settings()
 
-    def authenticate(self, *, username: str, password: str) -> MqttAuthResponse:
-        response = self._authenticate(username=username, password=password)
+    def authenticate(self, *, username: str, password: str, clientid: str | None = None) -> MqttAuthResponse:
+        response = self._authenticate(username=username, password=password, clientid=clientid)
         MQTT_AUTH.labels(action="authenticate", result=response.result).inc()
         return response
 
-    def _authenticate(self, *, username: str, password: str) -> MqttAuthResponse:
+    def _authenticate(self, *, username: str, password: str, clientid: str | None) -> MqttAuthResponse:
         if username == self.settings.mqtt_platform_username:
             if password and password == self.settings.mqtt_platform_password:
                 return MqttAuthResponse(result="allow", is_superuser=True)
@@ -66,6 +67,9 @@ class MqttService:
 
         device_id = device_id_from_username(username)
         if device_id is None:
+            return MqttAuthResponse(result="deny")
+        if clientid is not None and not device_client_id_allowed(device_id, clientid):
+            logger.info("Rejected MQTT login with a client id that does not belong to the device")
             return MqttAuthResponse(result="deny")
 
         device = self.session.get(Device, device_id)
@@ -79,16 +83,36 @@ class MqttService:
             return MqttAuthResponse(result="deny")
         return MqttAuthResponse(result="allow", is_superuser=False)
 
-    def authorize(self, *, username: str, action: str, topic: str) -> MqttAuthorizeResponse:
-        response = self._authorize(username=username, action=action, topic=topic)
+    def authorize(
+        self,
+        *,
+        username: str,
+        action: str,
+        topic: str,
+        clientid: str | None = None,
+        retain: bool = False,
+    ) -> MqttAuthorizeResponse:
+        response = self._authorize(username=username, action=action, topic=topic, clientid=clientid, retain=retain)
         MQTT_AUTH.labels(action="authorize", result=response.result).inc()
         return response
 
-    def _authorize(self, *, username: str, action: str, topic: str) -> MqttAuthorizeResponse:
+    def _authorize(
+        self,
+        *,
+        username: str,
+        action: str,
+        topic: str,
+        clientid: str | None,
+        retain: bool,
+    ) -> MqttAuthorizeResponse:
         if username == self.settings.mqtt_platform_username:
             return MqttAuthorizeResponse(result="allow")
         device_id = device_id_from_username(username)
-        if device_id is None or not can_access_topic(device_id, action, topic):
+        if device_id is None:
+            return MqttAuthorizeResponse(result="deny")
+        if clientid is not None and not device_client_id_allowed(device_id, clientid):
+            return MqttAuthorizeResponse(result="deny")
+        if not can_access_topic(device_id, action, topic, retain=retain):
             return MqttAuthorizeResponse(result="deny")
         return MqttAuthorizeResponse(result="allow")
 

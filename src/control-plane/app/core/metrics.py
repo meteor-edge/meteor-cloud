@@ -179,7 +179,7 @@ AUTH_LOGINS = counter("meteorcloud_auth_logins_total", "Console user logins by o
 # --- MQTT, device commands ----------------------------------------------------
 
 # action: authenticate | authorize; result: allow | deny
-MQTT_AUTH = counter("meteorcloud_mqtt_auth_total", "EMQX authentication/authorization decisions", ["action", "result"])
+MQTT_AUTH = counter("meteorcloud_mqtt_auth_total", "MQTT broker authentication/authorization decisions", ["action", "result"])
 # kind: status | metrics | command_result | unknown; result: applied | rejected
 MQTT_MESSAGES_INGESTED = counter(
     "meteorcloud_mqtt_messages_ingested_total", "Device MQTT messages received from the data plane", ["kind", "result"]

@@ -27,8 +27,8 @@ def start_mqtt_runtime(settings: Settings) -> None:
     global _client
     if not settings.mqtt_enabled:
         return
-    if settings.mqtt_provider != "emqx":
-        raise RuntimeError(f"Unsupported mqtt.provider={settings.mqtt_provider!r}; only 'emqx' is implemented")
+    if settings.mqtt_provider not in {"mosquitto", "emqx"}:
+        raise RuntimeError(f"Unsupported mqtt.provider={settings.mqtt_provider!r}; use 'mosquitto' or 'emqx'")
     client = PlatformMqttClient(settings)
     try:
         client.start()

@@ -24,7 +24,8 @@ if [[ ! -f "$OUT/ca.key" || ! -f "$OUT/ca.crt" ]]; then
     -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
 fi
 
-SAN="DNS:localhost,DNS:emqx,IP:127.0.0.1"
+# Bundled broker names on the Compose network: mqtt-broker (alias), mosquitto, emqx.
+SAN="DNS:localhost,DNS:mqtt-broker,DNS:mosquitto,DNS:emqx,IP:127.0.0.1"
 
 add_san() {
   local item="$1"
@@ -73,7 +74,7 @@ openssl x509 -req -in "$OUT/server.csr" -CA "$OUT/ca.crt" -CAkey "$OUT/ca.key" \
   -CAcreateserial -out "$OUT/server.crt" -days 3650 -sha256 \
   -extfile "$OUT/server.ext" >/dev/null 2>&1
 
-# EMQX in Docker runs as UID/GID 1000 and bind-mounts this key.
+# The bundled broker (Mosquitto or EMQX) runs as UID/GID 1000 and bind-mounts this key.
 # chmod while we still own the file, then chown. Do not chmod after a
 # docker chown — GitHub Actions (UID 1001) cannot chmod a UID-1000 file.
 chmod 0640 "$OUT/server.key"
@@ -87,7 +88,7 @@ elif ! chown 1000:1000 "$OUT/server.key" 2>/dev/null; then
     docker run --rm --user 0:0 -v "$OUT:/certs" busybox:1.36 \
       chown 1000:1000 /certs/server.key
   else
-    echo "error: could not set $OUT/server.key owner to UID/GID 1000 (required so EMQX can read the bind-mounted key)." >&2
+    echo "error: could not set $OUT/server.key owner to UID/GID 1000 (required so the MQTT broker can read the bind-mounted key)." >&2
     echo "error: rerun as uid 1000, as root, or with Docker available to chown the file." >&2
     exit 1
   fi
