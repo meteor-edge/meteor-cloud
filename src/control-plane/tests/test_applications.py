@@ -355,3 +355,37 @@ def test_policy_endpoint_is_closed_without_a_configured_token(client, monkeypatc
     for token in (None, "", "dev-data-plane-internal"):
         headers = {} if token is None else {"X-Data-Plane-Internal-Token": token}
         assert client.get("/internal/data-plane/policy", headers=headers).status_code == 401
+
+
+def test_device_directory_lists_enrolled_enabled_devices_with_their_org(
+    client: TestClient, db_session: Session
+) -> None:
+    from app.devices.models import Device
+
+    assert client.get("/internal/data-plane/devices").status_code == 401
+    org, _ = _org(client, db_session)
+    other, _ = _org(client, db_session, email="other@example.com")
+    enrolled = Device(organization_id=org.id, name="a", credential_hash="h" * 64)
+    foreign = Device(organization_id=other.id, name="b", credential_hash="i" * 64)
+    disabled = Device(organization_id=org.id, name="c", credential_hash="j" * 64, is_enabled=False)
+    pending = Device(organization_id=org.id, name="d")
+    db_session.add_all([enrolled, foreign, disabled, pending])
+    db_session.commit()
+
+    response = client.get("/internal/data-plane/devices", headers=INTERNAL)
+    assert response.status_code == 200
+    body = response.json()
+    owners = {item["id"]: item["organization_id"] for item in body["devices"]}
+    assert owners == {str(enrolled.id): str(org.id), str(foreign.id): str(other.id)}
+    assert response.headers["ETag"] == f'"{body["version"]}"'
+
+    unchanged = client.get(
+        "/internal/data-plane/devices", headers={**INTERNAL, "If-None-Match": f'"{body["version"]}"'}
+    )
+    assert unchanged.status_code == 304
+
+    enrolled.is_enabled = False
+    db_session.commit()
+    changed = client.get("/internal/data-plane/devices", headers=INTERNAL).json()
+    assert changed["version"] != body["version"]
+    assert [item["id"] for item in changed["devices"]] == [str(foreign.id)]
