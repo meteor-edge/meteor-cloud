@@ -120,6 +120,7 @@ const device = {
   cpu_model: "Intel",
   cpu_cores: 4,
   memory_mb: 8000,
+  local_ip: null,
   labels: {},
   metadata: {},
   credential_prefix: "dev_abc",

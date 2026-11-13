@@ -33,7 +33,7 @@ const (
 	sendBuffer        = 256
 	wsReadLimit       = 64 << 10
 	pingInterval      = 25 * time.Second
-	revalidateEvery   = 10 * time.Second
+	revalidateEvery   = time.Second
 	closeSlowConsumer = websocket.StatusCode(4008)
 	closeUnauthorized = websocket.StatusCode(4401)
 	closeGoingAway    = websocket.StatusGoingAway
@@ -121,7 +121,10 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	sess.enqueue(map[string]any{"type": "ready", "identity": identityView(id)})
 	// Commands that were waiting for this target.
-	if pending, err := s.commands.Undelivered(ctx, id); err == nil {
+	bctx, bcancel := context.WithTimeout(ctx, 10*time.Second)
+	pending, err := s.commands.Undelivered(bctx, id)
+	bcancel()
+	if err == nil {
 		for _, cmd := range pending {
 			sess.SendCommand(cmd)
 		}
@@ -159,7 +162,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-revalidate.C:
-			// Revocation and expiry apply to open connections, not only to new ones.
+			// Revocation, expiry, rotation and changed permissions apply to open
+			// connections, not only to new ones. The client reconnects with what it
+			// is allowed now.
 			if !s.policy.StillValid(id) {
 				s.metrics.LiveDropped.WithLabelValues("credential_revoked").Inc()
 				sess.shutdown(closeUnauthorized, "credential_revoked")

@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -46,6 +47,7 @@ type Identity struct {
 	Environment    string
 	ExpiresAt      time.Time
 	Permissions    Permissions
+	tokenHash      string
 }
 
 func (id *Identity) CanPublish(stream string) bool {
@@ -147,6 +149,7 @@ func (s *Store) Apply(snap *Snapshot) {
 			Environment:    c.Environment,
 			ExpiresAt:      c.ExpiresAt,
 			Permissions:    app.Permissions,
+			tokenHash:      strings.ToLower(c.TokenHash),
 		}
 		if c.DeviceID != nil {
 			id.DeviceID = *c.DeviceID
@@ -230,10 +233,19 @@ func (s *Store) ByCredentialID(credentialID string) (*Identity, error) {
 	return id, nil
 }
 
-// StillValid reports whether a long-lived connection's credential is still accepted.
+// StillValid reports whether a long-lived connection may go on as it was authenticated:
+// the credential is still accepted, its token was not rotated, and the identity and
+// permissions it carries are unchanged. A connection that fails this is closed and
+// the client reconnects with what it is allowed now.
 func (s *Store) StillValid(id *Identity) bool {
 	cur, err := s.ByCredentialID(id.CredentialID)
-	return err == nil && cur.OrganizationID == id.OrganizationID
+	if err != nil {
+		return false
+	}
+	return cur == id || (cur.tokenHash == id.tokenHash && cur.OrganizationID == id.OrganizationID &&
+		cur.ApplicationID == id.ApplicationID && cur.Application == id.Application &&
+		cur.DeviceID == id.DeviceID && cur.Environment == id.Environment &&
+		reflect.DeepEqual(cur.Permissions, id.Permissions))
 }
 
 // Application looks an enabled application up by id.

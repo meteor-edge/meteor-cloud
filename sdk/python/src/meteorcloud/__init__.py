@@ -28,7 +28,7 @@ from .exceptions import (
     UnavailableError,
     ValidationError,
 )
-from .models import Bucket, Command, Event, Identity, Page, PublishResult
+from .models import Bucket, Command, Event, Identity, Message, Page, PublishResult
 
 __version__ = "0.1.0"
 
@@ -45,6 +45,7 @@ __all__ = [
     "ConfigurationError",
     "Event",
     "Identity",
+    "Message",
     "MeteorClient",
     "MeteorCloudError",
     "NotFoundError",

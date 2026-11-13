@@ -63,13 +63,15 @@ type MQTT struct {
 	log     *slog.Logger
 	ingress IngressHandler
 
-	fanout   *autopaho.ConnectionManager
-	ingest   *autopaho.ConnectionManager
-	up       atomic.Bool
-	everUp   atomic.Bool
-	handlers Handlers
-	work     chan ingressItem
-	cancel   context.CancelFunc
+	fanout     *autopaho.ConnectionManager
+	ingest     *autopaho.ConnectionManager
+	up         atomic.Bool
+	everUp     atomic.Bool
+	ingressUp  atomic.Bool
+	ingressGen atomic.Int64
+	handlers   Handlers
+	work       chan ingressItem
+	cancel     context.CancelFunc
 }
 
 // NewMQTT creates the transport; ingress may be nil to disable MQTT ingestion.
@@ -215,9 +217,31 @@ func (m *MQTT) Start(ctx context.Context, h Handlers) error {
 		share := "$share/" + SharedGroup + "/" + TopicPrefix + "+/apps/+/devices/+/"
 		ingressFilters := []string{share + "telemetry/#", share + "events/#", share + "inference/#", share + "commands/ack"}
 		m.ingest, err = m.connect(ctx, m.cfg.ClientID+"-in", true, func(cm *autopaho.ConnectionManager) {
-			if err := subscribe(cm, ingressFilters); err != nil {
-				m.log.Error("MQTT ingress subscribe failed", "error", err.Error())
-			}
+			// Without this subscription nothing published over MQTT is stored: stay not
+			// ready and keep trying until it is in place or the connection is replaced.
+			m.ingressUp.Store(false)
+			gen := m.ingressGen.Add(1)
+			go func() {
+				for wait := time.Second; ; {
+					err := subscribe(cm, ingressFilters)
+					if m.ingressGen.Load() != gen || ctx.Err() != nil {
+						return // a newer connection took over, or the service is stopping
+					}
+					if err == nil {
+						m.ingressUp.Store(true)
+						return
+					}
+					m.log.Error("MQTT ingress subscribe failed; retrying", "error", err.Error())
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(wait):
+					}
+					if wait < 15*time.Second {
+						wait *= 2
+					}
+				}
+			}()
 		}, m.onIngress)
 		if err != nil {
 			return err
@@ -316,7 +340,9 @@ func (m *MQTT) PublishCommand(ctx context.Context, cmd *storage.Command) error {
 	return m.publish(ctx, CommandTopic(cmd.OrganizationID, cmd.Application, cmd.DeviceID), raw)
 }
 
-func (m *MQTT) Ready() bool { return m.up.Load() }
+// Ready reports whether live fan-out works and, when MQTT ingestion is on, whether
+// its subscription is in place.
+func (m *MQTT) Ready() bool { return m.up.Load() && (m.ingress == nil || m.ingressUp.Load()) }
 
 // Close disconnects cleanly.
 func (m *MQTT) Close() {

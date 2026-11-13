@@ -409,6 +409,7 @@ export type Device = {
   cpu_model: string | null;
   cpu_cores: number | null;
   memory_mb: number | null;
+  local_ip: string | null;
   labels: Record<string, unknown>;
   metadata: Record<string, unknown>;
   credential_prefix: string | null;

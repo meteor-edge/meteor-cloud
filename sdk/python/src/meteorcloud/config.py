@@ -23,9 +23,11 @@ The identity the service acts on always comes from the token. ``APP_ID`` and
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from .exceptions import ConfigurationError
 
@@ -49,6 +51,8 @@ class Config:
     reconnect_max_delay: float = 30.0
     #: Events buffered per subscription before the SDK applies backpressure.
     subscription_buffer: int = 1000
+    #: Allow http:// to a public address. The token would travel unencrypted.
+    allow_insecure: bool = False
 
     def __post_init__(self) -> None:
         endpoint = (self.endpoint or "").strip().rstrip("/")
@@ -58,6 +62,11 @@ class Config:
             )
         if not endpoint.startswith(("https://", "http://")):
             raise ConfigurationError("METEORCLOUD_ENDPOINT must start with https:// or http://", code="bad_endpoint")
+        if endpoint.startswith("http://") and not self.allow_insecure and not _local_host(endpoint):
+            raise ConfigurationError(
+                "METEORCLOUD_ENDPOINT uses http:// to a public address, which would send the token unencrypted. "
+                "Use https://, or set METEORCLOUD_ALLOW_INSECURE=true if you accept that.", code="insecure_endpoint"
+            )
         object.__setattr__(self, "endpoint", endpoint)
         if not self.token and not self.token_file:
             raise ConfigurationError(
@@ -84,6 +93,7 @@ class Config:
             "device_id": get("METEORCLOUD_DEVICE_ID"),
             "environment": get("METEORCLOUD_ENVIRONMENT"),
             "ca_file": get("METEORCLOUD_CA_FILE"),
+            "allow_insecure": (get("METEORCLOUD_ALLOW_INSECURE") or "").lower() in ("1", "true", "yes"),
         }
         for name, key in (("METEORCLOUD_TIMEOUT", "timeout"), ("METEORCLOUD_RETRY_TIME", "retry_time")):
             raw = get(name)
@@ -94,6 +104,19 @@ class Config:
                     raise ConfigurationError(f"{name} must be a number of seconds", code="bad_setting") from exc
         values.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**values)  # type: ignore[arg-type]
+
+
+def _local_host(endpoint: str) -> bool:
+    """True when plain http is acceptable: this machine, a private network address, or
+    a single-label name such as a container or LAN host name."""
+    host = urlsplit(endpoint).hostname or ""
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return "." not in host and host != ""
+    return address.is_loopback or address.is_private or address.is_link_local
 
 
 class TokenSource:

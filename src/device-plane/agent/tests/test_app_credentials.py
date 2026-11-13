@@ -78,7 +78,7 @@ def test_bound_docker_workload_gets_token_file_and_env(tmp_path: Path) -> None:
 
     assert reports[0]["sync_status"] == "in_sync"
     client.mint_app_credential.assert_called_once_with(device_token="dev_token", workload_key="meter-app")
-    token_path = tmp_path / "app-credentials" / "meter-app" / "token"
+    token_path = AppCredentialStore(tmp_path / "app-credentials").token_path("meter-app")
     assert token_path.read_text() == "mca_first\n"
     assert stat.S_IMODE(token_path.parent.stat().st_mode) == 0o700  # only root reaches it on the host
     assert stat.S_IMODE(token_path.stat().st_mode) == 0o644  # readable by a non-root container user
@@ -100,7 +100,7 @@ def test_token_is_rotated_in_place_without_restarting_the_container(tmp_path: Pa
     client.mint_app_credential.return_value = _issued(refresh_in=-1)  # already due
     runner = Runner()
     _reconcile(client, tmp_path, runner)
-    token_path = tmp_path / "app-credentials" / "meter-app" / "token"
+    token_path = AppCredentialStore(tmp_path / "app-credentials").token_path("meter-app")
     inode = token_path.stat().st_ino
     runs = len([c for c in runner.calls if c[:2] == ["docker", "run"]])
 
@@ -129,7 +129,7 @@ def test_rotation_failure_keeps_the_running_workload(tmp_path: Path) -> None:
     reports = _reconcile(client, tmp_path, runner)
 
     assert reports[0]["sync_status"] == "in_sync"
-    assert (tmp_path / "app-credentials" / "meter-app" / "token").read_text() == "mca_first\n"
+    assert (AppCredentialStore(tmp_path / "app-credentials").token_path("meter-app")).read_text() == "mca_first\n"
 
 
 def test_no_credentials_means_the_workload_is_not_started(tmp_path: Path) -> None:
@@ -165,7 +165,7 @@ def test_lost_token_file_restarts_the_workload_and_unbound_tokens_are_removed(tm
     client.mint_app_credential.return_value = _issued()
     runner = Runner()
     _reconcile(client, tmp_path, runner)
-    token_path = tmp_path / "app-credentials" / "meter-app" / "token"
+    token_path = AppCredentialStore(tmp_path / "app-credentials").token_path("meter-app")
     token_path.unlink()
 
     _reconcile(client, tmp_path, runner)
@@ -224,3 +224,27 @@ def test_store_reuses_a_valid_token_while_offline(tmp_path: Path) -> None:
     client.mint_app_credential.side_effect = AgentApiError(0, "network_error", "offline")
     again = store.for_apply(client, "dev_token", _item())
     assert again == first and again.token_path.read_text() == "mca_first\n"
+
+
+def test_workload_keys_never_share_a_credential_directory(tmp_path: Path) -> None:
+    store = AppCredentialStore(tmp_path / "app-credentials")
+    # Both sanitise to the same readable name.
+    assert store.token_path("shop/web") != store.token_path("shop_web")
+    assert store.token_path("shop/web") == store.token_path("shop/web")
+    assert store.token_path("shop/web").parent.parent == tmp_path / "app-credentials"
+
+
+def test_compose_can_recreate_containers_to_mount_a_replaced_token_file(tmp_path: Path) -> None:
+    artifact = tmp_path / "compose.yaml"
+    artifact.write_text("services:\n  web:\n    image: example/web:1\n")
+    calls: list[list[str]] = []
+
+    def runner(args, **_kwargs):  # noqa: ANN001, ANN202
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, 0, stdout="web\n", stderr="")
+
+    adapter = ComposeAdapter(runner=runner, work_root=tmp_path / "compose")
+    adapter.apply(project_name="shop", artifact=artifact)
+    assert "--force-recreate" not in calls[-1]
+    adapter.apply(project_name="shop", artifact=artifact, force_recreate=True)
+    assert calls[-1][-1] == "--force-recreate"

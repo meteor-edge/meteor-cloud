@@ -33,16 +33,17 @@ const device: Device = {
   device_group_id: null,
   is_enabled: true,
   status: "online",
-  serial_number: null,
   mac_addresses: [],
   hostname: "edge-01.local",
   os_name: null,
   os_version: null,
   kernel_version: null,
   architecture: null,
-  cpu_model: null,
-  cpu_cores: null,
-  memory_mb: null,
+  cpu_model: "ARM Cortex-A76",
+  cpu_cores: 4,
+  memory_mb: 3795,
+  local_ip: "192.168.1.20",
+  serial_number: "10000000abcd1234",
   labels: {},
   metadata: {},
   credential_prefix: null,
@@ -98,6 +99,15 @@ function renderPage(path = "/organizations/org-1/devices/dev-1") {
 }
 
 describe("DeviceDetailPage logs", () => {
+  it("shows serial, CPU, and local IP on the overview", async () => {
+    renderPage();
+
+    expect(await screen.findByText("10000000abcd1234")).toBeInTheDocument();
+    expect(screen.getByText("ARM Cortex-A76")).toBeInTheDocument();
+    expect(screen.getByText("192.168.1.20")).toBeInTheDocument();
+    expect(screen.getByText("Local IP")).toBeInTheDocument();
+  });
+
   it("opens logs from the Access tab only when the user asks", async () => {
     renderPage();
 

@@ -161,9 +161,12 @@ func run() error {
 		},
 	}, policy, pipeline, store, hub, cmds, metrics, log)
 
+	// ReadTimeout bounds a slow request body. WebSocket connections are not affected:
+	// the deadline is cleared when the connection is taken over.
 	public := &http.Server{Addr: cfg.HTTPAddr, Handler: server.PublicHandler(), ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout: 120 * time.Second, MaxHeaderBytes: 16 << 10}
-	ops := &http.Server{Addr: cfg.OpsAddr, Handler: server.OpsHandler(), ReadHeaderTimeout: 10 * time.Second}
+		ReadTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second, MaxHeaderBytes: 16 << 10}
+	ops := &http.Server{Addr: cfg.OpsAddr, Handler: server.OpsHandler(), ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout: 30 * time.Second}
 	errs := make(chan error, 2)
 	go func() { errs <- serve(public) }()
 	go func() { errs <- serve(ops) }()

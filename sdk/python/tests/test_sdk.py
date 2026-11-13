@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import meteorcloud
-from meteorcloud import AsyncMeteorClient, MeteorClient
+from meteorcloud import AsyncMeteorClient, Message, MeteorClient
 
 from .conftest import ORG, OTHER_ORG
 
@@ -83,8 +83,14 @@ def test_publish_is_idempotent_and_reports_rejections(dataplane):
         assert meter.telemetry.publish("energy.metrics", {"v": 1}, id="reading-1").status == "duplicate"
         assert len(meter.telemetry.query("energy.metrics")) == 1
 
-        results = meter.telemetry.publish_many("energy.metrics", [{"v": 2}, {"data": {"v": 3}, "id": "reading-3"}])
-        assert [r.status for r in results] == ["stored", "stored"] and results[1].id == "reading-3"
+        results = meter.telemetry.publish_many(
+            "energy.metrics", [{"v": 2}, Message({"v": 3}, id="reading-3"), {"data": {"v": 4}}])
+        assert [r.status for r in results] == ["stored"] * 3 and results[1].id == "reading-3"
+        # A dict is always the data itself, also when it has a "data" key.
+        stored = [e.data for e in meter.telemetry.query("energy.metrics")]
+        assert {"data": {"v": 4}} in stored and {"v": 3} in stored
+        with pytest.raises(meteorcloud.ValidationError):
+            meter.telemetry.publish("energy.metrics", {"v": float("nan")})
 
         with pytest.raises(meteorcloud.PublishError) as refused:
             meter.telemetry.publish("billing.invoices", {"v": 1})
@@ -320,3 +326,47 @@ def test_async_client(dataplane):
             assert (await meter.whoami()).device_id == "d1"
 
     asyncio.run(scenario())
+
+
+def test_close_from_inside_a_command_handler_still_reports_the_result(dataplane):
+    worker = client_for(dataplane, "meter", device_id="dev-1")
+    done = threading.Event()
+
+    @worker.commands.handler("shutdown")
+    def shutdown(command):
+        worker.close()  # must not wait for this very handler, nor cut off its result
+        done.set()
+        return {"bye": True}
+
+    worker.start()
+    wait_for(lambda: worker.connected)
+    with client_for(dataplane, "dashboard") as dashboard:
+        started = time.monotonic()
+        assert dashboard.commands.call("meter", "shutdown", device_id="dev-1", timeout=20) == {"bye": True}
+        assert time.monotonic() - started < 8 and done.is_set()
+    wait_for(lambda: worker._closed)
+    with pytest.raises(meteorcloud.ClientClosedError):
+        worker.whoami()
+
+
+def test_calls_racing_with_close_end_instead_of_hanging(dataplane):
+    client = client_for(dataplane, "meter")
+    outcomes: list[str] = []
+
+    def publish() -> None:
+        try:
+            for _ in range(200):
+                client.telemetry.publish("energy.metrics", {"v": 1})
+            outcomes.append("finished")
+        except meteorcloud.MeteorCloudError as err:
+            outcomes.append(type(err).__name__)
+
+    threads = [threading.Thread(target=publish) for _ in range(4)]
+    for t in threads:
+        t.start()
+    time.sleep(0.05)
+    client.close()
+    for t in threads:
+        t.join(timeout=15)
+    assert not any(t.is_alive() for t in threads), "a caller is stuck on a stopped loop"
+    assert len(outcomes) == 4
