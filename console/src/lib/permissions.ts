@@ -144,3 +144,13 @@ export function roleDescription(role: string | undefined): string {
       return "";
   }
 }
+
+/** rule.create / rule.update / rule.delete and integration.manage. The server re-checks. */
+export function canEditRules(role: string | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "developer";
+}
+
+/** alert.acknowledge and alert.silence. */
+export function canActOnAlerts(role: string | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "operator" || role === "developer";
+}

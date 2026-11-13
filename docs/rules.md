@@ -54,6 +54,21 @@ curl -X POST "$API/api/v1/organizations/$ORG/rules" -H "Authorization: Bearer $T
       "condition": {"type": "comparison", "field": "cpu_percent", "operator": "gt", "value": 90}}}}'
 ```
 
+## Console
+
+Under **Monitoring** in the sidebar:
+
+- **Alerts**: active alerts by default, filters for status and severity, acknowledge, and
+  silences (create for 1 hour to 1 week, end early).
+- **Rules**: every rule with its scope, severity, version and an on/off switch, plus the
+  webhook targets rules can deliver to.
+- **Rule editor**: the definition as JSON with *Validate* (every problem with its path),
+  *Preview devices*, *Run test* (sample events through the engine with a virtual clock),
+  the evaluation status per device, and earlier versions to load back into the editor.
+
+Viewers can read everything; changing rules and webhook targets needs the developer,
+admin or owner role, and acknowledging or silencing also works for operators.
+
 ## Rules of the road
 
 - **Versions.** Every save adds an immutable version. If only the name, description,

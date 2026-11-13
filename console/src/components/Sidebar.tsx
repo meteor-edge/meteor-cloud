@@ -1,4 +1,5 @@
 import {
+  BellRing,
   BookOpen,
   Boxes,
   Building2,
@@ -11,6 +12,7 @@ import {
   Layers,
   LayoutDashboard,
   List,
+  ListChecks,
   LogIn,
   Package,
   Rocket,
@@ -290,6 +292,20 @@ export function Sidebar() {
                     active={isPage("deployments")}
                   >
                     Deployments
+                  </SubLink>
+                </NavSection>
+                <NavSection
+                  icon={BellRing}
+                  label="Monitoring"
+                  active={["alerts", "rules"].some(isPage)}
+                  collapsed={collapsed}
+                  onExpand={() => setCollapsed(false)}
+                >
+                  <SubLink to={`${orgPath}/alerts`} icon={BellRing} active={isPage("alerts")}>
+                    Alerts
+                  </SubLink>
+                  <SubLink to={`${orgPath}/rules`} icon={ListChecks} active={isPage("rules")}>
+                    Rules
                   </SubLink>
                 </NavSection>
                 {(showMembers || showTeams) && (
