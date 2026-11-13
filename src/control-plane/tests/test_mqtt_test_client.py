@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.mqtt.hub import MqttEventHub, MqttTestEvent
 from app.mqtt.topics import mqtt_topic_matches, validate_mqtt_topic
 from app.tenancy.models import Organization, OrganizationRole
-from tests.conftest import add_member, auth_header, create_user
+from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
 from tests.test_mqtt_commands import RecordingPublisher, _client_with_publisher, _register
 
 
@@ -285,3 +285,20 @@ def test_mqtt_publish_rejects_out_of_scope_topics(db_session: Session) -> None:
         json={"topic": f"devices/{own}/commands", "payload": "x"},
     )
     assert allowed.status_code == 200, allowed.text
+
+
+def test_mqtt_publish_rejects_device_of_another_organization(db_session: Session) -> None:
+    """An admin of one organization cannot reach a real device in another."""
+    publisher = RecordingPublisher()
+    client = _client_with_publisher(db_session, publisher)
+    _, victim = _register(client, db_session)
+    attacker = create_user(db_session, email="attacker@example.com")
+    attacker_org, _ = create_org_with_owner(db_session, attacker)
+    denied = client.post(
+        f"/api/v1/organizations/{attacker_org.id}/mqtt/publish",
+        headers=auth_header(client, "attacker@example.com"),
+        json={"topic": f"devices/{victim['device_id']}/commands", "payload": "x"},
+    )
+    assert denied.status_code == 422, denied.text
+    assert denied.json()["error"]["code"] == "mqtt_topic_invalid"
+    assert publisher.published == []
