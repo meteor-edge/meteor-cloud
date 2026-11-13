@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,10 @@ type Config struct {
 	// AllowTTL / DenyTTL bound how long a topic decision is reused.
 	AllowTTL time.Duration
 	DenyTTL  time.Duration
+	// DownFor is how long requests are denied at once after the control plane
+	// failed to answer. Mosquitto runs these checks on its event loop, so this
+	// keeps an outage from stalling the broker for a full timeout per request.
+	DownFor time.Duration
 	// MaxCacheEntries caps memory; the cache is cleared when it is exceeded.
 	MaxCacheEntries int
 	// KickTopic is the platform-only topic that disconnects a user.
@@ -60,6 +65,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.DenyTTL < 0 {
 		c.DenyTTL = 0
+	}
+	if c.DownFor <= 0 {
+		c.DownFor = 2 * time.Second
 	}
 	if c.MaxCacheEntries <= 0 {
 		c.MaxCacheEntries = 100000
@@ -89,7 +97,12 @@ type Engine struct {
 	mu         sync.Mutex
 	cache      map[string]cacheEntry
 	superusers map[string]struct{}
+	downUntil  time.Time
 }
+
+// ErrControlPlaneDown is returned without a request while the control plane is
+// marked unreachable. Callers deny, as for any other error.
+var ErrControlPlaneDown = errors.New("control plane unreachable, denying without asking")
 
 // New builds an engine. It fails when the control plane URL or token is missing,
 // so a misconfigured broker refuses to start instead of running open or dead.
@@ -143,12 +156,15 @@ func (e *Engine) Authenticate(clientID, username, password string) (bool, error)
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if allowed && out.IsSuperuser {
+	switch {
+	case allowed && out.IsSuperuser:
 		e.superusers[username] = struct{}{}
-	} else {
-		// A failed login or a demotion drops the shortcut for this username.
+	case allowed:
+		// The control plane no longer calls this user a superuser.
 		delete(e.superusers, username)
 	}
+	// A failed login changes nothing: it says nothing about sessions that are
+	// already open, and anyone can send a wrong password for any username.
 	return allowed, err
 }
 
@@ -271,6 +287,12 @@ func (e *Engine) post(path string, body any, out any) error {
 	if err != nil {
 		return err
 	}
+	e.mu.Lock()
+	down := e.cfg.Now().Before(e.downUntil)
+	e.mu.Unlock()
+	if down {
+		return ErrControlPlaneDown
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), e.cfg.Timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.cfg.ControlPlaneURL+path, bytes.NewReader(raw))
@@ -281,6 +303,7 @@ func (e *Engine) post(path string, body any, out any) error {
 	req.Header.Set("X-MQTT-Internal-Token", e.cfg.InternalToken)
 	resp, err := e.cfg.HTTPClient.Do(req)
 	if err != nil {
+		e.markDown()
 		return err
 	}
 	defer resp.Body.Close()
@@ -288,8 +311,17 @@ func (e *Engine) post(path string, body any, out any) error {
 	if err != nil {
 		return err
 	}
+	if resp.StatusCode >= http.StatusInternalServerError {
+		e.markDown()
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("control plane answered HTTP %d", resp.StatusCode)
 	}
 	return json.Unmarshal(data, out)
+}
+
+func (e *Engine) markDown() {
+	e.mu.Lock()
+	e.downUntil = e.cfg.Now().Add(e.cfg.DownFor)
+	e.mu.Unlock()
 }

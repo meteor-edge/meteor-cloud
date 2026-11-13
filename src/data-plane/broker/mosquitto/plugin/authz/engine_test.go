@@ -2,6 +2,7 @@ package authz
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -168,18 +169,28 @@ func TestDecisionsAreCachedAndExpire(t *testing.T) {
 }
 
 func TestControlPlaneDownFailsClosedAndIsNotCached(t *testing.T) {
-	e, fake := newEngine(t, nil)
+	now := time.Unix(1000, 0)
+	e, fake := newEngine(t, func(c *Config) { c.Now = func() time.Time { return now } })
 	topic := "devices/11111111-1111-1111-1111-111111111111/status"
 	fake.down.Store(true)
 	if ok, err := e.Authorize("device-a", devA, AccessWrite, topic, false); ok || err == nil {
 		t.Fatal("must deny with an error while the control plane is down")
 	}
-	if ok, _ := e.Authenticate("device-a", devA, "pw-a"); ok {
-		t.Fatal("login must be denied while the control plane is down")
+	// While marked down, requests are denied without waiting on the control plane.
+	before := fake.aclCalls.Load() + fake.authCalls.Load()
+	if ok, err := e.Authenticate("device-a", devA, "pw-a"); ok || !errors.Is(err, ErrControlPlaneDown) {
+		t.Fatalf("login must be denied at once while the control plane is down, got %v %v", ok, err)
+	}
+	if ok, err := e.Authorize("device-a", devA, AccessWrite, topic, false); ok || !errors.Is(err, ErrControlPlaneDown) {
+		t.Fatalf("publish must be denied at once while the control plane is down, got %v %v", ok, err)
+	}
+	if fake.aclCalls.Load()+fake.authCalls.Load() != before {
+		t.Fatal("no request may be sent while the control plane is marked down")
 	}
 	fake.down.Store(false)
+	now = now.Add(3 * time.Second)
 	if ok, err := e.Authorize("device-a", devA, AccessWrite, topic, false); !ok || err != nil {
-		t.Fatal("must recover as soon as the control plane is back")
+		t.Fatal("must recover once the control plane is back")
 	}
 }
 
@@ -198,10 +209,15 @@ func TestSuperuserSkipsTopicChecks(t *testing.T) {
 	if fake.aclCalls.Load() != before {
 		t.Fatal("superuser checks must not call the control plane")
 	}
-	// A failed platform login drops the shortcut.
+	// A failed login under the same username, from any client, says nothing
+	// about the open platform session: it keeps its shortcut and may still kick.
+	e.Authenticate("attacker", "platform", "wrong")
 	e.Authenticate("dp", "platform", "wrong")
-	if ok, _ := e.Authorize("dp", "platform", AccessSubscribe, "devices/#", false); ok {
-		t.Fatal("shortcut must be dropped after a failed login")
+	if ok, _ := e.Authorize("dp", "platform", AccessSubscribe, "devices/#", false); !ok {
+		t.Fatal("a failed login must not strip the open platform session")
+	}
+	if _, ok := e.KickTarget("platform", DefaultKickTopic, []byte(`{"username":"`+devA+`"}`)); !ok {
+		t.Fatal("the platform must still be able to disconnect a device")
 	}
 }
 

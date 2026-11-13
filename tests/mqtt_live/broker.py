@@ -22,7 +22,11 @@ def ping_reply(payload: str) -> dict | None:
     command_id = data.get("command_id")
     if not command_id:
         return None
-    return {"command_id": command_id, "status": "completed", "result": {"message": "pong"}}
+    return {
+        "command_id": command_id,
+        "status": "completed",
+        "result": {"message": "pong"},
+    }
 
 
 @dataclass
@@ -39,6 +43,8 @@ class MqttSession:
     device_id: str | None = None
     auto_subscribe: list[str] = field(default_factory=list)
     handle_ping: bool = False
+    #: MQTT protocol version: ``mqtt.MQTTv311`` (default) or ``mqtt.MQTTv5``.
+    protocol: int = mqtt.MQTTv311
     messages: list[tuple[str, str]] = field(default_factory=list)
     connected: Event = field(default_factory=Event)
     subscribed: Event = field(default_factory=Event)
@@ -48,14 +54,20 @@ class MqttSession:
     disconnect_event: Event = field(default_factory=Event)
     _client: mqtt.Client | None = None
 
-    def start(self, *, lwt_topic: str | None = None, lwt_payload: str | None = None) -> None:
+    def start(
+        self, *, lwt_topic: str | None = None, lwt_payload: str | None = None
+    ) -> None:
         if self.client_id is None:
             suffix = uuid.uuid4().hex[:10]
-            self.client_id = f"device-{self.device_id}-live-{suffix}" if self.device_id else f"live-{suffix}"
+            self.client_id = (
+                f"device-{self.device_id}-live-{suffix}"
+                if self.device_id
+                else f"live-{suffix}"
+            )
         client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=self.client_id,
-            protocol=mqtt.MQTTv311,
+            protocol=self.protocol,
         )
         if self.username is not None:
             client.username_pw_set(self.username, self.password or "")
@@ -85,7 +97,9 @@ class MqttSession:
         self.subscribe_ok = None
         self._client.subscribe(topic, qos=qos)
 
-    def publish(self, topic: str, payload: str, *, qos: int = 1, retain: bool = False) -> bool:
+    def publish(
+        self, topic: str, payload: str, *, qos: int = 1, retain: bool = False
+    ) -> bool:
         assert self._client is not None
         info = self._client.publish(topic, payload=payload, qos=qos, retain=retain)
         try:
@@ -94,7 +108,9 @@ class MqttSession:
         except Exception:
             return False
 
-    def wait_message(self, matcher: Callable[[str, str], bool], timeout: float = 20) -> tuple[str, str] | None:
+    def wait_message(
+        self, matcher: Callable[[str, str], bool], timeout: float = 20
+    ) -> tuple[str, str] | None:
         from mqtt_live.http import wait_until
 
         found: list[tuple[str, str]] = []
@@ -163,7 +179,9 @@ class MqttSession:
         _properties: object = None,
     ) -> None:
         codes = reason_codes if isinstance(reason_codes, list) else [reason_codes]
-        self.subscribe_ok = not any(bool(getattr(code, "is_failure", False)) for code in codes)
+        self.subscribe_ok = not any(
+            bool(getattr(code, "is_failure", False)) for code in codes
+        )
         self.subscribed.set()
 
     def _on_disconnect(

@@ -377,7 +377,8 @@ k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
 k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (OBS=1 adds Prometheus, Grafana)
 	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
 	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
-	@test -f $(K8S_CERTS_DIR)/server.crt || MQTT_CERTS_SKIP_CHOWN=1 MQTT_PUBLIC_HOST=localhost \
+	@# Re-issue the server certificate (same CA) when it lacks the broker Service name.
+	@openssl x509 -in $(K8S_CERTS_DIR)/server.crt -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:$(K8S_RELEASE)-mqtt," || MQTT_CERTS_SKIP_CHOWN=1 MQTT_PUBLIC_HOST=localhost \
 		MQTT_EXTRA_SANS=$(K8S_RELEASE)-mqtt,$(K8S_RELEASE)-mqtt.$(K8S_NAMESPACE).svc,$(K8S_RELEASE)-emqx,$(K8S_RELEASE)-emqx.$(K8S_NAMESPACE).svc \
 		./scripts/generate-local-mqtt-certs.sh $(K8S_CERTS_DIR)
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) create secret generic meteorcloud-mqtt-tls \

@@ -140,13 +140,13 @@ default adapters. See [Device platform](fleet/device-platform.md).
 | `RateLimiter` | `redis`, `memory` | — |
 | `MQTTGateway` | Data-plane HTTP → broker | other transports |
 | `MqttBroker` | `mosquitto`, `emqx`, `vernemq` | other broker names |
-
-Broker choice (Mosquitto default, EMQX, VerneMQ), the `MqttBroker` port, and licensing: [MQTT brokers](fleet/mqtt-brokers.md). Full infra inventory: [Licensing](licensing.md).
 | Telemetry last-value | PostgreSQL columns on `Device` | `timescale`, `clickhouse` |
 | `OTAProvider` | `none` | `mender` and others later |
 | `DeviceConnectivityProvider` | `wireguard`, `none` | other tunnels later |
 | `DeviceShellProvider` | `ssh_gateway`, `echo` (tests), `none` | MQTT PTY later |
 | `ObjectStorage` | `s3`, `filesystem` | — |
+
+Broker choice (Mosquitto default, EMQX, VerneMQ), the `MqttBroker` port, and licensing: [MQTT brokers](fleet/mqtt-brokers.md). Full infra inventory: [Licensing](licensing.md).
 
 Artifact binaries live in object storage; PostgreSQL keeps metadata and `storage_key`. See [Artifacts](fleet/artifacts.md).
 

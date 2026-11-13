@@ -25,6 +25,10 @@ spec:
         {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "mqtt-broker") | nindent 8 }}
     spec:
       automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

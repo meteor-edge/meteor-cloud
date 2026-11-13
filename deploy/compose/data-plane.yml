@@ -16,9 +16,10 @@ volumes:
   mosquitto_data:
   vernemq_data:
 
-# Every bundled broker answers to "mqtt-broker". "emqx" is kept as a second
-# name so .env files and certificates from before the broker became selectable
-# (MQTT_BROKER_HOST=emqx, SAN DNS:emqx) keep working after a switch.
+# Every bundled broker answers to "mqtt-broker" and to "emqx". The default
+# MQTT_BROKER_HOST stays "emqx" because certificates from before the broker
+# became selectable only carry SAN DNS:emqx; new certificates carry both, and
+# .env.example sets mqtt-broker.
 x-broker-network: &broker-network
   meteorcloud:
     aliases:
@@ -132,7 +133,7 @@ services:
     environment:
       CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
       HTTP_ADDR: ":8081"
-      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-mqtt-broker}
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
       MQTT_PROVIDER: ${MQTT_PROVIDER:-mosquitto}
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
       MQTT_CA_CERT_PATH: /certs/ca.crt

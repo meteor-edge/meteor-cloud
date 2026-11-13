@@ -105,5 +105,9 @@ then
   echo "==> MQTT live tests against deployed broker"
   "$PYTHON" -m pytest -q tests/mqtt_live
 else
-  echo "Cloud MQTT: NOT RUN (:${MQTT_PORT} is not reachable; production compose does not deploy an MQTT broker here)"
+  if [[ "${MQTT_EXPECTED:-}" == "1" ]]; then
+    echo "Cloud MQTT: FAILED (MQTT_EXPECTED=1 but TLS on ${MQTT_HOST:-?}:${MQTT_PORT} did not answer)" >&2
+    exit 1
+  fi
+  echo "Cloud MQTT: NOT RUN (TLS on ${MQTT_HOST:-?}:${MQTT_PORT} did not answer; this deployment has no reachable broker. Set MQTT_EXPECTED=1 to make this a failure)"
 fi

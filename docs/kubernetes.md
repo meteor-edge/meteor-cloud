@@ -85,7 +85,7 @@ You provide:
 6. **For devices (MQTT)**: a way to expose TCP 8883 (a cloud LoadBalancer,
    MetalLB, or k3s servicelb), a DNS name for `mqtt.publicHost`, and a TLS Secret
    with `ca.crt`, `server.crt`, and `server.key`. The server certificate needs
-   SANs for the public host and for the broker Service (`<release>-mqtt`, or `<release>-emqx` with `mqtt.provider=emqx`), because the data plane
+   SANs for the public host and for the broker Service (`<fullname>-mqtt`, or `<fullname>-emqx` with `mqtt.provider=emqx`; `<fullname>` is `<release>-meteorcloud`, or `<release>` when the release name contains `meteorcloud`, or `fullnameOverride`; for release `fleet` that is `fleet-meteorcloud-mqtt`), because the data plane
    verifies it inside the cluster.
 7. **Redis** (optional), for consistent rate limits across API replicas.
 

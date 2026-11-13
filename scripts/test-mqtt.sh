@@ -20,7 +20,15 @@ export PLATFORM_URL="${PLATFORM_URL:-http://127.0.0.1:8000}"
 export MQTT_HOST="${MQTT_HOST:-127.0.0.1}"
 export MQTT_PORT="${MQTT_PORT:-8883}"
 export MQTT_CA_FILE="${MQTT_CA_FILE:-$ROOT/certs/ca.crt}"
+# Shell values win; otherwise use deploy/compose/.env, then the default.
+env_file_value() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  awk -F= -v key="$1" '$1==key{v=substr($0, index($0,"=")+1); gsub(/\r|^"|"$/, "", v); print v; exit}' "$ENV_FILE"
+}
+MQTT_PROVIDER="${MQTT_PROVIDER:-$(env_file_value MQTT_PROVIDER)}"
 export MQTT_PROVIDER="${MQTT_PROVIDER:-mosquitto}"
+VERNEMQ_ACCEPT_EULA="${VERNEMQ_ACCEPT_EULA:-$(env_file_value VERNEMQ_ACCEPT_EULA)}"
+export VERNEMQ_ACCEPT_EULA
 case "$MQTT_PROVIDER" in
   mosquitto|emqx|vernemq) ;;
   *) echo "error: MQTT_PROVIDER must be mosquitto, emqx, or vernemq" >&2; exit 1 ;;

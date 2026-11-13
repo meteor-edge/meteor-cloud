@@ -27,7 +27,7 @@ The broker never decides anything itself. For every login, publish, and subscrib
 
 - Issuing, rotating, or revoking a credential is one database write. There is no "database updated but broker not" state to repair, and the operations are idempotent.
 - Switching broker needs no data migration. Devices keep their credentials.
-- If the control plane is unreachable, brokers deny (fail closed).
+- If the control plane is unreachable, brokers deny every new login and every decision they have not cached (fail closed). Mosquitto keeps using decisions it cached before the outage until they expire (allowed: 60 s, denied: 10 s by default; set `MQTT_ACL_CACHE_SECONDS=0` to turn this off). After a failed call it denies at once for 2 seconds instead of waiting on the control plane for every request, because its plugin runs on the broker's event loop.
 
 ```text
 device ──TLS 8883──► broker ──HTTP (private network)──► control plane
@@ -118,7 +118,7 @@ Image `meteorcloud/mosquitto` is built from `src/data-plane/broker/mosquitto/`: 
 | Setting (environment) | Meaning | Default |
 | --- | --- | --- |
 | `CONTROL_PLANE_URL` | Where the plugin asks | `http://backend:8000` |
-| `MQTT_INTERNAL_TOKEN` | Shared secret. Empty stops the broker at startup | none |
+| `MQTT_INTERNAL_TOKEN` | Shared secret. Empty stops the broker at startup. Use URL-safe characters only (`openssl rand -hex 24`), because VerneMQ carries it in a URL | none |
 | `MQTT_ACL_CACHE_SECONDS` | Reuse an "allowed" topic decision (0 = ask every time) | `60` |
 | `MQTT_ACL_DENY_CACHE_SECONDS` | Reuse a "denied" decision | `10` |
 | `MQTT_AUTH_TIMEOUT_MS` | HTTP timeout per question | `3000` |
@@ -145,7 +145,7 @@ VerneMQ asks the control plane through `vmq_webhooks`. The control plane has a t
 | `auth_on_publish`, `auth_on_publish_m5` | `POST /internal/mqtt/vernemq/auth_on_publish[_m5]?token=...` |
 | `auth_on_subscribe`, `auth_on_subscribe_m5` | `POST /internal/mqtt/vernemq/auth_on_subscribe[_m5]?token=...` |
 
-- VerneMQ webhooks cannot send custom headers, so the shared secret is in the URL. Keep that URL on the private network between broker and control plane, and do not log it at a proxy.
+- VerneMQ webhooks cannot send custom headers, so the shared secret is in the URL. It is not URL-encoded, so `MQTT_INTERNAL_TOKEN` must be URL-safe (the installer and `openssl rand -hex` produce such tokens). Keep that URL on the private network between broker and control plane, and do not log it at a proxy.
 - The control plane sends no `cache-control` header, so VerneMQ asks for every publish and subscribe. A revoked device loses access at once; its open connection stays until it reconnects.
 - `vmq_passwd` and `vmq_acl` are off, anonymous access is off, TLS 1.2+ on 8883 is the only published listener (plain 1883 stays on loopback inside the container).
 - Telemetry processing must stay out of webhooks: the hooks only answer allow or deny.
@@ -171,7 +171,7 @@ Run that cluster yourself (the VerneMQ Helm chart is the usual way) and connect 
 All bundled brokers use the same three files from `MQTT_CERTS_DIR` (`ca.crt`, `server.crt`, `server.key`, key owned by UID 1000). `make mqtt-certs` creates a development CA and server certificate. For production, issue the server certificate from your own CA with these names:
 
 - the public hostname devices use (`MQTT_PUBLIC_HOST`);
-- the internal name the data plane uses: `mqtt-broker` on Compose, `<release>-mqtt` (Mosquitto) or `<release>-emqx` (EMQX) on Kubernetes.
+- the internal name the data plane uses: `mqtt-broker` (and `emqx`) on Compose, `<fullname>-mqtt` (Mosquitto) or `<fullname>-emqx` (EMQX) on Kubernetes. `<fullname>` is the chart's full name: `<release>-meteorcloud`, or just `<release>` when the release name contains `meteorcloud`, or `fullnameOverride`. Check it with `kubectl get svc`.
 
 Devices verify the broker with the CA they received at registration and log in with their own username and password. Client certificates (mTLS) are not implemented. Only TLS 1.2 and 1.3 are accepted.
 
@@ -190,7 +190,7 @@ Devices keep their credentials and reconnect by themselves. Retained messages an
 
 - **Compose:** replace the broker profile in `COMPOSE_PROFILES` and set `MQTT_PROVIDER`, then `docker compose up -d --remove-orphans`. An existing `.env` with `MQTT_BROKER_HOST=emqx` keeps working: every bundled broker also answers to that name.
 - **Ansible:** set `mqtt_provider` and re-run the playbook. Installs that say nothing get Mosquitto; set `mqtt_provider: emqx` to stay on EMQX.
-- **Helm:** `mqtt.provider`. Moving from EMQX to Mosquitto renames the broker Service from `<release>-emqx` to `<release>-mqtt`: re-issue the server certificate with the new name, and expect a new load balancer address. Set `mqtt.provider: emqx` to keep everything as it was.
+- **Helm:** `mqtt.provider`. Moving from EMQX to Mosquitto renames the broker Service from `<fullname>-emqx` to `<fullname>-mqtt`: re-issue the server certificate with the new name, and expect a new load balancer address. Set `mqtt.provider: emqx` to keep everything as it was.
 
 ## Adding another broker
 

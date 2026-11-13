@@ -266,14 +266,17 @@ def test_revoke_survives_a_broken_broker(client: TestClient, db_session: Session
 # --- broker adapters -------------------------------------------------------
 
 
-def test_every_supported_broker_has_an_adapter() -> None:
+def test_every_supported_broker_has_an_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MQTT_PROVIDER", raising=False)
     for name in SUPPORTED_BROKERS:
         broker = mqtt_broker(Settings(MQTT_PROVIDER=name))
         assert broker.name == name
         assert broker.disconnect_device(A) is False  # no publisher: best effort, never raises
-    assert Settings().mqtt_provider == "mosquitto"
-    assert isinstance(mqtt_broker(Settings()), MosquittoBroker)
-    assert mqtt_broker(Settings()).instant_disconnect is True
+    # _env_file=None: the default must not depend on a developer's .env.
+    default = Settings(_env_file=None)
+    assert default.mqtt_provider == "mosquitto"
+    assert isinstance(mqtt_broker(default), MosquittoBroker)
+    assert mqtt_broker(default).instant_disconnect is True
     assert mqtt_broker(Settings(MQTT_PROVIDER="vernemq")).clustering is True
 
 
@@ -355,14 +358,17 @@ def test_vernemq_register_publish_subscribe(client: TestClient, db_session: Sess
             ],
         },
     )
-    assert answer == {
-        "result": "ok",
-        "topics": [
-            {"topic": f"devices/{a['device_id']}/commands", "qos": 1},
-            {"topic": f"devices/{b['device_id']}/commands", "qos": 128},
-            {"topic": "devices/#", "qos": 128},
-        ],
-    }
+    # MQTT 3.1.1 answers go in "topics" with code 128; MQTT 5 answers must be under
+    # "modifiers.topics" with code 135, or VerneMQ ignores them and allows everything.
+    denied = 135 if suffix else 128
+    topics = [
+        {"topic": f"devices/{a['device_id']}/commands", "qos": 1},
+        {"topic": f"devices/{b['device_id']}/commands", "qos": denied},
+        {"topic": "devices/#", "qos": denied},
+    ]
+    assert answer == (
+        {"result": "ok", "modifiers": {"topics": topics}} if suffix else {"result": "ok", "topics": topics}
+    )
     assert _vmq(client, f"auth_on_subscribe{suffix}", {**subscribe, "topics": []}) == deny
 
 
@@ -378,7 +384,7 @@ def test_vernemq_platform_user_is_allowed_everywhere(client: TestClient) -> None
         client,
         "auth_on_subscribe_m5",
         {"username": user, "client_id": "dp", "topics": [{"topic": "$share/dp/devices/+/metrics", "qos": 1}]},
-    ) == {"result": "ok", "topics": [{"topic": "$share/dp/devices/+/metrics", "qos": 1}]}
+    ) == {"result": "ok", "modifiers": {"topics": [{"topic": "$share/dp/devices/+/metrics", "qos": 1}]}}
     assert _vmq(
         client, "auth_on_publish", {"username": user, "client_id": "dp", "topic": KICK_TOPIC, "retain": False}
     ) == {"result": "ok"}

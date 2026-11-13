@@ -1,7 +1,7 @@
 """MQTT authn/authz/TLS against the real broker (Mosquitto, EMQX, or VerneMQ).
 
-Brokers answer a denied PUBLISH differently: EMQX disconnects the client,
-Mosquitto and VerneMQ acknowledge and drop it (MQTT 3.1.1 has no "denied"
+Brokers answer a denied PUBLISH differently: EMQX and VerneMQ disconnect the
+client, Mosquitto acknowledges and drops it (MQTT 3.1.1 has no "denied"
 answer). So denial is proven the way that matters: a platform observer
 subscribed to everything never sees the message.
 """
@@ -12,6 +12,9 @@ import json
 import subprocess
 import uuid
 from pathlib import Path
+
+import paho.mqtt.client as mqtt
+import pytest
 
 from mqtt_live.broker import MqttSession
 from mqtt_live.http import wait_until
@@ -46,12 +49,42 @@ def _observer(live_config, topic_filter: str = "#") -> MqttSession:
 
 
 def _assert_publish_blocked(
-    observer: MqttSession, session: MqttSession, topic: str, *, retain: bool = False
+    observer: MqttSession, live_config, device, topic: str, *, retain: bool = False
 ) -> None:
+    """Publish from a fresh, connected session and check nobody receives it.
+
+    A fresh session per attempt: VerneMQ and EMQX close the connection of a
+    client whose publish is denied, and a publish on a dead session would
+    "pass" without the broker ever deciding anything.
+    """
     marker = f"blocked-{uuid.uuid4().hex}"
-    session.publish(topic, json.dumps({"marker": marker}), retain=retain)
+    session = _session(live_config, device)
+    session.start()
+    try:
+        assert session.wait_connected() is True, (
+            "the publishing session never connected"
+        )
+        session.publish(topic, json.dumps({"marker": marker}), retain=retain)
+        leaked = observer.wait_message(
+            lambda _topic, payload: marker in payload, timeout=3
+        )
+        assert leaked is None, (
+            f"denied publish to {topic} reached the broker's subscribers"
+        )
+    finally:
+        session.close()
+
+
+def _assert_open_session_publish_blocked(
+    observer: MqttSession, session: MqttSession, topic: str
+) -> None:
+    """For a session that was open before access was taken away (it may have been dropped)."""
+    marker = f"blocked-{uuid.uuid4().hex}"
+    session.publish(topic, json.dumps({"marker": marker}))
     leaked = observer.wait_message(lambda _topic, payload: marker in payload, timeout=3)
-    assert leaked is None, f"denied publish to {topic} reached the broker's subscribers"
+    assert leaked is None, (
+        f"publish to {topic} from a revoked session reached subscribers"
+    )
 
 
 def _assert_publish_delivered(
@@ -156,18 +189,26 @@ def test_reserved_and_unknown_own_topics_denied(api, live_config):
         assert session.wait_connected() is True
         for suffix in ("events", "telemetry", "custom", "commands"):
             _assert_publish_blocked(
-                observer, session, f"devices/{device.device_id}/{suffix}"
+                observer, live_config, device, f"devices/{device.device_id}/{suffix}"
             )
         # Only the status topic may be retained.
         _assert_publish_blocked(
-            observer, session, f"devices/{device.device_id}/metrics", retain=True
+            observer,
+            live_config,
+            device,
+            f"devices/{device.device_id}/metrics",
+            retain=True,
         )
     finally:
         session.close()
         observer.close()
 
 
-def test_denied_subscriptions(api, live_config):
+@pytest.mark.parametrize(
+    "protocol", [mqtt.MQTTv311, mqtt.MQTTv5], ids=["mqtt311", "mqtt5"]
+)
+def test_denied_subscriptions(api, live_config, protocol):
+    """Brokers answer MQTT 3.1.1 and MQTT 5 subscribes on different paths: check both."""
     device_a = api.register_device("sec-sub-a")
     device_b = api.register_device("sec-sub-b")
     filters = [
@@ -184,7 +225,7 @@ def test_denied_subscriptions(api, live_config):
         "meteorcloud/control/#",
     ]
     for topic_filter in filters:
-        session = _session(live_config, device_a)
+        session = _session(live_config, device_a, protocol=protocol)
         session.start()
         try:
             assert session.wait_connected() is True
@@ -208,9 +249,14 @@ def test_other_device_topics_denied(api, live_config):
         assert session.wait_connected() is True
         for suffix in ("status", "metrics", "commands", "commands/result"):
             _assert_publish_blocked(
-                observer, session, f"devices/{device_b.device_id}/{suffix}"
+                observer,
+                live_config,
+                device_a,
+                f"devices/{device_b.device_id}/{suffix}",
             )
-        _assert_publish_blocked(observer, session, "meteorcloud/control/disconnect")
+        _assert_publish_blocked(
+            observer, live_config, device_a, "meteorcloud/control/disconnect"
+        )
     finally:
         session.close()
         observer.close()
@@ -289,7 +335,10 @@ def test_cross_tenant_isolation(api, live_config):
             assert session.wait_connected() is True
             for suffix in ("status", "metrics", "commands", "commands/result"):
                 _assert_publish_blocked(
-                    observer, session, f"devices/{device_b.device_id}/{suffix}"
+                    observer,
+                    live_config,
+                    device_a,
+                    f"devices/{device_b.device_id}/{suffix}",
                 )
             session.subscribe(f"devices/{device_b.device_id}/commands")
             assert (not session.wait_subscribed(6)) or session.disconnect_event.is_set()
@@ -348,7 +397,7 @@ def test_revoke_cuts_a_connected_device(api, live_config):
                 "the broker did not drop the revoked device"
             )
         # Connected or not, nothing from it gets through any more.
-        _assert_publish_blocked(observer, session, status)
+        _assert_open_session_publish_blocked(observer, session, status)
         retry = _session(live_config, device)
         retry.start()
         try:
@@ -374,7 +423,7 @@ def test_disable_cuts_a_connected_device(api, live_config):
             assert session.disconnect_event.wait(10), (
                 "the broker did not drop the disabled device"
             )
-        _assert_publish_blocked(observer, session, status)
+        _assert_open_session_publish_blocked(observer, session, status)
     finally:
         session.close()
         observer.close()
@@ -403,11 +452,10 @@ def test_old_tls_versions_refused(live_config):
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     try:
+        context.set_ciphers("DEFAULT:@SECLEVEL=0")  # let the client offer legacy TLS
         context.minimum_version = ssl.TLSVersion.TLSv1
         context.maximum_version = ssl.TLSVersion.TLSv1_1
-    except ValueError:
-        import pytest
-
+    except (ValueError, ssl.SSLError):
         pytest.skip("This OpenSSL build cannot offer TLS 1.1")
     import socket
 
@@ -420,8 +468,14 @@ def test_old_tls_versions_refused(live_config):
             context.wrap_socket(raw),
         ):
             pass
-    except (ssl.SSLError, OSError):
+    except ssl.SSLError as exc:
+        # Only a refusal by the broker counts. If this OpenSSL cannot offer
+        # TLS 1.0/1.1 at all, the handshake fails locally and proves nothing.
+        if "NO_PROTOCOLS_AVAILABLE" in str(exc).upper().replace(" ", "_"):
+            pytest.skip("This OpenSSL build cannot offer TLS 1.0 or 1.1")
         refused = True
+    except OSError:
+        refused = True  # the broker closed the connection during the handshake
     assert refused
 
 

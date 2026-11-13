@@ -30,8 +30,10 @@ router = APIRouter(prefix="/internal/mqtt/vernemq", tags=["internal-mqtt"], incl
 
 _OK: dict[str, Any] = {"result": "ok"}
 _DENY: dict[str, Any] = {"result": {"error": "not_allowed"}}
-#: SUBACK failure code VerneMQ accepts per topic in an ``auth_on_subscribe`` answer.
+#: Per-topic refusal in an ``auth_on_subscribe`` answer: the MQTT 3.1.1 SUBACK
+#: failure code, and the MQTT 5 "not authorized" reason code.
 _SUBSCRIBE_DENIED_QOS = 128
+_SUBSCRIBE_DENIED_QOS_M5 = 135
 
 
 def _require_token(
@@ -92,7 +94,7 @@ def _publish(payload: _PublishHook, session: Session, settings: Settings) -> dic
     return _OK if result.result == "allow" else _DENY
 
 
-def _subscribe(payload: _SubscribeHook, session: Session, settings: Settings) -> dict[str, Any]:
+def _subscribe(payload: _SubscribeHook, session: Session, settings: Settings, *, mqtt5: bool = False) -> dict[str, Any]:
     service = MqttService(session, settings=settings)
     if not payload.topics:
         return _DENY
@@ -107,12 +109,18 @@ def _subscribe(payload: _SubscribeHook, session: Session, settings: Settings) ->
             ).result
             == "allow"
         )
-        answered.append({"topic": item.topic, "qos": item.qos if allowed else _SUBSCRIBE_DENIED_QOS})
+        denied = _SUBSCRIBE_DENIED_QOS_M5 if mqtt5 else _SUBSCRIBE_DENIED_QOS
+        answered.append({"topic": item.topic, "qos": item.qos if allowed else denied})
     # Per-topic answers: allowed filters keep their QoS, denied ones get a failure SUBACK.
+    # VerneMQ reads them from "topics" for MQTT 3.1.1 and from "modifiers.topics" for
+    # MQTT 5; an answer in the wrong place is ignored and the subscribe goes through.
+    if mqtt5:
+        return {"result": "ok", "modifiers": {"topics": answered}}
     return {"result": "ok", "topics": answered}
 
 
-# MQTT 3.1.1 and MQTT 5 hooks carry the same fields we need.
+# MQTT 3.1.1 and MQTT 5 hooks carry the same request fields we need. Only the
+# subscribe answer differs.
 @router.post("/auth_on_register")
 @router.post("/auth_on_register_m5")
 def vernemq_auth_on_register(payload: _RegisterHook, session: Service, settings: Config, _: Guard) -> dict[str, Any]:
@@ -126,6 +134,12 @@ def vernemq_auth_on_publish(payload: _PublishHook, session: Service, settings: C
 
 
 @router.post("/auth_on_subscribe")
-@router.post("/auth_on_subscribe_m5")
 def vernemq_auth_on_subscribe(payload: _SubscribeHook, session: Service, settings: Config, _: Guard) -> dict[str, Any]:
     return _subscribe(payload, session, settings)
+
+
+@router.post("/auth_on_subscribe_m5")
+def vernemq_auth_on_subscribe_m5(
+    payload: _SubscribeHook, session: Service, settings: Config, _: Guard
+) -> dict[str, Any]:
+    return _subscribe(payload, session, settings, mqtt5=True)
