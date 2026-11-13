@@ -65,6 +65,7 @@ Prefix: `/api/v1/organizations/{organization_id}`
 | Device logs | `GET .../devices/{device_id}/log-sources`, `POST .../devices/{device_id}/log-sessions` then WebSocket `/api/v1/log-sessions/{id}/ws` ([Device logs](fleet/logs.md)) |
 | Endpoints | `/endpoints`, `/endpoints/{id}` |
 | MQTT test | `/mqtt/events` (SSE), `/mqtt/publish` |
+| Rules and alerts | `/rules` (+ validate, preview-devices, versions, enable/disable), `/alerts` (+ acknowledge), `/alert-silences`, `/notification-integrations` ([Rules and alerts](rules.md)) |
 | Audit | `/audit-events` (filters and paging: [Audit log](audit-log.md)) |
 | Artifacts | `/artifacts` (separate router; upload, download, download-link) |
 

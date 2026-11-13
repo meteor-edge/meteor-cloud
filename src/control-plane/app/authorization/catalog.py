@@ -108,6 +108,19 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
         "Create, rotate and revoke data-plane credentials for applications.",
     ),
     PermissionDef("application", "command", "Send application commands", "Send commands to running applications."),
+    PermissionDef("rule", "read", "View rules", "List rules, their versions and matching devices."),
+    PermissionDef("rule", "create", "Create rules", "Create alerting and automation rules."),
+    PermissionDef("rule", "update", "Update rules", "Change, enable and disable rules. Every save is a new version."),
+    PermissionDef("rule", "delete", "Delete rules", "Delete rules. Their alert history stays."),
+    PermissionDef("alert", "read", "View alerts", "List alerts, their history and silences."),
+    PermissionDef("alert", "acknowledge", "Acknowledge alerts", "Mark firing alerts as acknowledged."),
+    PermissionDef("alert", "silence", "Silence alerts", "Hold notifications for matching alerts for a while."),
+    PermissionDef(
+        "integration",
+        "manage",
+        "Manage notification integrations",
+        "Add, change and remove the webhooks rules deliver to, including their signing secrets.",
+    ),
     PermissionDef("mqtt", "test", "Use MQTT test tools", "Publish and listen in the organization MQTT test UI."),
 )
 
@@ -127,10 +140,18 @@ _VIEWER = frozenset(
         "deployment.read",
         "endpoint.read",
         "application.read",
+        "rule.read",
+        "alert.read",
     }
 )
 _DEVELOPER = _VIEWER | frozenset(
     {
+        "rule.create",
+        "rule.update",
+        "rule.delete",
+        "alert.acknowledge",
+        "alert.silence",
+        "integration.manage",
         "application.create",
         "application.update",
         "application.delete",
@@ -154,6 +175,8 @@ _DEVELOPER = _VIEWER | frozenset(
 )
 _OPERATOR = _VIEWER | frozenset(
     {
+        "alert.acknowledge",
+        "alert.silence",
         "team.read",
         "device.create",
         "device.update",
