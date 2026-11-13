@@ -185,7 +185,7 @@ func TestAggregates(t *testing.T) {
 		{"avg", "gt", 29.9, true}, {"avg", "gt", 30.1, false},
 		{"min", "eq", 10, true}, {"max", "eq", 50, true},
 		{"sum", "eq", 120, true}, {"count", "eq", 4, true},
-		{"delta", "eq", 40, true}, // last 50 minus first 10
+		{"delta", "eq", 40, true},                              // last 50 minus first 10
 		{"rate", "gt", 0.44, true}, {"rate", "lt", 0.45, true}, // 40 over 90 s
 	}
 	for _, c := range cases {
