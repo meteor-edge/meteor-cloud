@@ -345,5 +345,27 @@
         cmd: "{{ platform_root }}/generate-mqtt-certs.sh {{ platform_certs_dir }}"
         creates: "{{ platform_certs_dir }}/server.crt"
       environment:
+        # ansible_host is the address devices and the health check verify against
+        # (public IP or domain). Pass it explicitly so a missing default cannot
+        # leave the cert with only localhost / the instance private IP.
         MQTT_PUBLIC_HOST: "{{ mqtt_public_host }}"
+        MQTT_EXTRA_SANS: "{{ mqtt_public_host }},{{ ansible_host | default('') }}"
       when: mqtt_certs_src_dir | length == 0
+
+    - name: Regenerate the broker certificate when the public host is missing from SANs
+      ansible.builtin.shell: |
+        set -euo pipefail
+        sans="$(openssl x509 -in {{ platform_certs_dir }}/server.crt -noout -ext subjectAltName 2>/dev/null || true)"
+        host="{{ mqtt_public_host }}"
+        if printf '%s\n' "$sans" | grep -Eq "DNS:${host}|IP Address:${host}|IP:${host}"; then
+          exit 0
+        fi
+        rm -f {{ platform_certs_dir }}/server.crt {{ platform_certs_dir }}/server.key \
+          {{ platform_certs_dir }}/server.csr {{ platform_certs_dir }}/server.ext
+        MQTT_PUBLIC_HOST="$host" MQTT_EXTRA_SANS="$host,{{ ansible_host | default('') }}" \
+          {{ platform_root }}/generate-mqtt-certs.sh {{ platform_certs_dir }}
+      args:
+        executable: /bin/bash
+      when: mqtt_certs_src_dir | length == 0 and mqtt_public_host | length > 0
+      register: platform_mqtt_certs_repair
+      changed_when: platform_mqtt_certs_repair.stdout is search('Wrote MQTT') or platform_mqtt_certs_repair.rc == 0 and 'Wrote MQTT' in (platform_mqtt_certs_repair.stdout | default(''))
