@@ -281,7 +281,7 @@ DATAPLANE_STORAGE=memory DATAPLANE_BUS=memory DATAPLANE_POLICY_FILE=/tmp/policy.
 METEORCLOUD_ENDPOINT=http://localhost:8082 METEORCLOUD_TOKEN=$TOKEN python sdk/python/examples/quickstart.py
 ```
 
-With a full local stack (`make dev`), create the application and credential in MeteorCloud instead.
+With a full local stack (`make dev`), create the application and credential in MeteorCloud instead. See [docs/data-plane](../../docs/data-plane/README.md).
 
 ## Tests
 

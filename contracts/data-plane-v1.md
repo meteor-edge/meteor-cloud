@@ -1,6 +1,6 @@
 # Data plane protocol v1
 
-The contract between applications (and SDKs) and the MeteorCloud application data plane (`src/data-plane/go`), and between the data plane and the control plane. The Python SDK (`sdk/python`) is one client of this contract.
+The contract between applications (and SDKs) and the MeteorCloud application data plane (`src/data-plane/go`), and between the data plane and the control plane. The Python SDK (`sdk/python`) is one client of this contract. Machine-readable HTTP description: [`src/data-plane/go/api/openapi.yaml`](../src/data-plane/go/api/openapi.yaml).
 
 Version 1 is identified by the `/v1` path prefix, the `meteor/v1/` topic prefix and `schema_version: 1` in the envelope. Additions (new optional fields, new endpoints) stay in v1. A change that would break an existing client gets a new version next to this one.
 

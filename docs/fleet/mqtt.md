@@ -117,6 +117,8 @@ The broker rejects a device whose client id is not `device-DEVICE_ID` or
 
 ## Topics
 
+Application data uses a separate, versioned hierarchy under `meteor/v1/orgs/{org}/...`, owned by the application data plane. Applications normally use the SDK and never connect to the broker; those that do log in with a short-lived token (username `app_...`) that EMQX verifies with its JWT authenticator. See [data plane protocol → MQTT](../../contracts/data-plane-v1.md#mqtt). The topics below are the device management topics.
+
 ```text
 devices/{device_id}/status              PUBLISH (device, LWT) / platform subscribe
 devices/{device_id}/metrics             PUBLISH (device) / platform subscribe (latest snapshot only)

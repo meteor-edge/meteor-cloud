@@ -14,6 +14,7 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | Eclipse Mosquitto **2.x** (Debian package, in `meteorcloud/mosquitto`) | MQTT broker (**default**) | [EPL-2.0 OR EDL-1.0 (BSD-3-Clause)](https://github.com/eclipse-mosquitto/mosquitto/blob/master/LICENSE.txt) | **Yes** | Fine to ship as default. Unmodified; our auth plugin is separate MeteorCloud code. Single node only |
 | EMQX **5.8.6** (single node) | Optional MQTT broker (`MQTT_PROVIDER=emqx`) | Apache 2.0 | **Yes** | OK as shipped, but **no upstream security fixes since 2026-02-28**. Details: [MQTT brokers](fleet/mqtt-brokers.md#emqx) |
 | VerneMQ (official `vernemq/vernemq` image) | Optional MQTT broker (`MQTT_PROVIDER=vernemq`) | Source: Apache 2.0. Official builds: [VerneMQ EULA](https://vernemq.com/vernemq-licenses.html) | **Only with commercial license** | Off by default; starts only with `VERNEMQ_ACCEPT_EULA=yes`. Commercial use of the official image needs a VerneMQ subscription, or build your own image from source. [MQTT brokers](fleet/mqtt-brokers.md#vernemq) |
+| ClickHouse **25.8** (`clickhouse/clickhouse-server:25.8-alpine`) | Optional store for application data (profile `clickhouse`) | [Apache 2.0](https://github.com/ClickHouse/ClickHouse/blob/master/LICENSE) | **Yes** | Unmodified image, reached over its HTTP interface; no ClickHouse library is linked into MeteorCloud. ClickHouse Cloud and its enterprise features are separate products and are not used |
 | Filesystem or customer S3 / R2 / GCS | Artifacts | N/A / cloud contract | **Yes** | **Preferred** production storage |
 | WireGuard / Docker | VPN / runtime | GPL family / Apache 2.0 | **Yes** | Normal host infra |
 | Prometheus / Alertmanager / node_exporter | Metrics / alerts | Apache 2.0 | **Yes** | Optional ops stack; fine |
@@ -53,6 +54,7 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | Mosquitto | `src/data-plane/broker/mosquitto/Dockerfile` (`debian:trixie-slim` + `mosquitto`) | `values.yaml` → `mqtt.mosquitto.image` |
 | EMQX | `deploy/compose/data-plane.yml` → `emqx/emqx:5.8.6` | `values.yaml` → `mqtt.emqx.image` |
 | VerneMQ | `deploy/compose/data-plane.yml` → `vernemq/vernemq:2.2.1` (`VERNEMQ_IMAGE`) | not in the chart (external only) |
+| ClickHouse | `deploy/compose/data-plane.yml` → `clickhouse/clickhouse-server:25.8-alpine` | not in the chart |
 | Data API base images | `src/data-plane/go/Dockerfile` → `golang:1.24-alpine`, `alpine:3.21` | not in the chart |
 | Data API Go modules | `src/data-plane/go/go.mod` | same |
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |

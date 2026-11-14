@@ -121,7 +121,7 @@ Keep **one** data-plane MQTT subscriber until shared subscriptions exist.
 
 ### Application data plane (Go)
 
-A second, independent service in [`src/data-plane/go/`](../src/data-plane/go/) serves applications: publish, live subscribe, history and commands over HTTPS and WebSocket, with the [Python SDK](../sdk/python/README.md) on top. It owns the `meteor/v1/...` topics; the Python process above keeps the device management topics (`devices/...`). It pulls a policy snapshot from the control plane and never calls it per message. Contract: [`contracts/data-plane-v1.md`](../contracts/data-plane-v1.md).
+A second, independent service in [`src/data-plane/go/`](../src/data-plane/go/) serves applications: publish, live subscribe, history and commands over HTTPS and WebSocket, with the [Python SDK](../sdk/python/README.md) on top. It owns the `meteor/v1/...` topics; the Python process above keeps the device management topics (`devices/...`). It stores telemetry, events and inference results in ClickHouse and keeps commands in PostgreSQL (its own `dataplane` schema); the control plane database stays PostgreSQL. It pulls a policy snapshot from the control plane and never calls it per message. Overview and design decisions: [docs/data-plane](data-plane/README.md). Contract: [`contracts/data-plane-v1.md`](../contracts/data-plane-v1.md).
 
 ## Device agent (`meteorcli`)
 

@@ -1,6 +1,6 @@
 // Package storage is the persistence boundary of the data plane. Applications never
-// see it: they use the HTTP API. PostgreSQL is the first backend; the interface keeps
-// ClickHouse or another time-series store a drop-in later.
+// see it: they use the HTTP API. Events live in an EventStore (ClickHouse, PostgreSQL
+// or memory); commands and dead letters need row updates and live in PostgreSQL.
 package storage
 
 import (
@@ -117,14 +117,21 @@ type CommandUpdate struct {
 	NextCheckAt  *time.Time
 }
 
-// Store is everything the data plane persists.
-type Store interface {
+// EventStore holds the append-only data: telemetry, events and inference results.
+type EventStore interface {
 	// InsertEvents stores events durably. inserted[i] is false when an event with the
 	// same (organization, id) already existed: the write is idempotent.
 	InsertEvents(ctx context.Context, events []*envelope.Event) (inserted []bool, err error)
 	QueryEvents(ctx context.Context, q Query) (events []*envelope.Event, next *Cursor, err error)
 	Aggregate(ctx context.Context, q AggregateQuery) ([]Bucket, error)
 	DeleteEventsBefore(ctx context.Context, before time.Time) (int64, error)
+	Ping(ctx context.Context) error
+	Close()
+}
+
+// Store is everything the data plane persists.
+type Store interface {
+	EventStore
 	AddDeadLetter(ctx context.Context, d DeadLetter) error
 
 	// CreateCommand stores a command. With an idempotency key that already exists in
@@ -140,7 +147,39 @@ type Store interface {
 	// UndeliveredCommands returns PENDING and DISPATCHED commands for a target that
 	// just connected.
 	UndeliveredCommands(ctx context.Context, organizationID, applicationID, deviceID string, limit int) ([]*Command, error)
+}
 
-	Ping(ctx context.Context) error
-	Close()
+// Split keeps events in one store and everything else (commands, dead letters) in
+// another: ClickHouse for the data, PostgreSQL for the state that changes.
+type Split struct {
+	Store             // commands and dead letters
+	Events EventStore // telemetry, events, inference
+}
+
+func (s *Split) InsertEvents(ctx context.Context, events []*envelope.Event) ([]bool, error) {
+	return s.Events.InsertEvents(ctx, events)
+}
+
+func (s *Split) QueryEvents(ctx context.Context, q Query) ([]*envelope.Event, *Cursor, error) {
+	return s.Events.QueryEvents(ctx, q)
+}
+
+func (s *Split) Aggregate(ctx context.Context, q AggregateQuery) ([]Bucket, error) {
+	return s.Events.Aggregate(ctx, q)
+}
+
+func (s *Split) DeleteEventsBefore(ctx context.Context, before time.Time) (int64, error) {
+	return s.Events.DeleteEventsBefore(ctx, before)
+}
+
+func (s *Split) Ping(ctx context.Context) error {
+	if err := s.Events.Ping(ctx); err != nil {
+		return err
+	}
+	return s.Store.Ping(ctx)
+}
+
+func (s *Split) Close() {
+	s.Events.Close()
+	s.Store.Close()
 }
