@@ -47,6 +47,8 @@ services:
 
   vernemq:
     image: ${VERNEMQ_IMAGE:-vernemq/vernemq:2.2.1}
+    # The image runs as UID 10000; group 1000 owns the bind-mounted server.key (mode 0640).
+    group_add: ["1000"]
     profiles: [vernemq]
     environment:
       # Accepting the EULA is your decision: the official image is free to

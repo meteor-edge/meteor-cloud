@@ -84,11 +84,12 @@ openssl x509 -req -in "$OUT/server.csr" -CA "$OUT/ca.crt" -CAkey "$OUT/ca.key" \
   -CAcreateserial -out "$OUT/server.crt" -days 3650 -sha256 \
   -extfile "$OUT/server.ext" >/dev/null 2>&1
 
-# Mosquitto and EMQX run as UID/GID 1000; the official VerneMQ image runs as 10000.
-# Mode 0644 lets either bind-mounted process read the key. chmod while we still
-# own the file, then chown. Do not chmod after a docker chown — GitHub Actions
-# (UID 1001) cannot chmod a UID-1000 file.
-chmod 0644 "$OUT/server.key"
+# Mosquitto and EMQX run as UID/GID 1000. The official VerneMQ image runs as
+# UID 10000, so Compose adds it to group 1000 (group_add) instead of making the
+# private key world-readable. chmod while we still own the file, then chown.
+# Do not chmod after a docker chown — GitHub Actions (UID 1001) cannot chmod a
+# UID-1000 file.
+chmod 0640 "$OUT/server.key"
 chmod 600 "$OUT/ca.key"
 chmod 644 "$OUT/ca.crt" "$OUT/server.crt"
 # Kubernetes reads the key into a Secret instead of bind-mounting it.
@@ -99,7 +100,7 @@ elif ! chown 1000:1000 "$OUT/server.key" 2>/dev/null; then
     docker run --rm --user 0:0 -v "$OUT:/certs" busybox:1.36 \
       chown 1000:1000 /certs/server.key
   else
-    echo "error: could not set $OUT/server.key owner to UID/GID 1000 (required so Mosquitto/EMQX can read the bind-mounted key)." >&2
+    echo "error: could not set $OUT/server.key owner to UID/GID 1000 (required so the MQTT broker can read the bind-mounted key)." >&2
     echo "error: rerun as uid 1000, as root, or with Docker available to chown the file." >&2
     exit 1
   fi
