@@ -310,6 +310,7 @@ services:
       NATS_STREAM_MAX_AGE: ${NATS_STREAM_MAX_AGE:-168h}
       NATS_STREAM_STORAGE: ${NATS_STREAM_STORAGE:-file}
       NATS_STREAM_RETENTION: ${NATS_STREAM_RETENTION:-limits}
+      NATS_STREAM_DISCARD: ${NATS_STREAM_DISCARD:-old}
     volumes:
       - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
     healthcheck:
@@ -361,6 +362,8 @@ services:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-meteorcloud}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-meteorcloud}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      # Same retention as data-api: writer OpenClickHouse applies table TTL; 0 would clear it.
+      DATAPLANE_RETENTION_DAYS: ${DATAPLANE_RETENTION_DAYS:-0}
       CLICKHOUSE_WRITER_BATCH_SIZE: ${CLICKHOUSE_WRITER_BATCH_SIZE:-1000}
       CLICKHOUSE_WRITER_FLUSH_INTERVAL: ${CLICKHOUSE_WRITER_FLUSH_INTERVAL:-1s}
     healthcheck:

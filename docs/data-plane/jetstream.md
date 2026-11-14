@@ -146,7 +146,7 @@ type Handler interface {
 | Handler error | Nak with backoff; `term` for permanent errors or after `MAX_DELIVER` attempts |
 | Undecodable message | Terminated (never decodes), logged with its subject |
 | Crash mid-batch | Unacked messages are redelivered after `ACK_WAIT` |
-| Duplicates | Same id within the duplicate window: dropped by the stream. Later redeliveries: the writer skips ids already stored (per organization); the rule handler is idempotent on the id |
+| Duplicates | Same scoped id within the JetStream duplicate window: dropped by the stream. Later sequential redeliveries: the writer skips ids already stored (per organization). Concurrent writer replicas can still both insert the same `(organization_id, event_id)` (`MergeTree` has no unique key; see [data-plane README](README.md#guarantees-in-short)). The rule handler is idempotent on the id |
 | Shutdown (SIGTERM) | Ingestion unsubscribes, finishes in-flight messages (`DEVICE_INGEST_DRAIN_TIMEOUT`, 20s) and leaves the rest unacknowledged for redelivery. Consumers finish and ack the batch in progress; the writer flushes its buffer. Then the NATS connection is drained |
 
 Device telemetry is MQTT QoS 1 between the agent and the broker, and MQTT shared subscriptions are not durable storage. The durability boundary is the JetStream publish acknowledgement: everything before it relies on MQTT redelivery, everything after it on JetStream.
@@ -186,7 +186,9 @@ All services expose Prometheus metrics on their ops port (scraped by the bundled
 
 ## Local development
 
-Add `nats` (and `clickhouse`) to `COMPOSE_PROFILES` in `deploy/compose/.env` (`.env.example` has development passwords), then `make dev`, or:
+Add `nats` (and `clickhouse`) to `COMPOSE_PROFILES` in `deploy/compose/.env` (`.env.example` has development passwords), then `make dev`.
+
+To start only the device-event services on top of an **already running** stack (MQTT broker + control plane + Postgres must already be up — this command does not start them):
 
 ```bash
 cd deploy/compose
