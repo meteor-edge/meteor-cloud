@@ -308,9 +308,10 @@ func (c *ClickHouse) InsertEvents(ctx context.Context, events []*envelope.Event)
 		if _, dup := known[key]; dup {
 			continue
 		}
-		known[key] = struct{}{} // a duplicate inside the same batch counts once
 		// Compact should not fail after envelope.CanonicalData; if it does, skip this
 		// row so one poison event cannot fail the rest of the batch (HTTP or JetStream).
+		// Reserve the key only after encode succeeds so a failed row cannot suppress a
+		// later valid event with the same id in this batch.
 		var data bytes.Buffer
 		if err := json.Compact(&data, ev.Data); err != nil {
 			continue
@@ -323,6 +324,7 @@ func (c *ClickHouse) InsertEvents(ctx context.Context, events []*envelope.Event)
 		}); err != nil {
 			continue
 		}
+		known[key] = struct{}{}
 		inserted[i] = true
 	}
 	if body.Len() == 0 {

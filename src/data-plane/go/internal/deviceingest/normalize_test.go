@@ -1,6 +1,7 @@
 package deviceingest
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -152,5 +153,23 @@ func TestPayloadIdentityIsIgnored(t *testing.T) {
 	}
 	if s := Subject(ChannelMetrics, res.Event.OrganizationID, res.Event.DeviceID); !strings.Contains(s, orgA) || strings.Contains(s, orgB) {
 		t.Fatalf("subject %s", s)
+	}
+}
+
+func TestNormalizeKeepsHTMLSensitiveCharsUnderLimit(t *testing.T) {
+	// json.Marshal HTML-escapes <>& to \u003c etc.; that must not inflate a
+	// below-limit payload into a CanonicalData rejection.
+	lim := envelope.DefaultLimits()
+	lim.MaxPayloadBytes = 256
+	payload := `{"note":"a < b & c > d","tags":["x<y","p&q"]}`
+	if len(payload) > lim.MaxPayloadBytes {
+		t.Fatalf("fixture larger than limit: %d", len(payload))
+	}
+	res, rej := Normalize(devA, orgA, ChannelMetrics, []byte(payload), now, lim)
+	if rej != nil {
+		t.Fatalf("rejected: %+v", rej)
+	}
+	if !bytes.Contains(res.Event.Data, []byte(`<`)) || !bytes.Contains(res.Event.Data, []byte(`&`)) {
+		t.Fatalf("expected literal < and & in data, got %s", res.Event.Data)
 	}
 }

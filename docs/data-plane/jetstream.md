@@ -189,7 +189,7 @@ All services expose Prometheus metrics on their ops port (scraped by the bundled
 | Path | How |
 | --- | --- |
 | Compose (dev / VM) | Add `nats` and `clickhouse` to `COMPOSE_PROFILES`; set `NATS_*_PASSWORD` and `CLICKHOUSE_PASSWORD` (see `.env.example`) |
-| Ansible (EC2 / on-prem) | `nats_enabled: true`, `mqtt_enabled: true`, `dataplane_storage: clickhouse`, plus `EDGE_PLATFORM_NATS_*_PASSWORD` and `EDGE_PLATFORM_CLICKHOUSE_PASSWORD` |
+| Ansible (EC2 / on-prem) | `nats_enabled: true`, `mqtt_enabled: true`, `dataplane_storage: clickhouse`, plus `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN`, `EDGE_PLATFORM_NATS_*_PASSWORD`, and `EDGE_PLATFORM_CLICKHOUSE_PASSWORD` |
 | Helm (Kubernetes) | `nats.enabled: true`, `mqtt.enabled: true`, `clickhouse.enabled: true` (or `clickhouse.external.url`); passwords generated in the chart Secret |
 
 ## Local development

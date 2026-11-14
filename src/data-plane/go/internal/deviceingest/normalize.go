@@ -181,11 +181,15 @@ func Normalize(deviceID, orgID string, ch Channel, payload []byte, now time.Time
 		}
 	}
 
-	raw, err := json.Marshal(fields)
-	if err != nil {
+	// Do not HTML-escape: json.Marshal would turn each '<' into \u003c and inflate
+	// a still-valid payload past MaxPayloadBytes before CanonicalData sees it.
+	var rawBuf bytes.Buffer
+	enc := json.NewEncoder(&rawBuf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(fields); err != nil {
 		return nil, &envelope.Rejection{Code: ReasonInvalidPayload, Message: "payload could not be re-encoded"}
 	}
-	data, rej := envelope.CanonicalData(raw, lim.MaxPayloadBytes)
+	data, rej := envelope.CanonicalData(bytes.TrimSpace(rawBuf.Bytes()), lim.MaxPayloadBytes)
 	if rej != nil {
 		return nil, rej
 	}
