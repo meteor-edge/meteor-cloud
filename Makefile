@@ -368,6 +368,15 @@ helm-lint: ## Lint the Helm chart and render it with every values file
 		--set mqtt.enabled=true,mqtt.tls.existingSecret=ci,mqtt.publicHost=mqtt.example.com \
 		-f $(CHART)/values-monitoring.yaml > /dev/null
 	! helm template meteorcloud $(CHART) -f $(CHART)/values-monitoring.yaml > /dev/null 2>&1
+	@# Application data API: off (defaults), MQTT bus with EMQX direct MQTT, and fail-closed cases.
+	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set dataApi.enabled=false > /dev/null
+	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml \
+		--set mqtt.enabled=true,mqtt.provider=emqx,mqtt.tls.existingSecret=ci,mqtt.publicHost=mqtt.example.com \
+		--set dataApi.bus=mqtt,dataApi.mqtt.direct=true > /dev/null
+	! helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set dataApi.bus=mqtt > /dev/null 2>&1
+	! helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml \
+		--set mqtt.enabled=true,mqtt.tls.existingSecret=ci,mqtt.publicHost=mqtt.example.com \
+		--set dataApi.bus=mqtt,dataApi.mqtt.direct=true > /dev/null 2>&1
 
 images: ## Build the backend, data-plane, MQTT broker, and console images (IMAGE_TAG=dev)
 	docker build -t meteorcloud/backend:$(IMAGE_TAG) $(BACKEND_DIR)

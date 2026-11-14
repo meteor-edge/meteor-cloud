@@ -57,6 +57,12 @@ spec:
               value: '{"content-type" = "application/json", "x-mqtt-internal-token" = "$(MQTT_INTERNAL_TOKEN)"}'
             - name: EMQX_AUTHORIZATION__SOURCES__1__HEADERS
               value: '{"content-type" = "application/json", "x-mqtt-internal-token" = "$(MQTT_INTERNAL_TOKEN)"}'
+            {{- if and .Values.dataApi.enabled .Values.dataApi.mqtt.direct }}
+            # Same signing secret as the data API (dataApi.mqtt.direct).
+            - name: EMQX_AUTHENTICATION__2__SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ include "meteorcloud.secretName" . }}, key: DATAPLANE_MQTT_JWT_SECRET }
+            {{- end }}
             # Pod IPs are reachable cluster-wide, so the Erlang cookie must be secret.
             - name: EMQX_NODE__COOKIE
               valueFrom:

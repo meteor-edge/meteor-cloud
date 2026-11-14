@@ -31,6 +31,25 @@ authentication = [
     connect_timeout = "5s"
     request_timeout = "5s"
   }
+  {{- if and .Values.dataApi.enabled .Values.dataApi.mqtt.direct }}
+  ,
+  # Application identities (username "app_<credential id>"): the API answers "ignore"
+  # and EMQX checks the short-lived token the data API signed (signature, username,
+  # expiry, and the topic ACL inside it). The secret arrives as
+  # EMQX_AUTHENTICATION__2__SECRET from the release Secret.
+  {
+    mechanism = jwt
+    enable = true
+    from = password
+    use_jwks = false
+    algorithm = "hmac-based"
+    secret = "unset-unset-unset-unset-unset-unset"
+    secret_base64_encoded = false
+    verify_claims { username = "${username}" }
+    acl_claim_name = "acl"
+    disconnect_after_expire = true
+  }
+  {{- end }}
 ]
 authorization {
   no_match = deny
