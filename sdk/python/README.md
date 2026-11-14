@@ -79,14 +79,20 @@ Options:
 Many at once:
 
 ```python
+from datetime import datetime, timedelta, timezone
+
 from meteorcloud import Message
 
+measured_at = datetime.now(timezone.utc) - timedelta(seconds=5)
 results = client.telemetry.publish_many("energy.metrics", [
     {"power": 1200},
-    Message({"power": 1210}, time="2026-11-11T10:00:05Z"),   # with its own time, id, seq or type
+    Message({"power": 1210}, time=measured_at),   # with its own time, id, seq or type
 ])
 failed = [r for r in results if not r.ok]
 ```
+
+A message's own time must be within the last 30 days and at most 5 minutes ahead of the service's clock
+(the defaults of a deployment). A message outside that window is refused with `invalid_timestamp`.
 
 ## Subscribe
 

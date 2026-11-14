@@ -105,9 +105,16 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(wsReadLimit)
 	sess := &session{id: id, out: make(chan []byte, sendBuffer), closed: make(chan struct{})}
+	// "ready" is queued before the hub can hand this session a command, so it is
+	// always the first frame.
+	sess.enqueue(map[string]any{"type": "ready", "identity": identityView(id)})
 	s.wsMu.Lock()
 	s.sessions[sess] = struct{}{}
+	closing = s.closing // shutdown may have started while the socket was being accepted
 	s.wsMu.Unlock()
+	if closing {
+		sess.shutdown(closeGoingAway, "shutting_down")
+	}
 	conn := s.hub.Register(id, sess)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
@@ -147,7 +154,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	sess.enqueue(map[string]any{"type": "ready", "identity": identityView(id)})
 	// Commands that were waiting for this target.
 	bctx, bcancel := context.WithTimeout(ctx, 10*time.Second)
 	pending, err := s.commands.Undelivered(bctx, id)

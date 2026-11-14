@@ -98,6 +98,7 @@ def upgrade() -> None:
         sa.Column("token_prefix", sa.String(32), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("rotated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("workload_key", sa.String(255), nullable=True),
         sa.Column(
             "created_by_user_id",

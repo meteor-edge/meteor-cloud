@@ -63,6 +63,8 @@ def _policy(client: TestClient) -> dict:
         ("energy..power", False),
         ("meteor.lifecycle", False),
         ("a." * 8 + "a", False),
+        ("a" * 63, True),
+        ("a" * 64, False),
         ("", False),
     ],
 )
@@ -161,6 +163,12 @@ def test_credential_lifecycle_and_policy_snapshot(client: TestClient, db_session
 
     rotated = client.post(f"{base}/{secret['id']}/rotate", headers=headers).json()
     assert rotated["token"] != secret["token"]
+    # Rotating again keeps the lifetime the credential was created with.
+    row = db_session.get(ApplicationCredential, uuid.UUID(secret["id"]))
+    first = row.expires_at - row.rotated_at
+    rotated = client.post(f"{base}/{secret['id']}/rotate", headers=headers).json()
+    db_session.refresh(row)
+    assert abs((row.expires_at - row.rotated_at) - first) < timedelta(seconds=1)
     policy = _policy(client)
     assert [item["token_hash"] for item in policy["credentials"]] == [hash_token(rotated["token"])]
 

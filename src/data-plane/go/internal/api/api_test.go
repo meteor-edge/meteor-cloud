@@ -753,11 +753,13 @@ func TestMQTTCredentials(t *testing.T) {
 	}
 	raw, _ := base64.RawURLEncoding.DecodeString(parts[1])
 	var claims struct {
-		Username string  `json:"username"`
-		Exp      int64   `json:"exp"`
-		ACL      bus.ACL `json:"acl"`
+		Username string    `json:"username"`
+		Exp      int64     `json:"exp"`
+		Rules    []aclRule `json:"acl"`
+		ACL      bus.ACL   `json:"-"`
 	}
 	json.Unmarshal(raw, &claims)
+	claims.ACL = aclFromRules(t, claims.Rules)
 	if left := time.Until(time.Unix(claims.Exp, 0)); claims.Username != "app_cred-collector" || left <= 0 || left > 11*time.Minute {
 		t.Fatalf("claims: %+v", claims)
 	}
@@ -784,7 +786,8 @@ func TestMQTTCredentials(t *testing.T) {
 	}
 	// The signed token is what the broker enforces: it must be empty too.
 	var signed struct {
-		ACL bus.ACL `json:"acl"`
+		Rules []aclRule `json:"acl"`
+		ACL   bus.ACL   `json:"-"`
 	}
 	if seg := strings.Split(none["password"].(string), "."); len(seg) == 3 {
 		payload, _ := base64.RawURLEncoding.DecodeString(seg[1])
@@ -792,6 +795,7 @@ func TestMQTTCredentials(t *testing.T) {
 	} else {
 		t.Fatal("password must be a signed token")
 	}
+	signed.ACL = aclFromRules(t, signed.Rules)
 	if len(signed.ACL.Publish)+len(signed.ACL.Subscribe) != 0 {
 		t.Fatalf("no grants must give an empty signed ACL: %+v", signed.ACL)
 	}
@@ -819,6 +823,22 @@ func TestBatchContractBoundaryAndBurstSmallerThanABatch(t *testing.T) {
 	}
 }
 
+func TestBatchLargerThanBurstFitsAFullBucketAtALowRate(t *testing.T) {
+	// The request's own token counts toward the capped batch charge: with a slow
+	// refill, a first batch larger than the bucket must still pass from a full bucket.
+	e := newEnv(t, func(o *Options) { o.RateLimitPerSec, o.RateLimitBurst = 1, 5 })
+	batch := make([]map[string]any, 6)
+	for i := range batch {
+		batch[i] = msg("energy.power", `{"p":1}`, nil)
+	}
+	if code, body := e.publish(tokCollector, batch...); code != 200 {
+		t.Fatalf("a batch larger than the burst must pass from a full bucket: %d %v", code, body)
+	}
+	if code, _ := e.publish(tokCollector, batch...); code != 429 {
+		t.Fatalf("the bucket is empty now: %d", code)
+	}
+}
+
 func TestNULCharacterIsRejectedPerMessage(t *testing.T) {
 	e := newEnv(t, nil)
 	code, body := e.publish(tokCollector,
@@ -837,4 +857,38 @@ func TestNULCharacterIsRejectedPerMessage(t *testing.T) {
 			t.Fatalf("the other messages must be stored: %v", results)
 		}
 	}
+}
+
+func TestParseBucketBounds(t *testing.T) {
+	for _, ok := range []string{"1s", "30s", "5m", "1h", "1d", "366d"} {
+		if _, err := parseBucket(ok); err != nil {
+			t.Errorf("%q should be accepted: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"0d", "367d", "999999999999d", "500ms", "1500ms", "100000h", "-1h", "x"} {
+		if _, err := parseBucket(bad); err == nil {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+}
+
+// aclFromRules reads the token's rule list back and checks its fixed shape: publishes
+// never retained, subscriptions exact, and a final deny for everything else.
+func aclFromRules(t *testing.T, rules []aclRule) bus.ACL {
+	t.Helper()
+	if n := len(rules); n == 0 || rules[n-1] != (aclRule{Permission: "deny", Action: "all", Topic: "#"}) {
+		t.Fatalf("the signed ACL must end by denying everything else: %+v", rules)
+	}
+	var acl bus.ACL
+	for _, r := range rules[:len(rules)-1] {
+		switch {
+		case r.Permission == "allow" && r.Action == "publish" && r.Retain != nil && !*r.Retain:
+			acl.Publish = append(acl.Publish, r.Topic)
+		case r.Permission == "allow" && r.Action == "subscribe" && strings.HasPrefix(r.Topic, "eq "):
+			acl.Subscribe = append(acl.Subscribe, strings.TrimPrefix(r.Topic, "eq "))
+		default:
+			t.Fatalf("unexpected rule in the signed ACL: %+v", r)
+		}
+	}
+	return acl
 }

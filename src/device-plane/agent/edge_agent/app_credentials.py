@@ -64,6 +64,25 @@ def _parse_time(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _write_in_place(path: Path, data: bytes) -> None:
+    """Replace a file's content without replacing the file.
+
+    A single-file bind mount follows the inode, so the token cannot be swapped in
+    with a rename. It is also never emptied first: the new token is written over the
+    old one in one write and the file is cut to the new length afterwards, so a
+    reader never sees an empty file and a failed write leaves the old token in place.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o644)
+    try:
+        written = os.pwrite(fd, data, 0)
+        if written != len(data):
+            raise OSError(f"short write to {path}")
+        os.ftruncate(fd, len(data))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 class AppCredentialStore:
     """Token files and their metadata, one directory per workload."""
 
@@ -134,10 +153,7 @@ class AppCredentialStore:
         os.chmod(self.root, 0o700)
         os.chmod(directory, 0o700)
         path = directory / "token"
-        # Written in place (same inode): a single-file bind mount keeps pointing at it.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(str(token) + "\n")
+        _write_in_place(path, (str(token) + "\n").encode("utf-8"))
         os.chmod(path, 0o644)
         meta = {
             "application": issued.get("application"),

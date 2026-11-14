@@ -110,3 +110,17 @@ def test_accepted_status_counts_as_success():
         assert [r.ok for r in results] == [True, True, True, False]
         # A single publish answered "accepted" returns normally instead of raising PublishError.
         assert client.telemetry.publish("energy.metrics", {"n": 5}).status == "accepted"
+
+
+def test_stream_survives_a_token_file_that_is_empty_during_a_refresh(tmp_path):
+    """A 401 while the token file is briefly empty must not end the reconnect loop."""
+    from meteorcloud._http import HTTP
+    from meteorcloud._stream import Stream
+    from meteorcloud.config import TokenSource
+
+    token_file = tmp_path / "token"
+    token_file.write_text("mca_first")
+    config = Config(endpoint="https://dataplane.test", token_file=str(token_file))
+    stream = Stream(config, HTTP(config, TokenSource(config)))
+    token_file.write_text("")
+    stream._refresh_token()  # must not raise

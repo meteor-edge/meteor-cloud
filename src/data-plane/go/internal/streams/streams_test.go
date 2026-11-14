@@ -1,10 +1,14 @@
 package streams
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateName(t *testing.T) {
-	ok := []string{"energy.power", "a", "temp-1.room_2", "0a.b"}
-	bad := []string{"", "Energy.power", "energy..power", "energy.*", ".a", "a.", "-a", "a.b.c.d.e.f.g.h.i", "a b"}
+	ok := []string{"energy.power", "a", "temp-1.room_2", "0a.b", strings.Repeat("a", 63)}
+	bad := []string{"", "Energy.power", "energy..power", "energy.*", ".a", "a.", "-a", "a.b.c.d.e.f.g.h.i", "a b",
+		strings.Repeat("a", 64)}
 	for _, s := range ok {
 		if err := ValidateName(s); err != nil {
 			t.Errorf("%q should be valid: %v", s, err)

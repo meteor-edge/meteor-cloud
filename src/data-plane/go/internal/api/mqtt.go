@@ -31,16 +31,36 @@ func SignMQTTToken(secret []byte, id *identity.Identity, now, expires time.Time)
 	return username, signing + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// signedACL is the ACL as the broker enforces it. Subscriptions are exact ("eq"):
-// EMQX matches a requested filter like a topic, so a rule ending in "+" would also
-// allow a subscription ending in "#" and reach streams outside the permission. A
-// client therefore subscribes to exactly the filters it was given.
-func signedACL(acl bus.ACL) bus.ACL {
-	exact := make([]string, len(acl.Subscribe))
-	for i, filter := range acl.Subscribe {
-		exact[i] = "eq " + filter
+// aclRule is one entry of the token's ACL, in the broker's rule format.
+type aclRule struct {
+	Permission string `json:"permission"`
+	Action     string `json:"action"`
+	Topic      string `json:"topic"`
+	Retain     *bool  `json:"retain,omitempty"`
+}
+
+// signedACL is the ACL as the broker enforces it.
+//
+// Subscriptions are exact ("eq"): EMQX matches a requested filter like a topic, so
+// a rule ending in "+" would also allow a subscription ending in "#" and reach
+// streams outside the permission. A client therefore subscribes to exactly the
+// filters it was given.
+//
+// Publishes are allowed only when not retained: a retained message would be
+// replayed by the broker to later subscribers as if it were new.
+//
+// The list ends with a deny for everything else, so an identity without grants
+// can do nothing whatever other authorization the broker has configured.
+func signedACL(acl bus.ACL) []aclRule {
+	notRetained := false
+	rules := make([]aclRule, 0, len(acl.Publish)+len(acl.Subscribe)+1)
+	for _, topic := range acl.Publish {
+		rules = append(rules, aclRule{Permission: "allow", Action: "publish", Topic: topic, Retain: &notRetained})
 	}
-	return bus.ACL{Publish: acl.Publish, Subscribe: exact}
+	for _, filter := range acl.Subscribe {
+		rules = append(rules, aclRule{Permission: "allow", Action: "subscribe", Topic: "eq " + filter})
+	}
+	return append(rules, aclRule{Permission: "deny", Action: "all", Topic: "#"})
 }
 
 // handleMQTTCredentials exchanges the application token for MQTT connection details.
