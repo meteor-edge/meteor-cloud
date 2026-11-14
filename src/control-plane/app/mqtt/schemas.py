@@ -30,6 +30,8 @@ class AgentMqttCredentialsResponse(MqttConnectInfo):
 class MqttAuthRequest(BaseModel):
     username: str = ""
     password: str = ""
+    # Sent by the bundled brokers so a device cannot reuse another device's client id.
+    clientid: str | None = None
 
 
 class MqttAuthResponse(BaseModel):
@@ -41,6 +43,9 @@ class MqttAuthorizeRequest(BaseModel):
     username: str = ""
     topic: str = ""
     action: str = ""
+    clientid: str | None = None
+    # EMQX sends "true"/"false" strings for ${retain}; Mosquitto sends a bool.
+    retain: bool | str | None = None
 
 
 class MqttAuthorizeResponse(BaseModel):

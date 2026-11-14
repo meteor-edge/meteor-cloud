@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Repo checkout: script lives in scripts/. On an AWS host Ansible installs it as
+# $platform_root/generate-mqtt-certs.sh — ROOT is that directory, not its parent.
+if [[ -d "$SCRIPT_DIR/deploy/compose" || -f "$SCRIPT_DIR/pyproject.toml" || -d "$SCRIPT_DIR/compose" ]]; then
+  ROOT="$SCRIPT_DIR"
+else
+  ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 OUT="${1:-$ROOT/certs}"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 
 ENV_FILE="$ROOT/deploy/compose/.env"
+if [[ ! -f "$ENV_FILE" && -f "$ROOT/compose/.env" ]]; then
+  ENV_FILE="$ROOT/compose/.env"
+fi
 if [[ -z "${MQTT_PUBLIC_HOST:-}" && -f "$ENV_FILE" ]]; then
   MQTT_PUBLIC_HOST="$(awk -F= '/^MQTT_PUBLIC_HOST=/{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")"
   MQTT_PUBLIC_HOST="${MQTT_PUBLIC_HOST%$'\r'}"
@@ -24,7 +34,8 @@ if [[ ! -f "$OUT/ca.key" || ! -f "$OUT/ca.crt" ]]; then
     -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
 fi
 
-SAN="DNS:localhost,DNS:emqx,IP:127.0.0.1"
+# Bundled broker names on the Compose network: mqtt-broker (alias), mosquitto, emqx.
+SAN="DNS:localhost,DNS:mqtt-broker,DNS:mosquitto,DNS:emqx,IP:127.0.0.1"
 
 add_san() {
   local item="$1"
@@ -38,7 +49,7 @@ add_host_san() {
   local host="$1"
   [[ -z "$host" ]] && return 0
   case "$host" in
-    localhost|127.0.0.1|emqx) return 0 ;;
+    localhost|127.0.0.1|emqx|mosquitto|mqtt-broker) return 0 ;;
   esac
   if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     add_san "IP:${host}"
@@ -73,9 +84,11 @@ openssl x509 -req -in "$OUT/server.csr" -CA "$OUT/ca.crt" -CAkey "$OUT/ca.key" \
   -CAcreateserial -out "$OUT/server.crt" -days 3650 -sha256 \
   -extfile "$OUT/server.ext" >/dev/null 2>&1
 
-# EMQX in Docker runs as UID/GID 1000 and bind-mounts this key.
-# chmod while we still own the file, then chown. Do not chmod after a
-# docker chown — GitHub Actions (UID 1001) cannot chmod a UID-1000 file.
+# Mosquitto and EMQX run as UID/GID 1000. The official VerneMQ image runs as
+# UID 10000, so Compose adds it to group 1000 (group_add) instead of making the
+# private key world-readable. chmod while we still own the file, then chown.
+# Do not chmod after a docker chown — GitHub Actions (UID 1001) cannot chmod a
+# UID-1000 file.
 chmod 0640 "$OUT/server.key"
 chmod 600 "$OUT/ca.key"
 chmod 644 "$OUT/ca.crt" "$OUT/server.crt"
@@ -87,7 +100,7 @@ elif ! chown 1000:1000 "$OUT/server.key" 2>/dev/null; then
     docker run --rm --user 0:0 -v "$OUT:/certs" busybox:1.36 \
       chown 1000:1000 /certs/server.key
   else
-    echo "error: could not set $OUT/server.key owner to UID/GID 1000 (required so EMQX can read the bind-mounted key)." >&2
+    echo "error: could not set $OUT/server.key owner to UID/GID 1000 (required so the MQTT broker can read the bind-mounted key)." >&2
     echo "error: rerun as uid 1000, as root, or with Docker available to chown the file." >&2
     exit 1
   fi

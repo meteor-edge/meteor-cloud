@@ -82,7 +82,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DATA_PLANE_URL: ${DATA_PLANE_URL:-http://data-plane:8081}
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
-      # Interpolated like EMQX's copy so the broker and API always agree.
+      # Interpolated like the broker's copy so the broker and API always agree.
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
       MQTT_CA_CERT_PATH: /certs/ca.crt
       OBJECT_STORAGE_PATH: /data/artifacts

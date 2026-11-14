@@ -1,0 +1,106 @@
+{{- if and .Values.mqtt.enabled (eq .Values.mqtt.broker "bundled") (eq .Values.mqtt.provider "mosquitto") }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $mosquitto := .Values.mqtt.mosquitto }}
+{{/* Eclipse Mosquitto with the meteorcloud_auth plugin (src/data-plane/broker/mosquitto):
+     TLS only, and every login and publish/subscribe is checked by the API.
+     The broker config is baked into the image; the plugin reads its settings
+     from the environment. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-mqtt
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "mqtt-broker") | nindent 4 }}
+spec:
+  # Mosquitto does not cluster: exactly one broker.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "mqtt-broker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "mqtt-broker") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: mosquitto
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" $mosquitto.image) }}
+          imagePullPolicy: {{ $mosquitto.image.pullPolicy }}
+          ports:
+            - name: mqtts
+              containerPort: 8883
+          env:
+            - name: CONTROL_PLANE_URL
+              value: {{ printf "http://%s-backend:8000" $fullname | quote }}
+            - name: MQTT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ include "meteorcloud.secretName" . }}, key: MQTT_INTERNAL_TOKEN }
+            - name: MQTT_ACL_CACHE_SECONDS
+              value: {{ $mosquitto.aclCacheSeconds | toString | quote }}
+          readinessProbe:
+            tcpSocket: { port: mqtts }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: mqtts }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml $mosquitto.resources | nindent 12 }}
+          volumeMounts:
+            - name: certs
+              mountPath: /mosquitto/certs
+              readOnly: true
+            - name: data
+              mountPath: /mosquitto/data
+      volumes:
+        - name: certs
+          secret:
+            secretName: {{ .Values.mqtt.tls.existingSecret }}
+            defaultMode: 0440
+        # Sessions and retained messages are not persisted; devices reconnect
+        # and the API holds desired state.
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-mqtt
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "mqtt-broker") | nindent 4 }}
+  {{- with $mosquitto.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $mosquitto.service.type }}
+  {{- with $mosquitto.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "mqtt-broker") | nindent 4 }}
+  ports:
+    - name: mqtts
+      port: {{ .Values.mqtt.port }}
+      targetPort: mqtts
+{{- end }}

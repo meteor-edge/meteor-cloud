@@ -15,7 +15,7 @@ Ingress is disabled. The console calls the API on the same origin, so route
 {{- if .Values.mqtt.enabled }}
 
 Devices connect to mqtts://{{ .Values.mqtt.publicHost }}:{{ .Values.mqtt.port }}
-{{- if eq .Values.mqtt.broker "bundled" }} (service {{ include "meteorcloud.fullname" . }}-emqx, type {{ .Values.mqtt.emqx.service.type }}){{ end }}.
+{{- if eq .Values.mqtt.broker "bundled" }} (service {{ include "meteorcloud.mqttBrokerHost" . }}, broker {{ .Values.mqtt.provider }}){{ end }}.
 {{- end }}
 {{- if and (eq .Values.cache.provider "memory") (gt (int .Values.backend.replicaCount) 1) }}
 

@@ -31,7 +31,7 @@ For a product walkthrough (console + first device), start with [Getting started]
 ```bash
 make dev                 # all Compose files (shared network meteorcloud)
 make dev-control-plane   # bundled infra (postgres/redis/minio profiles) + control-plane API
-make dev-data-plane      # EMQX + data-plane MQTT gateway
+make dev-data-plane      # MQTT broker + data-plane MQTT gateway
 make dev-console         # operator console
 ```
 
@@ -45,7 +45,6 @@ Together this starts:
 | OpenAPI | http://localhost:8000/docs |
 | PostgreSQL | localhost:5432 |
 | MQTT TLS | mqtts://localhost:8883 |
-| EMQX dashboard | http://localhost:18083 (development only) |
 | Redis | internal Docker network |
 
 Compose files:
@@ -53,7 +52,7 @@ Compose files:
 | File | Services |
 | --- | --- |
 | `deploy/compose/control-plane.yml` | `backend`; profiles `postgres`, `redis`, `minio` |
-| `deploy/compose/data-plane.yml` | profiles `mqtt` (`data-plane`), `emqx` |
+| `deploy/compose/data-plane.yml` | profiles `mqtt` (`data-plane`), and one of `mosquitto`, `emqx`, `vernemq` |
 | `deploy/compose/console.yml` | `console` (Vite dev server) |
 | `deploy/compose/docker-compose.yml` | `include:` of those three |
 | `deploy/compose/docker-compose.dev.yml` | Source mounts and hot reload (`make dev`). Console runs `npm install` on start so new packages (for example `@xterm/*`) land in the container `node_modules` volume |
@@ -204,7 +203,7 @@ Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed
 | `DATABASE_PROVIDER` | Persistence adapter (`postgresql` only) |
 | `CACHE_PROVIDER` | Rate-limit adapter: `redis` (shared) or `memory` (per process) |
 | `OBJECT_STORAGE_PROVIDER` | Artifacts: `s3` (any S3-compatible API) or `filesystem` (`OBJECT_STORAGE_PATH`) |
-| `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
+| `MQTT_PROVIDER` | Broker adapter: `mosquitto` (default), `emqx`, `vernemq` |
 | `DEPLOYMENT_PROVIDER` | Who *executes* Deploys: `native` (default), `none`, or `mender` (stub until adapter exists). Releases/UI stay in MeteorCloud |
 | `OTA_PROVIDER` | Deprecated; prefer `DEPLOYMENT_PROVIDER` |
 | `DEPLOY_TICK_INTERVAL_SECONDS` | Seconds between background Deploy sweeps (batched delays, phased soak, pending timeouts). Default `60`; `0` disables |

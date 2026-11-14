@@ -1,12 +1,101 @@
-# Data plane: MQTT gateway plus an optional bundled broker.
-#   mqtt   data-plane service (needed whenever MQTT_ENABLED=true)
-#   emqx   bundled EMQX broker (or point MQTT_BROKER_HOST at an external EMQX)
+# Data plane: MQTT gateway plus one optional bundled broker.
+#   mqtt        data-plane service (needed whenever MQTT_ENABLED=true)
+# Pick ONE broker profile and set MQTT_PROVIDER to the same name
+# (or pick none and point MQTT_BROKER_HOST at an external broker):
+#   mosquitto   Eclipse Mosquitto + meteorcloud_auth plugin (default; EPL-2.0/EDL-1.0)
+#   emqx        EMQX 5.8.6 (Apache 2.0; do not bump past 5.8, see docs/licensing.md)
+#   vernemq     VerneMQ (official image is under the VerneMQ EULA; see docs/licensing.md)
+# Every broker asks the control plane for logins and topic permissions, so the
+# security rules are the same whichever one runs (docs/fleet/mqtt.md).
 networks:
   meteorcloud:
     # Shared name so separately started module projects can join each other.
     name: ${COMPOSE_NETWORK_NAME:-meteorcloud}
 
+volumes:
+  mosquitto_data:
+  vernemq_data:
+
+# Every bundled broker answers to "mqtt-broker" and to "emqx". The default
+# MQTT_BROKER_HOST stays "emqx" because certificates from before the broker
+# became selectable only carry SAN DNS:emqx; new certificates carry both, and
+# .env.example sets mqtt-broker.
+x-broker-network: &broker-network
+  meteorcloud:
+    aliases:
+      - mqtt-broker
+      - emqx
+
 services:
+  mosquitto:
+    image: ${MOSQUITTO_IMAGE:-meteorcloud/mosquitto:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/broker/mosquitto
+    profiles: [mosquitto]
+    environment:
+      # Read by the meteorcloud_auth plugin. An empty token stops the broker at startup.
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
+      MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
+      MQTT_ACL_CACHE_SECONDS: ${MQTT_ACL_CACHE_SECONDS:-60}
+    ports:
+      - "${MQTT_PORT:-8883}:8883"
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}/server.crt:/mosquitto/certs/server.crt:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/server.key:/mosquitto/certs/server.key:ro
+      - mosquitto_data:/mosquitto/data
+    networks: *broker-network
+
+  vernemq:
+    image: ${VERNEMQ_IMAGE:-vernemq/vernemq:2.2.1}
+    # The image runs as UID 10000; group 1000 owns the bind-mounted server.key (mode 0640).
+    group_add: ["1000"]
+    profiles: [vernemq]
+    environment:
+      # Accepting the EULA is your decision: the official image is free to
+      # evaluate, commercial use needs a VerneMQ subscription or your own build
+      # from the Apache-2.0 source (set VERNEMQ_IMAGE). The broker will not
+      # start until this is "yes".
+      DOCKER_VERNEMQ_ACCEPT_EULA: ${VERNEMQ_ACCEPT_EULA:-no}
+      DOCKER_VERNEMQ_ALLOW_ANONYMOUS: "off"
+      # No local users or ACL files: the control plane decides through webhooks.
+      DOCKER_VERNEMQ_PLUGINS__VMQ_PASSWD: "off"
+      DOCKER_VERNEMQ_PLUGINS__VMQ_ACL: "off"
+      DOCKER_VERNEMQ_PLUGINS__VMQ_WEBHOOKS: "on"
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCREGISTER__HOOK: auth_on_register
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCREGISTER__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_register?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCPUBLISH__HOOK: auth_on_publish
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCPUBLISH__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_publish?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCSUBSCRIBE__HOOK: auth_on_subscribe
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCSUBSCRIBE__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_subscribe?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCREGISTERM5__HOOK: auth_on_register_m5
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCREGISTERM5__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_register_m5?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCPUBLISHM5__HOOK: auth_on_publish_m5
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCPUBLISHM5__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_publish_m5?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCSUBSCRIBEM5__HOOK: auth_on_subscribe_m5
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCSUBSCRIBEM5__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_subscribe_m5?token=${MQTT_INTERNAL_TOKEN:-}
+      # TLS on 8883 is the only published listener; plain 1883 stays on loopback.
+      DOCKER_VERNEMQ_LISTENER__TCP__DEFAULT: 127.0.0.1:1883
+      DOCKER_VERNEMQ_LISTENER__SSL__DEFAULT: 0.0.0.0:8883
+      DOCKER_VERNEMQ_LISTENER__SSL__CAFILE: /vernemq/certs/ca.crt
+      DOCKER_VERNEMQ_LISTENER__SSL__CERTFILE: /vernemq/certs/server.crt
+      DOCKER_VERNEMQ_LISTENER__SSL__KEYFILE: /vernemq/certs/server.key
+      DOCKER_VERNEMQ_LISTENER__SSL__TLS_VERSION: tlsv1.2
+      DOCKER_VERNEMQ_LISTENER__SSL__ALLOWED_PROTOCOL_VERSIONS: "3,4,5"
+      DOCKER_VERNEMQ_MAX_MESSAGE_SIZE: "262144"
+    ports:
+      - "${MQTT_PORT:-8883}:8883"
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}/ca.crt:/vernemq/certs/ca.crt:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/server.crt:/vernemq/certs/server.crt:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/server.key:/vernemq/certs/server.key:ro
+      - vernemq_data:/vernemq/data
+    healthcheck:
+      test: ["CMD-SHELL", "vernemq ping | grep -q pong"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+    networks: *broker-network
+
   emqx:
     image: emqx/emqx:5.8.6
     profiles: [emqx]
@@ -34,8 +123,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 12
-    networks:
-      - meteorcloud
+    networks: *broker-network
 
   data-plane:
     image: ${DATA_PLANE_IMAGE:-meteorcloud/data-plane:dev}
@@ -48,6 +136,7 @@ services:
       CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
       HTTP_ADDR: ":8081"
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
+      MQTT_PROVIDER: ${MQTT_PROVIDER:-mosquitto}
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
       MQTT_CA_CERT_PATH: /certs/ca.crt
     volumes:
@@ -55,7 +144,13 @@ services:
     ports:
       - "8081:8081"
     depends_on:
+      mosquitto:
+        condition: service_healthy
+        required: false
       emqx:
+        condition: service_healthy
+        required: false
+      vernemq:
         condition: service_healthy
         required: false
     healthcheck:

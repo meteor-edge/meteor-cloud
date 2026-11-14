@@ -12,6 +12,7 @@ git_ref: master
 # image_source: registry
 # backend_image: ghcr.io/your-org/meteorcloud-backend:0.2.0
 # data_plane_image: ghcr.io/your-org/meteorcloud-data-plane:0.2.0
+# mosquitto_image: ghcr.io/your-org/meteorcloud-mosquitto:0.2.0
 # frontend_image: ghcr.io/your-org/meteorcloud-console:0.2.0
 
 # PostgreSQL: bundled container, or external (EDGE_PLATFORM_DATABASE_URL).
@@ -27,7 +28,8 @@ object_storage_provider: filesystem
 # object_storage_bucket: meteorcloud-artifacts
 # minio_enabled: true                                   # bundled MinIO instead
 
-# Device MQTT (TLS 8883): bundled EMQX with a self-signed CA by default.
+# Device MQTT (TLS 8883): bundled Mosquitto broker with a self-signed CA by default.
+# mqtt_provider: mosquitto   # or emqx / vernemq (docs/fleet/mqtt.md, docs/licensing.md)
 mqtt_enabled: false
 # mqtt_broker: external
 # mqtt_broker_host: mqtt.example.com
