@@ -26,7 +26,7 @@ import (
 // each message is ingested once.
 const SharedGroup = "meteor-dataplane"
 
-// IngressHandler receives what clients publish over MQTT. Both methods are called
+// IngressHandler receives what clients publish over MQTT. The methods are called
 // from a bounded worker pool. They return true once the message is durably handled
 // (stored, applied, or written to the dead-letter table); only then is the broker
 // acknowledged. False (shutting down) leaves it unacknowledged, so the broker
@@ -34,6 +34,9 @@ const SharedGroup = "meteor-dataplane"
 type IngressHandler interface {
 	Message(ctx context.Context, t Topic, payload []byte) bool
 	CommandAck(ctx context.Context, t Topic, payload []byte) bool
+	// Invalid receives a message whose topic is not a v1 topic, for example a
+	// stream segment in upper case that the broker's ACL wildcard let through.
+	Invalid(ctx context.Context, topic string, payload []byte) bool
 }
 
 // MQTTConfig configures the EMQX transport.
@@ -53,6 +56,8 @@ type ingressItem struct {
 	pub    *paho.Publish
 	client *paho.Client
 	topic  Topic
+	// invalid: the topic did not parse; topic is empty.
+	invalid bool
 }
 
 // MQTT is the EMQX-backed Bus. It holds two connections: one for fan-out and
@@ -289,12 +294,10 @@ func (m *MQTT) onFanout(pr paho.PublishReceived) {
 // onIngress queues a client message for the worker pool. The queue is as large as
 // the MQTT Receive Maximum, so the broker itself stops sending when it is full.
 func (m *MQTT) onIngress(pr paho.PublishReceived) {
+	// A topic that does not parse goes to the workers as well: it is recorded as a
+	// dead letter before the broker is acknowledged, never dropped without a trace.
 	t, ok := ParseTopic(pr.Packet.Topic)
-	if !ok {
-		pr.Client.Ack(pr.Packet)
-		return
-	}
-	m.work <- ingressItem{pub: pr.Packet, client: pr.Client, topic: t}
+	m.work <- ingressItem{pub: pr.Packet, client: pr.Client, topic: t, invalid: !ok}
 }
 
 func (m *MQTT) ingressWorker(ctx context.Context) {
@@ -326,6 +329,9 @@ func (m *MQTT) ingressWorker(ctx context.Context) {
 }
 
 func (m *MQTT) handle(ctx context.Context, item ingressItem) bool {
+	if item.invalid {
+		return m.ingress.Invalid(ctx, item.pub.Topic, item.pub.Payload)
+	}
 	if item.topic.Kind == "ack" {
 		return m.ingress.CommandAck(ctx, item.topic, item.pub.Payload)
 	}

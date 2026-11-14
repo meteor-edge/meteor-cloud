@@ -240,3 +240,18 @@ func TestCommandAckOverMQTT(t *testing.T) {
 		t.Fatal("a command must only be acknowledged by its own target")
 	}
 }
+
+func TestAnUnparsableTopicIsDeadLetteredNotDropped(t *testing.T) {
+	f := newFixture(t)
+	bad := bus.TopicPrefix + "org-1/apps/meter/devices/dev-1/telemetry/energy/Bad"
+	if _, ok := bus.ParseTopic(bad); ok {
+		t.Fatal("the topic is expected not to parse")
+	}
+	if !f.gw.Invalid(context.Background(), bad, []byte(`{"data":{"v":1}}`)) {
+		t.Fatal("a dead-lettered message counts as handled")
+	}
+	dead := f.store.DeadLetters()
+	if len(dead) != 1 || dead[0].Reason != "invalid_topic" || dead[0].OrganizationID != "org-1" {
+		t.Fatalf("dead letters: %+v", dead)
+	}
+}
