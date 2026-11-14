@@ -18,10 +18,11 @@ prepares the server and runs those same files; it does not keep its own copy.
 | `redis` | profile `redis` | Only with `CACHE_PROVIDER=redis` |
 | `minio` | profile `minio` | Only with `OBJECT_STORAGE_PROVIDER=s3` and no other S3 service |
 | `data-plane` | profile `mqtt` | Needed whenever `MQTT_ENABLED=true` |
+| `data-api` | profile `data-api` | Application data API for the SDK (`/v1`). Ansible: `data_api_enabled: true` |
 | `mosquitto` | profile `mosquitto` | Bundled broker on 8883 (TLS), default. Use profile `emqx` or `vernemq` instead for that broker, or omit all three for an external one. [MQTT brokers](fleet/mqtt-brokers.md) |
 | Prometheus, node-exporter, Loki, Alloy, Alertmanager, Grafana | `docker-compose.observability.yml`, profiles `metrics`, `logs`, `alerting`, `dashboards` | Each optional, bound to 127.0.0.1; see [Observability](observability.md) |
 
-`/internal/*` (broker callbacks) and `/metrics` are never routed by Traefik.
+`/internal/*` (broker callbacks), data-api ops (`:8092`), and `/metrics` are never routed by Traefik. PathPrefix `/v1` reaches the data API when the `data-api` profile is on.
 
 ## Configuration
 

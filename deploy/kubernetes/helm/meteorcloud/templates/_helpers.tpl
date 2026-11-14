@@ -139,4 +139,18 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "mqtt.enabled needs mqtt.publicHost (the hostname devices connect to)" }}
 {{- end }}
 {{- end }}
+{{- if $v.dataApi.enabled }}
+{{- if not (has $v.dataApi.bus (list "memory" "mqtt")) }}
+{{- fail "dataApi.bus must be memory or mqtt" }}
+{{- end }}
+{{- if not (has $v.dataApi.storage (list "postgres" "memory")) }}
+{{- fail "dataApi.storage must be postgres or memory" }}
+{{- end }}
+{{- if and (eq $v.dataApi.bus "mqtt") (not $v.mqtt.enabled) }}
+{{- fail "dataApi.bus=mqtt needs mqtt.enabled=true" }}
+{{- end }}
+{{- if and (eq $v.dataApi.bus "memory") (gt (int $v.dataApi.replicaCount) 1) }}
+{{- fail "dataApi.bus=memory needs dataApi.replicaCount=1 (in-process bus)" }}
+{{- end }}
+{{- end }}
 {{- end }}

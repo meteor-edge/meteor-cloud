@@ -12,8 +12,13 @@ git_ref: master
 # image_source: registry
 # backend_image: ghcr.io/your-org/meteorcloud-backend:0.2.0
 # data_plane_image: ghcr.io/your-org/meteorcloud-data-plane:0.2.0
+# data_api_image: ghcr.io/your-org/meteorcloud-data-api:0.2.0
 # mosquitto_image: ghcr.io/your-org/meteorcloud-mosquitto:0.2.0
 # frontend_image: ghcr.io/your-org/meteorcloud-console:0.2.0
+
+# Application data API (SDK). Needs EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN.
+# data_api_enabled: true
+# dataplane_bus: memory   # or mqtt (requires mqtt_enabled)
 
 # PostgreSQL: bundled container, or external (EDGE_PLATFORM_DATABASE_URL).
 postgres_provider: bundled

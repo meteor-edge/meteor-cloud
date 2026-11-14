@@ -255,7 +255,7 @@ In MeteorCloud:
 
 On each device the agent obtains a token that is valid for that application on that device only, mounts it read-only at `/run/secrets/meteorcloud-token`, sets `METEORCLOUD_ENDPOINT` and starts your container. `docker_compose` releases work the same way and every service of the project gets the mount.
 
-A complete example is in [examples/edge-app](examples/edge-app). [examples/cloud_dashboard.py](examples/cloud_dashboard.py) is the cloud side: it reads history, watches live data and sends a command.
+A complete example is in [examples/edge-app](examples/edge-app). [examples/cloud_dashboard.py](examples/cloud_dashboard.py) is the cloud side: it reads history, watches live data and sends a command. [examples/stream-to-database](examples/stream-to-database) copies your streams into a PostgreSQL or SQLite database you own, with no gaps and no duplicates.
 
 ## Develop without a MeteorCloud installation
 

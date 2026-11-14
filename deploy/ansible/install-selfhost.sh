@@ -5,7 +5,7 @@
 # Clone the repo on the host, then from the repo root:
 #
 #   make up PLATFORM_DOMAIN=fleet.example.com
-#   make up ARGS='--no-vpn --mqtt=off --storage=filesystem --no-demo'
+#   make up ARGS='--no-vpn --mqtt=off --no-data-api --storage=filesystem --no-demo'
 #   make up ARGS=--route53    # also create the A records in Route53 (never overwrites)
 #   make down
 #   make down ARGS=--destroy-data
@@ -26,6 +26,7 @@ ARCHIVE="${INV}/source.tar.gz"
 VENV="${HOME}/.meteorcloud-ansible"
 VPN=1
 MQTT=bundled
+DATA_API=1
 STORAGE=minio
 DEMO=1
 ROUTE53=0
@@ -33,6 +34,7 @@ DOWN=0
 DESTROY_DATA=0
 ASK_VPN=1
 ASK_MQTT=1
+ASK_DATA_API=1
 ASK_STORAGE=1
 ASK_DEMO=1
 
@@ -41,6 +43,7 @@ usage() {
   echo "Options:"
   echo "  --no-vpn | --vpn"
   echo "  --mqtt=off|bundled|external"
+  echo "  --data-api | --no-data-api"
   echo "  --storage=filesystem|s3|minio"
   echo "  --demo | --no-demo"
   echo "  --route53            create A records in Route53 (AWS CLI; never overwrites)"
@@ -56,6 +59,8 @@ while [[ $# -gt 0 ]]; do
       MQTT="${1#--mqtt=}"
       ASK_MQTT=0
       ;;
+    --data-api) DATA_API=1; ASK_DATA_API=0 ;;
+    --no-data-api) DATA_API=0; ASK_DATA_API=0 ;;
     --storage=filesystem|--storage=s3|--storage=minio)
       STORAGE="${1#--storage=}"
       ASK_STORAGE=0
@@ -290,6 +295,7 @@ print_dns_guide() {
 
 if [[ "${ASK_VPN}" -eq 1 && -n "${ENABLE_VPN:-}" ]]; then VPN="${ENABLE_VPN}"; fi
 if [[ "${ASK_MQTT}" -eq 1 && -n "${MQTT_MODE:-}" ]]; then MQTT="${MQTT_MODE}"; fi
+if [[ "${ASK_DATA_API}" -eq 1 && -n "${ENABLE_DATA_API:-}" ]]; then DATA_API="${ENABLE_DATA_API}"; fi
 if [[ "${ASK_STORAGE}" -eq 1 && -n "${STORAGE_MODE:-}" ]]; then STORAGE="${STORAGE_MODE}"; fi
 if [[ "${ASK_DEMO}" -eq 1 && -n "${ENABLE_DEMO:-}" ]]; then DEMO="${ENABLE_DEMO}"; fi
 DOMAIN_RAW="${PLATFORM_DOMAIN:-${DOMAIN:-}}"
@@ -309,8 +315,9 @@ toggle_service() {
   case "$1" in
     0) if [[ "${VPN}" -eq 1 ]]; then VPN=0; else VPN=1; fi ;;
     1) if [[ "${MQTT}" == off ]]; then MQTT="${PREFERRED_MQTT}"; else MQTT=off; fi ;;
-    2) if [[ "${STORAGE}" == filesystem ]]; then STORAGE="${PREFERRED_STORAGE}"; else STORAGE=filesystem; fi ;;
-    3) if [[ "${DEMO}" -eq 1 ]]; then DEMO=0; else DEMO=1; fi ;;
+    2) if [[ "${DATA_API}" -eq 1 ]]; then DATA_API=0; else DATA_API=1; fi ;;
+    3) if [[ "${STORAGE}" == filesystem ]]; then STORAGE="${PREFERRED_STORAGE}"; else STORAGE=filesystem; fi ;;
+    4) if [[ "${DEMO}" -eq 1 ]]; then DEMO=0; else DEMO=1; fi ;;
   esac
 }
 
@@ -326,8 +333,8 @@ draw_service() {
   echo
 }
 
-# 4 items x 5 lines. Redraw in place (arrows + space, no typing numbers).
-MENU_LINES=20
+# 5 items x 5 lines. Redraw in place (arrows + space, no typing numbers).
+MENU_LINES=25
 
 draw_services_menu() {
   local idx="$1" mqtt_on=0 storage_on=0 mqtt_extra storage_extra
@@ -346,12 +353,16 @@ draw_services_menu() {
     "a TLS broker for device messages" \
     "live telemetry and commands. Enroll/HTTP work without it." \
     "${mqtt_extra}"
-  draw_service "$([[ "${idx}" -eq 2 ]] && echo 1 || echo 0)" "${storage_on}" \
+  draw_service "$([[ "${idx}" -eq 2 ]] && echo 1 || echo 0)" "${DATA_API}" \
+    "Application data API" \
+    "publish, subscribe, query, and commands for apps (SDK)" \
+    "PathPrefix /v1 on Traefik. Needs EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN."
+  draw_service "$([[ "${idx}" -eq 3 ]] && echo 1 || echo 0)" "${storage_on}" \
     "Artifact storage" \
     "where OS images, firmware, and compose bundles live" \
     "operators upload in the console; devices download via the API" \
     "${storage_extra}"
-  draw_service "$([[ "${idx}" -eq 3 ]] && echo 1 || echo 0)" "${DEMO}" \
+  draw_service "$([[ "${idx}" -eq 4 ]] && echo 1 || echo 0)" "${DEMO}" \
     "Demo organization" \
     "Demo Organization in the console, owned by the admin login" \
     "explore the UI after install. Devices you add yourself with meteorcli."
@@ -375,8 +386,8 @@ select_services() {
     if [[ "${key}" == $'\x1b' ]]; then
       read -rsn2 rest || true
       case "${rest}" in
-        '[A'|'[D') idx=$(((idx + 3) % 4)) ;;
-        '[B'|'[C') idx=$(((idx + 1) % 4)) ;;
+        '[A'|'[D') idx=$(((idx + 4) % 5)) ;;
+        '[B'|'[C') idx=$(((idx + 1) % 5)) ;;
       esac
     elif [[ "${key}" == ' ' ]]; then
       toggle_service "${idx}"
@@ -522,6 +533,9 @@ if [[ "${MQTT}" != off ]]; then
   export EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD="${EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD:-$(rand 16)}"
   export EDGE_PLATFORM_MQTT_INTERNAL_TOKEN="${EDGE_PLATFORM_MQTT_INTERNAL_TOKEN:-$(rand 24)}"
 fi
+if [[ "${DATA_API}" -eq 1 ]]; then
+  export EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN="${EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN:-$(rand 24)}"
+fi
 if [[ "${STORAGE}" == minio ]]; then
   export EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID="${EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID:-$(rand 10)}"
   export EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY="${EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY:-$(rand 12)}"
@@ -540,6 +554,9 @@ write_secrets() {
     if [[ -n "${EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD:-}" ]]; then
       printf 'EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD=%s\n' "${EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD}"
       printf 'EDGE_PLATFORM_MQTT_INTERNAL_TOKEN=%s\n' "${EDGE_PLATFORM_MQTT_INTERNAL_TOKEN}"
+    fi
+    if [[ -n "${EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN:-}" ]]; then
+      printf 'EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN=%s\n' "${EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN}"
     fi
     if [[ -n "${EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID:-}" ]]; then
       printf 'EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID=%s\n' "${EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID}"
@@ -625,6 +642,8 @@ mqtt_broker: ${MQTT_BROKER}
 mqtt_broker_host: ${MQTT_BROKER_HOST}
 mqtt_broker_port: ${MQTT_BROKER_PORT}
 mqtt_public_host: ${MQTT_PUBLIC_HOST}
+data_api_enabled: $([[ "${DATA_API}" -eq 1 ]] && echo true || echo false)
+dataplane_bus: memory
 firewall_enabled: false
 shell_provider: ${SHELL_PROVIDER_VALUE}
 EOF
@@ -657,6 +676,7 @@ PLAY_ARGS=(
   -e "minio_enabled=${MINIO_ENABLED}"
   -e "mqtt_enabled=${MQTT_ENABLED}"
   -e "mqtt_broker=${MQTT_BROKER}"
+  -e "data_api_enabled=$([[ "${DATA_API}" -eq 1 ]] && echo true || echo false)"
   -e "demo_data=$([[ "${DEMO}" -eq 1 ]] && echo true || echo false)"
 )
 if [[ "${VPN}" -eq 1 ]]; then
@@ -670,6 +690,9 @@ if [[ "${MQTT}" != off ]]; then
     -e "mqtt_broker_port=${MQTT_BROKER_PORT}"
     -e "mqtt_public_host=${MQTT_PUBLIC_HOST}"
   )
+fi
+if [[ "${DATA_API}" -eq 1 ]]; then
+  PLAY_ARGS+=(-e "data_plane_internal_token=${EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN}")
 fi
 if [[ -n "${EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID:-}" ]]; then
   PLAY_ARGS+=(
