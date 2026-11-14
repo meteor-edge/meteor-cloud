@@ -15,7 +15,7 @@ Website: [meteor-edge.com](https://meteor-edge.com)
 | **You host it** | Docker Compose on a VM/EC2, or Helm on a cluster you already run |
 | **Multi-tenant** | Organizations, memberships, RBAC, and optional device-group scopes |
 | **Device lifecycle** | Registration tokens, device-initiated enrollment, heartbeat, inventory |
-| **MQTT-ready** | TLS broker (EMQX), per-device credentials, ACL, ingest, live telemetry |
+| **MQTT-ready** | TLS broker (Mosquitto by default; EMQX or VerneMQ optional), per-device credentials, ACL, ingest, live telemetry |
 | **Artifacts** | OS images, firmware, compose bundles — metadata in Postgres, blobs in filesystem or S3 |
 | **Replaceable infra** | PostgreSQL required; Redis, MQTT, and object storage selected by config |
 
@@ -26,7 +26,7 @@ MeteorCloud is split into three planes. The **console** is the operator UI; it t
 | Plane | Path | Role |
 | --- | --- | --- |
 | **Device plane** | `src/device-plane/agent/` | `meteorcli` on the device: enroll, heartbeat, inventory, MQTT client |
-| **Data plane** | `src/data-plane/` | Platform MQTT gateway: subscribe/publish via EMQX, forward ingest to the control plane |
+| **Data plane** | `src/data-plane/` | Platform MQTT gateway: subscribe/publish via the MQTT broker, forward ingest to the control plane |
 | **Control plane** | `src/control-plane/` | Identity, tenancy, device registry, artifacts, MQTT policy, operator API, persistence |
 
 ### Schema
@@ -75,9 +75,8 @@ make seed      # owner@example.com / dev-password-123
 | OpenAPI | http://localhost:8000/docs |
 | Data plane health | http://localhost:8081/health |
 | MQTT TLS | mqtts://localhost:8883 |
-| EMQX dashboard (dev) | http://localhost:18083 |
 
-Choose bundled services with `COMPOSE_PROFILES` in `deploy/compose/.env` (`postgres`, `redis`, `minio`, `mqtt`, `emqx`). Start one module: `make dev-control-plane`, `make dev-data-plane`, `make dev-console`. Stop: `make stop`.
+Choose bundled services with `COMPOSE_PROFILES` in `deploy/compose/.env` (`postgres`, `redis`, `minio`, `mqtt`, `mosquitto`). Start one module: `make dev-control-plane`, `make dev-data-plane`, `make dev-console`. Stop: `make stop`.
 
 Kubernetes (local k3d + Helm):
 
@@ -127,7 +126,7 @@ On a VM you already have: clone, `make up`. To create a new AWS EC2 from a lapto
 | --- | --- | --- |
 | PostgreSQL | Required | Bundled container, or external |
 | Artifact storage | Required | Filesystem volume, AWS S3, or any S3-compatible API |
-| MQTT broker | Optional | Bundled or external EMQX; off by default |
+| MQTT broker | Optional | Bundled Mosquitto (default), EMQX, or VerneMQ, or external; off by default |
 | Redis | Optional | Shared rate limits across API replicas; in-memory otherwise |
 | Kafka, ClickHouse | Not used | Not deployed |
 

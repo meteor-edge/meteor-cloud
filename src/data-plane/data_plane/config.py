@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     mqtt_platform_username: str = Field(default="platform", alias="MQTT_PLATFORM_USERNAME")
     mqtt_platform_password: str = Field(default="dev-mqtt-platform", alias="MQTT_PLATFORM_PASSWORD")
     mqtt_ca_cert_path: str = Field(default="certs/ca.crt", alias="MQTT_CA_CERT_PATH")
-    mqtt_provider: str = Field(default="emqx", alias="MQTT_PROVIDER")
+    mqtt_provider: str = Field(default="mosquitto", alias="MQTT_PROVIDER")
     mqtt_enabled: bool = Field(default=True, alias="MQTT_ENABLED")
     # Observability: pull-only metrics and stdout logs; nothing is pushed anywhere.
     metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")

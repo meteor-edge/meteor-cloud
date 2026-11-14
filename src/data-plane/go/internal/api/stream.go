@@ -105,9 +105,16 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(wsReadLimit)
 	sess := &session{id: id, out: make(chan []byte, sendBuffer), closed: make(chan struct{})}
+	// "ready" is queued before the hub can hand this session a command, so it is
+	// always the first frame.
+	sess.enqueue(map[string]any{"type": "ready", "identity": identityView(id)})
 	s.wsMu.Lock()
 	s.sessions[sess] = struct{}{}
+	closing = s.closing // shutdown may have started while the socket was being accepted
 	s.wsMu.Unlock()
+	if closing {
+		sess.shutdown(closeGoingAway, "shutting_down")
+	}
 	conn := s.hub.Register(id, sess)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
@@ -119,12 +126,39 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		s.lifecycle(id, "app.disconnected")
 	}()
 
-	sess.enqueue(map[string]any{"type": "ready", "identity": identityView(id)})
+	// Revocation, expiry, rotation and changed permissions apply to open connections,
+	// not only to new ones, and must not wait behind a slow backlog query or a ping:
+	// this runs on its own and, if needed, cancels whatever the session is doing. The client
+	// reconnects with what it is allowed now.
+	go func() {
+		revalidate := time.NewTicker(revalidateEvery)
+		defer revalidate.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-revalidate.C:
+				if !s.policy.StillValid(id) {
+					s.metrics.LiveDropped.WithLabelValues("credential_revoked").Inc()
+					sess.shutdown(closeUnauthorized, "credential_revoked")
+					// The session loop sends the close frame when it is idle. If it is
+					// stuck in a query, a write or a ping, cut that short.
+					select {
+					case <-ctx.Done():
+					case <-time.After(2 * time.Second):
+						cancel()
+					}
+					return
+				}
+			}
+		}
+	}()
+
 	// Commands that were waiting for this target.
 	bctx, bcancel := context.WithTimeout(ctx, 10*time.Second)
 	pending, err := s.commands.Undelivered(bctx, id)
 	bcancel()
-	if err == nil {
+	if err == nil && ctx.Err() == nil {
 		for _, cmd := range pending {
 			sess.SendCommand(cmd)
 		}
@@ -135,8 +169,15 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	ping := time.NewTicker(pingInterval)
 	defer ping.Stop()
-	revalidate := time.NewTicker(revalidateEvery)
-	defer revalidate.Stop()
+	// A write or ping that was cut short by a revocation still closes with its reason.
+	fail := func() {
+		select {
+		case <-sess.closed:
+			ws.Close(sess.reason, sess.text)
+		default:
+			ws.CloseNow()
+		}
+	}
 	for {
 		select {
 		case <-sess.closed:
@@ -150,7 +191,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			err := ws.Write(wctx, websocket.MessageText, frame)
 			wcancel()
 			if err != nil {
-				ws.CloseNow()
+				fail()
 				return
 			}
 		case <-ping.C:
@@ -158,16 +199,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			err := ws.Ping(pctx)
 			pcancel()
 			if err != nil {
-				ws.CloseNow()
+				fail()
 				return
-			}
-		case <-revalidate.C:
-			// Revocation, expiry, rotation and changed permissions apply to open
-			// connections, not only to new ones. The client reconnects with what it
-			// is allowed now.
-			if !s.policy.StillValid(id) {
-				s.metrics.LiveDropped.WithLabelValues("credential_revoked").Inc()
-				sess.shutdown(closeUnauthorized, "credential_revoked")
 			}
 		}
 	}

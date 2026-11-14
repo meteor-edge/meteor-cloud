@@ -21,7 +21,7 @@ Only create a row when that service is enabled.
 | `cloud_app` | always | `fleet.example.com` | this server | TCP 80, 443 |
 | `cloud_app` (apps) | always | `*.fleet.example.com` | this server | TCP 443 |
 | `vpn` | WireGuard enabled | `vpn.fleet.example.com` | WireGuard server | UDP 51820 |
-| `mqtt` | bundled EMQX | `mqtt.fleet.example.com` | this server | TCP 8883 |
+| `mqtt` | bundled MQTT broker | `mqtt.fleet.example.com` | this server | TCP 8883 |
 | `mqtt` | external broker | none on this server | your broker | — |
 | storage | filesystem or MinIO | none (not public) | downloads via `https://fleet.example.com/api` | — |
 | storage | S3 / GCS | none on this server | your bucket; API still proxies downloads | — |

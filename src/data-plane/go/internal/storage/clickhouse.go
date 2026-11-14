@@ -284,6 +284,8 @@ func (c *ClickHouse) existing(ctx context.Context, org string, ids []string) (ma
 }
 
 func (c *ClickHouse) InsertEvents(ctx context.Context, events []*envelope.Event) ([]bool, error) {
+	// Existence check then insert: safe for sequential retries. Concurrent publishes of the
+	// same (organization_id, event_id) can both insert (MergeTree has no unique key).
 	inserted := make([]bool, len(events))
 	byOrg := map[string][]string{}
 	for _, ev := range events {

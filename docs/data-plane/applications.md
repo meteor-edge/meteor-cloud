@@ -26,9 +26,10 @@ APP=$(curl -s $API/organizations/$ORG/applications -H "authorization: Bearer $TO
                     "receive_commands": true}}' | jq -r .id)
 
 # 2. A credential for a cloud-hosted instance. The token is shown once.
-curl -s $API/organizations/$ORG/applications/$APP/credentials -H "authorization: Bearer $TOKEN" \
+#    Owner-only file mode so other local users cannot read the credential.
+(umask 077; curl -s $API/organizations/$ORG/applications/$APP/credentials -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' -d '{"name": "laptop", "environment": "dev", "expires_in_days": 30}' \
-  | jq -r .token > my-app.token
+  | jq -r .token > my-app.token)
 ```
 
 ## Permissions
@@ -55,8 +56,8 @@ curl -s $API/organizations/$ORG/applications/$APP/credentials -H "authorization:
 | `DELETE /applications/{id}` | Delete with all credentials | `application.delete` |
 | `GET /applications/{id}/credentials` | List credentials (never the token) | `application.credential` |
 | `POST /applications/{id}/credentials` | Create (`name`, `device_id?`, `environment?`, `expires_in_days?`). Returns the token once | `application.credential` |
-| `POST /applications/{id}/credentials/{cid}/rotate` | New token for the same scope; the old one stops working at once | `application.credential` |
-| `POST /applications/{id}/credentials/{cid}/revoke` | Stop the token | `application.credential` |
+| `POST /applications/{id}/credentials/{cid}/rotate` | New token for the same scope; the old one stops working after the next data-plane policy poll (about 5 seconds). Direct MQTT is slower — see [Credentials](#credentials) | `application.credential` |
+| `POST /applications/{id}/credentials/{cid}/revoke` | Stop the token (same policy-poll window; Direct MQTT exception below) | `application.credential` |
 | `POST /applications/{id}/commands` | Send a command as an operator (`name`, `payload?`, `device_id?`) | `application.command` |
 | `GET /applications/{id}/commands/{command_id}` | Command state and result | `application.command` |
 

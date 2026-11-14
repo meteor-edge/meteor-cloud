@@ -47,9 +47,14 @@ def _save_applied_workload(
     workload_key: str,
     release_id: str,
     revision: int,
+    reapply: bool = False,
 ) -> None:
     state = _load_applied_state(path)
     state[workload_key] = {"release_id": release_id, "revision": revision}
+    if reapply:
+        # The running workload no longer matches what was applied (its token file was
+        # lost). Stays set until an apply succeeds, so a failed apply is tried again.
+        state[workload_key]["reapply"] = True
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -361,11 +366,20 @@ def reconcile_software(
             reports.append(_failed(workload_key, f"Unsupported release kind: {kind!r}"))
             continue
 
-        if _already_applied(applied, item) and credentials.keep_fresh(client, device_token, item):
-            health_report = _health_only(item, compose_work=compose_work)
-            if health_report is not None:
-                reports.append(health_report)
-                continue
+        was_applied = _already_applied(applied, item)
+        if was_applied:
+            recorded = applied[workload_key]
+            if not recorded.get("reapply") and not credentials.keep_fresh(client, device_token, item):
+                recorded["reapply"] = True
+                release_id, revision = _desired_identity(item)  # not None: it was applied
+                _save_applied_workload(
+                    state_path, workload_key=workload_key, release_id=release_id, revision=revision, reapply=True
+                )
+            if not recorded.get("reapply"):
+                health_report = _health_only(item, compose_work=compose_work)
+                if health_report is not None:
+                    reports.append(health_report)
+                    continue
 
         artifact_id = item.get("artifact_id")
 
@@ -440,7 +454,7 @@ def reconcile_software(
                 # Same release applied again with a binding: its token file was lost.
                 # The containers must be created again to mount the new file.
                 report = _apply_compose(item, compose_file, compose_work, app,
-                                        force_recreate=app is not None and _already_applied(applied, item))
+                                        force_recreate=app is not None and was_applied)
 
             reports.append(report)
             identity = _desired_identity(item)

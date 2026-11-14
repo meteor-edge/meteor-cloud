@@ -6,7 +6,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -141,8 +144,8 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 	}
 	// No store can hold a NUL character inside a JSON text; one such message must not
 	// fail the batch it travels in.
-	if hasEscapedNUL(data) {
-		return nil, &Rejection{CodeInvalidPayload, "data must not contain the character \\u0000"}
+	if hasUnstorableEscape(data) {
+		return nil, &Rejection{CodeInvalidPayload, "data must not contain \\u0000 or an unpaired surrogate escape"}
 	}
 	ts := now
 	if msg.Time != nil {
@@ -159,6 +162,8 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 		typ = msg.Stream
 	} else if len(typ) > 128 {
 		return nil, &Rejection{CodeInvalidKind, "type is longer than 128 characters"}
+	} else if strings.ContainsRune(typ, 0) || !utf8.ValidString(typ) {
+		return nil, &Rejection{CodeInvalidKind, "type must be valid text without the character \\u0000"}
 	}
 	return &Event{
 		ID:             eventID,
@@ -178,17 +183,40 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 	}, nil
 }
 
-// hasEscapedNUL reports whether valid JSON contains the escape \u0000 (a backslash
-// that is itself escaped does not count).
-func hasEscapedNUL(data []byte) bool {
-	for i := 0; i+5 < len(data); i++ {
+// hasUnstorableEscape reports whether valid JSON contains an escape that no store
+// accepts inside a JSON text: \u0000, or a surrogate that is not half of a pair
+// (a backslash that is itself escaped does not count).
+func hasUnstorableEscape(data []byte) bool {
+	hex := func(i int) (rune, bool) {
+		if i+6 > len(data) || data[i] != '\\' || data[i+1] != 'u' {
+			return 0, false
+		}
+		v, err := strconv.ParseUint(string(data[i+2:i+6]), 16, 16)
+		return rune(v), err == nil
+	}
+	for i := 0; i+1 < len(data); i++ {
 		if data[i] != '\\' {
 			continue
 		}
-		if bytes.HasPrefix(data[i+1:], []byte("u0000")) {
-			return true
+		r, ok := hex(i)
+		if !ok {
+			i++ // skip the escaped character
+			continue
 		}
-		i++ // skip the escaped character
+		switch {
+		case r == 0:
+			return true
+		case r >= 0xD800 && r <= 0xDBFF: // high surrogate: a low one must follow
+			low, ok := hex(i + 6)
+			if !ok || low < 0xDC00 || low > 0xDFFF {
+				return true
+			}
+			i += 11
+		case r >= 0xDC00 && r <= 0xDFFF: // low surrogate without a high one
+			return true
+		default:
+			i += 5
+		}
 	}
 	return false
 }

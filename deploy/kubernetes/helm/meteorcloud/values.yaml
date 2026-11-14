@@ -35,12 +35,17 @@ config:
 #   REDIS_URL                                        cache.provider=redis
 #   OBJECT_STORAGE_ACCESS_KEY_ID/SECRET_ACCESS_KEY   s3 with static keys (optional)
 #   MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN      mqtt.enabled
-#   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled broker
+#   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled EMQX (mqtt.provider=emqx)
+#   DATA_PLANE_INTERNAL_TOKEN                        dataApi.enabled (the render fails without it)
+#   DATAPLANE_DATABASE_URL                           dataApi.storage=postgres (postgres://..., not +psycopg)
+#   DATAPLANE_MQTT_JWT_SECRET                        dataApi.mqtt.direct (32+ characters)
 #   EDGE_PLATFORM_ADMIN_EMAIL/PASSWORD               optional first administrator
 #   CONNECTIVITY_INTERNAL_TOKEN                      connectivity.provider=wireguard
 secrets:
   existingSecret: ""
   jwtSecret: ""
+  # Shared by the control plane policy feed and the Go data API. Empty: generated.
+  dataPlaneInternalToken: ""
   # Shared with the WireGuard gateway agent (EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN).
   # Empty: generated once; read it back from the Secret for the gateway.
   connectivityInternalToken: ""
@@ -196,9 +201,15 @@ objectStorage:
 # --- Device MQTT (optional) ------------------------------------------------
 mqtt:
   enabled: false
-  # bundled: single EMQX broker in this release. external: your EMQX cluster,
-  # configured for HTTP authn/authz against the API's /internal/mqtt endpoints.
+  # bundled: one broker in this release. external: your own broker (or cluster),
+  # configured to ask the API's /internal/mqtt endpoints for logins and topic
+  # permissions (docs/fleet/mqtt.md).
   broker: bundled
+  # Which broker software: mosquitto (default) | emqx | vernemq.
+  #   mosquitto  Eclipse Mosquitto + meteorcloud_auth plugin, single node.
+  #   emqx       EMQX 5.8.6 (Apache 2.0). Do not bump past 5.8 (docs/licensing.md).
+  #   vernemq    external only: run VerneMQ yourself and set broker: external.
+  provider: mosquitto
   # Hostname devices connect to (must be in the server certificate).
   publicHost: ""
   port: 8883
@@ -207,10 +218,27 @@ mqtt:
   internalToken: ""
   tls:
     # Secret with ca.crt (+ server.crt, server.key for the bundled broker). The
-    # server certificate needs SANs for publicHost and <release>-emqx.
+    # server certificate needs SANs for publicHost and the broker Service:
+    # <release>-mqtt (mosquitto) or <release>-emqx (emqx).
     existingSecret: ""
   external:
     host: ""
+  mosquitto:
+    image:
+      repository: meteorcloud/mosquitto
+      tag: ""                  # defaults to the chart appVersion
+      pullPolicy: IfNotPresent
+    # How long the broker reuses an "allowed" topic decision (0 asks the API every time).
+    aclCacheSeconds: 60
+    service:
+      # Devices reach 8883 through this Service. LoadBalancer needs a cloud or
+      # bare-metal load balancer (MetalLB, k3s servicelb).
+      type: LoadBalancer
+      annotations: {}
+      loadBalancerSourceRanges: []
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 512Mi }
   emqx:
     image:
       repository: emqx/emqx
@@ -269,6 +297,35 @@ dataPlane:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 384Mi }
 
+# Application data API (Go): publish / subscribe / query / commands for the SDK.
+# Off by default. Contract: contracts/data-plane-v1.md. Ingress PathPrefix /v1
+# reaches port 8082; ops (8092: /readyz, /metrics, internal) stays ClusterIP only.
+dataApi:
+  enabled: false
+  image:
+    repository: meteorcloud/data-api
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  # memory: single replica, no MQTT. mqtt: fan-out via the broker (needs mqtt.enabled).
+  bus: memory
+  # postgres: uses DATAPLANE_DATABASE_URL in the chart Secret (same DB, schema dataplane).
+  # memory: in-process store (dev / tests only).
+  storage: postgres
+  mqtt:
+    # Direct MQTT for applications (optional; the SDK works over HTTPS/WebSocket on
+    # /v1 without it). The data API signs short-lived broker tokens that EMQX
+    # verifies, so it needs bus=mqtt, mqtt.enabled and mqtt.provider=emqx: Mosquitto
+    # and VerneMQ refuse app_ logins. A bundled EMQX gets the JWT authenticator;
+    # an external EMQX needs the same secret configured by you (docs/kubernetes.md).
+    direct: false
+    # Signing secret, 32+ characters. Empty: generated once and kept across upgrades
+    # (or DATAPLANE_MQTT_JWT_SECRET from secrets.existingSecret).
+    jwtSecret: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
 # --- Metrics (optional) -----------------------------------------------------
 # The API and data plane serve Prometheus metrics on GET /metrics (their own
 # ports, never routed by the ingress). Grafana, Loki and Prometheus are not part
@@ -300,9 +357,10 @@ serviceAccount:
   annotations: {}
 
 # --- Ingress ----------------------------------------------------------------
-# Routes /api and /health to the API and everything else to the console.
-# /internal and /metrics are never routed. Needs an ingress controller in the
-# cluster (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
+# Routes /api and /health to the API, /v1 to the application data API when
+# dataApi.enabled, and everything else to the console. /internal, ops :8092 and
+# /metrics are never routed. Needs an ingress controller in the cluster
+# (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
 # Lets only this release's pods and the ingress controller's namespace reach the
 # API, so a forwardedAllowIps of "*" cannot be abused from elsewhere in the cluster.
 # Off by default: it needs a CNI that enforces NetworkPolicy and the right selector.

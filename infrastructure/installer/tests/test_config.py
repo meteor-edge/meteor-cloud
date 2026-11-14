@@ -148,6 +148,14 @@ def test_validate_requires_connectivity_token_for_vpn(
     assert not any("CONNECTIVITY" in item for item in validate_configuration(config))
 
 
+def test_validate_requires_url_safe_mqtt_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_configuration(EXAMPLE)
+    monkeypatch.setenv("EDGE_PLATFORM_MQTT_INTERNAL_TOKEN", "abc/def+==")
+    assert any("MQTT_INTERNAL_TOKEN" in item for item in validate_configuration(config))
+    monkeypatch.setenv("EDGE_PLATFORM_MQTT_INTERNAL_TOKEN", "Abc_def-123.x~")
+    assert not any("MQTT_INTERNAL_TOKEN" in item for item in validate_configuration(config))
+
+
 def test_vpn_placement_defaults_to_same_host() -> None:
     config = load_configuration(EXAMPLE)
     assert config.services.vpn.placement == "same_host"

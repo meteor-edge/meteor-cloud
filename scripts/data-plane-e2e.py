@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check of the application data plane: the whole developer workflow.
 
-Against a running stack (control plane, data API, ClickHouse or PostgreSQL, EMQX) it:
+Against a running stack (control plane, data API, ClickHouse or PostgreSQL, MQTT broker) it:
 
   1. registers a device and two applications with scoped permissions
   2. deploys a Docker release bound to an application
@@ -21,7 +21,7 @@ Environment:
     E2E_DATA_API_URL        default http://localhost:8082 (as reachable from this machine)
     E2E_EMAIL / E2E_PASSWORD  an organization owner (default: the seed owner)
     E2E_EDGE_IMAGE          image of sdk/python/examples/edge-app (built when unset)
-    E2E_MQTT_CA             CA certificate of the broker, to test direct MQTT (skipped when unset)
+    E2E_MQTT_CA             CA certificate of the broker, to test direct MQTT (EMQX only; skipped when unset)
 
 Needs Docker on this machine and: pip install -e sdk/python -e src/device-plane/agent
 """
@@ -71,6 +71,15 @@ def wait_for(what: str, predicate, timeout: float = 30.0, pause: float = 0.3):
             return value
         time.sleep(pause)
     raise AssertionError(f"timed out waiting for {what}")
+
+
+def _next_from_device(live, device_id: str, wait: float = 1.0):
+    """Take one live event; return it only when it is from this run's device."""
+    try:
+        event = live.get(timeout=wait)
+    except TimeoutError:
+        return None
+    return event if getattr(event, "device_id", None) == device_id else None
 
 
 def expect(error: type[Exception], fn, *args, **kwargs) -> Exception:
@@ -160,30 +169,32 @@ def main() -> int:
     step("release bound to the application and deployed")
 
     # 3. The real agent applies it -------------------------------------------------
-    agent = EdgeClient(CP)
-    artifacts = work / "artifacts"
-    reports = reconcile_software(agent, device_token, artifacts)
-    report = next(r for r in reports if r["workload_key"] == CONTAINER)
-    assert report["sync_status"] == "in_sync", report
-    token_file = next((work / "app-credentials").glob(f"{CONTAINER}-*/token"))
-    first_token = token_file.read_text().strip()
-    inspect = json.loads(subprocess.run(["docker", "inspect", CONTAINER], capture_output=True, text=True,
-                                        check=True).stdout)[0]
-    env = dict(item.split("=", 1) for item in inspect["Config"]["Env"])
-    assert env["METEORCLOUD_TOKEN_FILE"] == "/run/secrets/meteorcloud-token" and env["METEORCLOUD_ENDPOINT"]
-    assert env["METEORCLOUD_APP_ID"] == meter_slug and env["METEORCLOUD_DEVICE_ID"] == device_id
-    assert first_token not in json.dumps(inspect), "the token leaked into the container configuration"
-    assert any(m["Destination"] == "/run/secrets/meteorcloud-token" and not m["RW"] for m in inspect["Mounts"])
-    step("agent obtained a token, mounted it read-only and started the container (no token in env or image)")
-
+    # Cleanup wraps reconcile onward: if the container starts and a later assert fails,
+    # finally still removes it so it does not keep publishing.
     try:
+        agent = EdgeClient(CP)
+        artifacts = work / "artifacts"
+        reports = reconcile_software(agent, device_token, artifacts)
+        report = next(r for r in reports if r["workload_key"] == CONTAINER)
+        assert report["sync_status"] == "in_sync", report
+        token_file = next((work / "app-credentials").glob(f"{CONTAINER}-*/token"))
+        first_token = token_file.read_text().strip()
+        inspect = json.loads(subprocess.run(["docker", "inspect", CONTAINER], capture_output=True, text=True,
+                                            check=True).stdout)[0]
+        env = dict(item.split("=", 1) for item in inspect["Config"]["Env"])
+        assert env["METEORCLOUD_TOKEN_FILE"] == "/run/secrets/meteorcloud-token" and env["METEORCLOUD_ENDPOINT"]
+        assert env["METEORCLOUD_APP_ID"] == meter_slug and env["METEORCLOUD_DEVICE_ID"] == device_id
+        assert first_token not in json.dumps(inspect), "the token leaked into the container configuration"
+        assert any(m["Destination"] == "/run/secrets/meteorcloud-token" and not m["RW"] for m in inspect["Mounts"])
+        step("agent obtained a token, mounted it read-only and started the container (no token in env or image)")
+
         dash = MeteorClient(endpoint=DATA_API, token=dash_credential["token"], retry_time=20)
         me = dash.whoami()
         assert (me.application, me.environment, me.device_id) == (dash_slug, "staging", None)
 
         # 4 + 5. Published by the container, seen live and in history from the cloud ----
         live = dash.telemetry.subscribe("energy.*")
-        event = live.get(timeout=40)
+        event = wait_for("this run's live event", lambda: _next_from_device(live, device_id), 40)
         assert (event.application, event.device_id, event.environment) == (meter_slug, device_id, "production")
         assert event.organization_id == api.org and "power" in event.data
         step("container published with the SDK; cloud application received it live")
@@ -246,7 +257,7 @@ def main() -> int:
                 live.get(timeout=0.2)
             except TimeoutError:
                 break
-        fresh = live.get(timeout=30)
+        fresh = wait_for("fresh event after revoke", lambda: _next_from_device(live, device_id), 30)
         assert fresh.device_id == device_id and container_running()
         step("token rotated under the running container without a restart; the old token stopped working")
 
@@ -322,11 +333,17 @@ def mqtt_direct(token: str, ca: str, device_id: str) -> None:
     context.check_hostname = os.environ.get("E2E_MQTT_VERIFY_HOSTNAME", "true") == "true"
     client.tls_set_context(context)
     client.on_message = lambda _c, _u, message: received.append(json.loads(message.payload))
-    client.on_connect = lambda c, *_: c.subscribe(f"{login['live_root']}/energy/metrics", qos=1)
+    # The broker allows exactly the filters of the answer, nothing narrower or wider.
+    live_filter = next(f for f in login["subscribe"] if f.startswith(f"{login['live_root']}/energy/"))
+    client.on_connect = lambda c, *_: c.subscribe(live_filter, qos=1)
     client.connect(host, int(port))
     client.loop_start()
     try:
-        event = wait_for("an event over MQTT", lambda: received[0] if received else None, 30)
+        event = wait_for(
+            "an event over MQTT",
+            lambda: next((m for m in received if m.get("device_id") == device_id), None),
+            30,
+        )
         assert event["device_id"] == device_id and event["stream"] == "energy.metrics"
     finally:
         client.loop_stop()
@@ -341,7 +358,23 @@ def mqtt_direct(token: str, ca: str, device_id: str) -> None:
     wait_for("the broker's refusal", lambda: codes, 15)
     bad.loop_stop()
     assert codes[0] != "Success", codes
-    step("direct MQTT: short-lived login works, live topic delivers, a wrong password is refused")
+    # A filter that reaches beyond the grant, and a client id that is not the caller's own.
+    for client_id, topic in ((login["client_id"] + "-wide", f"{login['live_root']}/#"), ("someone-else", live_filter)):
+        probe = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, protocol=mqtt.MQTTv5)
+        probe.username_pw_set(login["username"], login["password"])
+        probe.tls_set_context(context)
+        outcome: list[str] = []
+        probe.on_connect = lambda c, _u, _f, reason, _p, topic=topic, outcome=outcome: (
+            c.subscribe(topic, qos=1) if str(reason) == "Success" else outcome.append(f"connect: {reason}"))
+        probe.on_subscribe = lambda _c, _u, _m, reasons, _p, outcome=outcome: outcome.append(str(reasons[0]))
+        probe.on_disconnect = lambda _c, _u, _f, reason, _p, outcome=outcome: outcome.append(f"disconnect: {reason}")
+        probe.connect(host, int(port))
+        probe.loop_start()
+        wait_for("the broker's answer", lambda outcome=outcome: outcome, 15)
+        probe.loop_stop()
+        assert not outcome[0].startswith("Granted"), (client_id, topic, outcome)
+    step("direct MQTT: short-lived login works, live topic delivers, a wrong password, a wider filter "
+         "and a foreign client id are refused")
 
 
 if __name__ == "__main__":

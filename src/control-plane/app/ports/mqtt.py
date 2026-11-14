@@ -1,7 +1,7 @@
 """MQTT connectivity port.
 
 The control plane publishes and watches topics through this gateway.
-The current adapter is the data-plane HTTP API (EMQX behind that service).
+The current adapter is the data-plane HTTP API (Mosquitto or EMQX behind that service).
 """
 
 from __future__ import annotations

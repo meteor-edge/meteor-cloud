@@ -55,7 +55,7 @@ mqtt:
   publicHost: mqtt.example.com
   tls:
     existingSecret: meteorcloud-mqtt-tls
-  emqx:
+  mosquitto:
     service:
       type: LoadBalancer
       loadBalancerSourceRanges: []

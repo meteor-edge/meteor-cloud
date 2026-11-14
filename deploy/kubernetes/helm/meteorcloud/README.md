@@ -1,6 +1,7 @@
 # meteorcloud Helm chart
 
-Installs MeteorCloud (API, console, and optionally the MQTT data plane and EMQX)
+Installs MeteorCloud (API, console, and optionally the MQTT data plane, a broker,
+and the application data API for the SDK)
 into an existing Kubernetes cluster. The chart does not create clusters or any
 cloud resources.
 
@@ -15,13 +16,15 @@ helm -n meteorcloud test meteorcloud
 | `postgresql.mode` | `bundled` (StatefulSet), `external` | `bundled` |
 | `objectStorage.provider` | `filesystem` (PVC), `s3` (any S3-compatible API) | `filesystem` |
 | `cache.provider` | `memory`, `redis` (`cache.redis.mode`: `bundled` / `external`) | `memory` |
-| `mqtt.enabled`, `mqtt.broker` | off, or `bundled` EMQX / `external` | off |
+| `mqtt.enabled`, `mqtt.broker` | off, or `bundled` / `external` | off |
+| `mqtt.provider` | `mosquitto`, `emqx` (bundled or external), `vernemq` (external only) | `mosquitto` |
+| `dataApi.enabled` | application data API (image `meteorcloud/data-api` from `src/data-plane/go`) on `/v1`; `dataApi.bus`: `memory` / `mqtt` | off |
 | `ingress.enabled`, `ingress.className` | any ingress controller | disabled; set `ingress.enabled: true` in an overlay |
 | `secrets.existingSecret` | your own Secret instead of the generated one | empty |
 | `networkPolicy.enabled` | only this release, the ingress namespace, and `networkPolicy.extraFrom` reach the API (needs a CNI that enforces it) | off |
 | `connectivity.provider` | `none`, `wireguard` (gateway on its own VM, see below) | `none` |
 | `metrics.enabled` | `/metrics` on the API and data plane; `false` records nothing and returns 404 | on |
-| `metrics.serviceMonitor.enabled`, `metrics.prometheusRule.enabled` | Prometheus Operator objects (job `backend` / `data-plane`, the bundled alert rules) | off |
+| `metrics.serviceMonitor.enabled`, `metrics.prometheusRule.enabled` | Prometheus Operator objects (job `backend` / `data-plane` / `data-api`, the bundled alert rules) | off |
 
 Device WireGuard (browser SSH, app endpoints): the WireGuard server runs outside
 the cluster on an AWS or on-prem VM set up by
@@ -32,6 +35,12 @@ give the gateway the same `secrets.connectivityInternalToken`. Browser SSH
 (`connectivity.shell.provider: ssh_gateway`) needs a Secret with the gateway key
 (`connectivity.shell.existingSecret`) and a route from the pods to the device network.
 See [docs/kubernetes.md](../../../../docs/kubernetes.md#device-wireguard-gateway-vm).
+
+Application data API: needs `DATA_PLANE_INTERNAL_TOKEN` (generated, or in your
+existing Secret with `DATAPLANE_DATABASE_URL`). SDK clients use the ingress URL,
+for example `METEORCLOUD_ENDPOINT=https://fleet.example.com`; port 8092 stays
+private. Direct application MQTT is optional and EMQX-only. See
+[docs/kubernetes.md](../../../../docs/kubernetes.md#application-data-api-sdk).
 
 Metrics: the chart does not install Prometheus, Grafana or Loki; use your
 cluster's monitoring. The rules in `files/rules/` are a copy of the Compose bundle

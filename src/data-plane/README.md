@@ -1,6 +1,6 @@
 # MeteorCloud data plane
 
-Python process that owns the EMQX platform MQTT session. It publishes and
+Python process that owns the platform MQTT session to the broker (Mosquitto, EMQX, or VerneMQ). It publishes and
 subscribes on behalf of the control plane, then POSTs each inbound payload to
 `CONTROL_PLANE_URL/internal/mqtt/ingest`.
 

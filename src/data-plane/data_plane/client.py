@@ -1,4 +1,4 @@
-"""EMQX platform client: subscribe, publish, and ingest via HTTP."""
+"""Platform MQTT client (Mosquitto or EMQX): subscribe, publish, and ingest via HTTP."""
 
 from __future__ import annotations
 

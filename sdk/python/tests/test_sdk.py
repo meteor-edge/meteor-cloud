@@ -6,11 +6,13 @@ import asyncio
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 import meteorcloud
 from meteorcloud import AsyncMeteorClient, Message, MeteorClient
+from meteorcloud.aio import AsyncSubscription
 
 from .conftest import ORG, OTHER_ORG
 
@@ -370,3 +372,32 @@ def test_calls_racing_with_close_end_instead_of_hanging(dataplane):
         t.join(timeout=15)
     assert not any(t.is_alive() for t in threads), "a caller is stuck on a stopped loop"
     assert len(outcomes) == 4
+
+
+# Close paths that must not hang: a full subscription buffer, and close() from a callback.
+
+ROUND2_EVENT = {"id": "e1", "stream": "energy.metrics", "time": "2026-01-01T00:00:00Z", "data": {"power": 1}}
+
+
+def test_a_blocked_delivery_ends_when_the_subscription_closes():
+    async def scenario() -> None:
+        client = SimpleNamespace(config=SimpleNamespace(subscription_buffer=1), _subscriptions=set())
+        sub = AsyncSubscription(client, "energy.metrics", None)  # type: ignore[arg-type]
+        await sub._deliver(ROUND2_EVENT)
+        blocked = asyncio.ensure_future(sub._deliver(ROUND2_EVENT))  # buffer is full: this waits
+        await asyncio.sleep(0.01)
+        assert not blocked.done()
+        sub._finish()
+        await asyncio.wait_for(blocked, 1)
+
+    asyncio.run(scenario())
+
+
+def test_close_from_the_clients_own_thread_does_not_block(monkeypatch):
+    client = MeteorClient.__new__(MeteorClient)
+    client._stop = threading.Event()
+    client._thread = threading.current_thread()  # as if a subscription callback called close()
+    started: list[str] = []
+    monkeypatch.setattr(threading.Thread, "start", lambda self: started.append(self.name))
+    client.close()
+    assert started == ["meteorcloud-close"] and client._stop.is_set()
