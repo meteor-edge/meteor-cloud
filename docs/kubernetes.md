@@ -22,11 +22,14 @@ render Prometheus Operator objects for clusters that already run it
 | Data plane | Deployment (1 replica) | `mqtt.enabled` |
 | Application data API | Deployment + Service (`/v1` on 8082; ops on 8092 ClusterIP only) | `dataApi.enabled` |
 | MQTT broker (Mosquitto, or EMQX with `mqtt.provider=emqx`) | Deployment + Service (LoadBalancer, 8883 TLS) | `mqtt.enabled` and `mqtt.broker=bundled` |
+| ClickHouse | StatefulSet + Service (HTTP 8123) | `clickhouse.enabled` |
+| NATS JetStream | StatefulSet + Service (4222/8222 ClusterIP) | `nats.enabled` |
+| device-ingest / rule-processor / clickhouse-writer | Deployments (same `dataApi.image`) | `nats.enabled` (needs `mqtt.enabled` and ClickHouse) |
 | Redis | Deployment (no persistence) | `cache.provider=redis` and `cache.redis.mode=bundled` |
 | Apps proxy | Traefik Deployment + LoadBalancer Service + PVC (ACME) for public app hostnames | `connectivity.apps.proxy.enabled` |
 | Test pod | `helm test` hook | `helm test` |
 
-No MinIO, Kafka, or ClickHouse.
+No MinIO or Kafka. ClickHouse and NATS are optional (`clickhouse.enabled` / `nats.enabled`).
 
 Configuration is split as follows:
 - **Application settings** go into a ConfigMap.

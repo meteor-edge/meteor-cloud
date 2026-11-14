@@ -73,6 +73,7 @@ Infrastructure options:
 | `mqtt_provider` | Broker software: `mosquitto`, `emqx`, or `vernemq` (needs `vernemq_accept_eula: "yes"`) | `mosquitto` |
 | `data_api_enabled` / `dataplane_bus` | `false`, or `true` with `memory` / `mqtt` (mqtt needs `mqtt_enabled`) | `false` / `memory` |
 | `dataplane_storage` | `postgres` (default) or `clickhouse` (`EDGE_PLATFORM_CLICKHOUSE_PASSWORD`, Compose profile `clickhouse`) | `postgres` |
+| `nats_enabled` | Device event path (MQTT → JetStream → rule-processor / clickhouse-writer). Needs `mqtt_enabled`, `dataplane_storage=clickhouse`, `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN`, `EDGE_PLATFORM_CLICKHOUSE_PASSWORD`, and `EDGE_PLATFORM_NATS_*_PASSWORD` | `false` |
 | `observability_enabled` | Prometheus, Loki, Alloy, Alertmanager, Grafana on 127.0.0.1 | `false` |
 | `observability_components` | Any of `metrics`, `logs`, `alerting`, `dashboards` (retention, webhook and external URLs: [Observability](../../docs/observability.md#ansible)) | all four |
 | `image_source` | `git` (build on host), `registry` (pull) | `git` |

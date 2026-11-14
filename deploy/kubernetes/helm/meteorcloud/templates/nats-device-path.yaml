@@ -1,0 +1,234 @@
+{{- if .Values.nats.enabled }}
+{{- if not .Values.mqtt.enabled }}
+{{- fail "nats.enabled requires mqtt.enabled (device-ingest bridges MQTT to JetStream)" }}
+{{- end }}
+{{- if and (not .Values.clickhouse.enabled) (eq .Values.clickhouse.external.url "") }}
+{{- fail "nats.enabled requires clickhouse.enabled or clickhouse.external.url for clickhouse-writer" }}
+{{- end }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $secretName := include "meteorcloud.secretName" . }}
+{{- $natsURL := printf "nats://%s-nats:4222" $fullname }}
+{{- $chURL := .Values.clickhouse.external.url | default (printf "http://%s-clickhouse:8123" $fullname) }}
+{{- $image := .Values.dataApi.image }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-device-ingest
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "device-ingest") | nindent 4 }}
+spec:
+  replicas: {{ .Values.nats.deviceIngest.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "device-ingest") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "device-ingest") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: device-ingest
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" $image) }}
+          imagePullPolicy: {{ $image.pullPolicy }}
+          command: ["device-ingest"]
+          env:
+            - name: LOG_FORMAT
+              value: {{ .Values.config.logFormat | quote }}
+            - name: CONTROL_PLANE_URL
+              value: {{ printf "http://%s-backend:8000" $fullname | quote }}
+            - name: DATA_PLANE_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: DATA_PLANE_INTERNAL_TOKEN }
+            - name: DEVICE_INGEST_MQTT_URL
+              value: {{ printf "mqtts://%s:%v" (include "meteorcloud.mqttBrokerHost" .) .Values.mqtt.port | quote }}
+            - name: MQTT_PLATFORM_USERNAME
+              value: {{ .Values.mqtt.platformUsername | quote }}
+            - name: MQTT_PLATFORM_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: MQTT_PLATFORM_PASSWORD }
+            - name: MQTT_CA_CERT_PATH
+              value: /certs/ca.crt
+            - name: NATS_URL
+              value: {{ $natsURL | quote }}
+            - name: NATS_INGEST_USER
+              value: ingest
+            - name: NATS_INGEST_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: NATS_INGEST_PASSWORD }
+            - name: NATS_STREAM_REPLICAS
+              value: {{ .Values.nats.stream.replicas | toString | quote }}
+            - name: NATS_STREAM_MAX_BYTES
+              value: {{ .Values.nats.stream.maxBytes | quote }}
+            - name: NATS_STREAM_MAX_AGE
+              value: {{ .Values.nats.stream.maxAge | quote }}
+            - name: NATS_STREAM_STORAGE
+              value: {{ .Values.nats.stream.storage | quote }}
+            - name: NATS_STREAM_RETENTION
+              value: {{ .Values.nats.stream.retention | quote }}
+            - name: NATS_STREAM_DISCARD
+              value: {{ .Values.nats.stream.discard | quote }}
+          readinessProbe:
+            exec: { command: ["device-ingest", "healthcheck"] }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec: { command: ["device-ingest", "healthcheck"] }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.nats.deviceIngest.resources | nindent 12 }}
+          volumeMounts:
+            - name: mqtt-ca
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: mqtt-ca
+          secret:
+            secretName: {{ .Values.mqtt.tls.existingSecret }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-rule-processor
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "rule-processor") | nindent 4 }}
+spec:
+  replicas: {{ .Values.nats.ruleProcessor.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "rule-processor") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "rule-processor") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: rule-processor
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" $image) }}
+          imagePullPolicy: {{ $image.pullPolicy }}
+          command: ["rule-processor"]
+          env:
+            - name: LOG_FORMAT
+              value: {{ .Values.config.logFormat | quote }}
+            - name: NATS_URL
+              value: {{ $natsURL | quote }}
+            - name: NATS_RULES_USER
+              value: rules
+            - name: NATS_RULES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: NATS_RULES_PASSWORD }
+            - name: RULES_WORKERS
+              value: {{ .Values.nats.ruleProcessor.workers | toString | quote }}
+          readinessProbe:
+            exec: { command: ["rule-processor", "healthcheck"] }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec: { command: ["rule-processor", "healthcheck"] }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.nats.ruleProcessor.resources | nindent 12 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-clickhouse-writer
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "clickhouse-writer") | nindent 4 }}
+spec:
+  replicas: {{ .Values.nats.clickhouseWriter.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "clickhouse-writer") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "clickhouse-writer") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: clickhouse-writer
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" $image) }}
+          imagePullPolicy: {{ $image.pullPolicy }}
+          command: ["clickhouse-writer"]
+          env:
+            - name: LOG_FORMAT
+              value: {{ .Values.config.logFormat | quote }}
+            - name: NATS_URL
+              value: {{ $natsURL | quote }}
+            - name: NATS_CHWRITER_USER
+              value: chwriter
+            - name: NATS_CHWRITER_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: NATS_CHWRITER_PASSWORD }
+            - name: CLICKHOUSE_URL
+              value: {{ $chURL | quote }}
+            - name: CLICKHOUSE_DB
+              value: {{ .Values.clickhouse.database | quote }}
+            - name: CLICKHOUSE_USER
+              value: {{ .Values.clickhouse.username | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: CLICKHOUSE_PASSWORD }
+            - name: DATAPLANE_RETENTION_DAYS
+              value: {{ .Values.nats.clickhouseWriter.retentionDays | toString | quote }}
+          readinessProbe:
+            exec: { command: ["clickhouse-writer", "healthcheck"] }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec: { command: ["clickhouse-writer", "healthcheck"] }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.nats.clickhouseWriter.resources | nindent 12 }}
+{{- end }}

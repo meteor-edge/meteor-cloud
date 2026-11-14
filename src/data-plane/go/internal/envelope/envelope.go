@@ -88,7 +88,8 @@ func DefaultLimits() Limits {
 	return Limits{MaxPayloadBytes: 64 << 10, MaxFutureSkew: 5 * time.Minute, MaxAge: 30 * 24 * time.Hour}
 }
 
-func validID(id string) bool {
+// ValidID reports whether id is an acceptable event id.
+func ValidID(id string) bool {
 	if len(id) == 0 || len(id) > 64 {
 		return false
 	}
@@ -131,20 +132,12 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 	eventID := msg.ID
 	if eventID == "" {
 		eventID = NewID()
-	} else if !validID(eventID) {
+	} else if !ValidID(eventID) {
 		return nil, &Rejection{CodeInvalidID, "id must be 1-64 characters of A-Z a-z 0-9 . _ : -"}
 	}
-	if len(msg.Data) > lim.MaxPayloadBytes {
-		return nil, &Rejection{CodePayloadTooLarge, fmt.Sprintf("data is larger than %d bytes", lim.MaxPayloadBytes)}
-	}
-	data := bytes.TrimSpace(msg.Data)
-	if len(data) == 0 || data[0] != '{' || !json.Valid(data) {
-		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
-	}
-	// No store can hold a NUL character inside a JSON text; one such message must not
-	// fail the batch it travels in.
-	if hasUnstorableEscape(data) {
-		return nil, &Rejection{CodeInvalidPayload, "data must not contain \\u0000 or an unpaired surrogate escape"}
+	data, rej := CanonicalData(msg.Data, lim.MaxPayloadBytes)
+	if rej != nil {
+		return nil, rej
 	}
 	ts := now
 	if msg.Time != nil {
@@ -178,8 +171,54 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 		Time:           ts,
 		ReceivedAt:     now.UTC(),
 		Seq:            msg.Seq,
-		Data:           json.RawMessage(data),
+		Data:           data,
 	}, nil
+}
+
+// CanonicalData checks that data is a single JSON object that ClickHouse (and
+// PostgreSQL) can store, and returns a compact form. Invalid payloads are rejected
+// here so one bad message never fails a whole insert batch.
+//
+// Energy readings and similar telemetry are free-form objects (any keys/numbers);
+// only shape and storability are enforced — not a fixed schema.
+func CanonicalData(data []byte, maxBytes int) (json.RawMessage, *Rejection) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || data[0] != '{' {
+		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
+	}
+	if maxBytes > 0 && len(data) > maxBytes {
+		return nil, &Rejection{CodePayloadTooLarge, fmt.Sprintf("data is larger than %d bytes", maxBytes)}
+	}
+	if !json.Valid(data) {
+		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
+	}
+	// No store can hold a NUL character inside a JSON text; one such message must not
+	// fail the batch it travels in.
+	if hasUnstorableEscape(data) {
+		return nil, &Rejection{CodeInvalidPayload, "data must not contain \\u0000 or an unpaired surrogate escape"}
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var obj map[string]json.RawMessage
+	if err := dec.Decode(&obj); err != nil {
+		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
+	}
+	if dec.More() {
+		return nil, &Rejection{CodeInvalidPayload, "data must be a single JSON object"}
+	}
+	var encoded bytes.Buffer
+	enc := json.NewEncoder(&encoded)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(obj); err != nil {
+		return nil, &Rejection{CodeInvalidPayload, "data could not be re-encoded"}
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, bytes.TrimSpace(encoded.Bytes())); err != nil {
+		return nil, &Rejection{CodeInvalidPayload, "data could not be re-encoded"}
+	}
+	if maxBytes > 0 && compact.Len() > maxBytes {
+		return nil, &Rejection{CodePayloadTooLarge, fmt.Sprintf("data is larger than %d bytes", maxBytes)}
+	}
+	return json.RawMessage(compact.Bytes()), nil
 }
 
 // hasUnstorableEscape reports whether valid JSON contains an escape that no store

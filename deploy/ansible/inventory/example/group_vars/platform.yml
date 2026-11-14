@@ -20,6 +20,7 @@ git_ref: master
 # data_api_enabled: true
 # dataplane_bus: memory   # or mqtt (requires mqtt_enabled)
 # dataplane_storage: postgres   # or clickhouse (needs EDGE_PLATFORM_CLICKHOUSE_PASSWORD)
+# nats_enabled: false   # MQTT → JetStream device path (needs mqtt_enabled + clickhouse + EDGE_PLATFORM_NATS_*_PASSWORD)
 
 # PostgreSQL: bundled container, or external (EDGE_PLATFORM_DATABASE_URL).
 postgres_provider: bundled

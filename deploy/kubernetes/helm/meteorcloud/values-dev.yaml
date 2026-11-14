@@ -32,6 +32,15 @@ dataApi:
   storage: postgres
   image: { repository: meteorcloud/data-api, tag: dev, pullPolicy: IfNotPresent }
 
+# Device event path: MQTT → JetStream → ClickHouse (docs/data-plane/jetstream.md).
+clickhouse:
+  enabled: true
+  persistence: { enabled: true, size: 2Gi }
+
+nats:
+  enabled: true
+  persistence: { enabled: true, size: 2Gi }
+
 postgresql:
   bundled:
     persistence: { size: 2Gi }
