@@ -134,3 +134,9 @@ def device_client_id_allowed(device_id: uuid.UUID, client_id: str) -> bool:
     """
     own = f"{DEVICE_CLIENT_ID_PREFIX}{device_id}"
     return client_id == own or (client_id.startswith(own + "-") and len(client_id) <= 128)
+
+
+def application_client_id_allowed(username: str, client_id: str) -> bool:
+    """An application login (``app_<credential id>``) may only use its username, or
+    ``<username>-<suffix>``, as client id, so it can never take over a device's session."""
+    return client_id == username or (client_id.startswith(username + "-") and len(client_id) <= 128)

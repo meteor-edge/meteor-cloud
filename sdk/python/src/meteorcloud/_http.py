@@ -34,7 +34,7 @@ def ssl_context(config: Config) -> ssl.SSLContext | None:
 
 def backoff(attempt: int, cap: float = 5.0, base: float = 0.2) -> float:
     """Exponential backoff with full jitter."""
-    return random.uniform(0, min(cap, base * (2**attempt)))
+    return random.uniform(0, min(cap, base * (2 ** min(attempt, 16))))
 
 
 def error_from_response(status: int, body: Any) -> exc.MeteorCloudError:

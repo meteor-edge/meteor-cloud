@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from runtime.compose import OVERRIDE_FILE, ComposeAdapter
 from runtime.docker import ContainerHealth, DockerAdapter
 
@@ -248,3 +249,49 @@ def test_compose_can_recreate_containers_to_mount_a_replaced_token_file(tmp_path
     assert "--force-recreate" not in calls[-1]
     adapter.apply(project_name="shop", artifact=artifact, force_recreate=True)
     assert calls[-1][-1] == "--force-recreate"
+
+
+def test_failed_token_write_keeps_the_previous_token(tmp_path: Path) -> None:
+    client = MagicMock()
+    client.mint_app_credential.return_value = _issued("mca_first")
+    store = AppCredentialStore(tmp_path / "app-credentials")
+    credential = store.mint(client, "dev_token", "meter-app")
+    inode = credential.token_path.stat().st_ino
+
+    client.mint_app_credential.return_value = _issued("mca_second")
+    with patch("edge_agent.app_credentials.os.pwrite", side_effect=OSError("disk full")), pytest.raises(OSError):
+        store.mint(client, "dev_token", "meter-app")
+    assert credential.token_path.read_text() == "mca_first\n"
+
+    # A shorter token replaces a longer one completely, in the same file.
+    client.mint_app_credential.return_value = _issued("mca_2")
+    store.mint(client, "dev_token", "meter-app")
+    assert credential.token_path.read_text() == "mca_2\n"
+    assert credential.token_path.stat().st_ino == inode
+
+
+def test_lost_token_file_is_recovered_even_when_the_first_apply_fails(tmp_path: Path) -> None:
+    client = MagicMock()
+    client.get_software.return_value = [_item()]
+    client.mint_app_credential.return_value = _issued()
+    runner = Runner()
+    _reconcile(client, tmp_path, runner)
+    AppCredentialStore(tmp_path / "app-credentials").token_path("meter-app").unlink()
+
+    class Failing(Runner):
+        def __call__(self, args, *, check=True):
+            if list(args[:2]) == ["docker", "run"]:
+                self.calls.append(list(args))
+                raise subprocess.CalledProcessError(125, args, stderr="cannot start")
+            return super().__call__(args, check=check)
+
+    failing = Failing()
+    reports = _reconcile(client, tmp_path, failing)
+    assert reports[0]["sync_status"] != "in_sync"
+
+    # The token file exists again, but the container was never started with it:
+    # the next pass must apply again instead of accepting the old container.
+    _reconcile(client, tmp_path, runner)
+    assert len([c for c in runner.calls if c[:2] == ["docker", "run"]]) == 2
+    _reconcile(client, tmp_path, runner)
+    assert len([c for c in runner.calls if c[:2] == ["docker", "run"]]) == 2

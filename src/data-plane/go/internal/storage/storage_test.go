@@ -76,30 +76,48 @@ func TestEventsIdempotentOrderedAndIsolated(t *testing.T) {
 				t.Fatalf("duplicate overwrote the first write: %v", first)
 			}
 			q.After = next
-			page2, next2, _ := s.QueryEvents(ctx, q)
+			page2, next2, err := s.QueryEvents(ctx, q)
+			if err != nil {
+				t.Fatalf("query: %v", err)
+			}
 			if len(page2) != 1 || page2[0].ID != "e3" || next2 != nil {
 				t.Fatalf("page2 wrong: %+v", page2)
 			}
 
-			desc, _, _ := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: "energy.power", Limit: 10, Descending: true})
+			desc, _, err := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: "energy.power", Limit: 10, Descending: true})
+			if err != nil {
+				t.Fatalf("query: %v", err)
+			}
 			if len(desc) != 3 || desc[0].ID != "e3" {
 				t.Fatalf("descending wrong: %+v", desc)
 			}
-			ranged, _, _ := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: "energy.power", Limit: 10,
+			ranged, _, err := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: "energy.power", Limit: 10,
 				Start: base.Add(2 * time.Minute), End: base.Add(3 * time.Minute)})
+			if err != nil {
+				t.Fatalf("query: %v", err)
+			}
 			if len(ranged) != 1 || ranged[0].ID != "e2" {
 				t.Fatalf("range is [start, end): %+v", ranged)
 			}
-			filtered, _, _ := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: "energy.power", Limit: 10,
+			filtered, _, err := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: "energy.power", Limit: 10,
 				Filter: map[string]json.RawMessage{"site": json.RawMessage(`"b"`)}})
+			if err != nil {
+				t.Fatalf("query: %v", err)
+			}
 			if len(filtered) != 1 || filtered[0].ID != "e2" {
 				t.Fatalf("filter wrong: %+v", filtered)
 			}
-			none, _, _ := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: "energy.power", Limit: 10, DeviceID: "dev-9"})
+			none, _, err := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: "energy.power", Limit: 10, DeviceID: "dev-9"})
+			if err != nil {
+				t.Fatalf("query: %v", err)
+			}
 			if len(none) != 0 {
 				t.Fatal("device filter")
 			}
-			iso, _, _ := s.QueryEvents(ctx, Query{OrganizationID: other, Stream: "energy.power", Limit: 10})
+			iso, _, err := s.QueryEvents(ctx, Query{OrganizationID: other, Stream: "energy.power", Limit: 10})
+			if err != nil {
+				t.Fatalf("query: %v", err)
+			}
 			if len(iso) != 1 || iso[0].OrganizationID != other {
 				t.Fatalf("organization isolation broken: %+v", iso)
 			}
@@ -133,18 +151,27 @@ func TestAggregate(t *testing.T) {
 			}
 			q.Func = "max"
 			q.Field = []string{"nested", "v"}
-			got, _ = s.Aggregate(ctx, q)
+			got, err = s.Aggregate(ctx, q)
+			if err != nil {
+				t.Fatalf("aggregate: %v", err)
+			}
 			if *got[0].Value != 2 || *got[1].Value != 5 {
 				t.Fatalf("max wrong: %+v", got)
 			}
 			q.Func = "count"
-			got, _ = s.Aggregate(ctx, q)
+			got, err = s.Aggregate(ctx, q)
+			if err != nil {
+				t.Fatalf("aggregate: %v", err)
+			}
 			if got[0].Count != 4 || got[1].Count != 3 {
 				t.Fatalf("count counts rows: %+v", got)
 			}
 			q.Func = "sum"
 			q.Field = []string{"missing"}
-			got, _ = s.Aggregate(ctx, q)
+			got, err = s.Aggregate(ctx, q)
+			if err != nil {
+				t.Fatalf("aggregate: %v", err)
+			}
 			if got[0].Value != nil || got[0].Count != 0 {
 				t.Fatalf("missing field must give null: %+v", got[0])
 			}
@@ -186,10 +213,13 @@ func TestCommandLifecycle(t *testing.T) {
 			if err != nil || len(due) != 1 {
 				t.Fatalf("claim: %v %d", err, len(due))
 			}
-			if again, _ := s.ClaimDueCommands(ctx, now.Add(time.Second), time.Minute, 10); len(again) != 0 {
+			if again, err := s.ClaimDueCommands(ctx, now.Add(time.Second), time.Minute, 10); err != nil || len(again) != 0 {
 				t.Fatal("a claimed command must be leased")
 			}
-			pending, _ := s.UndeliveredCommands(ctx, org, "app-1", "dev-1", 10)
+			pending, err := s.UndeliveredCommands(ctx, org, "app-1", "dev-1", 10)
+			if err != nil {
+				t.Fatalf("undelivered: %v", err)
+			}
 			if len(pending) != 1 {
 				t.Fatal("undelivered should list the pending command")
 			}
@@ -213,9 +243,32 @@ func TestCommandLifecycle(t *testing.T) {
 			if err != nil || changed || upd.State != StateSucceeded {
 				t.Fatalf("terminal state must be final: %+v %v %v", upd, changed, err)
 			}
-			if pending, _ := s.UndeliveredCommands(ctx, org, "app-1", "dev-1", 10); len(pending) != 0 {
+			if pending, err := s.UndeliveredCommands(ctx, org, "app-1", "dev-1", 10); err != nil || len(pending) != 0 {
 				t.Fatal("finished command still listed as undelivered")
 			}
 		})
+	}
+}
+
+// The memory store filters like PostgreSQL's jsonb containment.
+func TestMemoryFilterMatchesJSONBContainment(t *testing.T) {
+	cases := []struct {
+		have, want string
+		ok         bool
+	}{
+		{`{"a":1,"b":2}`, `{"a":1}`, true},
+		{`{"a":1}`, `{"a":1,"b":2}`, false},
+		{`[1,2,3]`, `[3,1]`, true},
+		{`[1,2]`, `[4]`, false},
+		{`20`, `20.0`, true},
+		{`9007199254740993`, `9007199254740992`, false},
+		{`"a"`, `"a"`, true},
+		{`"1"`, `1`, false},
+		{`{"p":{"l1":1,"l2":2}}`, `{"p":{"l2":2}}`, true},
+	}
+	for _, c := range cases {
+		if got := jsonEqual(json.RawMessage(c.have), json.RawMessage(c.want)); got != c.ok {
+			t.Errorf("%s contains %s: got %v, want %v", c.have, c.want, got, c.ok)
+		}
 	}
 }
