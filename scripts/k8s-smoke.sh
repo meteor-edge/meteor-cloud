@@ -3,7 +3,7 @@
 #   k3d cluster create -> import images -> helm install (values-ci.yaml)
 #   -> pods/services -> helm test -> HTTP smoke test through the ingress
 #   -> helm uninstall -> k3d cluster delete (always, unless KEEP_CLUSTER=1).
-# Needs k3d, kubectl, helm, and images meteorcloud/{backend,console}:$IMAGE_TAG.
+# Needs k3d, kubectl, helm, and images meteorcloud/{backend,console,data-api}:$IMAGE_TAG.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -51,7 +51,8 @@ else
 fi
 
 echo "==> Importing images (tag $IMAGE_TAG)"
-k3d image import -c "$CLUSTER" "meteorcloud/backend:$IMAGE_TAG" "meteorcloud/console:$IMAGE_TAG"
+k3d image import -c "$CLUSTER" "meteorcloud/backend:$IMAGE_TAG" "meteorcloud/console:$IMAGE_TAG" \
+  "meteorcloud/data-api:$IMAGE_TAG"
 
 echo "==> helm install"
 if helm status "$RELEASE" --kube-context "$CTX" -n "$NAMESPACE" >/dev/null 2>&1; then
@@ -61,6 +62,7 @@ fi
 if ! helm install "$RELEASE" "$CHART" --kube-context "$CTX" -n "$NAMESPACE" --create-namespace \
   -f "$CHART/values-ci.yaml" \
   --set "backend.image.tag=$IMAGE_TAG" --set "console.image.tag=$IMAGE_TAG" \
+  --set "dataApi.image.tag=$IMAGE_TAG" \
   --set "config.publicUrl=http://localhost:$HTTP_PORT" \
   --wait --timeout 10m; then
   diagnostics
@@ -85,6 +87,14 @@ done
 
 echo "==> Smoke test through the ingress"
 if ! python3 "$ROOT/scripts/smoke_test.py" "http://127.0.0.1:$HTTP_PORT"; then
+  diagnostics
+  exit 1
+fi
+
+echo "==> Application data API through the ingress (/v1 without a token must be 401)"
+code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$HTTP_PORT/v1/whoami")"
+if [[ "$code" != "401" ]]; then
+  echo "error: GET /v1/whoami returned $code, expected 401 from the data API" >&2
   diagnostics
   exit 1
 fi

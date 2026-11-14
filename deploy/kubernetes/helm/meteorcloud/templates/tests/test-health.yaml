@@ -54,13 +54,14 @@ spec:
           {{- if .Values.mqtt.enabled }}
           targets.append("http://{{ $fullname }}-data-plane:8081/metrics")
           {{- end }}
-          {{- if .Values.dataApi.enabled }}
+          {{- if and .Values.dataApi.enabled .Values.metrics.enabled }}
+          # The data API always serves /metrics on its private ops port.
           targets.append("http://{{ $fullname }}-data-api:8092/metrics")
           {{- end }}
           for url in targets:
               body = metrics(url)
               {{- if .Values.metrics.enabled }}
-              assert isinstance(body, str) and ("meteorcloud_" in body or "dataplane_" in body or "go_" in body or "process_" in body), (url, body if isinstance(body, int) else body[:200])
+              assert isinstance(body, str) and "meteorcloud_" in body, (url, body if isinstance(body, int) else body[:200])
               {{- else }}
               assert body == 404, (url, "metrics.enabled=false must serve 404")
               {{- end }}

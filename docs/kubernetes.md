@@ -43,7 +43,7 @@ The chart refuses to render unsupported combinations, for example several API re
 | `values-dev.yaml` | Local and dev (one model): local images, bundled PostgreSQL and MQTT broker, application data API (`dataApi.enabled`), Traefik ingress |
 | `values-staging.yaml` | Example staging: external PostgreSQL, S3, existing Secret, one replica, MQTT off |
 | `values-production.yaml` | Example production: external PostgreSQL, S3, Redis, existing Secret, two replicas, TLS ingress |
-| `values-ci.yaml` | Pull-request CI only: minimal (no Redis, MinIO, MQTT, Kafka, ClickHouse) |
+| `values-ci.yaml` | Pull-request CI only: minimal plus the data API on `/v1` (no Redis, MinIO, MQTT, Kafka, ClickHouse) |
 
 Environments are overlays on one chart (local/dev, then staging, then production):
 
@@ -118,6 +118,33 @@ python3 scripts/smoke_test.py https://fleet.example.com
 
 Upgrades use the same `helm upgrade --install` with new image tags. Migrations run
 in the API's init container before the new version serves traffic.
+
+## Application data API (SDK)
+
+The Go data API (`src/data-plane/go`, image `meteorcloud/data-api`) serves the
+SDK's publish, subscribe, query and commands on `/v1`. It is off by default:
+
+```yaml
+dataApi:
+  enabled: true
+  bus: memory        # one replica; mqtt fans out through the broker (needs mqtt.enabled)
+  storage: postgres  # schema "dataplane" in the platform database
+```
+
+- **Internal token.** The API and the data API share `DATA_PLANE_INTERNAL_TOKEN`
+  (policy feed and commands). The chart generates it, or takes
+  `secrets.dataPlaneInternalToken`. With `secrets.existingSecret`, add
+  `DATA_PLANE_INTERNAL_TOKEN` and `DATAPLANE_DATABASE_URL` (`postgres://...`, not
+  `postgresql+psycopg://`) to that Secret; `helm install` stops if either is missing.
+- **Endpoint.** The ingress routes `/v1` to the data API's port 8082, so
+  applications use the console URL: `METEORCLOUD_ENDPOINT=https://fleet.example.com`.
+  The ops port 8092 (`/readyz`, `/metrics`, the internal API) is never routed.
+- **Direct MQTT** for applications is optional; the SDK works over HTTPS and
+  WebSocket with the default Mosquitto broker. It needs `dataApi.bus=mqtt`,
+  `mqtt.provider=emqx` and `dataApi.mqtt.direct=true`. A bundled EMQX gets the JWT
+  authenticator automatically; for an external EMQX, add a JWT authenticator
+  (HMAC, `from = password`, `acl_claim_name = "acl"`) with the same
+  `DATAPLANE_MQTT_JWT_SECRET`.
 
 ## Device WireGuard (gateway VM)
 

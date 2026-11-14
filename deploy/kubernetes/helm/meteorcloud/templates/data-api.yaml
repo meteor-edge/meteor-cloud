@@ -75,8 +75,6 @@ spec:
             {{- if eq .Values.dataApi.bus "mqtt" }}
             - name: DATAPLANE_MQTT_URL
               value: {{ printf "mqtts://%s:%v" (include "meteorcloud.mqttBrokerHost" .) .Values.mqtt.port | quote }}
-            - name: DATAPLANE_MQTT_PUBLIC_URL
-              value: {{ printf "mqtts://%s:%v" .Values.mqtt.publicHost .Values.mqtt.port | quote }}
             - name: MQTT_PLATFORM_USERNAME
               value: {{ .Values.mqtt.platformUsername | quote }}
             - name: MQTT_CA_CERT_PATH
@@ -84,7 +82,10 @@ spec:
             - name: MQTT_PLATFORM_PASSWORD
               valueFrom:
                 secretKeyRef: { name: {{ $secretName }}, key: MQTT_PLATFORM_PASSWORD }
-            {{- with .Values.dataApi.mqtt.jwtSecret }}
+            {{- if .Values.dataApi.mqtt.direct }}
+            # Address handed to applications for direct MQTT (POST /v1/mqtt/credentials).
+            - name: DATAPLANE_MQTT_PUBLIC_URL
+              value: {{ printf "mqtts://%s:%v" .Values.mqtt.publicHost .Values.mqtt.port | quote }}
             - name: DATAPLANE_MQTT_JWT_SECRET
               valueFrom:
                 secretKeyRef: { name: {{ $secretName }}, key: DATAPLANE_MQTT_JWT_SECRET }
