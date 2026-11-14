@@ -15,7 +15,8 @@ config:
 secrets:
   # Development-only credentials; never reuse outside a local cluster.
   admin:
-    email: admin@meteorcloud.local
+    # Use a real domain: email-validator rejects reserved names like .local.
+    email: admin@example.com
     password: LocalAdmin123!
 
 backend:
@@ -24,6 +25,12 @@ console:
   image: { repository: meteorcloud/console, tag: dev, pullPolicy: IfNotPresent }
 dataPlane:
   image: { repository: meteorcloud/data-plane, tag: dev, pullPolicy: IfNotPresent }
+
+dataApi:
+  enabled: true
+  bus: memory
+  storage: postgres
+  image: { repository: meteorcloud/data-api, tag: dev, pullPolicy: IfNotPresent }
 
 postgresql:
   bundled:

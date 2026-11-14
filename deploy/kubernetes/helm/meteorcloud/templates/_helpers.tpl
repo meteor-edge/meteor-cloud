@@ -139,4 +139,47 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "mqtt.enabled needs mqtt.publicHost (the hostname devices connect to)" }}
 {{- end }}
 {{- end }}
+{{- if $v.dataApi.enabled }}
+{{- if not (has $v.dataApi.bus (list "memory" "mqtt")) }}
+{{- fail "dataApi.bus must be memory or mqtt" }}
+{{- end }}
+{{- if not (has $v.dataApi.storage (list "postgres" "memory")) }}
+{{- fail "dataApi.storage must be postgres or memory" }}
+{{- end }}
+{{- if and (eq $v.dataApi.bus "mqtt") (not $v.mqtt.enabled) }}
+{{- fail "dataApi.bus=mqtt needs mqtt.enabled=true" }}
+{{- end }}
+{{- if and (eq $v.dataApi.bus "memory") (gt (int $v.dataApi.replicaCount) 1) }}
+{{- fail "dataApi.bus=memory needs dataApi.replicaCount=1 (in-process bus)" }}
+{{- end }}
+{{- if and (eq $v.dataApi.storage "memory") (gt (int $v.dataApi.replicaCount) 1) }}
+{{- fail "dataApi.storage=memory needs dataApi.replicaCount=1 (in-process store)" }}
+{{- end }}
+{{- if and $v.dataApi.mqtt.jwtSecret (not $v.dataApi.mqtt.direct) }}
+{{- fail "dataApi.mqtt.jwtSecret is only used with dataApi.mqtt.direct=true" }}
+{{- end }}
+{{- if $v.dataApi.mqtt.direct }}
+{{- if or (ne $v.dataApi.bus "mqtt") (ne $v.mqtt.provider "emqx") }}
+{{- fail "dataApi.mqtt.direct needs dataApi.bus=mqtt and mqtt.provider=emqx (Mosquitto and VerneMQ refuse application logins)" }}
+{{- end }}
+{{- if and $v.dataApi.mqtt.jwtSecret (lt (len $v.dataApi.mqtt.jwtSecret) 32) }}
+{{- fail "dataApi.mqtt.jwtSecret must be at least 32 characters" }}
+{{- end }}
+{{- end }}
+{{- /* Fail closed with an existing Secret: the data API and the API share this token.
+     lookup is empty under helm template, so this only runs against a cluster. */}}
+{{- if $v.secrets.existingSecret }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $v.secrets.existingSecret }}
+{{- if $existing }}
+{{- $keys := list "DATA_PLANE_INTERNAL_TOKEN" }}
+{{- if eq $v.dataApi.storage "postgres" }}{{ $keys = append $keys "DATAPLANE_DATABASE_URL" }}{{ end }}
+{{- if $v.dataApi.mqtt.direct }}{{ $keys = append $keys "DATAPLANE_MQTT_JWT_SECRET" }}{{ end }}
+{{- range $key := $keys }}
+{{- if not (get ($existing.data | default dict) $key) }}
+{{- fail (printf "dataApi.enabled: Secret %s has no %s" $v.secrets.existingSecret $key) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}

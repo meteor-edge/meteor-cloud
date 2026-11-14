@@ -63,6 +63,7 @@
         platform_built_images: >-
           {{ [backend_image, frontend_image]
              + ([data_plane_image] if mqtt_enabled | bool else [])
+             + ([data_api_image] if data_api_enabled | bool else [])
              + ([mosquitto_image] if platform_bundled_mosquitto | bool else []) }}
       register: platform_images
       changed_when: false

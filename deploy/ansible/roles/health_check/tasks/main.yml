@@ -27,6 +27,17 @@
 # so check exactly that (a SAN without the public host fails here, not on devices).
 # OpenSSL 3's -verify_hostname treats the value as a DNS name; for a bare IP use
 # -verify_ip or the check fails even when the cert SAN lists that address.
+- name: Check the application data API through the entry point
+  ansible.builtin.uri:
+    url: "{{ platform_health_url }}/v1/whoami"
+    validate_certs: false
+    status_code: [401]
+  register: data_api_health
+  retries: 20
+  delay: 5
+  until: data_api_health.status == 401
+  when: data_api_enabled | bool
+
 - name: Check the MQTT broker over TLS
   ansible.builtin.shell: |
     set -euo pipefail
