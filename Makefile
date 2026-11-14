@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
 # Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
@@ -21,6 +21,8 @@ DP_COMPOSE := docker compose -p meteorcloud-dp -f $(COMPOSE_DIR)/data-plane.yml
 CONSOLE_COMPOSE := docker compose -p meteorcloud-console -f $(COMPOSE_DIR)/console.yml
 BACKEND_DIR := src/control-plane
 DATA_PLANE_DIR := src/data-plane
+DATA_API_DIR := src/data-plane/go
+SDK_DIR := sdk/python
 CONSOLE_DIR := console
 INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := src/device-plane/agent
@@ -215,6 +217,12 @@ data-plane-test: ## Run data-plane tests
 	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
 	cd $(DATA_PLANE_DIR) && python -m pytest -q
 
+data-api-test: ## Run application data plane (Go) tests; DATAPLANE_TEST_DATABASE_URL adds the PostgreSQL suite
+	cd $(DATA_API_DIR) && go vet ./... && go test -race ./...
+
+sdk-test: ## Run Python SDK tests against the real data plane binary (needs Go)
+	cd $(SDK_DIR) && python -m pytest -q
+
 console-test: ## Run console tests
 	@test -d $(CONSOLE_DIR)/node_modules || (echo "Console deps missing. Run: make install-console" && exit 1)
 	cd $(CONSOLE_DIR) && npm test -- --run
@@ -255,6 +263,8 @@ lint: ## Lint all projects
 	cd $(DATA_PLANE_DIR) && python -m ruff check .
 	@echo "==> Agent lint"
 	cd $(AGENT_DIR) && python -m ruff check .
+	@echo "==> SDK lint"
+	cd $(SDK_DIR) && python -m ruff check .
 	@echo "==> Console lint"
 	cd $(CONSOLE_DIR) && npm run lint
 
@@ -362,6 +372,7 @@ helm-lint: ## Lint the Helm chart and render it with every values file
 images: ## Build the backend, data-plane, MQTT broker, and console images (IMAGE_TAG=dev)
 	docker build -t meteorcloud/backend:$(IMAGE_TAG) $(BACKEND_DIR)
 	docker build -t meteorcloud/data-plane:$(IMAGE_TAG) $(DATA_PLANE_DIR)
+	docker build -t meteorcloud/data-api:$(IMAGE_TAG) $(DATA_API_DIR)
 	docker build -t meteorcloud/mosquitto:$(IMAGE_TAG) $(DATA_PLANE_DIR)/broker/mosquitto
 	docker build -t meteorcloud/console:$(IMAGE_TAG) $(CONSOLE_DIR)
 

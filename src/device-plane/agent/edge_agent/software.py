@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from edge_agent.app_credentials import AppCredential, AppCredentialError, AppCredentialStore, binding_of
 from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.heartbeat import send_heartbeat
 
@@ -256,7 +257,18 @@ def _apply_systemd(item: dict[str, Any], unit_file: Path) -> dict[str, Any]:
         return _failed(item["workload_key"], exc.message)
 
 
-def _apply_docker(item: dict[str, Any], tarball: Path | None) -> dict[str, Any]:
+def _bound_env(spec: dict[str, Any], app: AppCredential | None) -> dict[str, str]:
+    """The release's env plus the METEORCLOUD_* variables; a release may set its own endpoint."""
+    env = dict(spec.get("env") or {})
+    if app is not None:
+        endpoint = env.get("METEORCLOUD_ENDPOINT")
+        env.update(app.env)
+        if endpoint:
+            env["METEORCLOUD_ENDPOINT"] = endpoint
+    return env
+
+
+def _apply_docker(item: dict[str, Any], tarball: Path | None, app: AppCredential | None = None) -> dict[str, Any]:
     from runtime.docker import DockerAdapter, DockerError, docker_available
 
     if not docker_available():
@@ -271,9 +283,10 @@ def _apply_docker(item: dict[str, Any], tarball: Path | None) -> dict[str, Any]:
             image=spec.get("image"),
             tarball=tarball,
             ports=list(spec.get("ports") or []),
-            env=dict(spec.get("env") or {}),
+            env=_bound_env(spec, app),
             restart=spec.get("restart", "unless-stopped"),
             command=spec.get("command"),
+            volumes=[app.volume] if app is not None else None,
         )
         health = adapter.inspect_health(container_name=container_name)
         # Not up after install: the install failed. A HEALTHCHECK still starting is fine (unknown).
@@ -284,7 +297,10 @@ def _apply_docker(item: dict[str, Any], tarball: Path | None) -> dict[str, Any]:
         return _failed(item["workload_key"], exc.message)
 
 
-def _apply_compose(item: dict[str, Any], artifact: Path, work_root: Path) -> dict[str, Any]:
+def _apply_compose(
+    item: dict[str, Any], artifact: Path, work_root: Path, app: AppCredential | None = None,
+    force_recreate: bool = False,
+) -> dict[str, Any]:
     from runtime.compose import ComposeAdapter, ComposeError, compose_available
 
     if not compose_available():
@@ -301,6 +317,13 @@ def _apply_compose(item: dict[str, Any], artifact: Path, work_root: Path) -> dic
             project_name=project_name,
             artifact=artifact,
             env=dict(spec.get("env") or {}),
+            # Only the METEORCLOUD_* variables go to the services; a release may set its
+            # own endpoint, as for a docker release. The rest of spec.env stays
+            # substitution input for the compose file.
+            service_env=_bound_env({"env": {k: v for k, v in (spec.get("env") or {}).items()
+                                            if k == "METEORCLOUD_ENDPOINT"}}, app) if app is not None else None,
+            service_volumes=[app.volume] if app is not None else None,
+            force_recreate=force_recreate,
         )
         health = adapter.inspect_health(project_name=project_name)
         if health.status in ("unhealthy", "missing"):
@@ -325,6 +348,8 @@ def reconcile_software(
     compose_work = artifacts_dir.parent / "compose"
     state_path = applied_state_path(artifacts_dir)
     applied = _load_applied_state(state_path)
+    credentials = AppCredentialStore(artifacts_dir.parent / "app-credentials")
+    credentials.prune({str(item["workload_key"]) for item in desired if item.get("workload_key") and binding_of(item)})
     reports: list[dict[str, Any]] = []
     for item in desired:
         workload_key = item.get("workload_key")
@@ -336,7 +361,7 @@ def reconcile_software(
             reports.append(_failed(workload_key, f"Unsupported release kind: {kind!r}"))
             continue
 
-        if _already_applied(applied, item):
+        if _already_applied(applied, item) and credentials.keep_fresh(client, device_token, item):
             health_report = _health_only(item, compose_work=compose_work)
             if health_report is not None:
                 reports.append(health_report)
@@ -345,6 +370,26 @@ def reconcile_software(
         artifact_id = item.get("artifact_id")
 
         try:
+            app = None
+            if binding_of(item) is not None:
+                if kind == "systemd":
+                    reports.append(
+                        _failed(
+                            workload_key,
+                            "A MeteorCloud application binding needs a docker or docker_compose release.",
+                        )
+                    )
+                    continue
+                app = credentials.for_apply(client, device_token, item)
+                if "METEORCLOUD_ENDPOINT" not in _bound_env(item.get("spec") or {}, app):
+                    reports.append(
+                        _failed(
+                            workload_key,
+                            "The control plane has no data plane address (DATA_PLANE_PUBLIC_URL). "
+                            "Set it, or set METEORCLOUD_ENDPOINT in the release env.",
+                        )
+                    )
+                    continue
             if kind == "systemd":
                 if not artifact_id:
                     reports.append(_failed(workload_key, "systemd release is missing an artifact_id."))
@@ -377,7 +422,7 @@ def reconcile_software(
                     )
                     continue
                 _report_updating(client, device_token, workload_key=workload_key, progress_percent=100)
-                report = _apply_docker(item, tarball)
+                report = _apply_docker(item, tarball, app)
             else:  # docker_compose
                 if not artifact_id:
                     reports.append(
@@ -392,7 +437,10 @@ def reconcile_software(
                     artifacts_dir=artifacts_dir,
                 )
                 _report_updating(client, device_token, workload_key=workload_key, progress_percent=100)
-                report = _apply_compose(item, compose_file, compose_work)
+                # Same release applied again with a binding: its token file was lost.
+                # The containers must be created again to mount the new file.
+                report = _apply_compose(item, compose_file, compose_work, app,
+                                        force_recreate=app is not None and _already_applied(applied, item))
 
             reports.append(report)
             identity = _desired_identity(item)
@@ -405,6 +453,9 @@ def reconcile_software(
                     revision=revision,
                 )
                 applied[workload_key] = {"release_id": release_id, "revision": revision}
+        except AppCredentialError as error:
+            reports.append(_failed(workload_key, error.message))
+            logger.warning("No application credentials for %s", workload_key)
         except AgentApiError as error:
             reports.append(_failed(workload_key, error.message))
             logger.warning("Software reconcile failed for %s: %s", workload_key, error.code)

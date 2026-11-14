@@ -125,6 +125,7 @@ class DockerAdapter:
         env: dict[str, str] | None = None,
         restart: str | None = "unless-stopped",
         command: str | None = None,
+        volumes: list[str] | None = None,
     ) -> None:
         name = validate_container_name(container_name)
 
@@ -145,6 +146,8 @@ class DockerAdapter:
             args.extend(["-p", port])
         for key, value in (env or {}).items():
             args.extend(["-e", f"{key}={value}"])
+        for volume in volumes or []:
+            args.extend(["-v", volume])
         args.append(resolved_image)
         if command:
             args.extend(shlex.split(command))

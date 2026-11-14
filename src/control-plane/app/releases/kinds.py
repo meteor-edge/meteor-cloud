@@ -39,6 +39,17 @@ class SystemdSpec(BaseModel):
         return cleaned
 
 
+class MeteorCloudBinding(BaseModel):
+    """Binds a workload to an application identity (contracts/data-plane-v1.md).
+
+    The agent mints a device-scoped data-plane token for the application, mounts it
+    into the workload as a file and sets the METEORCLOUD_* environment variables.
+    """
+
+    application: str = Field(min_length=2, max_length=63, pattern=r"^[a-z][a-z0-9-]{1,62}$")
+    environment: str = Field(default="production", pattern=r"^[a-z][a-z0-9-]{0,31}$")
+
+
 class DockerSpec(BaseModel):
     container_name: str = Field(min_length=1, max_length=255)
     image: str | None = Field(default=None, max_length=512)
@@ -46,6 +57,7 @@ class DockerSpec(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     restart: str | None = Field(default="unless-stopped", max_length=64)
     command: str | None = Field(default=None, max_length=1024)
+    meteorcloud: MeteorCloudBinding | None = None
 
     @field_validator("container_name")
     @classmethod
@@ -71,6 +83,7 @@ class DockerSpec(BaseModel):
 class DockerComposeSpec(BaseModel):
     project_name: str = Field(min_length=1, max_length=255)
     env: dict[str, str] = Field(default_factory=dict)
+    meteorcloud: MeteorCloudBinding | None = None
 
     @field_validator("project_name")
     @classmethod
@@ -95,12 +108,16 @@ def validate_release_spec(kind: ReleaseKind, spec: dict[str, Any]) -> dict[str, 
     """
     model = _SPEC_MODELS[kind]
     try:
-        return model.model_validate(spec).model_dump()
+        validated = model.model_validate(spec).model_dump()
     except Exception as exc:
         raise ValidationAppError(
             "invalid_release_spec",
             f"Invalid {kind.value} release spec: {exc}",
         ) from exc
+    # Unbound workloads keep the spec shape they had before application bindings existed.
+    if validated.get("meteorcloud") is None:
+        validated.pop("meteorcloud", None)
+    return validated
 
 
 def validate_artifact_for_kind(
