@@ -368,4 +368,4 @@
         executable: /bin/bash
       when: mqtt_certs_src_dir | length == 0 and mqtt_public_host | length > 0
       register: platform_mqtt_certs_repair
-      changed_when: platform_mqtt_certs_repair.stdout is search('Wrote MQTT') or platform_mqtt_certs_repair.rc == 0 and 'Wrote MQTT' in (platform_mqtt_certs_repair.stdout | default(''))
+      changed_when: "'Wrote MQTT' in (platform_mqtt_certs_repair.stdout | default(''))"
