@@ -1,6 +1,6 @@
 # Operating the data plane
 
-The data API is one stateless Go binary (`meteorcloud/data-api` image, source `src/data-plane/go`). It needs ClickHouse for the data, PostgreSQL for commands, the control plane's policy endpoint and, for more than one replica or for MQTT clients, EMQX.
+The data API is one stateless Go binary (`meteorcloud/data-api` image, source `src/data-plane/go`). It needs ClickHouse for the data, PostgreSQL for commands, the control plane's policy endpoint and, for more than one replica, an MQTT broker (direct MQTT clients need EMQX).
 
 ## Run
 
@@ -41,9 +41,9 @@ Data API. Any secret can instead be read from a file by setting `<NAME>_FILE`.
 | `DATAPLANE_CLICKHOUSE_ASYNC_INSERT` | `true` | Let ClickHouse group small inserts. A publish is still confirmed only after the flush |
 | `DATAPLANE_DATABASE_URL` | required | PostgreSQL URL for commands and dead letters. Tables live in schema `dataplane`; migrations run at start |
 | `DATAPLANE_BUS` | `mqtt` | `memory` for a single replica without a broker |
-| `DATAPLANE_MQTT_URL` | required with `mqtt` | e.g. `mqtts://emqx:8883` |
+| `DATAPLANE_MQTT_URL` | required with `mqtt` | e.g. `mqtts://mqtt-broker:8883` |
 | `MQTT_PLATFORM_USERNAME`, `MQTT_PLATFORM_PASSWORD`, `MQTT_CA_CERT_PATH` | | The platform's broker login, same as the control plane |
-| `DATAPLANE_MQTT_JWT_SECRET` | empty | 32+ characters. Enables `POST /v1/mqtt/credentials`. EMQX must verify with the same value (`EMQX_AUTHENTICATION__2__ENABLE=true`, `EMQX_AUTHENTICATION__2__SECRET`). In Compose the broker refuses to start when `DATAPLANE_MQTT_ENABLED=true` and this is missing |
+| `DATAPLANE_MQTT_JWT_SECRET` | empty | 32+ characters. Enables `POST /v1/mqtt/credentials`. Direct MQTT works only with `MQTT_PROVIDER=emqx`: EMQX must verify with the same value (`EMQX_AUTHENTICATION__2__ENABLE=true`, `EMQX_AUTHENTICATION__2__SECRET`). In Compose the broker refuses to start when `DATAPLANE_MQTT_ENABLED=true` and this is missing |
 | `DATAPLANE_MQTT_PUBLIC_URL` | | Broker address given to MQTT clients |
 | `DATAPLANE_MQTT_TOKEN_TTL` | `1h` | Lifetime of an MQTT login |
 | `DATAPLANE_POLICY_INTERVAL` | `5s` | How often the policy is pulled. Upper bound for a revocation to take effect |
@@ -106,7 +106,7 @@ Logs are JSON lines on stdout. Tokens, credentials and message payloads are neve
 - MQTT ingestion uses a shared subscription, so the broker splits publishes between replicas.
 - ClickHouse takes the write load. It needs about 1 GB of memory even when idle; on a very small server use `DATAPLANE_STORAGE=postgres` and leave the `clickhouse` profile off. Moving from PostgreSQL to ClickHouse later does not copy old events: they stay in `dataplane.events` in PostgreSQL.
 - An id is checked before it is stored, so a repeated publish stores nothing twice. Two replicas that receive the same id in the same instant can both store it.
-- First limits you will meet: one ClickHouse server (add replicas or use a managed ClickHouse through `DATAPLANE_CLICKHOUSE_URL`) and EMQX 5.8.6 being a single node (see [licensing](../licensing.md)).
+- First limits you will meet: one ClickHouse server (add replicas or use a managed ClickHouse through `DATAPLANE_CLICKHOUSE_URL`) and the bundled broker being a single node (see [licensing](../licensing.md)).
 - Kafka is not part of the design. Add it when several independent consumers must replay the same stream, or when ingestion must outlive long storage outages. The ingestion pipeline is the place to put it.
 
 ## Troubleshooting

@@ -22,7 +22,7 @@ When you **add, upgrade, pin, or enable** a third-party image, library, broker, 
 4. If Production OK is not `Yes`, **ask before** making it a default install, public URL, or console product feature.
 5. Update [docs/licensing.md](docs/licensing.md) when the inventory changes.
 
-Shortcuts: pin Redis to **7.2**; EMQX **5.8.6** only unless BSL is reviewed; no MinIO as commercial production default; Grafana/Loki/Alloy optional localhost ops only.
+Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.8.6** only unless BSL is reviewed; VerneMQ official image only with its EULA accepted by the operator; no MinIO as commercial production default; Grafana/Loki/Alloy optional localhost ops only.
 
 ## Architecture (must follow)
 

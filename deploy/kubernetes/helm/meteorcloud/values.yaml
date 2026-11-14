@@ -35,7 +35,7 @@ config:
 #   REDIS_URL                                        cache.provider=redis
 #   OBJECT_STORAGE_ACCESS_KEY_ID/SECRET_ACCESS_KEY   s3 with static keys (optional)
 #   MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN      mqtt.enabled
-#   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled broker
+#   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled EMQX (mqtt.provider=emqx)
 #   EDGE_PLATFORM_ADMIN_EMAIL/PASSWORD               optional first administrator
 #   CONNECTIVITY_INTERNAL_TOKEN                      connectivity.provider=wireguard
 secrets:
@@ -196,9 +196,15 @@ objectStorage:
 # --- Device MQTT (optional) ------------------------------------------------
 mqtt:
   enabled: false
-  # bundled: single EMQX broker in this release. external: your EMQX cluster,
-  # configured for HTTP authn/authz against the API's /internal/mqtt endpoints.
+  # bundled: one broker in this release. external: your own broker (or cluster),
+  # configured to ask the API's /internal/mqtt endpoints for logins and topic
+  # permissions (docs/fleet/mqtt.md).
   broker: bundled
+  # Which broker software: mosquitto (default) | emqx | vernemq.
+  #   mosquitto  Eclipse Mosquitto + meteorcloud_auth plugin, single node.
+  #   emqx       EMQX 5.8.6 (Apache 2.0). Do not bump past 5.8 (docs/licensing.md).
+  #   vernemq    external only: run VerneMQ yourself and set broker: external.
+  provider: mosquitto
   # Hostname devices connect to (must be in the server certificate).
   publicHost: ""
   port: 8883
@@ -207,10 +213,27 @@ mqtt:
   internalToken: ""
   tls:
     # Secret with ca.crt (+ server.crt, server.key for the bundled broker). The
-    # server certificate needs SANs for publicHost and <release>-emqx.
+    # server certificate needs SANs for publicHost and the broker Service:
+    # <release>-mqtt (mosquitto) or <release>-emqx (emqx).
     existingSecret: ""
   external:
     host: ""
+  mosquitto:
+    image:
+      repository: meteorcloud/mosquitto
+      tag: ""                  # defaults to the chart appVersion
+      pullPolicy: IfNotPresent
+    # How long the broker reuses an "allowed" topic decision (0 asks the API every time).
+    aclCacheSeconds: 60
+    service:
+      # Devices reach 8883 through this Service. LoadBalancer needs a cloud or
+      # bare-metal load balancer (MetalLB, k3s servicelb).
+      type: LoadBalancer
+      annotations: {}
+      loadBalancerSourceRanges: []
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 512Mi }
   emqx:
     image:
       repository: emqx/emqx

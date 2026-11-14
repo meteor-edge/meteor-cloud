@@ -95,15 +95,21 @@ from mqtt_live.http import wait_mqtt_tls
 host = os.environ.get("MQTT_HOST") or ""
 ca = os.environ.get("MQTT_CA_FILE") or ""
 if not host:
+    print("MQTT probe: no MQTT_HOST", file=sys.stderr)
     sys.exit(2)
 try:
     wait_mqtt_tls(host, int(os.environ.get("MQTT_PORT", "8883")), ca, timeout_seconds=45)
-except Exception:
+except Exception as exc:
+    print(f"MQTT probe: {type(exc).__name__}: {exc}", file=sys.stderr)
     sys.exit(2)
 PY
 then
   echo "==> MQTT live tests against deployed broker"
   "$PYTHON" -m pytest -q tests/mqtt_live
 else
-  echo "Cloud MQTT: NOT RUN (:${MQTT_PORT} is not reachable; production compose does not deploy EMQX yet)"
+  if [[ "${MQTT_EXPECTED:-}" == "1" ]]; then
+    echo "Cloud MQTT: FAILED (MQTT_EXPECTED=1 but TLS on ${MQTT_HOST:-?}:${MQTT_PORT} did not answer)" >&2
+    exit 1
+  fi
+  echo "Cloud MQTT: NOT RUN (TLS on ${MQTT_HOST:-?}:${MQTT_PORT} did not answer; this deployment has no reachable broker. Set MQTT_EXPECTED=1 to make this a failure)"
 fi

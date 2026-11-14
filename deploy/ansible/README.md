@@ -68,7 +68,8 @@ Infrastructure options:
 | `postgres_provider` | `bundled`, `external` (`EDGE_PLATFORM_DATABASE_URL`) | `bundled` |
 | `cache_provider` | `memory`, `redis` (`redis_provider`: `bundled` / `external`) | `memory` |
 | `object_storage_provider` | `filesystem`, `s3` (AWS S3, any S3-compatible API, GCS interoperability, or bundled MinIO with `minio_enabled`) | `filesystem` |
-| `mqtt_enabled` / `mqtt_broker` | `false`, or `true` with `bundled` (EMQX) / `external` | `false` |
+| `mqtt_enabled` / `mqtt_broker` | `false`, or `true` with `bundled` / `external` | `false` |
+| `mqtt_provider` | Broker software: `mosquitto`, `emqx`, or `vernemq` (needs `vernemq_accept_eula: "yes"`) | `mosquitto` |
 | `observability_enabled` | Prometheus, Loki, Alloy, Alertmanager, Grafana on 127.0.0.1 | `false` |
 | `observability_components` | Any of `metrics`, `logs`, `alerting`, `dashboards` (retention, webhook and external URLs: [Observability](../../docs/observability.md#ansible)) | all four |
 | `image_source` | `git` (build on host), `registry` (pull) | `git` |

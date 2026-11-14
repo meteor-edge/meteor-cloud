@@ -53,7 +53,7 @@ spec:
             - name: MQTT_ENABLED
               value: "true"
             - name: MQTT_PROVIDER
-              value: emqx
+              value: {{ .Values.mqtt.provider | quote }}
             - name: MQTT_BROKER_HOST
               value: {{ include "meteorcloud.mqttBrokerHost" . | quote }}
             - name: MQTT_BROKER_PORT

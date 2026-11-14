@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check of the application data plane: the whole developer workflow.
 
-Against a running stack (control plane, data API, ClickHouse or PostgreSQL, EMQX) it:
+Against a running stack (control plane, data API, ClickHouse or PostgreSQL, MQTT broker) it:
 
   1. registers a device and two applications with scoped permissions
   2. deploys a Docker release bound to an application
@@ -21,7 +21,7 @@ Environment:
     E2E_DATA_API_URL        default http://localhost:8082 (as reachable from this machine)
     E2E_EMAIL / E2E_PASSWORD  an organization owner (default: the seed owner)
     E2E_EDGE_IMAGE          image of sdk/python/examples/edge-app (built when unset)
-    E2E_MQTT_CA             CA certificate of the broker, to test direct MQTT (skipped when unset)
+    E2E_MQTT_CA             CA certificate of the broker, to test direct MQTT (EMQX only; skipped when unset)
 
 Needs Docker on this machine and: pip install -e sdk/python -e src/device-plane/agent
 """

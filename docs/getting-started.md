@@ -103,7 +103,7 @@ Details: [Enrollment API keys](fleet/enrollment-api-keys.md), [Device-initiated 
 
 - Device appears in the console under the organization.
 - Heartbeats update `last_seen_at` ([Heartbeat](fleet/heartbeat.md)).
-- With MQTT enabled (`mqtt` / `emqx` Compose profiles), the agent keeps a TLS MQTT session ([MQTT](fleet/mqtt.md)).
+- With MQTT enabled (`mqtt` / `mosquitto` Compose profiles), the agent keeps a TLS MQTT session ([MQTT](fleet/mqtt.md)).
 
 ## Next steps
 

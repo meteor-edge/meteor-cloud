@@ -26,7 +26,7 @@ authentication = [
     method = post
     url = "{{ printf "http://%s-backend:8000" (include "meteorcloud.fullname" .) }}/internal/mqtt/authenticate"
     headers { content-type = "application/json" }
-    body { username = "${username}", password = "${password}" }
+    body { username = "${username}", password = "${password}", clientid = "${clientid}" }
     ssl.enable = false
     connect_timeout = "5s"
     request_timeout = "5s"
@@ -43,7 +43,7 @@ authorization {
       method = post
       url = "{{ printf "http://%s-backend:8000" (include "meteorcloud.fullname" .) }}/internal/mqtt/authorize"
       headers { content-type = "application/json" }
-      body { username = "${username}", topic = "${topic}", action = "${action}" }
+      body { username = "${username}", clientid = "${clientid}", topic = "${topic}", action = "${action}", retain = "${retain}" }
     }
   ]
 }

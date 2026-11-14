@@ -53,7 +53,7 @@ Commands and APIs you look up while working.
 | Device CLI | [meteorcli](meteorcli.md) |
 | MQTT ↔ control-plane contract | [`contracts/mqtt-http.md`](../contracts/mqtt-http.md) |
 | Architecture & providers | [Architecture](architecture.md) |
-| Bundled infra licenses (Postgres, Redis, EMQX, MinIO, …) | [Licensing](licensing.md) |
+| Bundled infra licenses (Postgres, Redis, MQTT brokers, MinIO, …) | [Licensing](licensing.md) |
 | Planned work (not implemented yet) | [Future plans](future-plans.md) |
 
 ## Deploy and operate

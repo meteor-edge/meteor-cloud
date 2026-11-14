@@ -25,7 +25,7 @@ export DATA_PLANE_URL=http://127.0.0.1:8081
 uvicorn app.main:app --reload
 ```
 
-MQTT publish/watch goes to the data-plane HTTP API. EMQX still authenticates
+MQTT publish/watch goes to the data-plane HTTP API. The broker still authenticates
 against this process at `/internal/mqtt/authenticate` and `/authorize`.
 
 ## Health

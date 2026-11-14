@@ -282,7 +282,7 @@ Check the `data-plane` container logs and restart it.
 
 ### DataPlaneMqttDisconnected
 
-The data plane has no connection to the broker for 2 minutes. Check the `emqx` container, the
+The data plane has no connection to the broker for 2 minutes. Check the broker container (`mosquitto`, `emqx`, or `vernemq`), the
 broker certificate (`MQTT_CA_CERT_PATH`) and `MQTT_PLATFORM_PASSWORD`. Data-plane logs show
 the connect error.
 
@@ -338,7 +338,7 @@ admin accounts use strong passwords.
 
 The broker denied more than 0.5 client decisions per second for 10 minutes. Usually devices
 that were deleted or disabled and keep reconnecting, or a client using an old certificate or
-password. If no device was removed recently, treat it as probing: check the EMQX client list
+password. If no device was removed recently, treat it as probing: check the broker's connection log
 and restrict port 8883 at the firewall if needed.
 
 ### InvalidRegistrationTokens

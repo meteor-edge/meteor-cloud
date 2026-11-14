@@ -45,8 +45,10 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{- define "meteorcloud.mqttBrokerHost" -}}
-{{- if eq .Values.mqtt.broker "bundled" }}
+{{- if and (eq .Values.mqtt.broker "bundled") (eq .Values.mqtt.provider "emqx") }}
 {{- printf "%s-emqx" (include "meteorcloud.fullname" .) }}
+{{- else if eq .Values.mqtt.broker "bundled" }}
+{{- printf "%s-mqtt" (include "meteorcloud.fullname" .) }}
 {{- else }}
 {{- .Values.mqtt.external.host }}
 {{- end }}
@@ -120,6 +122,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- if $v.mqtt.enabled }}
 {{- if not (has $v.mqtt.broker (list "bundled" "external")) }}
 {{- fail "mqtt.broker must be bundled or external" }}
+{{- end }}
+{{- if not (has $v.mqtt.provider (list "mosquitto" "emqx" "vernemq")) }}
+{{- fail "mqtt.provider must be mosquitto, emqx, or vernemq" }}
+{{- end }}
+{{- if and (eq $v.mqtt.broker "bundled") (eq $v.mqtt.provider "vernemq") }}
+{{- fail "mqtt.provider=vernemq is not bundled by this chart: deploy VerneMQ yourself (see docs/fleet/mqtt.md) and set mqtt.broker=external with mqtt.external.host" }}
 {{- end }}
 {{- if not $v.mqtt.tls.existingSecret }}
 {{- fail "mqtt.enabled needs mqtt.tls.existingSecret (ca.crt; plus server.crt and server.key for the bundled broker)" }}
