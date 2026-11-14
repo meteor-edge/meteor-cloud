@@ -71,7 +71,7 @@ Ordering: events are ordered by `time`, then `id`. The data plane does not reord
 
 ## Delivery semantics
 
-- **Accepted means persisted.** `POST /v1/messages` answers 200 only after every message marked `stored` or `duplicate` is durably written. There is no "accepted but not yet stored" state over HTTP.
+- **Accepted means persisted.** `POST /v1/messages` answers 200 only after every message marked `stored`, `accepted` or `duplicate` is durably written. `stored` means written to event storage. `accepted` means written to the durable message queue, from which storage, rules and export connectors read it; it is never lost, but can take a moment to appear in queries. This version of the service answers `stored`; deployments with a message queue answer `accepted`. Clients must treat both as success.
 - **At least once, deduplicated.** A client that gets no answer retries with the same ids. The first write of an `(organization, id)` wins. A retry is reported as `duplicate` and stores nothing.
 - **Backpressure, not loss.** A full ingestion queue answers `503 overloaded` with `Retry-After`. A storage failure answers `503 storage_unavailable`. In both cases nothing from the request may be assumed stored.
 - **Live delivery follows storage** and is best effort: a subscriber gets an event after it was stored, at most once per connection. A subscriber that cannot keep up is disconnected with close code 4008 and can backfill from history.
@@ -119,7 +119,7 @@ Up to 500 messages. Only `stream` and `data` are required. Response 200:
  "accepted": 1, "rejected": 1}
 ```
 
-`status` is `stored`, `duplicate` or `rejected`. Rejection codes: `invalid_stream`, `invalid_kind`, `invalid_id`, `invalid_payload`, `payload_too_large`, `invalid_timestamp`, `forbidden_stream`. One rejected message does not fail the others.
+`status` is `stored`, `accepted`, `duplicate` or `rejected` (see [Delivery semantics](#delivery-semantics)). Rejection codes: `invalid_stream`, `invalid_kind`, `invalid_id`, `invalid_payload`, `payload_too_large`, `invalid_timestamp`, `forbidden_stream`. One rejected message does not fail the others.
 
 ### `GET /v1/streams/{stream}/data`
 

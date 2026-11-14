@@ -75,8 +75,10 @@ class Event:
 class PublishResult:
     """Outcome for one published message.
 
-    ``status`` is ``stored`` (durably saved), ``duplicate`` (this id was already
-    saved; nothing was written twice) or ``rejected`` (see ``error_code``).
+    ``status`` is ``stored`` (durably saved), ``accepted`` (durably queued; it will be
+    stored and processed, but may not show up in queries for a moment), ``duplicate``
+    (this id was already saved; nothing was written twice) or ``rejected`` (see
+    ``error_code``). ``ok`` is true for every status except ``rejected``.
     """
 
     id: str
@@ -86,7 +88,7 @@ class PublishResult:
 
     @property
     def ok(self) -> bool:
-        return self.status in ("stored", "duplicate")
+        return self.status in ("stored", "accepted", "duplicate")
 
 
 @dataclass(frozen=True)

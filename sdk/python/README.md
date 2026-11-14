@@ -68,7 +68,7 @@ client.events.publish("alerts.overheat", {"temperature": 91}, type="overheat")
 client.inference.publish("vision.detections", {"label": "person", "confidence": 0.93})
 ```
 
-`publish` returns when the message is durably stored. It raises `PublishError` if MeteorCloud rejects the message (wrong stream, no permission, bad data) and `UnavailableError` if it could not be stored within the retry time. A message is never dropped without you knowing.
+`publish` returns when the message is durably stored (status `stored`) or durably queued for storage and processing (status `accepted`, used when the service runs with a message queue; the message can take a moment to appear in queries). It raises `PublishError` if MeteorCloud rejects the message (wrong stream, no permission, bad data) and `UnavailableError` if it could not be stored within the retry time. A message is never dropped without you knowing.
 
 Options:
 

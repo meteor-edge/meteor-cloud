@@ -188,7 +188,7 @@ class AsyncStreams:
         seq: int | None = None,
         type: str | None = None,
     ) -> PublishResult:
-        """Publish one message and return once it is durably stored.
+        """Publish one message and return once it is durably stored or queued.
 
         Raises :class:`PublishError` if the service rejects it and
         :class:`UnavailableError` if it could not be stored in time. Give your own
