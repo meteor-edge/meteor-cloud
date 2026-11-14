@@ -71,7 +71,7 @@ These differ from the first plan. Each was chosen to keep the system simple to r
 ## Guarantees in short
 
 - A publish answers success only after the message is durably stored. Overload and storage failures are reported, never hidden.
-- Publishing the same message id twice stores it once.
+- Publishing the same message id twice stores it once when the second publish starts after the first has finished. Two overlapping publishes of the same `(organization, id)` can both pass the existence check on ClickHouse (`MergeTree` has no unique key); sequential retries are safe. See [operations](operations.md#scaling).
 - Late and out of order data is accepted (30 days back, 5 minutes ahead).
 - Identity comes from the token. An organization, device or application named in a request body is ignored.
 - One organization can never read, subscribe to or command another organization's data.

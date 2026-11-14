@@ -73,6 +73,15 @@ def wait_for(what: str, predicate, timeout: float = 30.0, pause: float = 0.3):
     raise AssertionError(f"timed out waiting for {what}")
 
 
+def _next_from_device(live, device_id: str, wait: float = 1.0):
+    """Take one live event; return it only when it is from this run's device."""
+    try:
+        event = live.get(timeout=wait)
+    except TimeoutError:
+        return None
+    return event if getattr(event, "device_id", None) == device_id else None
+
+
 def expect(error: type[Exception], fn, *args, **kwargs) -> Exception:
     try:
         fn(*args, **kwargs)
@@ -160,30 +169,32 @@ def main() -> int:
     step("release bound to the application and deployed")
 
     # 3. The real agent applies it -------------------------------------------------
-    agent = EdgeClient(CP)
-    artifacts = work / "artifacts"
-    reports = reconcile_software(agent, device_token, artifacts)
-    report = next(r for r in reports if r["workload_key"] == CONTAINER)
-    assert report["sync_status"] == "in_sync", report
-    token_file = next((work / "app-credentials").glob(f"{CONTAINER}-*/token"))
-    first_token = token_file.read_text().strip()
-    inspect = json.loads(subprocess.run(["docker", "inspect", CONTAINER], capture_output=True, text=True,
-                                        check=True).stdout)[0]
-    env = dict(item.split("=", 1) for item in inspect["Config"]["Env"])
-    assert env["METEORCLOUD_TOKEN_FILE"] == "/run/secrets/meteorcloud-token" and env["METEORCLOUD_ENDPOINT"]
-    assert env["METEORCLOUD_APP_ID"] == meter_slug and env["METEORCLOUD_DEVICE_ID"] == device_id
-    assert first_token not in json.dumps(inspect), "the token leaked into the container configuration"
-    assert any(m["Destination"] == "/run/secrets/meteorcloud-token" and not m["RW"] for m in inspect["Mounts"])
-    step("agent obtained a token, mounted it read-only and started the container (no token in env or image)")
-
+    # Cleanup wraps reconcile onward: if the container starts and a later assert fails,
+    # finally still removes it so it does not keep publishing.
     try:
+        agent = EdgeClient(CP)
+        artifacts = work / "artifacts"
+        reports = reconcile_software(agent, device_token, artifacts)
+        report = next(r for r in reports if r["workload_key"] == CONTAINER)
+        assert report["sync_status"] == "in_sync", report
+        token_file = next((work / "app-credentials").glob(f"{CONTAINER}-*/token"))
+        first_token = token_file.read_text().strip()
+        inspect = json.loads(subprocess.run(["docker", "inspect", CONTAINER], capture_output=True, text=True,
+                                            check=True).stdout)[0]
+        env = dict(item.split("=", 1) for item in inspect["Config"]["Env"])
+        assert env["METEORCLOUD_TOKEN_FILE"] == "/run/secrets/meteorcloud-token" and env["METEORCLOUD_ENDPOINT"]
+        assert env["METEORCLOUD_APP_ID"] == meter_slug and env["METEORCLOUD_DEVICE_ID"] == device_id
+        assert first_token not in json.dumps(inspect), "the token leaked into the container configuration"
+        assert any(m["Destination"] == "/run/secrets/meteorcloud-token" and not m["RW"] for m in inspect["Mounts"])
+        step("agent obtained a token, mounted it read-only and started the container (no token in env or image)")
+
         dash = MeteorClient(endpoint=DATA_API, token=dash_credential["token"], retry_time=20)
         me = dash.whoami()
         assert (me.application, me.environment, me.device_id) == (dash_slug, "staging", None)
 
         # 4 + 5. Published by the container, seen live and in history from the cloud ----
         live = dash.telemetry.subscribe("energy.*")
-        event = live.get(timeout=40)
+        event = wait_for("this run's live event", lambda: _next_from_device(live, device_id), 40)
         assert (event.application, event.device_id, event.environment) == (meter_slug, device_id, "production")
         assert event.organization_id == api.org and "power" in event.data
         step("container published with the SDK; cloud application received it live")
@@ -246,7 +257,7 @@ def main() -> int:
                 live.get(timeout=0.2)
             except TimeoutError:
                 break
-        fresh = live.get(timeout=30)
+        fresh = wait_for("fresh event after revoke", lambda: _next_from_device(live, device_id), 30)
         assert fresh.device_id == device_id and container_running()
         step("token rotated under the running container without a restart; the old token stopped working")
 
@@ -328,7 +339,11 @@ def mqtt_direct(token: str, ca: str, device_id: str) -> None:
     client.connect(host, int(port))
     client.loop_start()
     try:
-        event = wait_for("an event over MQTT", lambda: received[0] if received else None, 30)
+        event = wait_for(
+            "an event over MQTT",
+            lambda: next((m for m in received if m.get("device_id") == device_id), None),
+            30,
+        )
         assert event["device_id"] == device_id and event["stream"] == "energy.metrics"
     finally:
         client.loop_stop()

@@ -211,8 +211,9 @@ services:
       DATAPLANE_HTTP_ADDR: ":8082"
       DATAPLANE_OPS_ADDR: ":8092"
       # clickhouse: telemetry, events and inference results go to ClickHouse; commands stay in
-      # PostgreSQL. postgres: everything in PostgreSQL (small installations, no clickhouse profile).
-      DATAPLANE_STORAGE: ${DATAPLANE_STORAGE:-clickhouse}
+      # PostgreSQL. postgres: everything in PostgreSQL (fallback when unset, so installs without the
+      # clickhouse profile keep working). New installs set DATAPLANE_STORAGE=clickhouse in .env.
+      DATAPLANE_STORAGE: ${DATAPLANE_STORAGE:-postgres}
       DATAPLANE_CLICKHOUSE_URL: ${DATAPLANE_CLICKHOUSE_URL:-http://clickhouse:8123}
       DATAPLANE_CLICKHOUSE_DATABASE: ${CLICKHOUSE_DB:-meteorcloud}
       DATAPLANE_CLICKHOUSE_USER: ${CLICKHOUSE_USER:-meteorcloud}

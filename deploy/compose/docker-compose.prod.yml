@@ -8,6 +8,9 @@ services:
     volumes: !override
       - ${POSTGRES_DATA:-postgres_data}:/var/lib/postgresql/data
 
+  clickhouse:
+    restart: unless-stopped
+
   redis:
     restart: unless-stopped
     command: redis-server --appendonly yes
