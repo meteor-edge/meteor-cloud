@@ -24,6 +24,7 @@ import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceUplinkPanel } from "@/components/fleet/DeviceUplinkPanel";
 import { DeviceResourceMeters } from "@/components/fleet/DeviceResourceMeters";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
+import { DeviceTelemetryCharts } from "@/components/fleet/DeviceTelemetryCharts";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
 import { DeviceActionsPanel } from "@/components/fleet/DeviceActionsPanel";
 import { DeviceWifiPanel } from "@/components/fleet/DeviceWifiPanel";
@@ -454,6 +455,13 @@ export function DeviceDetailPage() {
             metrics={device.mqtt_metrics}
             updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
           />
+          {token ? (
+            <DeviceTelemetryCharts
+              token={token}
+              organizationId={organizationId}
+              deviceId={deviceId}
+            />
+          ) : null}
           <div className="grid gap-4 rounded-lg border border-border bg-card p-6 shadow-glow sm:grid-cols-2">
             <Detail label="Serial number" value={device.serial_number} />
             <Detail

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Any
@@ -27,6 +28,16 @@ class DataPlaneHttpApi:
         return self._request(
             "GET", f"/internal/v1/organizations/{organization_id}/commands/{command_id}", None, missing_ok=True
         )
+
+    def get_device_metrics(
+        self, *, organization_id: uuid.UUID, device_id: uuid.UUID, params: dict[str, str]
+    ) -> dict[str, Any]:
+        query = urllib.parse.urlencode(params)
+        result = self._request(
+            "GET", f"/internal/v1/organizations/{organization_id}/devices/{device_id}/metrics?{query}", None
+        )
+        assert result is not None
+        return result
 
     def _request(
         self, method: str, path: str, body: dict[str, Any] | None, *, missing_ok: bool = False

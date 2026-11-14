@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from queue import Empty
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
+from app.applications.dependencies import get_data_plane_api
 from app.deployments.software_dependencies import DeviceSoftwareSvc
 from app.deployments.software_schemas import DeviceSoftwareResponse
 from app.devices.dependencies import FleetSvc
@@ -34,12 +36,14 @@ from app.devices.schemas import (
     RegistrationTokenCreateResponse,
     RegistrationTokenResponse,
 )
+from app.devices.telemetry import DeviceTelemetryResponse, TelemetryRange, get_device_telemetry
 from app.identity.dependencies import CurrentUser
 from app.mqtt.control import request_device_disconnect
 from app.mqtt.hub import get_mqtt_event_hub
 from app.mqtt.runtime import get_mqtt_publisher, get_mqtt_topic_watcher
 from app.mqtt.schemas import DevicePingResponse, MqttTestPublishRequest, MqttTestPublishResponse
 from app.mqtt.service import MqttPublisher
+from app.ports.data_plane import DataPlaneApi
 
 router = APIRouter(prefix="/api/v1/organizations/{organization_id}", tags=["fleet"])
 
@@ -340,6 +344,27 @@ def get_device(
     service: FleetSvc,
 ) -> DeviceResponse:
     return service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.get("/devices/{device_id}/telemetry", response_model=DeviceTelemetryResponse)
+def get_device_telemetry_history(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+    data_plane: Annotated[DataPlaneApi | None, Depends(get_data_plane_api)],
+    range_: Annotated[TelemetryRange, Query(alias="range")] = "24h",
+) -> DeviceTelemetryResponse:
+    """CPU, memory, disk and temperature history, bucketed for charts (stored in ClickHouse)."""
+    # Same permission as reading the device; raises 404/403 before the data plane is asked.
+    service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+    return get_device_telemetry(
+        data_plane,
+        organization_id=organization_id,
+        device_id=device_id,
+        range_=range_,
+        now=datetime.now(UTC),
+    )
 
 
 @router.get("/devices/{device_id}/software", response_model=list[DeviceSoftwareResponse])

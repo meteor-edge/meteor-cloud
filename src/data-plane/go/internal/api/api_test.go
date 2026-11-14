@@ -892,3 +892,56 @@ func aclFromRules(t *testing.T, rules []aclRule) bus.ACL {
 	}
 	return acl
 }
+
+func TestInternalDeviceMetrics(t *testing.T) {
+	e := newEnv(t, nil)
+	base := time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Minute)
+	mk := func(id, dev string, ts time.Time, data string) *envelope.Event {
+		return &envelope.Event{ID: id, SchemaVersion: 1, Kind: envelope.KindTelemetry, Type: "device.metrics",
+			Stream: storage.DeviceMetricsStream, OrganizationID: orgA, DeviceID: dev, Time: ts, ReceivedAt: ts, Data: json.RawMessage(data)}
+	}
+	if _, err := e.store.InsertEvents(context.Background(), []*envelope.Event{
+		mk("a", dev1, base, `{"cpu_percent":10,"disk_percent":70}`),
+		mk("b", dev1, base.Add(30*time.Second), `{"cpu_percent":20,"disk_percent":72}`),
+		mk("c", dev2, base, `{"cpu_percent":90}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := "/internal/v1/organizations/" + orgA + "/devices/" + dev1 + "/metrics"
+	if code, _ := e.internal("GET", path, "wrong", nil); code != 401 {
+		t.Fatalf("wrong token: %d", code)
+	}
+	if code, _ := e.request(e.public.URL, "GET", path, map[string]string{"X-Data-Plane-Internal-Token": internalTok}, nil); code != 404 {
+		t.Fatalf("internal route must not exist on the public listener: %d", code)
+	}
+	code, body := e.internal("GET", path, internalTok, nil)
+	if code != 200 || body["bucket_seconds"] != float64(60) || body["device_id"] != dev1 {
+		t.Fatalf("default query: %d %v", code, body)
+	}
+	series := body["series"].([]any)
+	if len(series) != len(DefaultDeviceMetrics) {
+		t.Fatalf("one series per default metric: %v", series)
+	}
+	cpu := series[0].(map[string]any)
+	points := cpu["points"].([]any)
+	if cpu["name"] != "cpu_percent" || len(points) != 1 || points[0].(map[string]any)["avg"] != float64(15) ||
+		points[0].(map[string]any)["max"] != float64(20) {
+		t.Fatalf("cpu: %v", cpu)
+	}
+	if mem := series[1].(map[string]any); mem["name"] != "memory_percent" || len(mem["points"].([]any)) != 0 {
+		t.Fatalf("memory must be an empty list, not null: %v", mem)
+	}
+	_, body = e.internal("GET", path+"?names=disk_percent,disk_percent&bucket=1h", internalTok, nil)
+	if s := body["series"].([]any); len(s) != 1 || s[0].(map[string]any)["points"].([]any)[0].(map[string]any)["avg"] != float64(71) {
+		t.Fatalf("named metric, duplicates folded: %v", body)
+	}
+	for _, q := range []string{"?names=bad%20name", "?bucket=1500ms", "?start=yesterday",
+		"?start=2026-11-14T10:00:00Z&end=2026-11-14T09:00:00Z", "?start=2026-01-01T00:00:00Z&end=2026-11-01T00:00:00Z&bucket=1m"} {
+		if code, _ := e.internal("GET", path+q, internalTok, nil); code != 400 {
+			t.Fatalf("%s must be refused: %d", q, code)
+		}
+	}
+	if code, _ := e.internal("GET", "/internal/v1/organizations/not-a-uuid/devices/"+dev1+"/metrics", internalTok, nil); code != 400 {
+		t.Fatalf("org must be a UUID: %d", code)
+	}
+}
