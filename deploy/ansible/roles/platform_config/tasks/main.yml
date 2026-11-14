@@ -32,9 +32,10 @@
       - redis_provider in ['bundled', 'external']
       - object_storage_provider in ['filesystem', 's3']
       - mqtt_broker in ['bundled', 'external']
+      - mqtt_provider in ['mosquitto', 'emqx', 'vernemq']
       - image_source in ['git', 'archive', 'registry']
       - image_source != 'archive' or platform_source_archive | length > 0
-      # Devices and the data plane share MQTT_BROKER_PORT; the bundled EMQX listens on 8883.
+      # Devices and the data plane share MQTT_BROKER_PORT; the bundled broker listens on 8883.
       - mqtt_broker == 'external' or (mqtt_broker_port | int) == 8883
       - >-
         not (observability_enabled | bool)
@@ -50,7 +51,7 @@
         or 'metrics' in (observability_components.split(',') | map('trim') | list)
     fail_msg: >-
       Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
-      redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external,
+      redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external, mqtt_provider mosquitto|emqx|vernemq,
       image_source git|archive|registry (archive needs platform_source_archive), observability_components
       (at least one) from metrics,logs,alerting,dashboards, alerting needs metrics; the bundled MQTT broker always uses port 8883.
     quiet: true
@@ -325,7 +326,7 @@
       loop:
         - { name: ca.crt, mode: "0644", owner: "root" }
         - { name: server.crt, mode: "0644", owner: "root" }
-        # EMQX runs as UID 1000
+        # The bundled broker runs as UID 1000
         - { name: server.key, mode: "0640", owner: "1000" }
       when: mqtt_certs_src_dir | length > 0
       register: platform_mqtt_certs
@@ -344,5 +345,27 @@
         cmd: "{{ platform_root }}/generate-mqtt-certs.sh {{ platform_certs_dir }}"
         creates: "{{ platform_certs_dir }}/server.crt"
       environment:
+        # ansible_host is the address devices and the health check verify against
+        # (public IP or domain). Pass it explicitly so a missing default cannot
+        # leave the cert with only localhost / the instance private IP.
         MQTT_PUBLIC_HOST: "{{ mqtt_public_host }}"
+        MQTT_EXTRA_SANS: "{{ mqtt_public_host }},{{ ansible_host | default('') }}"
       when: mqtt_certs_src_dir | length == 0
+
+    - name: Regenerate the broker certificate when the public host is missing from SANs
+      ansible.builtin.shell: |
+        set -euo pipefail
+        sans="$(openssl x509 -in {{ platform_certs_dir }}/server.crt -noout -ext subjectAltName 2>/dev/null || true)"
+        host="{{ mqtt_public_host }}"
+        if printf '%s\n' "$sans" | grep -Eq "DNS:${host}|IP Address:${host}|IP:${host}"; then
+          exit 0
+        fi
+        rm -f {{ platform_certs_dir }}/server.crt {{ platform_certs_dir }}/server.key \
+          {{ platform_certs_dir }}/server.csr {{ platform_certs_dir }}/server.ext
+        MQTT_PUBLIC_HOST="$host" MQTT_EXTRA_SANS="$host,{{ ansible_host | default('') }}" \
+          {{ platform_root }}/generate-mqtt-certs.sh {{ platform_certs_dir }}
+      args:
+        executable: /bin/bash
+      when: mqtt_certs_src_dir | length == 0 and mqtt_public_host | length > 0
+      register: platform_mqtt_certs_repair
+      changed_when: "'Wrote MQTT' in (platform_mqtt_certs_repair.stdout | default(''))"

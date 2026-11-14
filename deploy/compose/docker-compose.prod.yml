@@ -1,6 +1,6 @@
 # Production overlay: prebuilt images, restart policies, no dev ports, Traefik in front.
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-# Only Traefik (80/443) and the MQTT TLS listener (8883, profile emqx) are published.
+# Only Traefik (80/443) and the MQTT TLS listener (8883, the bundled broker profile) are published.
 services:
   postgres:
     restart: unless-stopped
@@ -28,10 +28,17 @@ services:
       # other containers and the host loopback reach it.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
 
+  mosquitto:
+    restart: unless-stopped
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+
   emqx:
     restart: unless-stopped
     ports: !override
       - "${MQTT_PORT:-8883}:8883"
+
+  vernemq:
+    restart: unless-stopped
 
   data-plane:
     restart: unless-stopped

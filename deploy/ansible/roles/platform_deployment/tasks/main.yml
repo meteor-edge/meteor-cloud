@@ -57,7 +57,13 @@
 
     - name: Check for existing application images
       ansible.builtin.command:
-        cmd: docker image inspect {{ ([backend_image, frontend_image] + ([data_plane_image] if mqtt_enabled | bool else [])) | join(' ') }}
+        cmd: docker image inspect {{ platform_built_images | join(' ') }}
+      vars:
+        platform_bundled_mosquitto: "{{ mqtt_enabled | bool and mqtt_broker == 'bundled' and mqtt_provider == 'mosquitto' }}"
+        platform_built_images: >-
+          {{ [backend_image, frontend_image]
+             + ([data_plane_image] if mqtt_enabled | bool else [])
+             + ([mosquitto_image] if platform_bundled_mosquitto | bool else []) }}
       register: platform_images
       changed_when: false
       failed_when: false
@@ -129,6 +135,33 @@
     cmd: "{{ platform_compose }} exec -T postgres sh /tmp/align-postgres-password.sh check"
     chdir: "{{ platform_compose_dir }}"
   changed_when: false
+
+# --remove-orphans keeps containers of services whose profile was switched off
+# (for example cache_provider redis -> memory, or mqtt_provider emqx -> mosquitto),
+# so remove those explicitly. Do it before the stack starts: an old broker still
+# holds the MQTT host ports. Volumes are kept, so switching back keeps the data.
+- name: List services enabled by the current profiles
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} config --services"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_enabled_services
+  changed_when: false
+
+- name: List existing service containers
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} ps --all --services"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_existing_services
+  changed_when: false
+
+- name: Remove containers of disabled services
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} rm --stop --force {{ platform_disabled_services | join(' ') }}"
+    chdir: "{{ platform_compose_dir }}"
+  vars:
+    platform_disabled_services: "{{ platform_existing_services.stdout_lines | difference(platform_enabled_services.stdout_lines) }}"
+  when: platform_disabled_services | length > 0
+  changed_when: true
 
 - name: Start platform stack
   ansible.builtin.command:
@@ -210,38 +243,13 @@
   ansible.builtin.command: /usr/local/sbin/meteorcloud-imds-guard {{ compose_project_name }}
   changed_when: false
 
-# --remove-orphans keeps containers of services whose profile was switched off
-# (for example cache_provider redis -> memory), so remove those explicitly.
-- name: List services enabled by the current profiles
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} config --services"
-    chdir: "{{ platform_compose_dir }}"
-  register: platform_enabled_services
-  changed_when: false
-
-- name: List existing service containers
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} ps --all --services"
-    chdir: "{{ platform_compose_dir }}"
-  register: platform_existing_services
-  changed_when: false
-
-- name: Remove containers of disabled services
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} rm --stop --force {{ platform_disabled_services | join(' ') }}"
-    chdir: "{{ platform_compose_dir }}"
-  vars:
-    platform_disabled_services: "{{ platform_existing_services.stdout_lines | difference(platform_enabled_services.stdout_lines) }}"
-  when: platform_disabled_services | length > 0
-  changed_when: true
-
 # Bind-mounted config files are not part of the Compose config hash.
 - name: Restart services whose mounted configuration changed
   ansible.builtin.command:
     cmd: "{{ platform_compose }} restart {{ item }}"
     chdir: "{{ platform_compose_dir }}"
   loop: >-
-    {{ (['emqx'] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
+    {{ ([mqtt_provider] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
        + (platform_observability_services if observability_enabled | bool else []) }}
   vars:
     platform_observability_by_component:
@@ -254,7 +262,7 @@
          | map('extract', platform_observability_by_component) | select('defined') | flatten }}
   when: >-
     (platform_service_config is defined and platform_service_config.changed)
-    or (item == 'emqx' and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
+    or (item == mqtt_provider and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
     or (item == 'alertmanager' and platform_alertmanager_secret is defined and platform_alertmanager_secret.changed)
     or (item == 'alertmanager' and platform_alertmanager_heartbeat_secret is defined
         and platform_alertmanager_heartbeat_secret.changed)

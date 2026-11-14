@@ -221,6 +221,7 @@ Rules: organization, application and device come from the topic, which the broke
 
 Known limits of direct MQTT in v1 (the HTTP and WebSocket paths do not have them):
 
+- It needs the EMQX broker (`MQTT_PROVIDER=emqx`), whose JWT authenticator checks the token. Mosquitto (the default) and VerneMQ refuse `app_` logins, so on those brokers applications use HTTP and WebSocket. The data plane's own broker connection works on every broker.
 - Revocation is not immediate. The broker checks the token when the client connects, so a client that is already connected keeps its session until the token expires (`DATAPLANE_MQTT_TOKEN_TTL`, one hour by default), even after its credential is revoked or its permissions shrink. No new token is issued in that time. Shorten the TTL where that window matters.
 - The data plane subscribes with a clean session. A message published while no replica is connected to the broker is not consumed, so at-least-once delivery on this path needs at least two replicas or a client that retries until the data is visible.
 - Messages that arrive over MQTT carry no `environment`, because the broker does not tell the data plane which credential published them.

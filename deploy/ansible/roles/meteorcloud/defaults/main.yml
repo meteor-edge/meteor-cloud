@@ -42,6 +42,8 @@ repository_url: https://github.com/meteor-edge/meteor-cloud.git
 git_ref: master
 backend_image: edge-platform-backend:0.2.0
 data_plane_image: edge-platform-data-plane:0.2.0
+# Bundled Mosquitto broker with the MeteorCloud auth plugin (mqtt_provider=mosquitto).
+mosquitto_image: edge-platform-mosquitto:0.2.0
 frontend_image: edge-platform-frontend:0.2.0
 image_pull_policy: if-not-present
 
@@ -70,9 +72,14 @@ object_storage_access_key_id: "{{ EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID | d
 object_storage_secret_access_key: >-
   {{ EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY | default(lookup('env', 'EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY'), true) }}
 
-# MQTT device connectivity (data plane). mqtt_broker: bundled EMQX or external.
+# MQTT device connectivity (data plane). mqtt_broker: bundled or external.
 mqtt_enabled: false
 mqtt_broker: bundled
+# Broker software: mosquitto (default) | emqx | vernemq. With mqtt_broker=external
+# it tells MeteorCloud what your broker is. See docs/fleet/mqtt.md and docs/licensing.md.
+mqtt_provider: mosquitto
+# Only for mqtt_provider=vernemq with the official image: you accept the VerneMQ EULA.
+vernemq_accept_eula: "no"
 mqtt_broker_host: emqx
 mqtt_broker_port: 8883
 mqtt_public_host: "{{ platform_domain if platform_domain else ansible_host | default(inventory_hostname) }}"

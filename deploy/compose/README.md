@@ -7,14 +7,14 @@ server, and by Ansible (which copies this directory to `/opt/edge-platform/compo
 |------|---------|
 | `docker-compose.yml` | Includes the three module files below |
 | `control-plane.yml` | `backend`; bundled `postgres`, `redis`, `minio` behind profiles |
-| `data-plane.yml` | `data-plane` (profile `mqtt`), bundled `emqx` (profile `emqx`) |
+| `data-plane.yml` | `data-plane` (profile `mqtt`), one bundled broker: `mosquitto` (default), `emqx`, or `vernemq` (profile of the same name) |
 | `console.yml` | Vite dev server for the console |
 | `docker-compose.dev.yml` | Source mounts and hot reload |
 | `docker-compose.prod.yml` | Production: Traefik (80/443, Let's Encrypt), nginx console, restart policies, no internal ports published |
 | `docker-compose.vpn.yml` | Optional: publish the API on `127.0.0.1:8000` for the host WireGuard gateway |
 | `docker-compose.observability.yml` | Prometheus, Loki, Alloy, Grafana (127.0.0.1 only) |
 | `.env.example` | Every setting, grouped into infrastructure, secrets, and application settings |
-| `config/`, `traefik/` | EMQX, PostgreSQL init, observability, and Traefik routing config |
+| `config/`, `traefik/` | EMQX config, PostgreSQL init, observability, and Traefik routing config |
 
 ```bash
 cp .env.example .env          # never commit .env

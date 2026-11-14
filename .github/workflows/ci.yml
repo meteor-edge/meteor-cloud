@@ -244,6 +244,15 @@ jobs:
           push: false
           cache-from: type=gha,scope=data-plane
           cache-to: type=gha,mode=max,scope=data-plane
+      - name: Build MQTT broker (Mosquitto + auth plugin; runs the plugin tests)
+        uses: docker/build-push-action@v6
+        with:
+          context: src/data-plane/broker/mosquitto
+          tags: meteorcloud/mosquitto:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=mosquitto
+          cache-to: type=gha,mode=max,scope=mosquitto
       - name: Build console
         uses: docker/build-push-action@v6
         with:
@@ -254,7 +263,7 @@ jobs:
           cache-from: type=gha,scope=console
           cache-to: type=gha,mode=max,scope=console
       - name: Export images
-        run: docker save meteorcloud/backend:ci meteorcloud/data-plane:ci meteorcloud/console:ci | gzip -1 > images.tar.gz
+        run: docker save meteorcloud/backend:ci meteorcloud/data-plane:ci meteorcloud/mosquitto:ci meteorcloud/console:ci | gzip -1 > images.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: images

@@ -1,4 +1,4 @@
-{{- if and .Values.mqtt.enabled (eq .Values.mqtt.broker "bundled") }}
+{{- if and .Values.mqtt.enabled (eq .Values.mqtt.broker "bundled") (eq .Values.mqtt.provider "emqx") }}
 {{- $fullname := include "meteorcloud.fullname" . }}
 {{- $emqx := .Values.mqtt.emqx }}
 apiVersion: v1

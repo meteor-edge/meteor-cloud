@@ -333,7 +333,7 @@ draw_services_menu() {
   local idx="$1" mqtt_on=0 storage_on=0 mqtt_extra storage_extra
   [[ "${MQTT}" != off ]] && mqtt_on=1
   [[ "${STORAGE}" != filesystem ]] && storage_on=1
-  mqtt_extra="Bundled EMQX on this host."
+  mqtt_extra="Bundled Mosquitto broker on this host."
   [[ "${MQTT}" == external ]] && mqtt_extra="Your existing broker."
   storage_extra="Bundled MinIO on this host. Off = files on this disk."
   [[ "${STORAGE}" == s3 ]] && storage_extra="Your S3 bucket. Off = files on this disk."

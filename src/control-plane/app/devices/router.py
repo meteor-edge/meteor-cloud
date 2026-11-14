@@ -35,6 +35,7 @@ from app.devices.schemas import (
     RegistrationTokenResponse,
 )
 from app.identity.dependencies import CurrentUser
+from app.mqtt.control import request_device_disconnect
 from app.mqtt.hub import get_mqtt_event_hub
 from app.mqtt.runtime import get_mqtt_publisher, get_mqtt_topic_watcher
 from app.mqtt.schemas import DevicePingResponse, MqttTestPublishRequest, MqttTestPublishResponse
@@ -378,8 +379,10 @@ def delete_device(
     device_id: uuid.UUID,
     current_user: CurrentUser,
     service: FleetSvc,
+    publisher: Annotated[MqttPublisher, Depends(get_mqtt_publisher)],
 ) -> None:
     service.delete_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+    request_device_disconnect(publisher, device_id)
 
 
 @router.post("/devices/{device_id}/enable", response_model=DeviceResponse)
@@ -403,13 +406,16 @@ def disable_device(
     device_id: uuid.UUID,
     current_user: CurrentUser,
     service: FleetSvc,
+    publisher: Annotated[MqttPublisher, Depends(get_mqtt_publisher)],
 ) -> DeviceResponse:
-    return service.set_device_enabled(
+    response = service.set_device_enabled(
         actor=current_user,
         organization_id=organization_id,
         device_id=device_id,
         enabled=False,
     )
+    request_device_disconnect(publisher, device_id)
+    return response
 
 
 @router.post(
@@ -447,8 +453,11 @@ def revoke_mqtt_credential(
     device_id: uuid.UUID,
     current_user: CurrentUser,
     service: FleetSvc,
+    publisher: Annotated[MqttPublisher, Depends(get_mqtt_publisher)],
 ) -> DeviceResponse:
-    return service.revoke_mqtt_credential(actor=current_user, organization_id=organization_id, device_id=device_id)
+    response = service.revoke_mqtt_credential(actor=current_user, organization_id=organization_id, device_id=device_id)
+    request_device_disconnect(publisher, device_id)
+    return response
 
 
 @router.post(

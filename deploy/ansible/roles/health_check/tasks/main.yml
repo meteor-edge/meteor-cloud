@@ -25,22 +25,23 @@
 
 # Devices verify the broker against the CA the API hands out and the public host,
 # so check exactly that (a SAN without the public host fails here, not on devices).
+# OpenSSL 3's -verify_hostname treats the value as a DNS name; for a bare IP use
+# -verify_ip or the check fails even when the cert SAN lists that address.
 - name: Check the MQTT broker over TLS
-  ansible.builtin.command:
-    argv:
-      - openssl
-      - s_client
-      - -connect
-      - "127.0.0.1:{{ mqtt_broker_port }}"
-      - -servername
-      - "{{ mqtt_public_host }}"
-      - -verify_hostname
-      - "{{ mqtt_public_host }}"
-      - -CAfile
-      - "{{ platform_certs_dir }}/ca.crt"
-      - -verify_return_error
-      - -brief
-    stdin: ""
+  ansible.builtin.shell: |
+    set -euo pipefail
+    host='{{ mqtt_public_host }}'
+    port='{{ mqtt_broker_port }}'
+    ca='{{ platform_certs_dir }}/ca.crt'
+    if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      openssl s_client -connect "127.0.0.1:${port}" -verify_ip "$host" \
+        -CAfile "$ca" -verify_return_error -brief </dev/null
+    else
+      openssl s_client -connect "127.0.0.1:${port}" -servername "$host" \
+        -verify_hostname "$host" -CAfile "$ca" -verify_return_error -brief </dev/null
+    fi
+  args:
+    executable: /bin/bash
   register: mqtt_health
   changed_when: false
   retries: 20

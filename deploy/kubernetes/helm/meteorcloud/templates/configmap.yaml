@@ -57,7 +57,7 @@ data:
   OBJECT_STORAGE_AUTO_CREATE_BUCKET: {{ .autoCreateBucket | toString | quote }}
   {{- end }}
   MQTT_ENABLED: {{ .Values.mqtt.enabled | toString | quote }}
-  MQTT_PROVIDER: emqx
+  MQTT_PROVIDER: {{ .Values.mqtt.provider | quote }}
   MQTT_BROKER_HOST: {{ include "meteorcloud.mqttBrokerHost" . | quote }}
   MQTT_BROKER_PORT: {{ .Values.mqtt.port | toString | quote }}
   MQTT_PUBLIC_HOST: {{ .Values.mqtt.publicHost | quote }}

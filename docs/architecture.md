@@ -8,7 +8,7 @@ MeteorCloud is modular. Planes do not import each other’s internals; they talk
 | --- | --- | --- |
 | **Git repository** | Where source is edited | One repo (`meteor-cloud`) |
 | **Code / module** | Folders and packages | `console/`, `src/control-plane/` (`app`), `src/data-plane/` (`data_plane`), `src/device-plane/agent/` (`meteorcli`, `edge_agent`), `src/device-plane/gateway/`, `src/device-plane/runtime/` |
-| **Deployable service** | What Compose/Helm start | API, console, optional data-plane + EMQX, optional VPN on the **host** |
+| **Deployable service** | What Compose/Helm start | API, console, optional data-plane + MQTT broker, optional VPN on the **host** |
 | **Published artifact** | What a machine downloads | Container images; `meteorcli` GitHub Release (`agent-v*`) |
 
 VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install enables them. Device types in the API are catalog rows ([Device types](fleet/device-types.md)), not extra code trees.
@@ -37,7 +37,7 @@ flowchart LR
   api[control-plane]
   pg[PostgreSQL]
   dp[data-plane]
-  emqx[EMQX optional]
+  emqx[MQTT broker optional]
   agent[meteorcli]
   gw[connectivity_agent]
   wg[wg0 optional]
@@ -63,7 +63,7 @@ The WireGuard gateway and browser SSH exist only when VPN / `SHELL_PROVIDER=ssh_
 | Plane | Deployable unit | Compose |
 | --- | --- | --- |
 | Control plane | Identity, tenancy, devices, audit, MQTT policy, ingest, operator API | `deploy/compose/control-plane.yml` |
-| Data plane | EMQX client, publish/watch, ingest forward | `deploy/compose/data-plane.yml` |
+| Data plane | MQTT broker client, publish/watch, ingest forward | `deploy/compose/data-plane.yml` |
 | Device plane | `meteorcli` on the edge device | not a Compose service |
 
 Operator **console**: Vite/React in `console/` — browser → control-plane API only. See [Console](console.md).
@@ -111,7 +111,7 @@ src/control-plane/app/
 └── main.py
 ```
 
-PostgreSQL is the control-plane database. Vendor systems (EMQX, Redis, future OTA) sit behind ports — no generic `DatabaseProvider`.
+PostgreSQL is the control-plane database. Vendor systems (MQTT broker, Redis, future OTA) sit behind ports — no generic `DatabaseProvider`.
 
 ## Data plane
 
@@ -142,17 +142,18 @@ default adapters. See [Device platform](fleet/device-platform.md).
 |------|-------------|----------------------|
 | Persistence | PostgreSQL | — |
 | `RateLimiter` | `redis`, `memory` | — |
-| `MQTTGateway` | Data-plane HTTP → EMQX | other broker names |
-
-Bundled broker pin and licensing (Apache 2.0 5.8.x vs BSL 5.9+): [MQTT → EMQX version and licensing](fleet/mqtt.md#emqx-version-and-licensing). Full infra inventory: [Licensing](licensing.md).
+| `MQTTGateway` | Data-plane HTTP → broker | other transports |
+| `MqttBroker` | `mosquitto`, `emqx`, `vernemq` | other broker names |
 | Telemetry last-value | PostgreSQL columns on `Device` | `timescale`, `clickhouse` |
 | `OTAProvider` | `none` | `mender` and others later |
 | `DeviceConnectivityProvider` | `wireguard`, `none` | other tunnels later |
 | `DeviceShellProvider` | `ssh_gateway`, `echo` (tests), `none` | MQTT PTY later |
 | `ObjectStorage` | `s3`, `filesystem` | — |
 
+Broker choice (Mosquitto default, EMQX, VerneMQ), the `MqttBroker` port, and licensing: [MQTT brokers](fleet/mqtt-brokers.md). Full infra inventory: [Licensing](licensing.md).
+
 Artifact binaries live in object storage; PostgreSQL keeps metadata and `storage_key`. See [Artifacts](fleet/artifacts.md).
 
 ## Kubernetes
 
-The Helm chart deploys `backend`, `console`, and (with MQTT) `data-plane` and EMQX as separate Deployments. API and console scale independently; the data-plane MQTT consumer stays at 1 replica until shared subscriptions exist. See [Kubernetes](kubernetes.md).
+The Helm chart deploys `backend`, `console`, and (with MQTT) `data-plane` and the MQTT broker as separate Deployments. API and console scale independently; the data-plane MQTT consumer stays at 1 replica until shared subscriptions exist. See [Kubernetes](kubernetes.md).
