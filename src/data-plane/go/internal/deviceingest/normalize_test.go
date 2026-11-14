@@ -112,6 +112,7 @@ func TestNormalizeRejectsInvalidMessages(t *testing.T) {
 		{"array", `[1,2]`, ReasonInvalidPayload},
 		{"truncated", `{"cpu":`, ReasonInvalidPayload},
 		{"empty", ``, ReasonInvalidPayload},
+		{"nul escape", `{"note":"a\u0000b"}`, ReasonInvalidPayload},
 		{"too large", `{"x":"` + strings.Repeat("a", 100) + `"}`, ReasonTooLarge},
 		{"bad id", `{"event_id":"has space"}`, ReasonInvalidID},
 		{"non-string id", `{"event_id":5}`, ReasonInvalidID},
