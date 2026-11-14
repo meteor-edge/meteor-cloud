@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"math/big"
 	"sort"
 	"sync"
 	"time"
@@ -82,14 +83,66 @@ func matches(ev *envelope.Event, q *Query) bool {
 	return true
 }
 
+// jsonEqual reports whether a contains b the way PostgreSQL's jsonb "@>" does, so
+// a filter means the same in both stores: an object contains an object whose keys
+// it has with contained values, an array contains an array whose elements it has,
+// and numbers compare by value without losing precision.
 func jsonEqual(a, b json.RawMessage) bool {
-	var x, y any
-	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
-		return false
+	x, okX := decodeExact(a)
+	y, okY := decodeExact(b)
+	return okX && okY && jsonContains(x, y)
+}
+
+func decodeExact(raw json.RawMessage) (any, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	return v, dec.Decode(&v) == nil
+}
+
+func jsonContains(have, want any) bool {
+	switch w := want.(type) {
+	case map[string]any:
+		h, ok := have.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, wv := range w {
+			hv, found := h[k]
+			if !found || !jsonContains(hv, wv) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		h, ok := have.([]any)
+		if !ok {
+			return false
+		}
+		for _, wv := range w {
+			found := false
+			for _, hv := range h {
+				if jsonContains(hv, wv) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	case json.Number:
+		h, ok := have.(json.Number)
+		if !ok {
+			return false
+		}
+		hr, okH := new(big.Rat).SetString(h.String())
+		wr, okW := new(big.Rat).SetString(w.String())
+		return okH && okW && hr.Cmp(wr) == 0
+	default:
+		return have == want
 	}
-	xa, _ := json.Marshal(x)
-	ya, _ := json.Marshal(y)
-	return bytes.Equal(xa, ya)
 }
 
 func less(a, b *envelope.Event) bool {
