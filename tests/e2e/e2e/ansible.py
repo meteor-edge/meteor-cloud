@@ -32,6 +32,8 @@ def platform_vars(cfg: Config, *, platform_archive: Path, gateway: Host | None, 
         "object_storage_provider": "s3",
         "minio_enabled": True,
         "shell_provider": "ssh_gateway",
+        # Application data API for SDK publish/subscribe/query (contracts/data-plane-v1.md).
+        "data_api_enabled": True,
         # Faster convergence for the suite (product defaults are 60s / 150s).
         "device_heartbeat_interval_seconds": 15,
         "device_offline_threshold_seconds": 45,

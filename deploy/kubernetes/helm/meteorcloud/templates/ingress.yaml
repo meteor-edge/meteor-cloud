@@ -35,6 +35,14 @@ spec:
               service:
                 name: {{ $fullname }}-backend
                 port: { name: http }
+          {{- if .Values.dataApi.enabled }}
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-data-api
+                port: { name: http }
+          {{- end }}
           - path: /
             pathType: Prefix
             backend:

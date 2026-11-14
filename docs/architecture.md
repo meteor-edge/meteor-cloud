@@ -156,4 +156,4 @@ Artifact binaries live in object storage; PostgreSQL keeps metadata and `storage
 
 ## Kubernetes
 
-The Helm chart deploys `backend`, `console`, and (with MQTT) `data-plane` and the MQTT broker as separate Deployments. API and console scale independently; the data-plane MQTT consumer stays at 1 replica until shared subscriptions exist. See [Kubernetes](kubernetes.md).
+The Helm chart deploys `backend`, `console`, and (with MQTT) `data-plane` and the MQTT broker as separate Deployments. With `dataApi.enabled`, it also deploys the Go application data API (`/v1` on the ingress). API and console scale independently; the data-plane MQTT consumer stays at 1 replica until shared subscriptions exist. See [Kubernetes](kubernetes.md).

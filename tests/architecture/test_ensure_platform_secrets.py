@@ -18,6 +18,7 @@ def _run(home: Path, env_extra: dict[str, str] | None = None) -> subprocess.Comp
         "EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN",
         "EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD",
         "EDGE_PLATFORM_MQTT_INTERNAL_TOKEN",
+        "EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN",
         "EDGE_PLATFORM_ADMIN_EMAIL",
         "EDGE_PLATFORM_ADMIN_PASSWORD",
     ):
@@ -47,6 +48,7 @@ def test_generates_and_reuses_secrets(tmp_path: Path) -> None:
     assert "EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN=" in text
     assert "EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD=" in text
     assert "EDGE_PLATFORM_MQTT_INTERNAL_TOKEN=" in text
+    assert "EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN=" in text
     assert "EDGE_PLATFORM_ADMIN_EMAIL=" in text
     assert "EDGE_PLATFORM_ADMIN_PASSWORD=" in text
 

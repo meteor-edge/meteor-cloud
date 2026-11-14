@@ -36,11 +36,15 @@ config:
 #   OBJECT_STORAGE_ACCESS_KEY_ID/SECRET_ACCESS_KEY   s3 with static keys (optional)
 #   MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN      mqtt.enabled
 #   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled EMQX (mqtt.provider=emqx)
+#   DATA_PLANE_INTERNAL_TOKEN, DATAPLANE_DATABASE_URL  dataApi.enabled
+#   DATAPLANE_MQTT_JWT_SECRET                        dataApi.mqtt.jwtSecret set
 #   EDGE_PLATFORM_ADMIN_EMAIL/PASSWORD               optional first administrator
 #   CONNECTIVITY_INTERNAL_TOKEN                      connectivity.provider=wireguard
 secrets:
   existingSecret: ""
   jwtSecret: ""
+  # Shared by the control plane policy feed and the Go data API. Empty: generated.
+  dataPlaneInternalToken: ""
   # Shared with the WireGuard gateway agent (EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN).
   # Empty: generated once; read it back from the Secret for the gateway.
   connectivityInternalToken: ""
@@ -292,6 +296,28 @@ dataPlane:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 384Mi }
 
+# Application data API (Go): publish / subscribe / query / commands for the SDK.
+# Off by default. Contract: contracts/data-plane-v1.md. Ingress PathPrefix /v1
+# reaches port 8082; ops (8092: /readyz, /metrics, internal) stays ClusterIP only.
+dataApi:
+  enabled: false
+  image:
+    repository: meteorcloud/data-api
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  # memory: single replica, no MQTT. mqtt: fan-out via the broker (needs mqtt.enabled).
+  bus: memory
+  # postgres: uses DATAPLANE_DATABASE_URL in the chart Secret (same DB, schema dataplane).
+  # memory: in-process store (dev / tests only).
+  storage: postgres
+  mqtt:
+    # Optional; only for direct MQTT logins (EMQX JWT). Empty skips the secret key.
+    jwtSecret: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
 # --- Metrics (optional) -----------------------------------------------------
 # The API and data plane serve Prometheus metrics on GET /metrics (their own
 # ports, never routed by the ingress). Grafana, Loki and Prometheus are not part
@@ -323,9 +349,10 @@ serviceAccount:
   annotations: {}
 
 # --- Ingress ----------------------------------------------------------------
-# Routes /api and /health to the API and everything else to the console.
-# /internal and /metrics are never routed. Needs an ingress controller in the
-# cluster (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
+# Routes /api and /health to the API, /v1 to the application data API when
+# dataApi.enabled, and everything else to the console. /internal, ops :8092 and
+# /metrics are never routed. Needs an ingress controller in the cluster
+# (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
 # Lets only this release's pods and the ingress controller's namespace reach the
 # API, so a forwardedAllowIps of "*" cannot be abused from elsewhere in the cluster.
 # Off by default: it needs a CNI that enforces NetworkPolicy and the right selector.

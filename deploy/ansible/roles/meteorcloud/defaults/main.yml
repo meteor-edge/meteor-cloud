@@ -42,6 +42,12 @@ repository_url: https://github.com/meteor-edge/meteor-cloud.git
 git_ref: master
 backend_image: edge-platform-backend:0.2.0
 data_plane_image: edge-platform-data-plane:0.2.0
+# Application data API (Go). Off by default; enable for SDK publish/subscribe/query/commands.
+data_api_enabled: false
+data_api_image: meteorcloud/data-api:0.2.0
+data_plane_internal_token: "{{ EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN | default(lookup('env', 'EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN'), true) }}"
+# memory: single replica, no MQTT bus required. mqtt: fan-out via the broker (needs mqtt_enabled).
+dataplane_bus: memory
 # Bundled Mosquitto broker with the MeteorCloud auth plugin (mqtt_provider=mosquitto).
 mosquitto_image: edge-platform-mosquitto:0.2.0
 frontend_image: edge-platform-frontend:0.2.0
