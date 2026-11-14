@@ -165,6 +165,7 @@ any non-final state -> TIMEOUT
 - `TIMEOUT` when `expires_at` passes before `received`, when `max_attempts` (0 means unlimited) is used up, or when no result arrives within `timeout_seconds` after `received`.
 - Acknowledgements may skip states (`succeeded` straight after delivery is valid). A final state never changes. Defaults: `timeout_seconds` 60, `expires_in_seconds` 3600.
 - With `device_id`, only the instance of the application on that device may acknowledge. Without it, any instance may.
+- A command is not delivered again after `received`, so a handler never runs twice because of a retry. The price: if the handler finished but its result cannot be reported within `timeout_seconds` (the application lost its connection for that long), the command ends in `TIMEOUT`. A sender treats `TIMEOUT` as "outcome unknown", not as "did not run".
 
 ### `POST /v1/mqtt/credentials`
 
