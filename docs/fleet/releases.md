@@ -33,8 +33,6 @@ Reading requires `artifact.read`. Creating and updating require `artifact.create
 | `docker` | type `docker` tarball **or** none if pulling | `container_name`, and either `image` or an artifact |
 | `docker_compose` | type `docker_compose` (required) | `project_name`, optional `env` |
 
-`docker` and `docker_compose` specs accept an optional `meteorcloud: {"application": "<slug>", "environment": "production"}`. It binds the workload to an [application identity](../data-plane/applications.md#applications-deployed-to-devices): the agent mounts a device-scoped token at `/run/secrets/meteorcloud-token` and sets the `METEORCLOUD_*` variables, so the container can use the [SDK](../../sdk/python/README.md) with no configuration.
-
 Uniqueness is per organization on kind + name + version (case-insensitive).
 
 ## UI

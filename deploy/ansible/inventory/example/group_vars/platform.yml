@@ -19,6 +19,7 @@ git_ref: master
 # Application data API (SDK). Needs EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN.
 # data_api_enabled: true
 # dataplane_bus: memory   # or mqtt (requires mqtt_enabled)
+# dataplane_storage: postgres   # or clickhouse (needs EDGE_PLATFORM_CLICKHOUSE_PASSWORD)
 
 # PostgreSQL: bundled container, or external (EDGE_PLATFORM_DATABASE_URL).
 postgres_provider: bundled

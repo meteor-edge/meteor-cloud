@@ -8,9 +8,9 @@ The data API is one stateless Go binary (`meteorcloud/data-api` image, source `s
 | --- | --- |
 | Laptop | `make dev` with `data-api` and `clickhouse` in `COMPOSE_PROFILES` (the default in `.env.example`). API on `http://localhost:8082` |
 | Production Compose | Add `data-api` and `clickhouse` to `COMPOSE_PROFILES`, set the secrets below, including `CLICKHOUSE_PASSWORD`. Traefik routes `https://<domain>/v1/...` to it, so `DATA_PLANE_PUBLIC_URL=https://<domain>` |
-| Standalone | Run the binary anywhere it can reach ClickHouse, PostgreSQL and the control plane |
-
-Not wired yet: the Ansible installer (`make up`, `make aws-up`) and the Helm chart do not deploy the data API. On an installer-managed server, add the profile and the settings below to the environment file by hand. On Kubernetes, run the image as a Deployment with the settings below.
+| Ansible (`make up`, `make aws-up`) | `data_api_enabled: true` runs the data API. Storage defaults to PostgreSQL (`dataplane_storage: postgres`); set `dataplane_storage: clickhouse` and enable the `clickhouse` profile when you want ClickHouse |
+| Kubernetes (Helm) | `dataApi.enabled=true` (on in `values-dev.yaml`). Storage is `postgres` or `memory` today; the chart does not deploy ClickHouse yet |
+| Standalone | Run the binary anywhere it can reach ClickHouse (or PostgreSQL), PostgreSQL for commands, and the control plane |
 
 Two listeners:
 

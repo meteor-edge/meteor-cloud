@@ -22,6 +22,7 @@
       redis_provider=external, EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD and EDGE_PLATFORM_MQTT_INTERNAL_TOKEN
       when mqtt_enabled (plus mqtt_broker_host for an external broker),
       EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN when data_api_enabled,
+      EDGE_PLATFORM_CLICKHOUSE_PASSWORD when data_api_enabled with dataplane_storage=clickhouse,
       EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID and EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY
       (8+ chars) for bundled MinIO, and EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD when observability_enabled with the dashboards component.
     quiet: true
@@ -36,7 +37,9 @@
       - mqtt_broker in ['bundled', 'external']
       - mqtt_provider in ['mosquitto', 'emqx', 'vernemq']
       - dataplane_bus in ['memory', 'mqtt']
+      - dataplane_storage in ['postgres', 'clickhouse']
       - not (data_api_enabled | bool and dataplane_bus == 'mqtt') or (mqtt_enabled | bool)
+      - not (data_api_enabled | bool and dataplane_storage == 'clickhouse') or (clickhouse_password | length > 0)
       - image_source in ['git', 'archive', 'registry']
       - image_source != 'archive' or platform_source_archive | length > 0
       # Devices and the data plane share MQTT_BROKER_PORT; the bundled broker listens on 8883.
