@@ -85,3 +85,22 @@ func TestOldButAcceptableTimestampKept(t *testing.T) {
 		t.Fatal("source time must be preserved and received_at set by the server")
 	}
 }
+
+func TestUnstorableEscapes(t *testing.T) {
+	cases := map[string]bool{
+		`{"v":"a\u0000b"}`:         true,
+		`{"v":"a\\u0000b"}`:        false, // an escaped backslash, not a NUL
+		`{"v":"\ud800"}`:           true,  // high surrogate alone
+		`{"v":"\udc00"}`:           true,  // low surrogate alone
+		`{"v":"😀"}`:                false, // a pair
+		`{"v":"\ud83dx"}`:          true,
+		`{"v":"\ud83d\\ude00"}`:    true,
+		`{"v":"é \\ud800"}`:        false,
+		`{"v":"plain \"quoted\""}`: false,
+	}
+	for in, want := range cases {
+		if got := hasUnstorableEscape([]byte(in)); got != want {
+			t.Errorf("%s: got %v, want %v", in, got, want)
+		}
+	}
+}
