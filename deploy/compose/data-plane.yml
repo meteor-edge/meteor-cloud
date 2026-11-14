@@ -17,6 +17,7 @@ networks:
 volumes:
   mosquitto_data:
   vernemq_data:
+  clickhouse_data:
 
 # Every bundled broker answers to "mqtt-broker" and to "emqx". The default
 # MQTT_BROKER_HOST stays "emqx" because certificates from before the broker
@@ -248,6 +249,3 @@ services:
         required: false
     networks:
       - meteorcloud
-
-volumes:
-  clickhouse_data:
