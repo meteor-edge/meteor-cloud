@@ -63,6 +63,8 @@ def _policy(client: TestClient) -> dict:
         ("energy..power", False),
         ("meteor.lifecycle", False),
         ("a." * 8 + "a", False),
+        ("a" * 63, True),
+        ("a" * 64, False),
         ("", False),
     ],
 )
@@ -161,6 +163,12 @@ def test_credential_lifecycle_and_policy_snapshot(client: TestClient, db_session
 
     rotated = client.post(f"{base}/{secret['id']}/rotate", headers=headers).json()
     assert rotated["token"] != secret["token"]
+    # Rotating again keeps the lifetime the credential was created with.
+    row = db_session.get(ApplicationCredential, uuid.UUID(secret["id"]))
+    first = row.expires_at - row.rotated_at
+    rotated = client.post(f"{base}/{secret['id']}/rotate", headers=headers).json()
+    db_session.refresh(row)
+    assert abs((row.expires_at - row.rotated_at) - first) < timedelta(seconds=1)
     policy = _policy(client)
     assert [item["token_hash"] for item in policy["credentials"]] == [hash_token(rotated["token"])]
 
@@ -366,10 +374,14 @@ def test_reserved_streams_can_be_received_but_not_published(client: TestClient, 
 
 def test_broker_hooks_leave_application_logins_to_the_data_plane(client: TestClient) -> None:
     mqtt_internal = {"X-MQTT-Internal-Token": get_settings().mqtt_internal_token}
-    auth = client.post(
-        "/internal/mqtt/authenticate", headers=mqtt_internal, json={"username": "app_1234", "password": "mca_x"}
-    )
-    assert auth.json()["result"] == "ignore"
+    login = {"username": "app_1234", "password": "mca_x"}
+    for clientid, result in [("app_1234", "ignore"), ("app_1234-worker", "ignore")]:
+        auth = client.post("/internal/mqtt/authenticate", headers=mqtt_internal, json={**login, "clientid": clientid})
+        assert auth.json()["result"] == result
+    # An application can never present a device's (or anyone else's) client id.
+    for body in [login, {**login, "clientid": f"device-{uuid.uuid4()}"}, {**login, "clientid": "app_12345"}]:
+        auth = client.post("/internal/mqtt/authenticate", headers=mqtt_internal, json=body)
+        assert auth.json()["result"] == "deny", body
     acl = client.post(
         "/internal/mqtt/authorize",
         headers=mqtt_internal,

@@ -91,3 +91,36 @@ def test_plain_http_is_refused_for_public_addresses():
     env = {"METEORCLOUD_ENDPOINT": "http://cloud.example.com", "METEORCLOUD_TOKEN": "mca_x",
            "METEORCLOUD_ALLOW_INSECURE": "true"}
     assert Config.from_env(env).allow_insecure is True
+
+
+def test_accepted_status_counts_as_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent = __import__("json").loads(request.content)["messages"]
+        statuses = ["accepted", "stored", "duplicate", "rejected"]
+        results = []
+        for index, message in enumerate(sent):
+            item = {"index": index, "id": message["id"], "status": statuses[index]}
+            if statuses[index] == "rejected":
+                item["error"] = {"code": "forbidden_stream", "message": "no"}
+            results.append(item)
+        return httpx.Response(200, json={"results": results})
+
+    with MeteorClient(endpoint="https://dataplane.test", token="t", transport=httpx.MockTransport(handler)) as client:
+        results = client.telemetry.publish_many("energy.metrics", [{"n": 1}, {"n": 2}, {"n": 3}, {"n": 4}])
+        assert [r.ok for r in results] == [True, True, True, False]
+        # A single publish answered "accepted" returns normally instead of raising PublishError.
+        assert client.telemetry.publish("energy.metrics", {"n": 5}).status == "accepted"
+
+
+def test_stream_survives_a_token_file_that_is_empty_during_a_refresh(tmp_path):
+    """A 401 while the token file is briefly empty must not end the reconnect loop."""
+    from meteorcloud._http import HTTP
+    from meteorcloud._stream import Stream
+    from meteorcloud.config import TokenSource
+
+    token_file = tmp_path / "token"
+    token_file.write_text("mca_first")
+    config = Config(endpoint="https://dataplane.test", token_file=str(token_file))
+    stream = Stream(config, HTTP(config, TokenSource(config)))
+    token_file.write_text("")
+    stream._refresh_token()  # must not raise

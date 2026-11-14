@@ -178,7 +178,7 @@ class Stream:
                             await self._dispatch(frame)
                     code = ws.close_code
                     if code == CLOSE_UNAUTHORIZED:
-                        self._http.refresh_token()
+                        self._refresh_token()
                         reason = "credential revoked or expired"
                     elif code == CLOSE_SLOW_CONSUMER:
                         reason = "this application reads events too slowly; some live events were skipped"
@@ -188,11 +188,11 @@ class Stream:
                 status = err.response.status_code
                 reason = f"refused with HTTP {status}"
                 if status == 401:
-                    self._http.refresh_token()
+                    self._refresh_token()
                     reason = "token refused"
             except ConnectionClosed as err:
                 if err.rcvd is not None and err.rcvd.code == CLOSE_UNAUTHORIZED:
-                    self._http.refresh_token()
+                    self._refresh_token()
                     reason = "credential revoked or expired"
             except exc.ConfigurationError as err:
                 reason = err.message
@@ -211,6 +211,14 @@ class Stream:
             log.warning("live connection down, reconnecting",
                         extra={"meteorcloud": {"reason": reason, "retry_in_seconds": round(delay, 2)}})
             await asyncio.sleep(delay)
+
+    def _refresh_token(self) -> None:
+        """Read the token again. A token file that is empty or missing right now must
+        not end the reconnect loop: the next attempt reads it again."""
+        try:
+            self._http.refresh_token()
+        except exc.ConfigurationError as err:
+            log.warning("token could not be read; retrying", extra={"meteorcloud": {"reason": err.message}})
 
     async def _dispatch(self, frame: dict[str, Any]) -> None:
         kind = frame.get("type")

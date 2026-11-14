@@ -42,7 +42,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The request itself spent one token; a batch spends one per extra message.
-	if extra := len(req.Messages) - 1; extra > 0 && !s.allow(id.CredentialID, extra) {
+	if extra := len(req.Messages) - 1; extra > 0 && !s.allow(id.CredentialID, extra, 1) {
 		s.rateLimited(w)
 		return
 	}

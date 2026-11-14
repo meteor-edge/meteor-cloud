@@ -305,11 +305,15 @@ class ApplicationService:
         row = self._credential(organization_id, application_id, credential_id)
         if row.revoked_at is not None:
             raise ConflictError("credential_revoked", "A revoked credential cannot be rotated.")
-        lifetime = row.expires_at - row.created_at
+        # Counted from the last rotation, so the lifetime stays what it was
+        # created with however often the secret is rotated.
+        lifetime = row.expires_at - (row.rotated_at or row.created_at)
+        now = datetime.now(UTC)
         token, token_hash, prefix = generate_app_token()
         row.token_hash = token_hash
         row.token_prefix = prefix
-        row.expires_at = datetime.now(UTC) + max(lifetime, timedelta(days=1))
+        row.rotated_at = now
+        row.expires_at = now + max(lifetime, timedelta(days=1))
         self.audit.record(
             action="application.credential.rotate",
             resource_type="application_credential",

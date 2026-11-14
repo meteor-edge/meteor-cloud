@@ -17,7 +17,7 @@ from app.devices.models import Device, DeviceCommand, DeviceMqttCredential
 from app.devices.tokens import hash_token
 from app.mqtt.acl import can_access_topic, device_id_from_username
 from app.mqtt.payloads import parse_json_object, parse_metrics_payload, parse_status_payload
-from app.mqtt.policy import device_client_id_allowed
+from app.mqtt.policy import application_client_id_allowed, device_client_id_allowed
 from app.mqtt.schemas import (
     DevicePingResponse,
     MqttAuthorizeResponse,
@@ -70,6 +70,11 @@ class MqttService:
             return MqttAuthResponse(result="deny")
 
         if username.startswith(APPLICATION_USERNAME_PREFIX):
+            # The token check belongs to the broker, but the client id is checked here:
+            # connecting with a device's client id would disconnect that device.
+            if clientid is None or not application_client_id_allowed(username, clientid):
+                logger.info("Rejected MQTT login with a client id that does not belong to the application")
+                return MqttAuthResponse(result="deny")
             return MqttAuthResponse(result="ignore")
         device_id = device_id_from_username(username)
         if device_id is None:
