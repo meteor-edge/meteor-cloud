@@ -97,6 +97,17 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     ),
     PermissionDef("enrollment_key", "read", "View enrollment API keys", "List enrollment API keys."),
     PermissionDef("enrollment_key", "manage", "Manage enrollment API keys", "Create and revoke enrollment API keys."),
+    PermissionDef("application", "read", "View applications", "List applications and their credentials."),
+    PermissionDef("application", "create", "Create applications", "Register applications for the data plane."),
+    PermissionDef("application", "update", "Update applications", "Change application details and stream permissions."),
+    PermissionDef("application", "delete", "Delete applications", "Delete applications and their credentials."),
+    PermissionDef(
+        "application",
+        "credential",
+        "Manage application credentials",
+        "Create, rotate and revoke data-plane credentials for applications.",
+    ),
+    PermissionDef("application", "command", "Send application commands", "Send commands to running applications."),
     PermissionDef("mqtt", "test", "Use MQTT test tools", "Publish and listen in the organization MQTT test UI."),
 )
 
@@ -115,10 +126,16 @@ _VIEWER = frozenset(
         "artifact.read",
         "deployment.read",
         "endpoint.read",
+        "application.read",
     }
 )
 _DEVELOPER = _VIEWER | frozenset(
     {
+        "application.create",
+        "application.update",
+        "application.delete",
+        "application.credential",
+        "application.command",
         "team.read",
         "device_type.create",
         "device_type.update",
@@ -140,6 +157,7 @@ _OPERATOR = _VIEWER | frozenset(
         "team.read",
         "device.create",
         "device.update",
+        "application.command",
         # device.reboot / device.shell / device.users are owner/admin only.
         "device.logs",
         "deployment.create",

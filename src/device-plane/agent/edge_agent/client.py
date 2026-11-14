@@ -169,6 +169,12 @@ class EdgeClient:
     def fetch_mqtt_credentials(self, *, device_token: str) -> dict[str, Any]:
         return self._post("/api/v1/agent/mqtt/credentials", {}, bearer=device_token)
 
+    def mint_app_credential(self, *, device_token: str, workload_key: str) -> dict[str, Any]:
+        """Device-scoped application token for a workload bound to a MeteorCloud application."""
+        return self._post(
+            "/api/v1/agent/applications/credentials", {"workload_key": workload_key}, bearer=device_token
+        )
+
     def get_wifi_changes(self, *, device_token: str) -> list[dict[str, Any]]:
         """Wi-Fi changes waiting for this device. The answer can hold a Wi-Fi password: do not log it."""
         result = self._get("/api/v1/agent/network/wifi", bearer=device_token)

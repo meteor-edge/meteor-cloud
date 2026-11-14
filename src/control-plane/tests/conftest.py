@@ -18,6 +18,8 @@ os.environ.setdefault(
 os.environ.setdefault("WIREGUARD_SERVER_ENDPOINT", "127.0.0.1:51820")
 os.environ.setdefault("APPS_BASE_DOMAIN", "meteor-edge.com")
 os.environ.setdefault("CONNECTIVITY_INTERNAL_TOKEN", "test-connectivity-internal")
+if not os.environ.get("DATA_PLANE_INTERNAL_TOKEN"):  # also when it is set but empty
+    os.environ["DATA_PLANE_INTERNAL_TOKEN"] = "test-data-plane-internal"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,6 +27,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 # Ensure metadata includes domain models.
+from app.applications import models as _application_models  # noqa: F401
 from app.artifacts import models as _artifact_models  # noqa: F401
 from app.artifacts.dependencies import get_object_storage, get_public_os_image_rate_limiter
 from app.audit import models as _audit_models  # noqa: F401

@@ -18,6 +18,9 @@ from runtime.docker import HEALTHY, MISSING, UNHEALTHY, UNKNOWN, ContainerHealth
 logger = logging.getLogger("edge_agent.runtime.compose")
 
 
+OVERRIDE_FILE = "compose.meteorcloud.json"
+
+
 class ComposeError(Exception):
     """Raised when a compose operation fails."""
 
@@ -91,7 +94,19 @@ class ComposeAdapter:
         project_name: str,
         artifact: Path,
         env: dict[str, str] | None = None,
+        service_env: dict[str, str] | None = None,
+        service_volumes: list[str] | None = None,
+        force_recreate: bool = False,
     ) -> None:
+        """Bring the project up.
+
+        ``force_recreate`` creates the containers again even when nothing in the
+        project changed (a mounted file was replaced on the host).
+
+        ``env`` feeds ``${VAR}`` substitution in the compose file. ``service_env`` and
+        ``service_volumes`` are added to every service through an override file, so the
+        project's own compose file is left as the developer wrote it.
+        """
         name = validate_project_name(project_name)
         if not artifact.is_file():
             raise ComposeError(f"Compose artifact not found: {artifact}")
@@ -108,7 +123,25 @@ class ComposeAdapter:
                 encoding="utf-8",
             )
             args.extend(["--env-file", str(env_file)])
+        override = project_dir / OVERRIDE_FILE
+        if service_env or service_volumes:
+            services = self._services(args)
+            addition: dict[str, object] = {}
+            if service_env:
+                addition["environment"] = dict(service_env)
+            if service_volumes:
+                addition["volumes"] = list(service_volumes)
+            # JSON is valid YAML, so no YAML library is needed to write the override.
+            override.write_text(
+                json.dumps({"services": {service: addition for service in services}}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            args.extend(["-f", str(override)])
+        elif override.exists():
+            override.unlink()
         args.extend(["up", "-d", "--remove-orphans"])
+        if force_recreate:
+            args.append("--force-recreate")
 
         self._run(args)
         logger.info("Started compose project %s from %s", name, compose_file)
@@ -165,6 +198,17 @@ class ComposeAdapter:
         dest = project_dir / "compose.yaml"
         dest.write_bytes(artifact.read_bytes())
         return dest
+
+    def _services(self, base_args: Sequence[str]) -> list[str]:
+        try:
+            result = self._runner([*base_args, "config", "--services"], check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ComposeError(f"docker compose config failed: {exc}") from exc
+        services = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        if result.returncode != 0 or not services:
+            detail = (result.stderr or "").strip() or "no services found"
+            raise ComposeError(f"docker compose config --services failed: {detail}")
+        return services
 
     def _run(self, args: Sequence[str]) -> None:
         try:

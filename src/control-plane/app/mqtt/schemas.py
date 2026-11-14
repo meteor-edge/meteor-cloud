@@ -35,7 +35,8 @@ class MqttAuthRequest(BaseModel):
 
 
 class MqttAuthResponse(BaseModel):
-    result: Literal["allow", "deny"]
+    # "ignore" hands the decision to the broker's next authenticator (the data plane).
+    result: Literal["allow", "deny", "ignore"]
     is_superuser: bool = False
 
 
@@ -49,7 +50,7 @@ class MqttAuthorizeRequest(BaseModel):
 
 
 class MqttAuthorizeResponse(BaseModel):
-    result: Literal["allow", "deny"]
+    result: Literal["allow", "deny", "ignore"]
 
 
 class DevicePingResponse(BaseModel):
