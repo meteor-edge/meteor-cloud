@@ -54,6 +54,25 @@ services:
     # Reached through Traefik at /v1 (same host as the console and the API).
     ports: !reset []
 
+  nats:
+    restart: unless-stopped
+    # Client/monitor stay loopback-only from the base file.
+    ports: !override
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_PORT:-8222}:8222"
+
+  device-ingest:
+    restart: unless-stopped
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+
+  rule-processor:
+    restart: unless-stopped
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+
+  clickhouse-writer:
+    restart: unless-stopped
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+
   console:
     image: ${CONSOLE_IMAGE:-meteorcloud/console:dev}
     build:

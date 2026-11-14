@@ -53,6 +53,13 @@ dataplane_bus: memory
 dataplane_storage: postgres
 clickhouse_password: "{{ EDGE_PLATFORM_CLICKHOUSE_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_CLICKHOUSE_PASSWORD'), true) }}"
 dataplane_clickhouse_url: http://clickhouse:8123
+# Device event path (MQTT → NATS JetStream → rule-processor / clickhouse-writer). Needs mqtt_enabled
+# and ClickHouse (dataplane_storage=clickhouse). Off by default.
+nats_enabled: false
+nats_ingest_password: "{{ EDGE_PLATFORM_NATS_INGEST_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_NATS_INGEST_PASSWORD'), true) }}"
+nats_rules_password: "{{ EDGE_PLATFORM_NATS_RULES_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_NATS_RULES_PASSWORD'), true) }}"
+nats_chwriter_password: "{{ EDGE_PLATFORM_NATS_CHWRITER_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_NATS_CHWRITER_PASSWORD'), true) }}"
+nats_admin_password: "{{ EDGE_PLATFORM_NATS_ADMIN_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_NATS_ADMIN_PASSWORD'), true) }}"
 # Bundled Mosquitto broker with the MeteorCloud auth plugin (mqtt_provider=mosquitto).
 mosquitto_image: edge-platform-mosquitto:0.2.0
 frontend_image: edge-platform-frontend:0.2.0

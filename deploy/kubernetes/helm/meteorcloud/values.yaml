@@ -36,9 +36,11 @@ config:
 #   OBJECT_STORAGE_ACCESS_KEY_ID/SECRET_ACCESS_KEY   s3 with static keys (optional)
 #   MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN      mqtt.enabled
 #   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled EMQX (mqtt.provider=emqx)
-#   DATA_PLANE_INTERNAL_TOKEN                        dataApi.enabled (the render fails without it)
+#   DATA_PLANE_INTERNAL_TOKEN                        dataApi.enabled or nats.enabled
 #   DATAPLANE_DATABASE_URL                           dataApi.storage=postgres (postgres://..., not +psycopg)
 #   DATAPLANE_MQTT_JWT_SECRET                        dataApi.mqtt.direct (32+ characters)
+#   CLICKHOUSE_PASSWORD                              clickhouse.enabled or nats.enabled
+#   NATS_*_PASSWORD                                  nats.enabled
 #   EDGE_PLATFORM_ADMIN_EMAIL/PASSWORD               optional first administrator
 #   CONNECTIVITY_INTERNAL_TOKEN                      connectivity.provider=wireguard
 secrets:
@@ -324,6 +326,77 @@ dataApi:
     jwtSecret: ""
   resources:
     requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# --- ClickHouse (optional; device history / data API storage) ---------------
+# Off by default. Bundled single node for evaluation and small installs; set
+# external.url for a managed ClickHouse. Apache 2.0 image (docs/licensing.md).
+clickhouse:
+  enabled: false
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "25.8-alpine"
+    pullPolicy: IfNotPresent
+  database: meteorcloud
+  username: meteorcloud
+  password: ""                 # empty: generated once
+  external:
+    url: ""                    # e.g. http://clickhouse.example:8123
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 2Gi }
+
+# --- NATS JetStream device event path (optional) ----------------------------
+# MQTT → device-ingest → JetStream METEOR_DEVICE → rule-processor / clickhouse-writer.
+# Needs mqtt.enabled and ClickHouse (bundled or external). Docs: docs/data-plane/jetstream.md.
+# Images come from dataApi.image (same meteorcloud/data-api binary).
+nats:
+  enabled: false
+  image:
+    repository: nats
+    tag: "2.15.3-alpine"
+    pullPolicy: IfNotPresent
+  jetstream:
+    maxFileStore: 20GB
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  stream:
+    replicas: 1
+    maxBytes: 10GB
+    maxAge: 168h
+    storage: file
+    retention: limits
+    discard: old
+  passwords:
+    ingest: ""
+    rules: ""
+    chwriter: ""
+    admin: ""
+  deviceIngest:
+    replicaCount: 1
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+  ruleProcessor:
+    replicaCount: 1
+    workers: 8
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+  clickhouseWriter:
+    replicaCount: 1
+    retentionDays: 0
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
     limits: { memory: 512Mi }
 
 # --- Metrics (optional) -----------------------------------------------------

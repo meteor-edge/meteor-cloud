@@ -184,6 +184,14 @@ All services expose Prometheus metrics on their ops port (scraped by the bundled
 | `meteorcloud_clickhouse_writer_insert_failures_total`, `_rows_total{result}`, `_insert_duration_seconds` | Writer |
 | `meteorcloud_rule_processor_events_total{kind}` | Default rule handler |
 
+## Deploy
+
+| Path | How |
+| --- | --- |
+| Compose (dev / VM) | Add `nats` and `clickhouse` to `COMPOSE_PROFILES`; set `NATS_*_PASSWORD` and `CLICKHOUSE_PASSWORD` (see `.env.example`) |
+| Ansible (EC2 / on-prem) | `nats_enabled: true`, `mqtt_enabled: true`, `dataplane_storage: clickhouse`, plus `EDGE_PLATFORM_NATS_*_PASSWORD` and `EDGE_PLATFORM_CLICKHOUSE_PASSWORD` |
+| Helm (Kubernetes) | `nats.enabled: true`, `mqtt.enabled: true`, `clickhouse.enabled: true` (or `clickhouse.external.url`); passwords generated in the chart Secret |
+
 ## Local development
 
 Add `nats` (and `clickhouse`) to `COMPOSE_PROFILES` in `deploy/compose/.env` (`.env.example` has development passwords), then `make dev`.

@@ -56,8 +56,8 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | Mosquitto | `src/data-plane/broker/mosquitto/Dockerfile` (`debian:trixie-slim` + `mosquitto`) | `values.yaml` → `mqtt.mosquitto.image` |
 | EMQX | `deploy/compose/data-plane.yml` → `emqx/emqx:5.8.6` | `values.yaml` → `mqtt.emqx.image` |
 | VerneMQ | `deploy/compose/data-plane.yml` → `vernemq/vernemq:2.2.1` (`VERNEMQ_IMAGE`) | not in the chart (external only) |
-| ClickHouse | `deploy/compose/data-plane.yml` → `clickhouse/clickhouse-server:25.8-alpine` | not in the chart |
-| NATS Server | `deploy/compose/data-plane.yml` → `nats:2.15.3-alpine` | not in the chart |
+| ClickHouse | `deploy/compose/data-plane.yml` → `clickhouse/clickhouse-server:25.8-alpine` | `clickhouse.enabled` |
+| NATS Server | `deploy/compose/data-plane.yml` → `nats:2.15.3-alpine` | `nats.enabled` (image `nats:2.15.3-alpine`) |
 | Data API base images | `src/data-plane/go/Dockerfile` → `golang:1.26-alpine`, `alpine:3.21` | not in the chart |
 | Data API Go modules | `src/data-plane/go/go.mod` | same |
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |
