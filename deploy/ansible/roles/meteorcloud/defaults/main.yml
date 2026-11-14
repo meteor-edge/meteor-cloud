@@ -48,6 +48,11 @@ data_api_image: meteorcloud/data-api:0.2.0
 data_plane_internal_token: "{{ EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN | default(lookup('env', 'EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN'), true) }}"
 # memory: single replica, no MQTT bus required. mqtt: fan-out via the broker (needs mqtt_enabled).
 dataplane_bus: memory
+# postgres: events and commands in PostgreSQL (default; no clickhouse profile). clickhouse: events in
+# ClickHouse (needs the clickhouse Compose profile and CLICKHOUSE_PASSWORD / dataplane_clickhouse_*).
+dataplane_storage: postgres
+clickhouse_password: "{{ EDGE_PLATFORM_CLICKHOUSE_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_CLICKHOUSE_PASSWORD'), true) }}"
+dataplane_clickhouse_url: http://clickhouse:8123
 # Bundled Mosquitto broker with the MeteorCloud auth plugin (mqtt_provider=mosquitto).
 mosquitto_image: edge-platform-mosquitto:0.2.0
 frontend_image: edge-platform-frontend:0.2.0

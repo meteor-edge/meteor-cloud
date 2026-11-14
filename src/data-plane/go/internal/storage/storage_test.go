@@ -14,7 +14,8 @@ import (
 )
 
 // The same behaviour is required of every backend. PostgreSQL runs when
-// DATAPLANE_TEST_DATABASE_URL points at a disposable database.
+// DATAPLANE_TEST_DATABASE_URL points at a disposable database and ClickHouse when
+// DATAPLANE_TEST_CLICKHOUSE_URL points at a disposable server.
 func stores(t *testing.T) map[string]Store {
 	out := map[string]Store{"memory": NewMemory()}
 	if url := os.Getenv("DATAPLANE_TEST_DATABASE_URL"); url != "" {
@@ -24,6 +25,17 @@ func stores(t *testing.T) map[string]Store {
 		}
 		t.Cleanup(pg.Close)
 		out["postgres"] = pg
+	}
+	// ClickHouse holds the events; commands stay in the other store, as in production.
+	if url := os.Getenv("DATAPLANE_TEST_CLICKHOUSE_URL"); url != "" {
+		ch, err := OpenClickHouse(context.Background(), ClickHouseOptions{URL: url, Database: "dataplane_test",
+			Password: os.Getenv("DATAPLANE_TEST_CLICKHOUSE_PASSWORD"), AsyncInsert: true, QueryTimeout: 5 * time.Second})
+		if err != nil {
+			t.Fatalf("clickhouse: %v", err)
+		}
+		split := &Split{Store: NewMemory(), Events: ch}
+		t.Cleanup(split.Close)
+		out["clickhouse"] = split
 	}
 	return out
 }

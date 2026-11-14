@@ -108,6 +108,14 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U dataplane" --health-interval 5s --health-timeout 5s --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8-alpine
+        env:
+          CLICKHOUSE_PASSWORD: dataplane
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget -qO- http://127.0.0.1:8123/ping" --health-interval 5s --health-timeout 5s --health-retries 30
     steps:
       - uses: actions/checkout@v5
         with:
@@ -120,9 +128,11 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
-      - name: Test (race, with PostgreSQL)
+      - name: Test (race, with PostgreSQL and ClickHouse)
         env:
           DATAPLANE_TEST_DATABASE_URL: postgres://dataplane:dataplane@localhost:5432/dataplane_test
+          DATAPLANE_TEST_CLICKHOUSE_URL: http://localhost:8123
+          DATAPLANE_TEST_CLICKHOUSE_PASSWORD: dataplane
         run: go test -race ./...
 
   sdk:

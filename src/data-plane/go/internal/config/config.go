@@ -27,12 +27,18 @@ type Config struct {
 	PolicyInterval  time.Duration
 	PolicyMaxStale  time.Duration
 
-	// Storage: "postgres" (default) or "memory" (tests, demos; not durable).
-	StorageBackend string
-	DatabaseURL    string
-	DatabaseConns  int
-	QueryTimeout   time.Duration
-	RetentionDays  int
+	// Storage: "postgres" (default), "clickhouse" (events in ClickHouse, commands in
+	// PostgreSQL) or "memory" (tests, demos; not durable).
+	StorageBackend      string
+	ClickHouseURL       string
+	ClickHouseDatabase  string
+	ClickHouseUser      string
+	ClickHousePassword  string
+	ClickHouseAsyncMode bool
+	DatabaseURL         string
+	DatabaseConns       int
+	QueryTimeout        time.Duration
+	RetentionDays       int
 
 	// Transport: "mqtt" (EMQX) or "memory" (single replica, no broker).
 	BusBackend     string
@@ -133,6 +139,13 @@ func Load() (*Config, error) {
 	if c.DatabaseURL, err = secret("DATAPLANE_DATABASE_URL"); err != nil {
 		return nil, err
 	}
+	c.ClickHouseURL = env("DATAPLANE_CLICKHOUSE_URL", "")
+	c.ClickHouseDatabase = env("DATAPLANE_CLICKHOUSE_DATABASE", "meteorcloud")
+	c.ClickHouseUser = env("DATAPLANE_CLICKHOUSE_USER", "default")
+	c.ClickHouseAsyncMode = env("DATAPLANE_CLICKHOUSE_ASYNC_INSERT", "true") == "true"
+	if c.ClickHousePassword, err = secret("DATAPLANE_CLICKHOUSE_PASSWORD"); err != nil {
+		return nil, err
+	}
 	if c.MQTTPassword, err = secret("MQTT_PLATFORM_PASSWORD"); err != nil {
 		return nil, err
 	}
@@ -201,9 +214,16 @@ func (c *Config) validate() error {
 		if c.DatabaseURL == "" {
 			return fmt.Errorf("DATAPLANE_DATABASE_URL is required with DATAPLANE_STORAGE=postgres")
 		}
+	case "clickhouse":
+		if c.ClickHouseURL == "" {
+			return fmt.Errorf("DATAPLANE_CLICKHOUSE_URL is required with DATAPLANE_STORAGE=clickhouse (for example http://clickhouse:8123)")
+		}
+		if c.DatabaseURL == "" {
+			return fmt.Errorf("DATAPLANE_DATABASE_URL is required with DATAPLANE_STORAGE=clickhouse (commands are kept in PostgreSQL)")
+		}
 	case "memory":
 	default:
-		return fmt.Errorf("DATAPLANE_STORAGE must be postgres or memory")
+		return fmt.Errorf("DATAPLANE_STORAGE must be clickhouse, postgres or memory")
 	}
 	switch c.BusBackend {
 	case "mqtt":

@@ -98,6 +98,18 @@ func run() error {
 			return fmt.Errorf("storage: %w", err)
 		}
 		store = pg
+		if cfg.StorageBackend == "clickhouse" {
+			ch, err := storage.OpenClickHouse(ctx, storage.ClickHouseOptions{
+				URL: cfg.ClickHouseURL, Database: cfg.ClickHouseDatabase, User: cfg.ClickHouseUser,
+				Password: cfg.ClickHousePassword, AsyncInsert: cfg.ClickHouseAsyncMode,
+				QueryTimeout: cfg.QueryTimeout, RetentionDays: cfg.RetentionDays,
+			})
+			if err != nil {
+				pg.Close()
+				return fmt.Errorf("storage: %w", err)
+			}
+			store = &storage.Split{Store: pg, Events: ch}
+		}
 	}
 	defer store.Close()
 
