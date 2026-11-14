@@ -60,6 +60,28 @@
   until: mqtt_health.rc == 0
   when: mqtt_enabled | bool and mqtt_broker == 'bundled'
 
+# JetStream must be enabled and healthy before device-ingest / consumers are useful.
+- name: Check NATS JetStream health on loopback
+  ansible.builtin.uri:
+    url: http://127.0.0.1:{{ nats_monitor_port | default(8222) }}/healthz?js-enabled-only=true
+    return_content: true
+  register: nats_health
+  retries: 20
+  delay: 5
+  until: nats_health.status == 200 and ('ok' in (nats_health.content | default('')))
+  when: nats_enabled | bool
+
+- name: Check device-ingest is healthy
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} exec -T device-ingest device-ingest healthcheck"
+    chdir: "{{ platform_compose_dir }}"
+  register: device_ingest_health
+  changed_when: false
+  retries: 20
+  delay: 5
+  until: device_ingest_health.rc == 0
+  when: nats_enabled | bool
+
 - name: Check the WireGuard interface is up
   ansible.builtin.command: wg show wg0 listen-port
   delegate_to: "{{ vpn_gateway_host }}"

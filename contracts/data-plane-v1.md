@@ -65,7 +65,7 @@ Every stored message has this shape. It is what queries and subscriptions return
 | `received_at` | Set by the data plane |
 | `seq` | Optional publisher sequence number, stored as given |
 | `device_id`, `environment` | Omitted when empty |
-| `data` | A JSON object, at most 64 KB |
+| `data` | A JSON object, at most 64 KB. Keys and values are free-form (energy readings, nested phases, …). Rejected when not a single object, larger than the limit, or not storable as JSON text (for example `\u0000`); one rejected message does not fail the rest of the batch |
 
 Ordering: events are ordered by `time`, then `id`. The data plane does not reorder or reject late data inside the accepted window.
 

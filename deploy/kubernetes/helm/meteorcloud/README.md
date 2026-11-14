@@ -19,6 +19,8 @@ helm -n meteorcloud test meteorcloud
 | `mqtt.enabled`, `mqtt.broker` | off, or `bundled` / `external` | off |
 | `mqtt.provider` | `mosquitto`, `emqx` (bundled or external), `vernemq` (external only) | `mosquitto` |
 | `dataApi.enabled` | application data API (image `meteorcloud/data-api` from `src/data-plane/go`) on `/v1`; `dataApi.bus`: `memory` / `mqtt` | off |
+| `clickhouse.enabled` | bundled ClickHouse (or set `clickhouse.external.url`) | off |
+| `nats.enabled` | device event path: JetStream + device-ingest / rule-processor / clickhouse-writer (needs MQTT + ClickHouse) | off |
 | `ingress.enabled`, `ingress.className` | any ingress controller | disabled; set `ingress.enabled: true` in an overlay |
 | `secrets.existingSecret` | your own Secret instead of the generated one | empty |
 | `networkPolicy.enabled` | only this release, the ingress namespace, and `networkPolicy.extraFrom` reach the API (needs a CNI that enforces it) | off |
