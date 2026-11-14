@@ -23,12 +23,24 @@ func SignMQTTToken(secret []byte, id *identity.Identity, now, expires time.Time)
 		"username": username,
 		"iat":      now.Unix(),
 		"exp":      expires.Unix(),
-		"acl":      bus.BuildACL(id),
+		"acl":      signedACL(bus.BuildACL(id)),
 	})
 	signing := header + "." + base64.RawURLEncoding.EncodeToString(claims)
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(signing))
 	return username, signing + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// signedACL is the ACL as the broker enforces it. Subscriptions are exact ("eq"):
+// EMQX matches a requested filter like a topic, so a rule ending in "+" would also
+// allow a subscription ending in "#" and reach streams outside the permission. A
+// client therefore subscribes to exactly the filters it was given.
+func signedACL(acl bus.ACL) bus.ACL {
+	exact := make([]string, len(acl.Subscribe))
+	for i, filter := range acl.Subscribe {
+		exact[i] = "eq " + filter
+	}
+	return bus.ACL{Publish: acl.Publish, Subscribe: exact}
 }
 
 // handleMQTTCredentials exchanges the application token for MQTT connection details.

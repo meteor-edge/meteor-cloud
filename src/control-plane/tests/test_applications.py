@@ -366,10 +366,14 @@ def test_reserved_streams_can_be_received_but_not_published(client: TestClient, 
 
 def test_broker_hooks_leave_application_logins_to_the_data_plane(client: TestClient) -> None:
     mqtt_internal = {"X-MQTT-Internal-Token": get_settings().mqtt_internal_token}
-    auth = client.post(
-        "/internal/mqtt/authenticate", headers=mqtt_internal, json={"username": "app_1234", "password": "mca_x"}
-    )
-    assert auth.json()["result"] == "ignore"
+    login = {"username": "app_1234", "password": "mca_x"}
+    for clientid, result in [("app_1234", "ignore"), ("app_1234-worker", "ignore")]:
+        auth = client.post("/internal/mqtt/authenticate", headers=mqtt_internal, json={**login, "clientid": clientid})
+        assert auth.json()["result"] == result
+    # An application can never present a device's (or anyone else's) client id.
+    for body in [login, {**login, "clientid": f"device-{uuid.uuid4()}"}, {**login, "clientid": "app_12345"}]:
+        auth = client.post("/internal/mqtt/authenticate", headers=mqtt_internal, json=body)
+        assert auth.json()["result"] == "deny", body
     acl = client.post(
         "/internal/mqtt/authorize",
         headers=mqtt_internal,

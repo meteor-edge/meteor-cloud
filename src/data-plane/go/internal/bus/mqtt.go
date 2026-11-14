@@ -63,15 +63,14 @@ type MQTT struct {
 	log     *slog.Logger
 	ingress IngressHandler
 
-	fanout     *autopaho.ConnectionManager
-	ingest     *autopaho.ConnectionManager
-	up         atomic.Bool
-	everUp     atomic.Bool
-	ingressUp  atomic.Bool
-	ingressGen atomic.Int64
-	handlers   Handlers
-	work       chan ingressItem
-	cancel     context.CancelFunc
+	fanout      *autopaho.ConnectionManager
+	ingest      *autopaho.ConnectionManager
+	fanoutLink  link
+	ingressLink link
+	everUp      atomic.Bool
+	handlers    Handlers
+	work        chan ingressItem
+	cancel      context.CancelFunc
 }
 
 // NewMQTT creates the transport; ingress may be nil to disable MQTT ingestion.
@@ -108,8 +107,51 @@ func (m *MQTT) tlsConfig(u *url.URL) (*tls.Config, error) {
 	return cfg, nil
 }
 
-func (m *MQTT) connect(ctx context.Context, clientID string, manualAck bool, onUp func(*autopaho.ConnectionManager),
+// link is the state of one broker connection: usable once its subscriptions are in place.
+type link struct {
+	up  atomic.Bool
+	gen atomic.Int64
+}
+
+// connect opens one connection. Whenever it comes up, the filters are subscribed and
+// retried until they are in place or a newer connection took over; only then is the
+// link up and onReady called. A lost connection takes down its own link only.
+func (m *MQTT) connect(ctx context.Context, clientID string, manualAck bool, l *link, filters []string, onReady func(),
 	onMessage func(paho.PublishReceived)) (*autopaho.ConnectionManager, error) {
+	down := func() {
+		l.up.Store(false)
+		l.gen.Add(1) // stops a subscribe loop of the lost connection
+		m.refreshConnected()
+	}
+	onUp := func(cm *autopaho.ConnectionManager) {
+		l.up.Store(false)
+		gen := l.gen.Add(1)
+		go func() {
+			for wait := time.Second; ; {
+				err := subscribe(cm, filters)
+				if l.gen.Load() != gen || ctx.Err() != nil {
+					return // a newer connection took over, or the service is stopping
+				}
+				if err == nil {
+					l.up.Store(true)
+					m.refreshConnected()
+					if onReady != nil {
+						onReady()
+					}
+					return
+				}
+				m.log.Error("MQTT subscribe failed; retrying", "client", clientID, "error", err.Error())
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(wait):
+				}
+				if wait < 15*time.Second {
+					wait *= 2
+				}
+			}
+		}()
+	}
 	u, err := url.Parse(m.cfg.BrokerURL)
 	if err != nil {
 		return nil, fmt.Errorf("DATAPLANE_MQTT_URL: %w", err)
@@ -147,8 +189,7 @@ func (m *MQTT) connect(ctx context.Context, clientID string, manualAck bool, onU
 		},
 		OnConnectionUp: func(cm *autopaho.ConnectionManager, _ *paho.Connack) { onUp(cm) },
 		OnConnectError: func(err error) {
-			m.up.Store(false)
-			m.metrics.BusConnected.Set(0)
+			down()
 			m.log.Warn("MQTT connection attempt failed", "client", clientID, "error", err.Error())
 		},
 		ClientConfig: paho.ClientConfig{
@@ -161,13 +202,11 @@ func (m *MQTT) connect(ctx context.Context, clientID string, manualAck bool, onU
 				},
 			},
 			OnClientError: func(err error) {
-				m.up.Store(false)
-				m.metrics.BusConnected.Set(0)
+				down()
 				m.log.Warn("MQTT connection lost", "client", clientID, "error", err.Error())
 			},
 			OnServerDisconnect: func(d *paho.Disconnect) {
-				m.up.Store(false)
-				m.metrics.BusConnected.Set(0)
+				down()
 				m.log.Warn("MQTT broker disconnected the client", "client", clientID, "reason_code", d.ReasonCode)
 			},
 		},
@@ -197,52 +236,21 @@ func (m *MQTT) Start(ctx context.Context, h Handlers) error {
 		TopicPrefix + "+/apps/+/devices/+/commands",
 	}
 	var err error
-	m.fanout, err = m.connect(ctx, m.cfg.ClientID, false, func(cm *autopaho.ConnectionManager) {
-		if err := subscribe(cm, fanoutFilters); err != nil {
-			m.log.Error("MQTT fan-out subscribe failed", "error", err.Error())
-			return
-		}
+	m.fanout, err = m.connect(ctx, m.cfg.ClientID, false, &m.fanoutLink, fanoutFilters, func() {
 		if m.everUp.Swap(true) {
 			m.metrics.BusReconnects.Inc()
 		}
-		m.up.Store(true)
-		m.metrics.BusConnected.Set(1)
 		m.log.Info("MQTT transport connected")
 	}, m.onFanout)
 	if err != nil {
 		return err
 	}
-
 	if m.ingress != nil {
+		// Without the ingress subscription nothing published over MQTT is stored, so
+		// the service is not ready until it is in place.
 		share := "$share/" + SharedGroup + "/" + TopicPrefix + "+/apps/+/devices/+/"
 		ingressFilters := []string{share + "telemetry/#", share + "events/#", share + "inference/#", share + "commands/ack"}
-		m.ingest, err = m.connect(ctx, m.cfg.ClientID+"-in", true, func(cm *autopaho.ConnectionManager) {
-			// Without this subscription nothing published over MQTT is stored: stay not
-			// ready and keep trying until it is in place or the connection is replaced.
-			m.ingressUp.Store(false)
-			gen := m.ingressGen.Add(1)
-			go func() {
-				for wait := time.Second; ; {
-					err := subscribe(cm, ingressFilters)
-					if m.ingressGen.Load() != gen || ctx.Err() != nil {
-						return // a newer connection took over, or the service is stopping
-					}
-					if err == nil {
-						m.ingressUp.Store(true)
-						return
-					}
-					m.log.Error("MQTT ingress subscribe failed; retrying", "error", err.Error())
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(wait):
-					}
-					if wait < 15*time.Second {
-						wait *= 2
-					}
-				}
-			}()
-		}, m.onIngress)
+		m.ingest, err = m.connect(ctx, m.cfg.ClientID+"-in", true, &m.ingressLink, ingressFilters, nil, m.onIngress)
 		if err != nil {
 			return err
 		}
@@ -295,14 +303,18 @@ func (m *MQTT) ingressWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case item := <-m.work:
-			var handled bool
-			if item.topic.Kind == "ack" {
-				handled = m.ingress.CommandAck(ctx, item.topic, item.pub.Payload)
-			} else {
-				handled = m.ingress.Message(ctx, item.topic, item.pub.Payload)
-			}
-			if !handled {
-				continue
+			// Not handled means a store that is briefly unavailable. MQTT 5 does not send
+			// the message again on an open connection, so this worker keeps it and tries
+			// again; the bounded queue behind it is the backpressure to the broker.
+			for wait := time.Second; !m.handle(ctx, item); {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(wait):
+				}
+				if wait < 15*time.Second {
+					wait *= 2
+				}
 			}
 			// Acknowledge to the broker only now: an unacknowledged QoS 1 message is
 			// redelivered after a crash, and ingestion is idempotent.
@@ -311,6 +323,13 @@ func (m *MQTT) ingressWorker(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (m *MQTT) handle(ctx context.Context, item ingressItem) bool {
+	if item.topic.Kind == "ack" {
+		return m.ingress.CommandAck(ctx, item.topic, item.pub.Payload)
+	}
+	return m.ingress.Message(ctx, item.topic, item.pub.Payload)
 }
 
 func (m *MQTT) publish(ctx context.Context, topic string, payload []byte) error {
@@ -342,7 +361,17 @@ func (m *MQTT) PublishCommand(ctx context.Context, cmd *storage.Command) error {
 
 // Ready reports whether live fan-out works and, when MQTT ingestion is on, whether
 // its subscription is in place.
-func (m *MQTT) Ready() bool { return m.up.Load() && (m.ingress == nil || m.ingressUp.Load()) }
+func (m *MQTT) Ready() bool {
+	return m.fanoutLink.up.Load() && (m.ingress == nil || m.ingressLink.up.Load())
+}
+
+func (m *MQTT) refreshConnected() {
+	if m.Ready() {
+		m.metrics.BusConnected.Set(1)
+	} else {
+		m.metrics.BusConnected.Set(0)
+	}
+}
 
 // Close disconnects cleanly.
 func (m *MQTT) Close() {

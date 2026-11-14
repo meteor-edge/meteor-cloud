@@ -205,7 +205,7 @@ Server to client:
 
 The SDK does not use MQTT. It is offered for clients that already speak it. MQTT 5, TLS, QoS 1.
 
-Login: `POST /v1/mqtt/credentials`, then connect with the returned `username` (`app_<credential id>`), `password` (a JWT, valid one hour by default) and `client_id`. The broker verifies the signature and enforces the topic list embedded in the token, so a client can reach nothing beyond the answer's `publish` and `subscribe` filters. A subscribe or publish outside them disconnects the client.
+Login: `POST /v1/mqtt/credentials`, then connect with the returned `username` (`app_<credential id>`), `password` (a JWT, valid one hour by default) and `client_id`. The broker verifies the signature and enforces the topic list embedded in the token, so a client can reach nothing beyond the answer's `publish` and `subscribe` filters. Subscribe to exactly the filters in `subscribe`: a narrower or wider filter is refused, even one inside the permission. Use the returned `client_id`, or that value followed by `-` and a suffix of your own; any other client id is refused, so an application cannot take over a device's session. A subscribe or publish outside the lists disconnects the client.
 
 Topics (a stream's dots become topic levels; `*` becomes `+`, a trailing `**` becomes `+/#`):
 
