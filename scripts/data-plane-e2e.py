@@ -322,7 +322,9 @@ def mqtt_direct(token: str, ca: str, device_id: str) -> None:
     context.check_hostname = os.environ.get("E2E_MQTT_VERIFY_HOSTNAME", "true") == "true"
     client.tls_set_context(context)
     client.on_message = lambda _c, _u, message: received.append(json.loads(message.payload))
-    client.on_connect = lambda c, *_: c.subscribe(f"{login['live_root']}/energy/metrics", qos=1)
+    # The broker allows exactly the filters of the answer, nothing narrower or wider.
+    live_filter = next(f for f in login["subscribe"] if f.startswith(f"{login['live_root']}/energy/"))
+    client.on_connect = lambda c, *_: c.subscribe(live_filter, qos=1)
     client.connect(host, int(port))
     client.loop_start()
     try:
@@ -341,7 +343,23 @@ def mqtt_direct(token: str, ca: str, device_id: str) -> None:
     wait_for("the broker's refusal", lambda: codes, 15)
     bad.loop_stop()
     assert codes[0] != "Success", codes
-    step("direct MQTT: short-lived login works, live topic delivers, a wrong password is refused")
+    # A filter that reaches beyond the grant, and a client id that is not the caller's own.
+    for client_id, topic in ((login["client_id"] + "-wide", f"{login['live_root']}/#"), ("someone-else", live_filter)):
+        probe = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, protocol=mqtt.MQTTv5)
+        probe.username_pw_set(login["username"], login["password"])
+        probe.tls_set_context(context)
+        outcome: list[str] = []
+        probe.on_connect = lambda c, _u, _f, reason, _p, topic=topic, outcome=outcome: (
+            c.subscribe(topic, qos=1) if str(reason) == "Success" else outcome.append(f"connect: {reason}"))
+        probe.on_subscribe = lambda _c, _u, _m, reasons, _p, outcome=outcome: outcome.append(str(reasons[0]))
+        probe.on_disconnect = lambda _c, _u, _f, reason, _p, outcome=outcome: outcome.append(f"disconnect: {reason}")
+        probe.connect(host, int(port))
+        probe.loop_start()
+        wait_for("the broker's answer", lambda outcome=outcome: outcome, 15)
+        probe.loop_stop()
+        assert not outcome[0].startswith("Granted"), (client_id, topic, outcome)
+    step("direct MQTT: short-lived login works, live topic delivers, a wrong password, a wider filter "
+         "and a foreign client id are refused")
 
 
 if __name__ == "__main__":
