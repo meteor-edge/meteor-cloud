@@ -249,3 +249,26 @@ func TestCommandLifecycle(t *testing.T) {
 		})
 	}
 }
+
+// The memory store filters like PostgreSQL's jsonb containment.
+func TestMemoryFilterMatchesJSONBContainment(t *testing.T) {
+	cases := []struct {
+		have, want string
+		ok         bool
+	}{
+		{`{"a":1,"b":2}`, `{"a":1}`, true},
+		{`{"a":1}`, `{"a":1,"b":2}`, false},
+		{`[1,2,3]`, `[3,1]`, true},
+		{`[1,2]`, `[4]`, false},
+		{`20`, `20.0`, true},
+		{`9007199254740993`, `9007199254740992`, false},
+		{`"a"`, `"a"`, true},
+		{`"1"`, `1`, false},
+		{`{"p":{"l1":1,"l2":2}}`, `{"p":{"l2":2}}`, true},
+	}
+	for _, c := range cases {
+		if got := jsonEqual(json.RawMessage(c.have), json.RawMessage(c.want)); got != c.ok {
+			t.Errorf("%s contains %s: got %v, want %v", c.have, c.want, got, c.ok)
+		}
+	}
+}
