@@ -56,7 +56,8 @@ Settings come from three places:
 Required secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD` and `EDGE_PLATFORM_JWT_SECRET`.
 Others are required only by the option that uses them, e.g.
 `EDGE_PLATFORM_MQTT_INTERNAL_TOKEN` and `EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD`
-with MQTT, or `EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID` and
+with MQTT, `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN` with the application data API,
+or `EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID` and
 `EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY` with bundled MinIO (optional for
 external S3 when the host has an IAM role). Every run checks these first and fails
 with a clear message.
@@ -70,6 +71,7 @@ Infrastructure options:
 | `object_storage_provider` | `filesystem`, `s3` (AWS S3, any S3-compatible API, GCS interoperability, or bundled MinIO with `minio_enabled`) | `filesystem` |
 | `mqtt_enabled` / `mqtt_broker` | `false`, or `true` with `bundled` / `external` | `false` |
 | `mqtt_provider` | Broker software: `mosquitto`, `emqx`, or `vernemq` (needs `vernemq_accept_eula: "yes"`) | `mosquitto` |
+| `data_api_enabled` / `dataplane_bus` | `false`, or `true` with `memory` / `mqtt` (mqtt needs `mqtt_enabled`) | `false` / `memory` |
 | `observability_enabled` | Prometheus, Loki, Alloy, Alertmanager, Grafana on 127.0.0.1 | `false` |
 | `observability_components` | Any of `metrics`, `logs`, `alerting`, `dashboards` (retention, webhook and external URLs: [Observability](../../docs/observability.md#ansible)) | all four |
 | `image_source` | `git` (build on host), `registry` (pull) | `git` |

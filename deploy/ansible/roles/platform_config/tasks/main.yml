@@ -7,6 +7,7 @@
       - postgres_provider != 'external' or external_database_url | length > 0
       - cache_provider != 'redis' or redis_provider == 'bundled' or external_redis_url | length > 0
       - not (mqtt_enabled | bool) or (mqtt_platform_password | length > 0 and mqtt_internal_token | length > 0)
+      - not (data_api_enabled | bool) or (data_plane_internal_token | length > 0)
       - >-
         not (observability_enabled | bool)
         or 'dashboards' not in (observability_components.split(',') | map('trim') | list)
@@ -20,6 +21,7 @@
       (or EDGE_PLATFORM_DATABASE_URL for postgres_provider=external), EDGE_PLATFORM_REDIS_URL for
       redis_provider=external, EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD and EDGE_PLATFORM_MQTT_INTERNAL_TOKEN
       when mqtt_enabled (plus mqtt_broker_host for an external broker),
+      EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN when data_api_enabled,
       EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID and EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY
       (8+ chars) for bundled MinIO, and EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD when observability_enabled with the dashboards component.
     quiet: true
@@ -33,6 +35,8 @@
       - object_storage_provider in ['filesystem', 's3']
       - mqtt_broker in ['bundled', 'external']
       - mqtt_provider in ['mosquitto', 'emqx', 'vernemq']
+      - dataplane_bus in ['memory', 'mqtt']
+      - not (data_api_enabled | bool and dataplane_bus == 'mqtt') or (mqtt_enabled | bool)
       - image_source in ['git', 'archive', 'registry']
       - image_source != 'archive' or platform_source_archive | length > 0
       # Devices and the data plane share MQTT_BROKER_PORT; the bundled broker listens on 8883.

@@ -23,7 +23,7 @@ spec:
         - python
         - -c
         - |
-          import json, urllib.request
+          import json, urllib.error, urllib.request
           api = json.load(urllib.request.urlopen("http://{{ $fullname }}-backend:8000/api/v1/health", timeout=10))
           print("api:", api)
           html = urllib.request.urlopen("http://{{ $fullname }}-console/", timeout=10).read().decode()
@@ -34,7 +34,17 @@ spec:
           assert dp == 200, dp
           print("data-plane: ok")
           {{- end }}
-          import urllib.error
+          {{- if .Values.dataApi.enabled }}
+          ready = json.load(urllib.request.urlopen("http://{{ $fullname }}-data-api:8092/readyz", timeout=10))
+          assert ready.get("ready") is True, ready
+          unauth = urllib.request.Request("http://{{ $fullname }}-data-api:8082/v1/whoami")
+          try:
+              urllib.request.urlopen(unauth, timeout=10)
+              raise SystemExit("data-api whoami without token should 401")
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401, exc
+          print("data-api: ok")
+          {{- end }}
           def metrics(url):
               try:
                   return urllib.request.urlopen(url, timeout=10).read().decode()
@@ -44,10 +54,13 @@ spec:
           {{- if .Values.mqtt.enabled }}
           targets.append("http://{{ $fullname }}-data-plane:8081/metrics")
           {{- end }}
+          {{- if .Values.dataApi.enabled }}
+          targets.append("http://{{ $fullname }}-data-api:8092/metrics")
+          {{- end }}
           for url in targets:
               body = metrics(url)
               {{- if .Values.metrics.enabled }}
-              assert isinstance(body, str) and "meteorcloud_" in body, (url, body if isinstance(body, int) else body[:200])
+              assert isinstance(body, str) and ("meteorcloud_" in body or "dataplane_" in body or "go_" in body or "process_" in body), (url, body if isinstance(body, int) else body[:200])
               {{- else }}
               assert body == 404, (url, "metrics.enabled=false must serve 404")
               {{- end }}

@@ -1,0 +1,141 @@
+{{- if .Values.dataApi.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $secretName := include "meteorcloud.secretName" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-data-api
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "data-api") | nindent 4 }}
+spec:
+  replicas: {{ .Values.dataApi.replicaCount }}
+  {{- if eq .Values.dataApi.bus "memory" }}
+  # memory bus is in-process; a second replica would not see the other's live events.
+  strategy:
+    type: Recreate
+  {{- else }}
+  strategy:
+    type: RollingUpdate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "data-api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "data-api") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: data-api
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" .Values.dataApi.image) }}
+          imagePullPolicy: {{ .Values.dataApi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8082
+            - name: ops
+              containerPort: 8092
+          env:
+            - name: CONTROL_PLANE_URL
+              value: {{ printf "http://%s-backend:8000" $fullname | quote }}
+            - name: DATAPLANE_HTTP_ADDR
+              value: ":8082"
+            - name: DATAPLANE_OPS_ADDR
+              value: ":8092"
+            - name: DATAPLANE_BUS
+              value: {{ .Values.dataApi.bus | quote }}
+            - name: DATAPLANE_STORAGE
+              value: {{ .Values.dataApi.storage | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.config.logFormat | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: DATA_PLANE_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: DATA_PLANE_INTERNAL_TOKEN }
+            {{- if eq .Values.dataApi.storage "postgres" }}
+            - name: DATAPLANE_DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: DATAPLANE_DATABASE_URL }
+            {{- end }}
+            {{- if eq .Values.dataApi.bus "mqtt" }}
+            - name: DATAPLANE_MQTT_URL
+              value: {{ printf "mqtts://%s:%v" (include "meteorcloud.mqttBrokerHost" .) .Values.mqtt.port | quote }}
+            - name: DATAPLANE_MQTT_PUBLIC_URL
+              value: {{ printf "mqtts://%s:%v" .Values.mqtt.publicHost .Values.mqtt.port | quote }}
+            - name: MQTT_PLATFORM_USERNAME
+              value: {{ .Values.mqtt.platformUsername | quote }}
+            - name: MQTT_CA_CERT_PATH
+              value: /certs/ca.crt
+            - name: MQTT_PLATFORM_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: MQTT_PLATFORM_PASSWORD }
+            {{- with .Values.dataApi.mqtt.jwtSecret }}
+            - name: DATAPLANE_MQTT_JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: DATAPLANE_MQTT_JWT_SECRET }
+            {{- end }}
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: ops }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: ops }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.dataApi.resources | nindent 12 }}
+          {{- if and (eq .Values.dataApi.bus "mqtt") .Values.mqtt.enabled }}
+          volumeMounts:
+            - name: mqtt-ca
+              mountPath: /certs
+              readOnly: true
+          {{- end }}
+      {{- if and (eq .Values.dataApi.bus "mqtt") .Values.mqtt.enabled }}
+      volumes:
+        - name: mqtt-ca
+          secret:
+            secretName: {{ .Values.mqtt.tls.existingSecret }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-data-api
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "data-api") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "data-api") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8082
+      targetPort: http
+    - name: ops
+      port: 8092
+      targetPort: ops
+{{- end }}

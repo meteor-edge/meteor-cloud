@@ -17,6 +17,12 @@ Ingress is disabled. The console calls the API on the same origin, so route
 Devices connect to mqtts://{{ .Values.mqtt.publicHost }}:{{ .Values.mqtt.port }}
 {{- if eq .Values.mqtt.broker "bundled" }} (service {{ include "meteorcloud.mqttBrokerHost" . }}, broker {{ .Values.mqtt.provider }}){{ end }}.
 {{- end }}
+{{- if .Values.dataApi.enabled }}
+
+Application data API (SDK): PathPrefix /v1 on the ingress → {{ include "meteorcloud.fullname" . }}-data-api:8082.
+Set METEORCLOUD_ENDPOINT to the same public URL as the console. Ops (:8092) is ClusterIP only.
+Bus={{ .Values.dataApi.bus }}; storage={{ .Values.dataApi.storage }}.
+{{- end }}
 {{- if and (eq .Values.cache.provider "memory") (gt (int .Values.backend.replicaCount) 1) }}
 
 WARNING: cache.provider=memory keeps rate-limit counters per pod; with
@@ -24,8 +30,8 @@ WARNING: cache.provider=memory keeps rate-limit counters per pod; with
 {{- end }}
 {{- if .Values.metrics.enabled }}
 
-Metrics: GET /metrics on service {{ include "meteorcloud.fullname" . }}-backend:8000{{ if .Values.mqtt.enabled }} and {{ include "meteorcloud.fullname" . }}-data-plane:8081{{ end }} (not routed by the ingress).
-{{- if .Values.metrics.serviceMonitor.enabled }} Scraped through ServiceMonitor objects as job="backend"{{ if .Values.mqtt.enabled }} and job="data-plane"{{ end }}, once your Prometheus serviceMonitorSelector matches metrics.serviceMonitor.labels.{{ else }} Set metrics.serviceMonitor.enabled=true with the Prometheus Operator, or scrape these yourself.{{ end }}
+Metrics: GET /metrics on service {{ include "meteorcloud.fullname" . }}-backend:8000{{ if .Values.mqtt.enabled }} and {{ include "meteorcloud.fullname" . }}-data-plane:8081{{ end }}{{ if .Values.dataApi.enabled }} and {{ include "meteorcloud.fullname" . }}-data-api:8092{{ end }} (not routed by the ingress).
+{{- if .Values.metrics.serviceMonitor.enabled }} Scraped through ServiceMonitor objects as job="backend"{{ if .Values.mqtt.enabled }} and job="data-plane"{{ end }}{{ if .Values.dataApi.enabled }} and job="data-api"{{ end }}, once your Prometheus serviceMonitorSelector matches metrics.serviceMonitor.labels.{{ else }} Set metrics.serviceMonitor.enabled=true with the Prometheus Operator, or scrape these yourself.{{ end }}
 {{- end }}
 {{- if eq .Values.postgresql.mode "bundled" }}
 

@@ -387,7 +387,7 @@ k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
 	kubectl config use-context k3d-$(K8S_CLUSTER)
 
 k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (OBS=1 adds Prometheus, Grafana)
-	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
+	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/data-api:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
 	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
 	@# Re-issue the server certificate (same CA) when it lacks any broker Service name.
 	@sans=$$(openssl x509 -in $(K8S_CERTS_DIR)/server.crt -noout -ext subjectAltName 2>/dev/null | tr -d ' ' | tr ',' '\n'); \
@@ -407,14 +407,14 @@ ifeq ($(OBS),1)
 endif
 	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
 		-f $(CHART)/values-dev.yaml $(if $(filter 1,$(OBS)),-f $(CHART)/values-monitoring.yaml) --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
-		--set dataPlane.image.tag=$(IMAGE_TAG) --set mqtt.mosquitto.image.tag=$(IMAGE_TAG) \
+		--set dataPlane.image.tag=$(IMAGE_TAG) --set dataApi.image.tag=$(IMAGE_TAG) --set mqtt.mosquitto.image.tag=$(IMAGE_TAG) \
 		--set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
 		--wait --timeout 10m
 	# Restart so pods pick up images re-imported under the same tag.
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) rollout restart deployment
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) rollout status deployment --timeout 5m
 	@echo ""
-	@echo "Console and API: http://localhost:$(K8S_HTTP_PORT)  (admin@meteorcloud.local / LocalAdmin123!)"
+	@echo "Console and API: http://localhost:$(K8S_HTTP_PORT)  (admin@example.com / LocalAdmin123!)"
 	@echo "MQTT TLS:        mqtts://localhost:$(K8S_MQTT_PORT)  (CA: $(K8S_CERTS_DIR)/ca.crt)"
 ifeq ($(OBS),1)
 	@echo "Grafana:         kubectl -n $(K8S_OBS_NAMESPACE) port-forward svc/kube-prometheus-stack-grafana 3001:80"
