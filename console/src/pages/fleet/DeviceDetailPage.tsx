@@ -24,6 +24,12 @@ import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceUplinkPanel } from "@/components/fleet/DeviceUplinkPanel";
 import { DeviceResourceMeters } from "@/components/fleet/DeviceResourceMeters";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
+import { DeviceTelemetryCharts } from "@/components/fleet/DeviceTelemetryCharts";
+import {
+  DeploymentHistoryPanel,
+  DeviceAppsPanel,
+  DeviceLogHistory,
+} from "@/components/fleet/DeviceHistoryPanels";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
 import { DeviceActionsPanel } from "@/components/fleet/DeviceActionsPanel";
 import { DeviceWifiPanel } from "@/components/fleet/DeviceWifiPanel";
@@ -315,6 +321,10 @@ export function DeviceDetailPage() {
         </div>
       )}
 
+      {activeTab === "software" && token && (
+        <DeploymentHistoryPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+      )}
+
       {activeTab === "network" && (
         <>
           {canWifi && token && (
@@ -401,6 +411,10 @@ export function DeviceDetailPage() {
         </div>
       )}
 
+      {activeTab === "access" && canLogs && token && (
+        <DeviceLogHistory token={token} organizationId={organizationId} deviceId={deviceId} />
+      )}
+
       {activeTab === "mqtt" && (
         <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
           <h2 className="text-lg font-semibold">MQTT Connection</h2>
@@ -454,6 +468,16 @@ export function DeviceDetailPage() {
             metrics={device.mqtt_metrics}
             updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
           />
+          {token ? (
+            <DeviceTelemetryCharts
+              token={token}
+              organizationId={organizationId}
+              deviceId={deviceId}
+            />
+          ) : null}
+          {token ? (
+            <DeviceAppsPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+          ) : null}
           <div className="grid gap-4 rounded-lg border border-border bg-card p-6 shadow-glow sm:grid-cols-2">
             <Detail label="Serial number" value={device.serial_number} />
             <Detail

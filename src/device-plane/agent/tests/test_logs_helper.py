@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import io
+import json
 import subprocess
 from pathlib import Path
 
@@ -221,3 +222,40 @@ def test_must_run_as_root(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(helper.os, "geteuid", lambda: 1000)
     with pytest.raises(SystemExit):
         helper.main(["list"])
+
+
+def test_warnings_prints_only_safe_fields(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    seen: list[list[str]] = []
+    journal = "\n".join(
+        [
+            '{"__CURSOR":"s=a;i=2","__REALTIME_TIMESTAMP":"1763200800000000","PRIORITY":"3",'
+            '"_SYSTEMD_UNIT":"nginx.service","SYSLOG_IDENTIFIER":"nginx","MESSAGE":"upstream down",'
+            '"_CMDLINE":"secret"}',
+            '{"__CURSOR":"s=a;i=3","MESSAGE":[104,105]}',
+            '{"__CURSOR":"s=a;i=4"}',
+        ]
+    )
+
+    def run(args, **_kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, journal, "")
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+    assert helper.warnings([]) == 0
+    assert "--priority=warning" in seen[0] and "--since=-10min" in seen[0] and "--output=json" in seen[0]
+    assert "--all" in seen[0], "long messages must arrive as text, not null"
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert lines[0] == {
+        "cursor": "s=a;i=2",
+        "timestamp": "2025-11-15T10:00:00Z",
+        "priority": 3,
+        "unit": "nginx.service",
+        "source": "nginx",
+        "message": "upstream down",
+    }
+    assert lines[1]["message"] == "hi" and len(lines) == 2
+    assert helper.warnings(["--after-cursor", "s=a;i=4"]) == 0
+    assert "--after-cursor=s=a;i=4" in seen[1]
+    for bad in (["--after-cursor", "--since=x y"], ["--after-cursor"], ["--lines=9"]):
+        with pytest.raises(SystemExit):
+            helper.warnings(bad)

@@ -33,6 +33,9 @@ type Query struct {
 	After          *Cursor
 	// Filter is a JSON object the event data must contain (top-level equality).
 	Filter map[string]json.RawMessage
+	// Contains keeps events whose top-level "message" string contains this text,
+	// ignoring case (device log search).
+	Contains string
 }
 
 // AggregateQuery buckets a numeric field over time.

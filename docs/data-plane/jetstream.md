@@ -23,7 +23,7 @@ JetStream is internal messaging between data-plane services. **Devices never con
                  rule-processor (Go)                 clickhouse-writer (Go)
                  Handler (rule engine)               batched, idempotent inserts
                          ▼                                   ▼
-                  alerts / actions                  ClickHouse `events` table
+                  alerts / actions                  ClickHouse `events` table (+ `device_metrics` view)
 ```
 
 The existing path from the Python data plane to the control plane (`POST /internal/mqtt/ingest`, last known status and metrics shown in the console) is unchanged; both subscribe to the same device topics.

@@ -71,12 +71,13 @@ def test_normalize_device_topic() -> None:
         normalize_device_topic(device, "commands", action="subscribe")
         == f"devices/{device}/commands"
     )
+    assert normalize_device_topic(device, "events") == f"devices/{device}/events"
     try:
-        normalize_device_topic(device, "events")
+        normalize_device_topic(device, "telemetry")
     except ValueError as exc:
         assert "must be one of" in str(exc)
     else:
-        raise AssertionError("expected events topic to fail")
+        raise AssertionError("expected an unknown topic to fail")
     try:
         normalize_device_topic(device, "devices/11111111-1111-1111-1111-111111111111/status")
     except ValueError as exc:

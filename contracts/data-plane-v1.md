@@ -243,4 +243,8 @@ Only enabled applications and usable credentials (not revoked, not expired, devi
 
 **Operator commands** (control plane pushes, ops listener `:8092`, same shared token header): `POST /internal/v1/commands` with `{organization_id, application_id, issued_by, name, payload, device_id?, ...}` and `GET /internal/v1/organizations/{org}/commands/{id}`.
 
+**Device telemetry history** (control plane reads, ops listener, same header): `GET /internal/v1/organizations/{org}/devices/{device}/metrics?start&end&bucket&names` answers bucketed `{name, points: [{t, avg, min, max, count}]}` series of the device's `meteor.device.metrics` stream. Details: [device telemetry](../docs/data-plane/device-telemetry.md).
+
+**Platform history** (ops listener, same header): `POST /internal/v1/events` stores control-plane events (only `meteor.deployments`; ids are outbox ids, so retries are stored once); `GET /internal/v1/organizations/{org}/events?stream=meteor.*&device_id&start&end&order&limit&cursor&filter&q&previous=1` reads a platform stream; `GET /internal/v1/organizations/{org}/devices/online?start&end&bucket` counts distinct devices with metrics per bucket. Devices publish app lifecycle events and journal warnings on `devices/<id>/events`; events of type `log` are stored in `meteor.device.logs`. Details: [platform history](../docs/data-plane/platform-history.md).
+
 **Agent credential minting** (device agent to control plane): `POST /api/v1/agent/applications/credentials` with the device token and `{"workload_key": "..."}`. Answers a device-scoped token only when the device's desired release for that workload is bound to an application: `{token, credential_id, expires_at, refresh_after, endpoint, application, application_id, organization_id, device_id, environment}`.

@@ -8,6 +8,8 @@ The data plane lets applications publish data, subscribe to live data, query his
 | Register applications, permissions and credentials | [Applications and credentials](applications.md) |
 | Run, configure, monitor and troubleshoot it | [Operations](operations.md) |
 | Understand the device event path (MQTT → NATS JetStream → rule processor, ClickHouse writer) | [Device event path](jetstream.md) |
+| Understand device CPU, memory, disk and temperature history (ClickHouse, console charts) | [Device telemetry history](device-telemetry.md) |
+| Understand online/offline, deployment, app lifecycle and saved-warning history | [Platform history](platform-history.md) |
 | Write a client in another language, or use MQTT directly | [Protocol contract](../../contracts/data-plane-v1.md) · [OpenAPI](../../src/data-plane/go/api/openapi.yaml) |
 
 ## Try it

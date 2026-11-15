@@ -29,9 +29,6 @@ Action = Literal["publish", "subscribe", "read"]
 CONTROL_TOPIC_PREFIX = "meteorcloud/control/"
 KICK_TOPIC = f"{CONTROL_TOPIC_PREFIX}disconnect"
 
-#: Reserved for future device events / rule engine input; denied until a rule opens it.
-RESERVED_DEVICE_SUFFIXES = ("events",)
-
 
 @dataclass(frozen=True)
 class TopicRule:
@@ -52,6 +49,9 @@ DEVICE_RULES: tuple[TopicRule, ...] = (
         allow_retain=True,  # online/offline status and last will are retained
     ),
     TopicRule(name="device-metrics", actions=frozenset({"publish"}), pattern="devices/{device_id}/metrics"),
+    # App lifecycle and other device events (device-ingest -> JetStream -> ClickHouse,
+    # rule processor). Not retained: each message is one event, not a state.
+    TopicRule(name="device-events", actions=frozenset({"publish"}), pattern="devices/{device_id}/events"),
     TopicRule(
         name="device-command-results",
         actions=frozenset({"publish"}),

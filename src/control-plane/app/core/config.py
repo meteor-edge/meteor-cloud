@@ -153,6 +153,8 @@ class Settings(BaseSettings):
     data_plane_public_url: str = Field(default="", alias="DATA_PLANE_PUBLIC_URL")
     # Shared secret for /internal/data-plane/* (policy snapshot) and data-plane /internal/v1/*.
     data_plane_internal_token: str = Field(default="", alias="DATA_PLANE_INTERNAL_TOKEN")
+    # Seconds between sends of the platform history outbox (deployment changes) to the data plane.
+    history_relay_interval_seconds: float = Field(default=5.0, gt=0, le=300, alias="HISTORY_RELAY_INTERVAL_SECONDS")
     # Lifetime of credentials the device agent mints for deployed workloads.
     app_credential_ttl_hours: int = Field(default=168, ge=1, le=8760, alias="APP_CREDENTIAL_TTL_HOURS")
 

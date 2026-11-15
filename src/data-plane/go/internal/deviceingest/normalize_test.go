@@ -173,3 +173,14 @@ func TestNormalizeKeepsHTMLSensitiveCharsUnderLimit(t *testing.T) {
 		t.Fatalf("expected literal < and & in data, got %s", res.Event.Data)
 	}
 }
+
+func TestNormalizeEventsAndLogs(t *testing.T) {
+	app, rej := Normalize(devA, orgA, ChannelEvents, []byte(`{"type":"app.exited","app":"web","exit_code":137}`), now, envelope.DefaultLimits())
+	if rej != nil || app.Event.Stream != StreamEvents || app.Event.Type != "app.exited" || app.Event.Kind != envelope.KindEvent {
+		t.Fatalf("app event: %+v %v", app, rej)
+	}
+	log, rej := Normalize(devA, orgA, ChannelEvents, []byte(`{"type":"log","message":"disk failing","priority":3}`), now, envelope.DefaultLimits())
+	if rej != nil || log.Event.Stream != StreamLogs || log.Event.Type != LogEventType {
+		t.Fatalf("log event: %+v %v", log, rej)
+	}
+}

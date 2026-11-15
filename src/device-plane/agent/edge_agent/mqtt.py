@@ -17,6 +17,7 @@ import paho.mqtt.client as mqtt
 
 from edge_agent.metrics import collect_metrics, read_uptime_seconds
 from edge_agent.mqtt_config import MqttConfig, resolve_mqtt_broker_host
+from edge_agent.observer import DeviceObserver
 
 logger = logging.getLogger("edge_agent")
 
@@ -24,7 +25,8 @@ AGENT_VERSION = "0.3.0"
 COMMANDS_QOS = 1
 STATUS_QOS = 1
 METRICS_INTERVAL_SECONDS = 60.0
-DEVICE_PUBLISH_SUFFIXES = frozenset({"status", "metrics", "commands/result"})
+DEVICE_PUBLISH_SUFFIXES = frozenset({"status", "metrics", "events", "commands/result"})
+EVENTS_QOS = 1
 DEVICE_SUBSCRIBE_SUFFIXES = frozenset({"commands"})
 
 
@@ -110,8 +112,10 @@ class DeviceMqttSession:
         tls_insecure: bool | None = None,
         server_url: str | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        observer: DeviceObserver | None = None,
     ) -> None:
         self.device_id = device_id
+        self.observer = observer or DeviceObserver()
         self.config = config
         self.tls_insecure = tls_insecure_enabled() if tls_insecure is None else tls_insecure
         self.server_url = server_url
@@ -134,6 +138,10 @@ class DeviceMqttSession:
     @property
     def metrics_topic(self) -> str:
         return f"devices/{self.device_id}/metrics"
+
+    @property
+    def events_topic(self) -> str:
+        return f"devices/{self.device_id}/events"
 
     @property
     def result_topic(self) -> str:
@@ -168,6 +176,7 @@ class DeviceMqttSession:
         client.connect_async(self._broker_host(), self.config.port, 60)
         client.loop_start()
         self._client = client
+        self.observer.install()
         self._metrics_stop.clear()
         self._metrics_thread = Thread(target=self._metrics_loop, name="mqtt-metrics", daemon=True)
         self._metrics_thread.start()
@@ -261,8 +270,11 @@ class DeviceMqttSession:
         client = self._client
         if client is None:
             return
+        events: list[dict] = []
         try:
             body = collect_metrics()
+            extra, events = self.observer.observe()
+            body.update(extra)
             body["timestamp"] = utc_timestamp()
             client.publish(
                 self.metrics_topic,
@@ -272,6 +284,20 @@ class DeviceMqttSession:
             )
         except Exception:
             logger.debug("Could not publish MQTT metrics")
+        for event in events:
+            self._publish_event(client, event)
+
+    def _publish_event(self, client: mqtt.Client, event: dict) -> None:
+        """App lifecycle changes and system warnings, kept as device events in the cloud."""
+        try:
+            client.publish(
+                self.events_topic,
+                payload=json.dumps({"timestamp": utc_timestamp(), **event}),
+                qos=EVENTS_QOS,
+                retain=False,
+            )
+        except Exception:
+            logger.debug("Could not publish MQTT event")
 
 
 def commands_topic(device_id: str) -> str:

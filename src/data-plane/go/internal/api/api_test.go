@@ -892,3 +892,144 @@ func aclFromRules(t *testing.T, rules []aclRule) bus.ACL {
 	}
 	return acl
 }
+
+func TestInternalDeviceMetrics(t *testing.T) {
+	e := newEnv(t, nil)
+	base := time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Minute)
+	mk := func(id, dev string, ts time.Time, data string) *envelope.Event {
+		return &envelope.Event{ID: id, SchemaVersion: 1, Kind: envelope.KindTelemetry, Type: "device.metrics",
+			Stream: storage.DeviceMetricsStream, OrganizationID: orgA, DeviceID: dev, Time: ts, ReceivedAt: ts, Data: json.RawMessage(data)}
+	}
+	if _, err := e.store.InsertEvents(context.Background(), []*envelope.Event{
+		mk("a", dev1, base, `{"cpu_percent":10,"disk_percent":70}`),
+		mk("b", dev1, base.Add(30*time.Second), `{"cpu_percent":20,"disk_percent":72}`),
+		mk("c", dev2, base, `{"cpu_percent":90}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := "/internal/v1/organizations/" + orgA + "/devices/" + dev1 + "/metrics"
+	if code, _ := e.internal("GET", path, "wrong", nil); code != 401 {
+		t.Fatalf("wrong token: %d", code)
+	}
+	if code, _ := e.request(e.public.URL, "GET", path, map[string]string{"X-Data-Plane-Internal-Token": internalTok}, nil); code != 404 {
+		t.Fatalf("internal route must not exist on the public listener: %d", code)
+	}
+	code, body := e.internal("GET", path, internalTok, nil)
+	if code != 200 || body["bucket_seconds"] != float64(60) || body["device_id"] != dev1 {
+		t.Fatalf("default query: %d %v", code, body)
+	}
+	series := body["series"].([]any)
+	if len(series) != len(DefaultDeviceMetrics) {
+		t.Fatalf("one series per default metric: %v", series)
+	}
+	cpu := series[0].(map[string]any)
+	points := cpu["points"].([]any)
+	if cpu["name"] != "cpu_percent" || len(points) != 1 || points[0].(map[string]any)["avg"] != float64(15) ||
+		points[0].(map[string]any)["max"] != float64(20) {
+		t.Fatalf("cpu: %v", cpu)
+	}
+	if mem := series[1].(map[string]any); mem["name"] != "memory_percent" || len(mem["points"].([]any)) != 0 {
+		t.Fatalf("memory must be an empty list, not null: %v", mem)
+	}
+	_, body = e.internal("GET", path+"?names=disk_percent,disk_percent&bucket=1h", internalTok, nil)
+	if s := body["series"].([]any); len(s) != 1 || s[0].(map[string]any)["points"].([]any)[0].(map[string]any)["avg"] != float64(71) {
+		t.Fatalf("named metric, duplicates folded: %v", body)
+	}
+	for _, q := range []string{"?names=bad%20name", "?bucket=1500ms", "?start=yesterday",
+		"?start=2026-11-14T10:00:00Z&end=2026-11-14T09:00:00Z", "?start=2026-01-01T00:00:00Z&end=2026-11-01T00:00:00Z&bucket=1m"} {
+		if code, _ := e.internal("GET", path+q, internalTok, nil); code != 400 {
+			t.Fatalf("%s must be refused: %d", q, code)
+		}
+	}
+	if code, _ := e.internal("GET", "/internal/v1/organizations/not-a-uuid/devices/"+dev1+"/metrics", internalTok, nil); code != 400 {
+		t.Fatalf("org must be a UUID: %d", code)
+	}
+}
+
+func TestInternalPlatformEvents(t *testing.T) {
+	e := newEnv(t, nil)
+	now := time.Now().UTC().Truncate(time.Second)
+	ev := func(id, dev, typ string, ts time.Time, data string) map[string]any {
+		return map[string]any{"id": id, "organization_id": orgA, "device_id": dev, "stream": "meteor.deployments",
+			"type": typ, "time": ts.Format(time.RFC3339Nano), "data": json.RawMessage(data)}
+	}
+	batch := map[string]any{"events": []any{
+		ev("d1", dev1, "deployment.device.updating", now.Add(-3*time.Minute), `{"deployment_id":"dep-1"}`),
+		ev("d2", dev1, "deployment.device.succeeded", now.Add(-time.Minute), `{"deployment_id":"dep-1","seconds":120}`),
+		ev("d3", dev2, "deployment.device.failed", now.Add(-time.Minute), `{"deployment_id":"dep-2"}`),
+	}}
+	if code, _ := e.internal("POST", "/internal/v1/events", "wrong", batch); code != 401 {
+		t.Fatalf("wrong token: %d", code)
+	}
+	code, body := e.internal("POST", "/internal/v1/events", internalTok, batch)
+	if code != 200 || body["inserted"] != float64(3) {
+		t.Fatalf("write: %d %v", code, body)
+	}
+	if _, body := e.internal("POST", "/internal/v1/events", internalTok, batch); body["inserted"] != float64(0) {
+		t.Fatalf("a retried batch must be stored once: %v", body)
+	}
+	for name, bad := range map[string]map[string]any{
+		"device stream": ev("x", dev1, "t", now, `{}`),
+		"future":        ev("x", dev1, "t", now.Add(time.Hour), `{}`),
+		"org":           ev("x", dev1, "t", now, `{}`),
+	} {
+		switch name {
+		case "device stream":
+			bad["stream"] = "meteor.device.status"
+		case "org":
+			bad["organization_id"] = "nope"
+		}
+		if code, _ := e.internal("POST", "/internal/v1/events", internalTok, map[string]any{"events": []any{bad}}); code != 400 {
+			t.Fatalf("%s must be refused: %d", name, code)
+		}
+	}
+
+	q := "/internal/v1/organizations/" + orgA + "/events?stream=meteor.deployments"
+	_, body = e.internal("GET", q+"&device_id="+dev1+"&order=desc", internalTok, nil)
+	if evs := body["events"].([]any); len(evs) != 2 || evs[0].(map[string]any)["type"] != "deployment.device.succeeded" {
+		t.Fatalf("device history: %v", body)
+	}
+	_, body = e.internal("GET", q+`&filter={"deployment_id":"dep-2"}`, internalTok, nil)
+	if evs := body["events"].([]any); len(evs) != 1 || evs[0].(map[string]any)["device_id"] != dev2 {
+		t.Fatalf("filter by deployment: %v", body)
+	}
+	start := now.Add(-2 * time.Minute).Format(time.RFC3339)
+	_, body = e.internal("GET", q+"&device_id="+dev1+"&start="+start+"&previous=1", internalTok, nil)
+	if prev, _ := body["previous"].(map[string]any); prev == nil || prev["id"] != "d1" || len(body["events"].([]any)) != 1 {
+		t.Fatalf("previous state: %v", body)
+	}
+	if code, _ := e.internal("GET", "/internal/v1/organizations/"+orgA+"/events?stream=energy.power", internalTok, nil); code != 400 {
+		t.Fatalf("application streams are not served here: %d", code)
+	}
+	if _, body := e.internal("GET", "/internal/v1/organizations/"+orgB+"/events?stream=meteor.deployments", internalTok, nil); len(body["events"].([]any)) != 0 {
+		t.Fatalf("other organization must see nothing: %v", body)
+	}
+	// The search limit counts characters, as the control plane does, not UTF-8 bytes.
+	if code, _ := e.internal("GET", q+"&q="+url.QueryEscape(strings.Repeat("温", 200)), internalTok, nil); code != 200 {
+		t.Fatalf("200 multibyte characters must be accepted: %d", code)
+	}
+	if code, _ := e.internal("GET", q+"&q="+url.QueryEscape(strings.Repeat("温", 201)), internalTok, nil); code != 400 {
+		t.Fatalf("201 characters must be refused: %d", code)
+	}
+}
+
+func TestInternalOnlineDevices(t *testing.T) {
+	e := newEnv(t, nil)
+	base := time.Now().UTC().Add(-20 * time.Minute).Truncate(5 * time.Minute)
+	mk := func(id, dev string, ts time.Time) *envelope.Event {
+		return &envelope.Event{ID: id, SchemaVersion: 1, Kind: envelope.KindTelemetry, Type: "device.metrics",
+			Stream: storage.DeviceMetricsStream, OrganizationID: orgA, DeviceID: dev, Time: ts, ReceivedAt: ts, Data: json.RawMessage(`{"cpu_percent":1}`)}
+	}
+	e.store.InsertEvents(context.Background(), []*envelope.Event{
+		mk("a", dev1, base), mk("b", dev2, base.Add(time.Minute)), mk("c", dev1, base.Add(6*time.Minute)),
+	})
+	code, body := e.internal("GET", "/internal/v1/organizations/"+orgA+"/devices/online?bucket=5m&start="+
+		base.Format(time.RFC3339)+"&end="+base.Add(10*time.Minute).Format(time.RFC3339), internalTok, nil)
+	b := body["buckets"].([]any)
+	if code != 200 || len(b) != 2 || b[0].(map[string]any)["devices"] != float64(2) || b[1].(map[string]any)["devices"] != float64(1) {
+		t.Fatalf("online: %d %v", code, body)
+	}
+	if code, _ := e.internal("GET", "/internal/v1/organizations/"+orgA+"/devices/online?bucket=1s&start=2026-01-01T00:00:00Z&end=2026-11-01T00:00:00Z", internalTok, nil); code != 400 {
+		t.Fatalf("too many buckets: %d", code)
+	}
+}

@@ -115,6 +115,10 @@ func (s *Server) OpsHandler() http.Handler {
 	mux.Handle("GET /metrics", s.metrics.Handler())
 	mux.Handle("POST /internal/v1/commands", s.internal("internal_commands_create", s.handleInternalCommandCreate))
 	mux.Handle("GET /internal/v1/organizations/{org}/commands/{id}", s.internal("internal_commands_get", s.handleInternalCommandGet))
+	mux.Handle("GET /internal/v1/organizations/{org}/devices/{device}/metrics", s.internal("internal_device_metrics", s.handleInternalDeviceMetrics))
+	mux.Handle("GET /internal/v1/organizations/{org}/devices/online", s.internal("internal_devices_online", s.handleInternalOnlineDevices))
+	mux.Handle("GET /internal/v1/organizations/{org}/events", s.internal("internal_events_query", s.handleInternalEventsQuery))
+	mux.Handle("POST /internal/v1/events", s.internal("internal_events_write", s.handleInternalEventsWrite))
 	return mux
 }
 

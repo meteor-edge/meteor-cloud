@@ -45,7 +45,8 @@ VMQ = f"/internal/mqtt/vernemq/{{hook}}?token={TOKEN}"
         ("publish", "commands", False, False),  # a device cannot command itself
         ("subscribe", "status", False, False),
         ("subscribe", "commands/result", False, False),
-        ("publish", "events", False, False),  # reserved until a rule opens it
+        ("publish", "events", False, True),  # device events (app lifecycle)
+        ("publish", "events", True, False),  # never retained
         ("subscribe", "events", False, False),
         ("publish", "telemetry", False, False),
         ("delete", "status", False, False),
@@ -95,10 +96,17 @@ def test_decision_names_the_rule_or_reason() -> None:
 
 def test_rules_are_data_and_can_be_extended() -> None:
     """A later rule set (customer topics, rule engine input) is just more rows."""
-    extra = (*DEVICE_RULES, TopicRule("device-events", frozenset({"publish"}), "devices/{device_id}/events"))
-    assert evaluate_device(A, "publish", f"devices/{A}/events", rules=extra).allowed
-    assert not evaluate_device(A, "publish", f"devices/{B}/events", rules=extra).allowed
-    assert not evaluate_device(A, "publish", f"devices/{A}/events").allowed
+    extra = (*DEVICE_RULES, TopicRule("device-logs", frozenset({"publish"}), "devices/{device_id}/logs"))
+    assert evaluate_device(A, "publish", f"devices/{A}/logs", rules=extra).allowed
+    assert not evaluate_device(A, "publish", f"devices/{B}/logs", rules=extra).allowed
+    assert not evaluate_device(A, "publish", f"devices/{A}/logs").allowed
+
+
+def test_device_events_are_own_and_not_retained() -> None:
+    assert evaluate_device(A, "publish", f"devices/{A}/events").rule == "device-events"
+    assert not evaluate_device(A, "publish", f"devices/{B}/events").allowed
+    assert not evaluate_device(A, "publish", f"devices/{A}/events", retain=True).allowed
+    assert not evaluate_device(A, "subscribe", f"devices/{A}/events").allowed
 
 
 def test_client_id_must_belong_to_the_device() -> None:

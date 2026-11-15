@@ -3,16 +3,32 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from queue import Empty
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
+from app.applications.dependencies import get_data_plane_api
+from app.core.database import get_db
 from app.deployments.software_dependencies import DeviceSoftwareSvc
 from app.deployments.software_schemas import DeviceSoftwareResponse
 from app.devices.dependencies import FleetSvc
 from app.devices.device_config import DeviceConfigRequest, DeviceConfigResponse
+from app.devices.history import (
+    DeviceAppsResponse,
+    DeviceAvailabilityResponse,
+    DeviceDeploymentHistoryResponse,
+    DeviceLogHistoryResponse,
+    FleetOnlineResponse,
+    device_apps,
+    device_availability,
+    device_deployment_history,
+    device_log_history,
+    fleet_online_history,
+)
 from app.devices.schemas import (
     DeviceCredentialResponse,
     DeviceEnrollmentRequestResponse,
@@ -34,12 +50,14 @@ from app.devices.schemas import (
     RegistrationTokenCreateResponse,
     RegistrationTokenResponse,
 )
+from app.devices.telemetry import DeviceTelemetryResponse, TelemetryRange, get_device_telemetry
 from app.identity.dependencies import CurrentUser
 from app.mqtt.control import request_device_disconnect
 from app.mqtt.hub import get_mqtt_event_hub
 from app.mqtt.runtime import get_mqtt_publisher, get_mqtt_topic_watcher
 from app.mqtt.schemas import DevicePingResponse, MqttTestPublishRequest, MqttTestPublishResponse
 from app.mqtt.service import MqttPublisher
+from app.ports.data_plane import DataPlaneApi
 
 router = APIRouter(prefix="/api/v1/organizations/{organization_id}", tags=["fleet"])
 
@@ -340,6 +358,121 @@ def get_device(
     service: FleetSvc,
 ) -> DeviceResponse:
     return service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.get("/devices/{device_id}/telemetry", response_model=DeviceTelemetryResponse)
+def get_device_telemetry_history(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+    data_plane: Annotated[DataPlaneApi | None, Depends(get_data_plane_api)],
+    range_: Annotated[TelemetryRange, Query(alias="range")] = "24h",
+) -> DeviceTelemetryResponse:
+    """CPU, memory, disk and temperature history, bucketed for charts (stored in ClickHouse)."""
+    # Same permission as reading the device; raises 404/403 before the data plane is asked.
+    service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+    return get_device_telemetry(
+        data_plane,
+        organization_id=organization_id,
+        device_id=device_id,
+        range_=range_,
+        now=datetime.now(UTC),
+    )
+
+
+@router.get("/devices/{device_id}/availability", response_model=DeviceAvailabilityResponse)
+def get_device_availability(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+    data_plane: Annotated[DataPlaneApi | None, Depends(get_data_plane_api)],
+    range_: Annotated[TelemetryRange, Query(alias="range")] = "24h",
+) -> DeviceAvailabilityResponse:
+    """Online/offline segments and uptime from the agent's status messages and the broker's last will."""
+    service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+    return device_availability(
+        data_plane, organization_id=organization_id, device_id=device_id, range_=range_, now=datetime.now(UTC)
+    )
+
+
+@router.get("/devices/{device_id}/deployment-history", response_model=DeviceDeploymentHistoryResponse)
+def get_device_deployment_history(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+    session: Annotated[Session, Depends(get_db)],
+    data_plane: Annotated[DataPlaneApi | None, Depends(get_data_plane_api)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> DeviceDeploymentHistoryResponse:
+    """Every status change of this device in a Deploy, newest first, with durations."""
+    service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+    return device_deployment_history(
+        data_plane, session, organization_id=organization_id, device_id=device_id, limit=limit
+    )
+
+
+@router.get("/devices/{device_id}/apps", response_model=DeviceAppsResponse)
+def get_device_apps(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+    data_plane: Annotated[DataPlaneApi | None, Depends(get_data_plane_api)],
+) -> DeviceAppsResponse:
+    """Latest per-app CPU, memory, restarts and health, plus recent app lifecycle events."""
+    service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+    return device_apps(data_plane, organization_id=organization_id, device_id=device_id, now=datetime.now(UTC))
+
+
+@router.get("/devices/{device_id}/log-history", response_model=DeviceLogHistoryResponse)
+def get_device_log_history(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+    data_plane: Annotated[DataPlaneApi | None, Depends(get_data_plane_api)],
+    range_: Annotated[TelemetryRange, Query(alias="range")] = "7d",
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    cursor: Annotated[str | None, Query(max_length=512)] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> DeviceLogHistoryResponse:
+    """System warnings the device sent (journal, warning or worse), newest first; ``q`` searches messages."""
+    service.require_device_permission(
+        actor=current_user, organization_id=organization_id, device_id=device_id, permission="device.logs"
+    )
+    return device_log_history(
+        data_plane,
+        organization_id=organization_id,
+        device_id=device_id,
+        range_=range_,
+        query=(q.strip() or None) if q else None,
+        cursor=cursor,
+        limit=limit,
+        now=datetime.now(UTC).replace(microsecond=0),
+    )
+
+
+@router.get("/fleet/online-history", response_model=FleetOnlineResponse)
+def get_fleet_online_history(
+    organization_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+    data_plane: Annotated[DataPlaneApi | None, Depends(get_data_plane_api)],
+    range_: Annotated[TelemetryRange, Query(alias="range")] = "24h",
+) -> FleetOnlineResponse:
+    """How many devices were online over time (devices that reported metrics in each bucket)."""
+    total, online = service.fleet_counts(actor=current_user, organization_id=organization_id)
+    return fleet_online_history(
+        data_plane,
+        organization_id=organization_id,
+        range_=range_,
+        total_devices=total,
+        online_now=online,
+        now=datetime.now(UTC),
+    )
 
 
 @router.get("/devices/{device_id}/software", response_model=list[DeviceSoftwareResponse])
