@@ -178,6 +178,10 @@ def test_own_topics_allowed(api, live_config):
         _assert_publish_delivered(
             observer, session, f"devices/{device.device_id}/commands/result"
         )
+        # App lifecycle events and journal warnings (agent 0.3.4).
+        _assert_publish_delivered(
+            observer, session, f"devices/{device.device_id}/events"
+        )
     finally:
         session.close()
         observer.close()
@@ -190,18 +194,19 @@ def test_reserved_and_unknown_own_topics_denied(api, live_config):
     session.start()
     try:
         assert session.wait_connected() is True
-        for suffix in ("events", "telemetry", "custom", "commands"):
+        for suffix in ("telemetry", "custom", "commands"):
             _assert_publish_blocked(
                 observer, live_config, device, f"devices/{device.device_id}/{suffix}"
             )
         # Only the status topic may be retained.
-        _assert_publish_blocked(
-            observer,
-            live_config,
-            device,
-            f"devices/{device.device_id}/metrics",
-            retain=True,
-        )
+        for suffix in ("metrics", "events"):
+            _assert_publish_blocked(
+                observer,
+                live_config,
+                device,
+                f"devices/{device.device_id}/{suffix}",
+                retain=True,
+            )
     finally:
         session.close()
         observer.close()
