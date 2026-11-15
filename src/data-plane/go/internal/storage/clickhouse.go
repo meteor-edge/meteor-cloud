@@ -374,6 +374,9 @@ func (c *ClickHouse) where(q *Query, params map[string]string) (string, error) {
 	if !q.End.IsZero() {
 		conds = append(conds, "ts < "+add("DateTime64(6, 'UTC')", chTime(q.End)))
 	}
+	if q.Contains != "" {
+		conds = append(conds, "positionCaseInsensitiveUTF8(JSONExtractString(data, 'message'), "+add("String", chString(q.Contains))+") > 0")
+	}
 	for key, want := range q.Filter {
 		k := add("String", chString(key))
 		var v any

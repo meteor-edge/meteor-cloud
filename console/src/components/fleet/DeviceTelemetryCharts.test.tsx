@@ -8,6 +8,7 @@ import { DeviceTelemetryCharts } from "@/components/fleet/DeviceTelemetryCharts"
 import { splitSegments } from "@/lib/telemetry";
 
 vi.mock("@/api/fleet/telemetry", () => ({ getDeviceTelemetry: vi.fn() }));
+vi.mock("@/components/fleet/DeviceHistoryPanels", () => ({ AvailabilityStrip: () => null }));
 
 const start = "2026-11-14T10:00:00Z";
 const end = "2026-11-14T11:00:00Z";

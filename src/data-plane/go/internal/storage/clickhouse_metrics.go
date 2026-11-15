@@ -118,3 +118,31 @@ func (c *ClickHouse) DeviceMetrics(ctx context.Context, q DeviceMetricsQuery) ([
 	})
 	return out, err
 }
+
+// CountDevices counts distinct devices per bucket in one query.
+func (c *ClickHouse) CountDevices(ctx context.Context, q Query, bucket time.Duration) ([]DeviceCount, error) {
+	width := bucket.Microseconds()
+	if width < time.Second.Microseconds() {
+		return nil, fmt.Errorf("bucket is too small")
+	}
+	params := map[string]string{}
+	where, err := c.where(&q, params)
+	if err != nil {
+		return nil, err
+	}
+	sql := fmt.Sprintf(`SELECT intDiv(toUnixTimestamp64Micro(ts), %d) * %d AS bucket, uniqExact(device_id) AS n
+		FROM %s.events WHERE %s AND device_id != '' GROUP BY bucket ORDER BY bucket`, width, width, c.database, where)
+	var out []DeviceCount
+	err = c.query(ctx, sql, params, func(line []byte) error {
+		var r struct {
+			Bucket int64 `json:"bucket"`
+			N      int64 `json:"n"`
+		}
+		if err := json.Unmarshal(line, &r); err != nil {
+			return err
+		}
+		out = append(out, DeviceCount{Start: time.UnixMicro(r.Bucket).UTC(), Devices: r.N})
+		return nil
+	})
+	return out, err
+}

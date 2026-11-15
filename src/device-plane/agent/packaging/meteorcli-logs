@@ -9,8 +9,13 @@ wraps it on the device. Every source must be one `list` reports right now; nothi
 from the caller reaches a shell, and file paths are limited to a fixed allowlist.
 
   meteorcli-logs list
+  meteorcli-logs warnings [--after-cursor CURSOR]
   meteorcli-logs show journal|systemd UNIT|docker CONTAINER [--project NAME]|file PATH
                  [--lines N] [--since 15m|1h|24h|7d] [--grep TEXT] [--follow]
+
+`warnings` prints journal entries at warning or worse as JSON lines (at most 200,
+after CURSOR or from the last 10 minutes), with only the message, priority, unit,
+time and cursor, for the agent to keep them in the cloud.
 
 --project makes a container count only if it belongs to that compose project, so the
 control plane can let users read a deployed project's containers and nothing else.
@@ -28,6 +33,7 @@ import subprocess
 import sys
 import threading
 from collections import deque
+from datetime import datetime, timezone
 
 # sudo usually sets secure_path, but do not rely on it for the tools run as root.
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -274,6 +280,53 @@ def show(opts: dict) -> int:
     return stream(command(opts, lines=0, follow=True), needle=opts["grep"])
 
 
+CURSOR = re.compile(r"^[A-Za-z0-9=;_-]{1,512}$")
+WARNINGS_MAX = 200
+
+
+def warnings(argv: list[str]) -> int:
+    args = ["journalctl", "--no-pager", "--quiet", "--output=json", "--priority=warning", f"--lines={WARNINGS_MAX}"]
+    if argv[:1] == ["--after-cursor"] and len(argv) == 2 and CURSOR.match(argv[1]):
+        args.append(f"--after-cursor={argv[1]}")
+    elif not argv:
+        args.append("--since=-10min")
+    else:
+        fail("usage: warnings [--after-cursor CURSOR]")
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        fail("journalctl failed")
+    for line in result.stdout.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = entry.get("MESSAGE")
+        if isinstance(message, list):  # binary messages come as byte arrays
+            message = bytes(b for b in message if isinstance(b, int) and 0 <= b < 256).decode("utf-8", "replace")
+        if not isinstance(message, str) or not message:
+            continue
+        try:
+            micros = int(entry.get("__REALTIME_TIMESTAMP", ""))
+            timestamp = datetime.fromtimestamp(micros / 1e6, timezone.utc).isoformat().replace("+00:00", "Z")
+        except (TypeError, ValueError):
+            timestamp = None
+        priority = entry.get("PRIORITY")
+        print(
+            json.dumps(
+                {
+                    "cursor": entry.get("__CURSOR"),
+                    "timestamp": timestamp,
+                    "priority": int(priority) if isinstance(priority, str) and priority.isdigit() else None,
+                    "unit": entry.get("_SYSTEMD_UNIT"),
+                    "source": entry.get("SYSLOG_IDENTIFIER"),
+                    "message": message[:1000],
+                }
+            )
+        )
+    return 0 if result.returncode == 0 else 1
+
+
 def main(argv: list[str]) -> int:
     if os.geteuid() != 0:
         fail("must run as root (via sudo)")
@@ -281,6 +334,8 @@ def main(argv: list[str]) -> int:
     if argv == ["list"]:
         print(json.dumps(list_sources()))
         return 0
+    if argv and argv[0] == "warnings":
+        return warnings(argv[1:])
     if argv and argv[0] == "show":
         return show(parse_show(argv[1:]))
     fail("unsupported command")

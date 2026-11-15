@@ -121,3 +121,65 @@ func TestClickHouseDeviceMetricsBackfill(t *testing.T) {
 		t.Fatalf("backfill + view: %+v", got)
 	}
 }
+
+func TestCountReportingDevicesEveryBackend(t *testing.T) {
+	for name, s := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			org, other := uuid.NewString(), uuid.NewString()
+			a, b := uuid.NewString(), uuid.NewString()
+			base := time.Date(2026, 11, 15, 8, 0, 0, 0, time.UTC)
+			batch := []*envelope.Event{
+				metricEvent(org, a, "a1", base, `{"cpu_percent":1}`),
+				metricEvent(org, a, "a2", base.Add(time.Minute), `{"cpu_percent":1}`),
+				metricEvent(org, b, "b1", base.Add(2*time.Minute), `{"cpu_percent":1}`),
+				metricEvent(org, a, "a3", base.Add(6*time.Minute), `{"cpu_percent":1}`),
+				metricEvent(other, b, "o1", base, `{"cpu_percent":1}`),
+			}
+			if _, err := s.InsertEvents(ctx, batch); err != nil {
+				t.Fatal(err)
+			}
+			got, err := CountReportingDevices(ctx, s, Query{OrganizationID: org, Stream: DeviceMetricsStream,
+				Start: base, End: base.Add(10 * time.Minute)}, 5*time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 2 || !got[0].Start.Equal(base) || got[0].Devices != 2 || got[1].Devices != 1 {
+				t.Fatalf("counts: %+v", got)
+			}
+		})
+	}
+}
+
+func TestQueryContainsMessageEveryBackend(t *testing.T) {
+	for name, s := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			org := uuid.NewString()
+			base := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+			stream := "meteor.device.logs"
+			batch := []*envelope.Event{
+				event(org, "l1", stream, base, `{"type":"log","message":"Disk /dev/sda FAILING"}`),
+				event(org, "l2", stream, base.Add(time.Second), `{"type":"log","message":"all good"}`),
+				event(org, "l3", stream, base.Add(2*time.Second), `{"type":"log","note":"failing but not a message"}`),
+				event(org, "l4", stream, base.Add(3*time.Second), `{"type":"log","message":"100% failing_now"}`),
+			}
+			if _, err := s.InsertEvents(ctx, batch); err != nil {
+				t.Fatal(err)
+			}
+			for needle, want := range map[string][]string{"failing": {"l1", "l4"}, "% fail": {"l4"}, "_now": {"l4"}, "absent": nil} {
+				got, _, err := s.QueryEvents(ctx, Query{OrganizationID: org, Stream: stream, Contains: needle, Limit: 10})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ids []string
+				for _, ev := range got {
+					ids = append(ids, ev.ID)
+				}
+				if len(ids) != len(want) || (len(want) > 0 && (ids[0] != want[0] || ids[len(ids)-1] != want[len(want)-1])) {
+					t.Fatalf("%q: got %v, want %v", needle, ids, want)
+				}
+			}
+		})
+	}
+}

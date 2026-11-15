@@ -34,6 +34,11 @@ const (
 	StreamMetrics = "meteor.device.metrics"
 	StreamStatus  = "meteor.device.status"
 	StreamEvents  = "meteor.device.events"
+	// StreamLogs holds the device's system warnings: events of type "log" on the
+	// events topic, kept apart so they cannot crowd out app lifecycle events.
+	StreamLogs = "meteor.device.logs"
+	// LogEventType is the event type the agent gives a journal entry.
+	LogEventType = "log"
 )
 
 // Subject prefixes (schema version 1).
@@ -212,6 +217,9 @@ func Normalize(deviceID, orgID string, ch Channel, payload []byte, now time.Time
 		var t string
 		if raw, ok := fields["type"]; ok && json.Unmarshal(raw, &t) == nil && t != "" && len(t) <= 128 {
 			ev.Type = t
+		}
+		if ev.Type == LogEventType {
+			ev.Stream = StreamLogs
 		}
 	}
 	return &Result{Event: ev, TimeReplaced: replaced}, nil

@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/big"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +68,14 @@ func matches(ev *envelope.Event, q *Query) bool {
 	}
 	if !q.End.IsZero() && !ev.Time.Before(q.End) {
 		return false
+	}
+	if q.Contains != "" {
+		var data struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(ev.Data, &data) != nil || !strings.Contains(strings.ToLower(data.Message), strings.ToLower(q.Contains)) {
+			return false
+		}
 	}
 	if len(q.Filter) > 0 {
 		var data map[string]json.RawMessage

@@ -37,6 +37,8 @@ from app.devices.fleet_metrics import register_fleet_metrics
 from app.devices.router import router as fleet_router
 from app.endpoints.router import router as endpoints_router
 from app.endpoints.routing import router as routing_internal_router
+from app.history import recorder as history_recorder
+from app.history.relay import run_relay
 from app.identity.router import router as identity_router
 from app.mqtt.internal_router import router as mqtt_internal_router
 from app.mqtt.runtime import start_mqtt_runtime, stop_mqtt_runtime
@@ -58,11 +60,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     sweeper: asyncio.Task[None] | None = None
     if settings.deploy_tick_interval_seconds > 0 and settings.deployment_provider == "native":
         sweeper = asyncio.create_task(run_sweeper(settings.deploy_tick_interval_seconds))
+    relay: asyncio.Task[None] | None = None
+    if history_recorder.history_enabled():
+        relay = asyncio.create_task(run_relay(settings.history_relay_interval_seconds))
     yield
-    if sweeper is not None:
-        sweeper.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await sweeper
+    for task in (sweeper, relay):
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
     stop_mqtt_runtime()
     logger.info("Shutting down %s", settings.app_name)
 
@@ -73,6 +79,7 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level, settings.log_format)
 
     configure_metrics(metrics_backend(settings))
+    history_recorder.install()
 
     application = FastAPI(
         title=settings.app_name,

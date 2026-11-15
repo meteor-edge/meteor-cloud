@@ -74,6 +74,11 @@ vi.mock("@/components/fleet/DeviceSoftwarePanel", () => ({ DeviceSoftwarePanel: 
 vi.mock("@/components/fleet/DeviceEndpointsPanel", () => ({ DeviceEndpointsPanel: () => null }));
 vi.mock("@/components/fleet/DeviceNetworkPanel", () => ({ DeviceNetworkPanel: () => null }));
 vi.mock("@/components/fleet/DeviceTelemetryCharts", () => ({ DeviceTelemetryCharts: () => null }));
+vi.mock("@/components/fleet/DeviceHistoryPanels", () => ({
+  DeploymentHistoryPanel: () => null,
+  DeviceAppsPanel: () => null,
+  DeviceLogHistory: () => null,
+}));
 vi.mock("@/components/fleet/DeviceUplinkPanel", () => ({
   DeviceUplinkPanel: () => <p>uplink panel</p>,
 }));

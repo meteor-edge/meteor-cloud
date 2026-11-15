@@ -19,7 +19,7 @@ from app.artifacts.repository import ArtifactRepository
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.devices.device_config import (
     DEVICE_CONFIG_FILE_NAME,
     DeviceConfigRequest,
@@ -990,6 +990,24 @@ class FleetService:
             page=page,
             page_size=page_size,
         )
+
+    def fleet_counts(self, *, actor: User, organization_id: uuid.UUID) -> tuple[int, int]:
+        """(registered devices, online now) for the whole organization; needs org-wide device.read."""
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require_role_permission(membership, "device.read")
+        if self.authz.scope_for(membership).mode == "device_groups":
+            raise ForbiddenError("fleet_scope_required", "Fleet history needs access to the whole organization.")
+        total = self.list_devices(actor=actor, organization_id=organization_id, page_size=1).total
+        online = self.list_devices(actor=actor, organization_id=organization_id, status="online", page_size=1).total
+        return total, online
+
+    def require_device_permission(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID, permission: str
+    ) -> None:
+        """404 for a device outside the organization, 403 without ``permission`` on its group."""
+        membership = self._require_membership(organization_id, actor.id)
+        device = self._require_device(organization_id, device_id)
+        self._require(membership, permission, device_group_id=device.device_group_id)
 
     def get_device(
         self,

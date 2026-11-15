@@ -15,3 +15,4 @@ export * from "@/api/fleet/deviceConfig";
 export * from "@/api/fleet/wifi";
 export * from "@/api/fleet/actions";
 export * from "@/api/fleet/telemetry";
+export * from "@/api/fleet/history";

@@ -8,6 +8,7 @@ import {
   type TelemetrySeries,
 } from "@/api/fleet/telemetry";
 import { ApiError } from "@/api/http";
+import { AvailabilityStrip } from "@/components/fleet/DeviceHistoryPanels";
 import { splitSegments } from "@/lib/telemetry";
 import { cn } from "@/lib/utils";
 
@@ -384,6 +385,13 @@ export function DeviceTelemetryCharts({
           ))}
         </div>
       </div>
+
+      <AvailabilityStrip
+        token={token}
+        organizationId={organizationId}
+        deviceId={deviceId}
+        range={range}
+      />
 
       {query.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading telemetry…</p>

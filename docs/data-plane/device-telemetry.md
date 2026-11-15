@@ -74,7 +74,12 @@ Console-facing (control plane): `GET /api/v1/organizations/{org}/devices/{id}/te
 | `load_1m`, `load_5m`, `load_15m` | 0.3.4 | Load average |
 | `uptime_seconds` | 0.3.4 | Seconds since boot |
 
-Older agents keep working; the Load chart appears once a device runs 0.3.4.
+| `net_rx_bps`, `net_tx_bps` | 0.3.4 | Bytes per second over physical interfaces since the last report |
+| `wifi_signal_dbm` | 0.3.4 | Wi-Fi signal level, when the device has Wi-Fi |
+| `agent_errors` | 0.3.4 | Errors the agent logged since the last report |
+| `app.<name>.cpu`, `.mem`, `.restarts`, `.up`, `.healthy`, `.health_ms` | 0.3.4 | Per Docker container; see [platform history](platform-history.md) |
+
+Older agents keep working; the Load chart appears once a device runs 0.3.4. App lifecycle events, online/offline changes, deployment history and saved warnings are described in [platform history](platform-history.md).
 
 ## Requirements
 

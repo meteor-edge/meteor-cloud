@@ -39,6 +39,23 @@ class DataPlaneHttpApi:
         assert result is not None
         return result
 
+    def write_events(self, events: list[dict[str, Any]]) -> dict[str, Any]:
+        result = self._request("POST", "/internal/v1/events", {"events": events})
+        assert result is not None
+        return result
+
+    def list_events(self, *, organization_id: uuid.UUID, params: dict[str, str]) -> dict[str, Any]:
+        query = urllib.parse.urlencode(params)
+        result = self._request("GET", f"/internal/v1/organizations/{organization_id}/events?{query}", None)
+        assert result is not None
+        return result
+
+    def online_devices(self, *, organization_id: uuid.UUID, params: dict[str, str]) -> dict[str, Any]:
+        query = urllib.parse.urlencode(params)
+        result = self._request("GET", f"/internal/v1/organizations/{organization_id}/devices/online?{query}", None)
+        assert result is not None
+        return result
+
     def _request(
         self, method: str, path: str, body: dict[str, Any] | None, *, missing_ok: bool = False
     ) -> dict[str, Any] | None:
