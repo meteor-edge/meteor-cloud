@@ -1004,6 +1004,13 @@ func TestInternalPlatformEvents(t *testing.T) {
 	if _, body := e.internal("GET", "/internal/v1/organizations/"+orgB+"/events?stream=meteor.deployments", internalTok, nil); len(body["events"].([]any)) != 0 {
 		t.Fatalf("other organization must see nothing: %v", body)
 	}
+	// The search limit counts characters, as the control plane does, not UTF-8 bytes.
+	if code, _ := e.internal("GET", q+"&q="+url.QueryEscape(strings.Repeat("温", 200)), internalTok, nil); code != 200 {
+		t.Fatalf("200 multibyte characters must be accepted: %d", code)
+	}
+	if code, _ := e.internal("GET", q+"&q="+url.QueryEscape(strings.Repeat("温", 201)), internalTok, nil); code != 400 {
+		t.Fatalf("201 characters must be refused: %d", code)
+	}
 }
 
 func TestInternalOnlineDevices(t *testing.T) {

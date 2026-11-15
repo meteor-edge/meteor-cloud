@@ -169,6 +169,38 @@ describe("device history panels", () => {
   });
 });
 
+describe("saved warnings paging", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+  afterEach(cleanup);
+
+  it("keeps loaded warnings when an older page fails", async () => {
+    vi.mocked(historyApi.getDeviceLogHistory)
+      .mockResolvedValueOnce({
+        device_id: "dev",
+        range: "7d",
+        query: null,
+        entries: [
+          {
+            t: "2026-11-15T09:00:00Z",
+            message: "first page",
+            priority: 4,
+            unit: null,
+            source: null,
+          },
+        ],
+        next_cursor: "c1",
+      })
+      .mockRejectedValueOnce(new ApiError(500, "storage_unavailable", "down"));
+    wrap(<DeviceLogHistory {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
+    expect(await screen.findByText("Older warnings could not be loaded.")).toBeInTheDocument();
+    expect(screen.getByText("first page")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+});
+
 describe("FleetOnlineChart", () => {
   beforeEach(() => {
     vi.resetAllMocks();

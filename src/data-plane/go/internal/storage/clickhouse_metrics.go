@@ -19,11 +19,12 @@ import (
 //
 // ReplacingMergeTree on (organization, device, metric, time, event id) folds the
 // duplicates that the one-time backfill below, or two writer replicas, can create.
-// Queries do not use FINAL: a duplicate that has not merged yet only repeats a
-// sample inside its bucket, which leaves avg, min and max unchanged.
+// Until a merge has run, the chart query folds them itself (one sample per event
+// id), so avg and count are not skewed.
 
 const (
-	deviceMetricsMaxKeys   = 64
+	// About 20 system keys plus up to 20 apps with 6 keys each (agent 0.3.4).
+	deviceMetricsMaxKeys   = 160
 	deviceMetricsMaxKeyLen = 64
 )
 
@@ -52,29 +53,62 @@ func (c *ClickHouse) deviceMetricsSelect(extra string) string {
 
 // ensureDeviceMetrics creates the table and the view. The first time, it copies
 // the metrics already in events, creates the view, and copies again what arrived
-// in between. The view is created last, so a failed copy is retried on the next
-// start instead of leaving a table with a hole.
+// in between. The view is created after the first copy, so a failed copy is
+// retried on the next start; the catch-up copy after the view is recorded in
+// device_metrics_backfill, so it is retried too until it has succeeded once.
 func (c *ClickHouse) ensureDeviceMetrics(ctx context.Context) error {
 	if err := c.exec(ctx, fmt.Sprintf(clickhouseDeviceMetricsDDL, c.database), nil, nil); err != nil {
 		return err
 	}
-	exists := false
-	err := c.query(ctx, `SELECT 1 AS x FROM system.tables WHERE database = {db:String} AND name = 'device_metrics_mv'`,
-		map[string]string{"db": c.database}, func([]byte) error { exists = true; return nil })
-	if err != nil || exists {
+	if err := c.exec(ctx, "CREATE TABLE IF NOT EXISTS "+c.database+
+		".device_metrics_backfill (done_at DateTime64(6, 'UTC')) ENGINE = MergeTree ORDER BY tuple()", nil, nil); err != nil {
 		return err
+	}
+	done := false
+	if err := c.query(ctx, "SELECT 1 AS x FROM "+c.database+".device_metrics_backfill LIMIT 1", nil,
+		func([]byte) error { done = true; return nil }); err != nil {
+		return err
+	}
+	var viewCreated string
+	err := c.query(ctx, `SELECT toString(metadata_modification_time) AS t FROM system.tables
+		WHERE database = {db:String} AND name = 'device_metrics_mv'`,
+		map[string]string{"db": c.database}, func(line []byte) error {
+			var r struct {
+				T string `json:"t"`
+			}
+			if err := json.Unmarshal(line, &r); err != nil {
+				return err
+			}
+			viewCreated = r.T
+			return nil
+		})
+	if err != nil {
+		return err
+	}
+	if viewCreated != "" && done {
+		return nil
 	}
 	since := time.Now().Add(-5 * time.Minute)
-	if err := c.exec(ctx, "INSERT INTO "+c.database+".device_metrics "+c.deviceMetricsSelect(""), nil, nil); err != nil {
-		return fmt.Errorf("backfill: %w", err)
+	if viewCreated == "" {
+		if err := c.exec(ctx, "INSERT INTO "+c.database+".device_metrics "+c.deviceMetricsSelect(""), nil, nil); err != nil {
+			return fmt.Errorf("backfill: %w", err)
+		}
+		view := "CREATE MATERIALIZED VIEW IF NOT EXISTS " + c.database + ".device_metrics_mv TO " + c.database + ".device_metrics AS " +
+			c.deviceMetricsSelect("")
+		if err := c.exec(ctx, view, nil, nil); err != nil {
+			return err
+		}
+	} else if t, err := time.ParseInLocation("2006-01-02 15:04:05", viewCreated, time.UTC); err == nil {
+		// A previous start created the view but did not finish the catch-up copy.
+		since = t.Add(-5 * time.Minute)
+	} else {
+		since = time.Unix(0, 0)
 	}
-	view := "CREATE MATERIALIZED VIEW IF NOT EXISTS " + c.database + ".device_metrics_mv TO " + c.database + ".device_metrics AS " +
-		c.deviceMetricsSelect("")
-	if err := c.exec(ctx, view, nil, nil); err != nil {
-		return err
+	if err := c.exec(ctx, "INSERT INTO "+c.database+".device_metrics "+
+		c.deviceMetricsSelect("AND received_at >= {since:DateTime64(6, 'UTC')}"), map[string]string{"since": chTime(since)}, nil); err != nil {
+		return fmt.Errorf("backfill catch-up: %w", err)
 	}
-	return c.exec(ctx, "INSERT INTO "+c.database+".device_metrics "+
-		c.deviceMetricsSelect("AND received_at >= {since:DateTime64(6, 'UTC')}"), map[string]string{"since": chTime(since)}, nil)
+	return c.exec(ctx, "INSERT INTO "+c.database+".device_metrics_backfill (done_at) VALUES (now64(6))", nil, nil)
 }
 
 // DeviceMetrics reads all requested metrics of one device in one query.
@@ -87,11 +121,16 @@ func (c *ClickHouse) DeviceMetrics(ctx context.Context, q DeviceMetricsQuery) ([
 		"org": chString(q.OrganizationID), "dev": chString(q.DeviceID), "names": chArray(q.Names),
 		"start": chTime(q.Start), "end": chTime(q.End),
 	}
+	// The inner query keeps one sample per event id: duplicates that have not
+	// merged yet would otherwise skew avg and count.
 	sql := fmt.Sprintf(`SELECT name, intDiv(toUnixTimestamp64Micro(ts), %d) * %d AS bucket,
 			avg(value) AS avg, min(value) AS min, max(value) AS max, count() AS n
-		FROM %s.device_metrics
-		WHERE organization_id = {org:String} AND device_id = {dev:String} AND name IN {names:Array(String)}
-			AND ts >= {start:DateTime64(6, 'UTC')} AND ts < {end:DateTime64(6, 'UTC')}
+		FROM (
+			SELECT name, ts, any(value) AS value FROM %s.device_metrics
+			WHERE organization_id = {org:String} AND device_id = {dev:String} AND name IN {names:Array(String)}
+				AND ts >= {start:DateTime64(6, 'UTC')} AND ts < {end:DateTime64(6, 'UTC')}
+			GROUP BY name, ts, event_id
+		)
 		GROUP BY name, bucket ORDER BY name, bucket`, width, width, c.database)
 	index := map[string]int{}
 	var out []MetricSeries

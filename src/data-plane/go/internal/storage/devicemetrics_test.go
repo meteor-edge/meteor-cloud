@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -95,11 +96,13 @@ func TestClickHouseDeviceMetricsBackfill(t *testing.T) {
 	if err := ch.exec(ctx, "DROP VIEW IF EXISTS "+db+".device_metrics_mv", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := ch.exec(ctx, "TRUNCATE TABLE "+db+".device_metrics", nil, nil); err != nil {
-		t.Fatal(err)
+	for _, table := range []string{"device_metrics", "device_metrics_backfill"} {
+		if err := ch.exec(ctx, "TRUNCATE TABLE "+db+"."+table, nil, nil); err != nil {
+			t.Fatal(err)
+		}
 	}
 	org, dev := uuid.NewString(), uuid.NewString()
-	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Minute)
+	base := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Hour)
 	if _, err := ch.InsertEvents(ctx, []*envelope.Event{metricEvent(org, dev, "old", base, `{"cpu_percent":12}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +122,57 @@ func TestClickHouseDeviceMetricsBackfill(t *testing.T) {
 	}
 	if len(got) != 1 || len(got[0].Points) != 1 || got[0].Points[0].Avg != 13 {
 		t.Fatalf("backfill + view: %+v", got)
+	}
+	// Rows copied twice (backfill + view, or a retried catch-up) count once before any merge.
+	if err := again.exec(ctx, "INSERT INTO "+db+".device_metrics "+again.deviceMetricsSelect(""), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err = again.DeviceMetrics(ctx, DeviceMetricsQuery{OrganizationID: org, DeviceID: dev, Names: []string{"cpu_percent"},
+		Start: base, End: base.Add(time.Hour), Bucket: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || len(got[0].Points) != 1 || got[0].Points[0].Avg != 13 || got[0].Points[0].Count != 2 {
+		t.Fatalf("duplicates must not skew the bucket: %+v", got)
+	}
+	// A view without a finished catch-up is caught up on the next start.
+	if err := again.exec(ctx, "TRUNCATE TABLE "+db+".device_metrics_backfill", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	third, err := OpenClickHouse(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer third.Close()
+	marked := false
+	if err := third.query(ctx, "SELECT 1 AS x FROM "+db+".device_metrics_backfill", nil, func([]byte) error { marked = true; return nil }); err != nil || !marked {
+		t.Fatalf("catch-up not recorded: %v", err)
+	}
+}
+
+func TestCountReportingDevicesRefusesPartialCounts(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemory()
+	org := uuid.NewString()
+	base := time.Date(2026, 11, 15, 8, 0, 0, 0, time.UTC)
+	var batch []*envelope.Event
+	for i := 0; i < 5; i++ {
+		batch = append(batch, metricEvent(org, uuid.NewString(), uuid.NewString(), base.Add(time.Duration(i)*time.Second), `{"cpu_percent":1}`))
+	}
+	if _, err := s.InsertEvents(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	oldLimit, oldPage := fallbackScanLimit, fallbackPageSize
+	defer func() { fallbackScanLimit, fallbackPageSize = oldLimit, oldPage }()
+	fallbackScanLimit, fallbackPageSize = 2, 2
+	q := Query{OrganizationID: org, Stream: DeviceMetricsStream, Start: base, End: base.Add(time.Minute)}
+	if got, err := CountReportingDevices(ctx, s, q, time.Minute); !errors.Is(err, ErrScanLimit) {
+		t.Fatalf("partial counts returned as complete: %+v, %v", got, err)
+	}
+	fallbackScanLimit = 10
+	got, err := CountReportingDevices(ctx, s, q, time.Minute)
+	if err != nil || len(got) != 1 || got[0].Devices != 5 {
+		t.Fatalf("counts: %+v, %v", got, err)
 	}
 }
 

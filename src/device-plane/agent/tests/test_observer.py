@@ -214,3 +214,33 @@ def test_device_observer_merges_everything(monkeypatch) -> None:
         logging.getLogger("edge_agent").removeHandler(device.errors)
     assert metrics["wifi_signal_dbm"] == -61.0 and metrics["agent_errors"] == 1 and metrics["app.web.up"] == 1
     assert events == []
+
+
+def test_long_app_names_stay_distinct_and_short() -> None:
+    a, b = "a" * 50 + "-web", "a" * 50 + "-worker"
+    assert observer.metric_name("web") == "web"
+    assert observer.metric_name(a) != observer.metric_name(b)
+    assert all(len(f"app.{observer.metric_name(n)}.health_ms") <= 64 for n in (a, b))
+    lines = {a: _line(a), b: _line(b, running=False, status="exited")}
+    metrics, _ = AppObserver(runner=_docker(lines)).observe()
+    assert metrics[f"app.{observer.metric_name(a)}.up"] == 1
+    assert metrics[f"app.{observer.metric_name(b)}.up"] == 0
+
+
+def test_failed_inspect_keeps_the_baseline() -> None:
+    lines = {"web": _line("web")}
+    healthy = _docker(lines)
+    broken = {"on": False}
+
+    def run(args):
+        if broken["on"] and args[:2] == ["docker", "inspect"]:
+            return subprocess.CompletedProcess(args, 1, "", "Cannot connect to the Docker daemon")
+        return healthy(args)
+
+    apps = AppObserver(runner=run)
+    apps.observe()
+    broken["on"] = True
+    assert apps.observe() == ({}, [])
+    broken["on"] = False
+    _, events = apps.observe()
+    assert events == [], "no false removed/started events after a failed look"

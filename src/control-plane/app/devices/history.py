@@ -33,6 +33,9 @@ DEPLOYMENTS_STREAM = "meteor.deployments"
 
 # Online-count buckets: wide enough that a device reporting once a minute is
 # counted in every bucket it was connected for.
+STATUS_PAGE_SIZE = 1000
+STATUS_MAX_PAGES = 10
+
 ONLINE_BUCKETS: dict[str, str] = {"1h": "5m", "6h": "5m", "24h": "15m", "7d": "1h", "30d": "6h"}
 
 
@@ -146,7 +149,9 @@ def build_segments(
     segments: list[AvailabilitySegment] = []
     current: str = previous or "unknown"
     cursor = start
-    for at, status in sorted(changes):
+    # Sort by time only: Python's sort is stable, so equal times keep the order the
+    # data plane returned them in (time, then event id).
+    for at, status in sorted(changes, key=lambda change: change[0]):
         at = min(max(at, start), end)
         if status == current:
             continue
@@ -170,34 +175,51 @@ def device_availability(
     window, _ = RANGES[range_]
     end = now.replace(microsecond=0)
     start = end - window
-    body = dp.list_events(
-        organization_id=organization_id,
-        params={
-            "stream": STATUS_STREAM,
-            "device_id": str(device_id),
-            "start": _iso(start),
-            "end": _iso(end),
-            "order": "asc",
-            "limit": "1000",
-            "previous": "1",
-        },
-    )
+    params = {
+        "stream": STATUS_STREAM,
+        "device_id": str(device_id),
+        "start": _iso(start),
+        "end": _iso(end),
+        "order": "asc",
+        "limit": str(STATUS_PAGE_SIZE),
+        "previous": "1",
+    }
+    body = dp.list_events(organization_id=organization_id, params=params)
     previous = _status_of(body["previous"]) if body.get("previous") else None
+    raw = list(body.get("events", []))
+    # Follow the cursor so a busy window is read to its end (bounded: a device
+    # that flaps this often is shown as such well before the cap).
+    pages = 1
+    while body.get("next_cursor") and pages < STATUS_MAX_PAGES:
+        body = dp.list_events(
+            organization_id=organization_id,
+            params={**params, "cursor": body["next_cursor"], "previous": "0"},
+        )
+        raw.extend(body.get("events", []))
+        pages += 1
     changes: list[tuple[datetime, str]] = []
-    for event in body.get("events", []):
+    for event in raw:
         status, at = _status_of(event), _parse_time(event.get("time"))
         if status and at:
             changes.append((at, status))
     segments = build_segments(start, end, previous, changes)
     known = sum((s.end - s.start).total_seconds() for s in segments if s.status != "unknown")
     online = sum((s.end - s.start).total_seconds() for s in segments if s.status == "online")
+    # Count transitions into offline, not offline messages: a repeated offline
+    # (last will after a stop message) is the same outage.
+    offline_count = 0
+    state = previous
+    for _, status in sorted(changes, key=lambda change: change[0]):
+        if status == "offline" and state != "offline":
+            offline_count += 1
+        state = status
     return DeviceAvailabilityResponse(
         device_id=device_id,
         range=range_,
         start=start,
         end=end,
         uptime_percent=round(online * 100 / known, 2) if known > 0 else None,
-        offline_count=sum(1 for _, status in changes if status == "offline"),
+        offline_count=offline_count,
         segments=segments,
         changes=[StatusChange(t=at, status=status) for at, status in changes][-200:],  # type: ignore[arg-type]
     )

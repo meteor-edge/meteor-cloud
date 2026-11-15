@@ -26,6 +26,9 @@ RELAY_LOCK_KEY = 0x686973746F7279
 BATCH_SIZE = 500
 # While the data plane is down the outbox grows; older events are dropped so it stays bounded.
 MAX_AGE = timedelta(days=7)
+# Batches per pass: a large backlog is drained over several passes, so a pass
+# (a worker thread that shutdown cannot cancel) always ends within seconds.
+MAX_BATCHES_PER_PASS = 10
 
 
 def relay_batch(session: Session, data_plane: DataPlaneApi, *, now: datetime | None = None) -> int:
@@ -79,11 +82,12 @@ def relay_once(engine: Engine, session_factory: Callable[[], Session], data_plan
         try:
             sent = 0
             with session_factory() as session:
-                while True:
+                for _ in range(MAX_BATCHES_PER_PASS):
                     n = relay_batch(session, data_plane)
                     sent += n
                     if n < BATCH_SIZE:
-                        return sent
+                        break
+                return sent
         finally:
             try:
                 lock_connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": RELAY_LOCK_KEY})

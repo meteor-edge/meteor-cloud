@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -29,7 +30,11 @@ type DeviceCounter interface {
 }
 
 // fallbackScanLimit bounds how many events the generic fallback reads.
-const fallbackScanLimit = 200_000
+var fallbackScanLimit, fallbackPageSize = 200_000, 1000
+
+// ErrScanLimit means the window holds more events than the generic fallback
+// reads; counts over part of the window would be wrong, so none are returned.
+var ErrScanLimit = errors.New("too many events in the window for the generic device count")
 
 // CountReportingDevices counts, per bucket, the distinct devices with at least one
 // event in q (one organization, one stream, a time window). Over the metrics
@@ -45,7 +50,7 @@ func CountReportingDevices(ctx context.Context, store EventStore, q Query, bucke
 	// Generic path for PostgreSQL and memory: page through the window.
 	seen := map[int64]map[string]struct{}{}
 	var order []int64
-	q.Limit, q.Descending, q.After = 1000, false, nil
+	q.Limit, q.Descending, q.After = fallbackPageSize, false, nil
 	read := 0
 	for {
 		events, next, err := store.QueryEvents(ctx, q)
@@ -66,8 +71,11 @@ func CountReportingDevices(ctx context.Context, store EventStore, q Query, bucke
 			set[ev.DeviceID] = struct{}{}
 		}
 		read += len(events)
-		if next == nil || read >= fallbackScanLimit {
+		if next == nil {
 			break
+		}
+		if read >= fallbackScanLimit {
+			return nil, ErrScanLimit
 		}
 		q.After = next
 	}

@@ -285,7 +285,17 @@ WARNINGS_MAX = 200
 
 
 def warnings(argv: list[str]) -> int:
-    args = ["journalctl", "--no-pager", "--quiet", "--output=json", "--priority=warning", f"--lines={WARNINGS_MAX}"]
+    # --all: without it journalctl prints fields over 4096 bytes as null and the
+    # entry would be lost instead of cut to 1000 characters below.
+    args = [
+        "journalctl",
+        "--no-pager",
+        "--quiet",
+        "--all",
+        "--output=json",
+        "--priority=warning",
+        f"--lines={WARNINGS_MAX}",
+    ]
     if argv[:1] == ["--after-cursor"] and len(argv) == 2 and CURSOR.match(argv[1]):
         args.append(f"--after-cursor={argv[1]}")
     elif not argv:
@@ -308,7 +318,8 @@ def warnings(argv: list[str]) -> int:
             continue
         try:
             micros = int(entry.get("__REALTIME_TIMESTAMP", ""))
-            timestamp = datetime.fromtimestamp(micros / 1e6, timezone.utc).isoformat().replace("+00:00", "Z")
+            # timezone.utc, not datetime.UTC: the helper runs on the system Python (3.10 on Ubuntu 22.04).
+            timestamp = datetime.fromtimestamp(micros / 1e6, timezone.utc).isoformat().replace("+00:00", "Z")  # noqa: UP017
         except (TypeError, ValueError):
             timestamp = None
         priority = entry.get("PRIORITY")

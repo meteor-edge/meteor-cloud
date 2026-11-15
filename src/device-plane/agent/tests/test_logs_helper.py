@@ -243,6 +243,7 @@ def test_warnings_prints_only_safe_fields(monkeypatch: pytest.MonkeyPatch, capsy
     monkeypatch.setattr(helper.subprocess, "run", run)
     assert helper.warnings([]) == 0
     assert "--priority=warning" in seen[0] and "--since=-10min" in seen[0] and "--output=json" in seen[0]
+    assert "--all" in seen[0], "long messages must arrive as text, not null"
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert lines[0] == {
         "cursor": "s=a;i=2",

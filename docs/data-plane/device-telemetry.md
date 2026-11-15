@@ -31,12 +31,12 @@ Devices never reach NATS or ClickHouse. The console never reaches the data plane
 `device_metrics` is filled by a materialized view on `events`. Every numeric top-level key of a metrics payload becomes a row `(organization_id, device_id, name, ts, event_id, value)`, so:
 
 - a newer agent that sends a new key (for example `load_1m`) is stored without a schema change;
-- strings, `null`, objects and arrays are skipped; at most 64 keys of at most 64 characters per message are kept;
+- strings, `null`, objects and arrays are skipped; at most 160 keys of at most 64 characters per message are kept (enough for the system keys plus 20 apps);
 - charts read a narrow table sorted by `(organization_id, device_id, name, ts)` and never parse JSON.
 
-The table is a `ReplacingMergeTree` keyed on the event id, which folds duplicates from the one-time backfill or from two writer replicas. Queries skip `FINAL`: a duplicate only repeats a sample inside its bucket and leaves avg, min and max unchanged.
+The table is a `ReplacingMergeTree` keyed on the event id, which folds duplicates from the one-time backfill or from two writer replicas. Until a merge has run, the chart query keeps one sample per event id itself, so a duplicate does not skew avg or count.
 
-When the view does not exist yet (first start after upgrading), the data API or the ClickHouse writer copies the metrics already in `events`, creates the view, then copies again whatever arrived in between. The view is created last, so a failed copy is retried at the next start.
+When the view does not exist yet (first start after upgrading), the data API or the ClickHouse writer copies the metrics already in `events`, creates the view, then copies again whatever arrived in between. A failed first copy is retried at the next start (the view does not exist yet); the catch-up copy is recorded in `device_metrics_backfill` and retried at every start until it has succeeded once.
 
 Retention follows `DATAPLANE_RETENTION_DAYS` on both tables (a table TTL; 0 keeps everything).
 

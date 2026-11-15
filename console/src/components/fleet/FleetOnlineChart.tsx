@@ -29,7 +29,7 @@ export function FleetOnlineChart({
   const [range, setRange] = useState<TelemetryRange>("24h");
   const [hover, setHover] = useState<number | null>(null);
   const query = useQuery({
-    queryKey: ["fleet-online-history", organizationId, range],
+    queryKey: ["fleet-online-history", organizationId, range, token],
     queryFn: () => getFleetOnlineHistory(token, organizationId, range),
     refetchInterval: 300_000,
     retry: (count, error) => !(error instanceof ApiError) && count < 1,

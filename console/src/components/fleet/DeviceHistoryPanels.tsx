@@ -47,7 +47,7 @@ export function AvailabilityStrip({
   range: TelemetryRange;
 }) {
   const query = useQuery({
-    queryKey: ["device-availability", organizationId, deviceId, range],
+    queryKey: ["device-availability", organizationId, deviceId, range, token],
     queryFn: () => getDeviceAvailability(token, organizationId, deviceId, range),
     refetchInterval: 60_000,
     retry: noRetryOnApiError,
@@ -132,8 +132,10 @@ export function DeploymentHistoryPanel({
   deviceId: string;
 }) {
   const query = useQuery({
-    queryKey: ["device-deployment-history", organizationId, deviceId],
+    queryKey: ["device-deployment-history", organizationId, deviceId, token],
     queryFn: () => getDeviceDeploymentHistory(token, organizationId, deviceId),
+    // Keep a deployment that is still installing up to date while the panel is open.
+    refetchInterval: 15_000,
     retry: noRetryOnApiError,
   });
   return (
@@ -221,7 +223,7 @@ export function DeviceAppsPanel({
   deviceId: string;
 }) {
   const query = useQuery({
-    queryKey: ["device-apps", organizationId, deviceId],
+    queryKey: ["device-apps", organizationId, deviceId, token],
     queryFn: () => getDeviceApps(token, organizationId, deviceId),
     refetchInterval: 60_000,
     retry: noRetryOnApiError,
@@ -333,7 +335,7 @@ export function DeviceLogHistory({
   const [search, setSearch] = useState("");
   const [range, setRange] = useState<TelemetryRange>("7d");
   const query = useInfiniteQuery({
-    queryKey: ["device-log-history", organizationId, deviceId, range, search],
+    queryKey: ["device-log-history", organizationId, deviceId, range, search, token],
     queryFn: ({ pageParam }) =>
       getDeviceLogHistory(token, organizationId, deviceId, {
         range,
@@ -385,7 +387,7 @@ export function DeviceLogHistory({
       </form>
       {query.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : query.isError ? (
+      ) : query.isError && !entries.length ? (
         <p className="text-sm text-muted-foreground">{unavailableText(query.error)}</p>
       ) : !entries.length ? (
         <p className="text-sm text-muted-foreground">
@@ -409,7 +411,14 @@ export function DeviceLogHistory({
           ))}
         </ul>
       )}
-      {query.hasNextPage ? (
+      {query.isFetchNextPageError ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-muted-foreground">Older warnings could not be loaded.</p>
+          <Button variant="outline" size="sm" onClick={() => query.fetchNextPage()}>
+            Try again
+          </Button>
+        </div>
+      ) : query.hasNextPage ? (
         <Button
           variant="outline"
           size="sm"

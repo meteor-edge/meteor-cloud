@@ -30,7 +30,8 @@ var metricName = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}$`)
 //	&names=cpu_percent,...      metrics (default DefaultDeviceMetrics)
 func (s *Server) handleInternalDeviceMetrics(w http.ResponseWriter, r *http.Request) {
 	org, dev := r.PathValue("org"), r.PathValue("device")
-	if _, err := uuid.Parse(org); err != nil {
+	orgID, err := uuid.Parse(org)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_parameter", "org: must be a UUID")
 		return
 	}
@@ -43,7 +44,7 @@ func (s *Server) handleInternalDeviceMetrics(w http.ResponseWriter, r *http.Requ
 	bad := func(param, msg string) {
 		writeError(w, http.StatusBadRequest, "invalid_parameter", param+": "+msg)
 	}
-	q := storage.DeviceMetricsQuery{OrganizationID: strings.ToLower(org), DeviceID: devID.String(), Names: DefaultDeviceMetrics}
+	q := storage.DeviceMetricsQuery{OrganizationID: orgID.String(), DeviceID: devID.String(), Names: DefaultDeviceMetrics}
 	if v := qs.Get("names"); v != "" {
 		names := strings.Split(v, ",")
 		if len(names) > maxDeviceMetricNames {

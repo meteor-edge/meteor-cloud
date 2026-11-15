@@ -16,6 +16,7 @@ Every reading is best effort: a missing tool or file leaves the key out.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
@@ -43,6 +44,17 @@ INSPECT_TEMPLATE = (
     "{{.RestartCount}}|{{.State.StartedAt}}|{{if .State.Health}}{{.State.Health.Status}}|"
     "{{range .State.Health.Log}}{{.Start.UnixNano}},{{.End.UnixNano}};{{end}}{{end}}"
 )
+
+
+def metric_name(name: str) -> str:
+    """The app's name in metric keys: as is up to MAX_APP_NAME, else a prefix plus a hash.
+
+    Two long names that share their first characters still get distinct keys.
+    """
+    if len(name) <= MAX_APP_NAME:
+        return name
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return f"{name[: MAX_APP_NAME - 9]}~{digest}"
 
 
 def _default_runner(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -137,7 +149,7 @@ def parse_inspect_line(line: str) -> AppState | None:
     parts = line.strip().split("|")
     if len(parts) < 7:
         return None
-    name = parts[0].lstrip("/")[:MAX_APP_NAME]
+    name = parts[0].lstrip("/")
     if not name:
         return None
     try:
@@ -198,7 +210,7 @@ def parse_stats(output: str) -> dict[str, tuple[float | None, float | None]]:
         parts = line.strip().split("|")
         if len(parts) < 3:
             continue
-        stats[parts[0][:MAX_APP_NAME]] = (_percent(parts[1]), _bytes(parts[2].split("/")[0]))
+        stats[parts[0].lstrip("/")] = (_percent(parts[1]), _bytes(parts[2].split("/")[0]))
     return stats
 
 
@@ -226,6 +238,11 @@ class AppObserver:
             inspected = self.runner(["docker", "inspect", "-f", INSPECT_TEMPLATE, *names])
         except (OSError, subprocess.SubprocessError):
             return None
+        # A container removed between ps and inspect also makes inspect exit 1, but
+        # it still prints the others; only an answer with nothing in it is a failure
+        # (keep the previous baseline instead of reporting every app removed).
+        if inspected.returncode != 0 and not (inspected.stdout or "").strip():
+            return None
         states = {}
         for line in (inspected.stdout or "").splitlines():
             state = parse_inspect_line(line)
@@ -248,7 +265,7 @@ class AppObserver:
         stats = self._stats() if any(state.running for state in states.values()) else {}
         metrics: dict[str, float] = {}
         for name, state in states.items():
-            prefix = f"app.{name}."
+            prefix = f"app.{metric_name(name)}."
             metrics[prefix + "up"] = 1 if state.running else 0
             metrics[prefix + "restarts"] = state.restarts
             if state.health in ("healthy", "unhealthy"):

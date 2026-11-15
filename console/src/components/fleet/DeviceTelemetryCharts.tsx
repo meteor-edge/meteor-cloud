@@ -337,7 +337,7 @@ export function DeviceTelemetryCharts({
 }) {
   const [range, setRange] = useState<TelemetryRange>("24h");
   const query = useQuery({
-    queryKey: ["device-telemetry", organizationId, deviceId, range],
+    queryKey: ["device-telemetry", organizationId, deviceId, range, token],
     queryFn: () => getDeviceTelemetry(token, organizationId, deviceId, range),
     refetchInterval: range === "1h" ? 60_000 : 300_000,
     // A refused or unconfigured request will not get better by retrying.

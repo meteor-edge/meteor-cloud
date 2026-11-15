@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -191,7 +193,7 @@ func (s *Server) handleInternalEventsQuery(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if v := qs.Get("q"); v != "" {
-		if len(v) > 200 {
+		if utf8.RuneCountInString(v) > 200 {
 			bad("q", "must be at most 200 characters")
 			return
 		}
@@ -273,6 +275,11 @@ func (s *Server) handleInternalOnlineDevices(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := context.WithTimeout(r.Context(), s.opts.QueryTimeout)
 	defer cancel()
 	counts, err := storage.CountReportingDevices(ctx, s.store, q, width)
+	if errors.Is(err, storage.ErrScanLimit) {
+		writeError(w, http.StatusBadRequest, "window_too_large",
+			"Too many events in this window for this storage backend; narrow the time range (ClickHouse has no limit).")
+		return
+	}
 	if err != nil {
 		s.queryFailed(w, err)
 		return

@@ -313,3 +313,67 @@ def test_log_history_needs_device_logs_and_searches(client: TestClient, db_sessi
     calls = len(fake.calls)
     assert client.get(url, headers=auth_header(client, "viewer@example.com")).status_code == 403
     assert len(fake.calls) == calls
+
+
+class _PagedStatus:
+    """Status history served in pages, like the data plane does past its limit."""
+
+    def __init__(self, pages: list[list[dict]], previous: dict | None) -> None:
+        self.pages = pages
+        self.previous = previous
+        self.calls: list[dict] = []
+
+    def list_events(self, *, organization_id, params):
+        self.calls.append(dict(params))
+        index = int(params.get("cursor") or 0)
+        return {
+            "events": self.pages[index],
+            "previous": self.previous if index == 0 else None,
+            "next_cursor": str(index + 1) if index + 1 < len(self.pages) else None,
+        }
+
+
+def test_availability_reads_every_page_and_counts_transitions() -> None:
+    from app.devices.history import device_availability
+
+    now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+
+    def ev(hours_ago: float, status: str) -> dict:
+        return {"time": (now - timedelta(hours=hours_ago)).isoformat(), "data": {"status": status}}
+
+    dp = _PagedStatus(
+        [
+            [ev(20, "offline"), ev(20, "offline"), ev(19, "online")],
+            # The second page holds a later outage; it must not be lost.
+            [ev(5, "offline"), ev(4, "online")],
+        ],
+        previous={"time": (now - timedelta(days=2)).isoformat(), "data": {"status": "online"}},
+    )
+    body = device_availability(dp, organization_id=uuid.uuid4(), device_id=uuid.uuid4(), range_="24h", now=now)
+    assert len(dp.calls) == 2 and dp.calls[1]["cursor"] == "1"
+    assert body.offline_count == 2, "a repeated offline message is the same outage"
+    assert [s.status for s in body.segments] == ["online", "offline", "online", "offline", "online"]
+    assert body.uptime_percent == round(22 * 100 / 24, 2)
+
+
+def test_equal_timestamps_keep_the_received_order() -> None:
+    start = datetime(2026, 11, 15, 0, 0, tzinfo=UTC)
+    at = start + timedelta(hours=1)
+    segments = build_segments(start, start + timedelta(hours=2), "offline", [(at, "online"), (at, "offline")])
+    assert segments[-1].status == "offline"
+
+
+def test_relay_pass_is_bounded(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.history import relay
+
+    calls = []
+
+    def fake_batch(session, data_plane, *, now=None):
+        calls.append(1)
+        return relay.BATCH_SIZE  # a backlog that never runs dry
+
+    monkeypatch.setattr(relay, "relay_batch", fake_batch)
+    engine = db_session.get_bind()
+    sent = relay.relay_once(engine, lambda: Session(bind=engine), _FakeDataPlane())
+    assert len(calls) == relay.MAX_BATCHES_PER_PASS
+    assert sent == relay.BATCH_SIZE * relay.MAX_BATCHES_PER_PASS
