@@ -69,7 +69,12 @@ Releases and artifacts link both ways in the console:
   `meteorcli.service` already runs as root. Re-run the installer with `sudo`
   after upgrading if Deploy fails with permission denied on the unit file.
 - **docker** — pull `spec.image` and/or `docker load` a tarball, then
-  `docker run`.
+  `docker run`. When the release is saved, MeteorCloud resolves the image tag on a
+  public registry to its digest and stores it as `spec.image_digest`; devices then run
+  `image@sha256:…`, so every device gets the same bytes even if the tag moves. You can
+  also give `image_digest` (or `image@sha256:…`) yourself, for private registries.
+  `RELEASE_RESOLVE_IMAGE_DIGESTS=false` turns the lookup off;
+  `RELEASE_REQUIRE_IMAGE_DIGESTS=true` refuses releases that cannot be pinned.
 - **docker_compose** — materialize YAML/zip and `docker compose up -d`.
 
 ## Deployment provider

@@ -261,3 +261,36 @@ def test_compose_without_services_is_missing(tmp_path: Path) -> None:
 def test_compose_health_validates_project_name(tmp_path: Path) -> None:
     with pytest.raises(ComposeError):
         ComposeAdapter(runner=_inspect_runner({}), work_root=tmp_path).inspect_health(project_name="../x")
+
+
+DIGEST = "sha256:" + "ab" * 32
+
+
+@pytest.mark.parametrize(
+    ("image", "expected"),
+    [
+        ("nginx:1.27", f"nginx@{DIGEST}"),
+        ("nginx", f"nginx@{DIGEST}"),
+        ("registry.example.com:5000/team/app:2", f"registry.example.com:5000/team/app@{DIGEST}"),
+        (f"ghcr.io/org/app@{'sha256:' + 'cd' * 32}", f"ghcr.io/org/app@{DIGEST}"),
+    ],
+)
+def test_pinned_image(image: str, expected: str) -> None:
+    from runtime.docker import pinned_image
+
+    assert pinned_image(image, DIGEST) == expected
+    assert pinned_image(image, None) == image
+
+
+def test_docker_apply_runs_the_pinned_digest() -> None:
+    calls: list[list[str]] = []
+
+    def runner(args, *, check=True):
+        del check
+        calls.append(list(args))
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    DockerAdapter(runner=runner).apply(container_name="web", image="nginx:1.27", image_digest=DIGEST)
+    assert calls[1][-1] == f"nginx@{DIGEST}"
+    with pytest.raises(DockerError):
+        DockerAdapter(runner=runner).apply(container_name="web", image="nginx:1.27", image_digest="sha256:bad")

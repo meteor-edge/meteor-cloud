@@ -456,7 +456,8 @@ def test_poll_is_capped_per_ip_across_request_ids(client: TestClient) -> None:
 
 
 def test_wrong_keys_are_limited_per_ip_before_the_key_lookup(client: TestClient) -> None:
-    ip_limiter = InMemoryRateLimiter(limit=2, window_seconds=60)
+    # Windows are cut on the wall clock, so a 60 s window can end between two requests.
+    ip_limiter = InMemoryRateLimiter(limit=2, window_seconds=10**6)
     client.app.dependency_overrides[get_enroll_ip_rate_limiter] = lambda: ip_limiter
 
     responses = [
@@ -469,7 +470,7 @@ def test_wrong_keys_are_limited_per_ip_before_the_key_lookup(client: TestClient)
     ]
 
     assert [r.status_code for r in responses] == [401, 401, 429]
-    assert 1 <= int(responses[2].headers["Retry-After"]) <= 60
+    assert 1 <= int(responses[2].headers["Retry-After"]) <= 10**6
 
 
 def test_enroll_check_is_limited_per_ip(client: TestClient) -> None:

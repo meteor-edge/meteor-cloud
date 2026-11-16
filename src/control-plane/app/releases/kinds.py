@@ -53,6 +53,8 @@ class MeteorCloudBinding(BaseModel):
 class DockerSpec(BaseModel):
     container_name: str = Field(min_length=1, max_length=255)
     image: str | None = Field(default=None, max_length=512)
+    # sha256 manifest digest the device pulls instead of the tag; set when the release is saved.
+    image_digest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
     ports: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     restart: str | None = Field(default="unless-stopped", max_length=64)
@@ -117,6 +119,8 @@ def validate_release_spec(kind: ReleaseKind, spec: dict[str, Any]) -> dict[str, 
     # Unbound workloads keep the spec shape they had before application bindings existed.
     if validated.get("meteorcloud") is None:
         validated.pop("meteorcloud", None)
+    if "image_digest" in validated and validated["image_digest"] is None:
+        validated.pop("image_digest")
     return validated
 
 

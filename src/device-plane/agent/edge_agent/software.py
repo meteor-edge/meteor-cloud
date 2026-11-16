@@ -360,6 +360,7 @@ def _apply_docker(item: dict[str, Any], tarball: Path | None, app: AppCredential
         adapter.apply(
             container_name=container_name,
             image=spec.get("image"),
+            image_digest=spec.get("image_digest"),
             tarball=tarball,
             ports=list(spec.get("ports") or []),
             env=_bound_env(spec, app),
