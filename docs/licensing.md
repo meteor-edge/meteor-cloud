@@ -63,6 +63,15 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |
 | Observability | `deploy/compose/docker-compose.observability.yml` | not in the chart |
 
+## Automated check
+
+CI job **Supply chain → Licences of shipped dependencies** (`.github/workflows/supply-chain.yml`) runs
+`scripts/check_licenses.py` on the console's production npm packages, the Python services, agent
+and SDK (with all their dependencies), and the Go binaries (`go-licenses`). GPL, AGPL, LGPL, SSPL,
+BSL/BUSL, Commons Clause, Elastic and unknown licences fail the job unless the package is listed in
+`ALLOWED` in that script with a reason (today: `psycopg`, LGPL-3.0, used unmodified). Dev tooling
+and container images are not covered; images stay in the table above.
+
 ## For coding agents
 
 When adding or upgrading a third-party dependency or image, check this page, state **Production OK**, and surface a **LICENSING RISK** note to the human. Rules: [AGENTS.md](../AGENTS.md), Cursor `.cursor/rules/third-party-licensing.mdc`.
