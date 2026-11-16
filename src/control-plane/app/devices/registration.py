@@ -33,7 +33,8 @@ from app.devices.tokens import generate_device_token, hash_token
 from app.mqtt.credentials import issue_mqtt_credentials, mqtt_config_version
 from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
 
-_AGENT_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
+# Match agent-v* / pyproject versions (X.Y.Z plus optional pre-release suffix).
+_AGENT_VERSION = re.compile(r"^\d+\.\d+\.\d+[0-9A-Za-z._-]*$")
 
 
 class RegistrationService:

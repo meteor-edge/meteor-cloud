@@ -60,4 +60,35 @@ describe("AgentUpdatePanel", () => {
     await user.click(screen.getByRole("button", { name: "Update to latest" }));
     expect(updateDeviceAgent).not.toHaveBeenCalled();
   });
+
+  it("keeps the mutation result when a stale list response arrives later", async () => {
+    let resolveList: ((value: DeviceActions) => void) | undefined;
+    const pendingList = new Promise<DeviceActions>((resolve) => {
+      resolveList = resolve;
+    });
+    vi.mocked(listDeviceActions).mockReturnValueOnce(pendingList);
+    const ordered: DeviceActions = {
+      actions: [
+        {
+          id: "act-1",
+          kind: "update_agent",
+          state: "pending",
+          from_version: "0.3.3",
+          username: null,
+          sudo: false,
+          created_at: "2026-01-01T00:00:00Z",
+          sent_at: null,
+          reported_at: null,
+          last_error: null,
+        },
+      ],
+    };
+    vi.mocked(updateDeviceAgent).mockResolvedValue(ordered);
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: "Update to latest" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Updating…" })).toBeInTheDocument());
+    resolveList?.(empty);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Updating…" })).toBeInTheDocument());
+  });
 });

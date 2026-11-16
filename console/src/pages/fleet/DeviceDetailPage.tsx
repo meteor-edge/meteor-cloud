@@ -205,7 +205,9 @@ export function DeviceDetailPage() {
     { id: "network", label: "Network" },
     { id: "mqtt", label: "MQTT" },
     ...(canShell || canLogs ? [{ id: "access" as const, label: "Access" }] : []),
-    ...(canManage ? [{ id: "settings" as const, label: "Settings" }] : []),
+    ...(canManage || canUpdateAgent || canPower || canUsers || canWifi
+      ? [{ id: "settings" as const, label: "Settings" }]
+      : []),
   ];
 
   async function onSave() {
@@ -617,7 +619,7 @@ export function DeviceDetailPage() {
         </div>
       )}
 
-      {activeTab === "settings" && canManage && canUpdateAgent && token && (
+      {activeTab === "settings" && canUpdateAgent && token && (
         <AgentUpdatePanel
           token={token}
           organizationId={organizationId}

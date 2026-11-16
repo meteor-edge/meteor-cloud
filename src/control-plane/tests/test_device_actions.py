@@ -142,6 +142,7 @@ def test_update_agent_requires_permission_and_rejects_a_second_order(
     operator = auth_header(client, "operator@example.com")
 
     assert client.post(f"{url}/update-agent", headers=operator).status_code == 403
+    assert client.post(f"{url}/update-agent", headers=headers).status_code == 422
 
     client.post(
         "/api/v1/agent/heartbeat",
@@ -166,6 +167,22 @@ def test_update_agent_requires_permission_and_rejects_a_second_order(
     assert _report(client, agent, results=[{"id": action["id"], "state": "done"}]) == {"accepted": 1}
     events = db_session.scalars(select(AuditEvent).where(AuditEvent.action == "device.action.update_agent")).all()
     assert len(events) == 1
+
+
+def test_sent_update_agent_expires_so_a_lost_response_does_not_block(
+    client: TestClient, db_session: Session
+) -> None:
+    _org, headers, agent, url = _device(client, db_session)
+    client.post("/api/v1/agent/heartbeat", headers=agent, json={"agent_version": "0.3.3"})
+    ordered = client.post(f"{url}/update-agent", headers=headers)
+    action_id = next(row["id"] for row in ordered.json()["actions"] if row["kind"] == "update_agent")
+    assert _collect(client, agent)
+    row = db_session.get(DeviceAction, action_id)
+    assert row is not None and row.state == STATE_SENT
+    row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.commit()
+
+    assert client.post(f"{url}/update-agent", headers=headers).status_code == 200
 
 
 def test_expired_action_is_cancelled(client: TestClient, db_session: Session) -> None:

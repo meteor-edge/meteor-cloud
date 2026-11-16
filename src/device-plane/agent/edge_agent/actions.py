@@ -18,7 +18,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from edge_agent.agent_update import settle_pending, start_updater
+from edge_agent.agent_update import clear_pending, settle_pending, start_updater
 from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.platform.linux import (
     ACTION_HELPER,
@@ -150,8 +150,11 @@ class ActionSync:
 
     def _report_settled_update(self) -> None:
         settled = settle_pending(self.config_dir)
-        if settled is not None:
-            self._report([settled])
+        if settled is None:
+            return
+        self._report([settled])
+        # Clear only after the server accepted the result so a failed POST can retry.
+        clear_pending(self.config_dir)
 
     def on_heartbeat(self, response: dict[str, Any]) -> None:
         """Called with each heartbeat response. Never raises: actions must not stop heartbeats."""

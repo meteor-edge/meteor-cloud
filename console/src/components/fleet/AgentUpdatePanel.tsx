@@ -77,7 +77,9 @@ export function AgentUpdatePanel({ token, organizationId, deviceId, agentVersion
 
   const mutation = useMutation({
     mutationFn: () => updateDeviceAgent(token, organizationId, deviceId),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      // Drop in-flight list fetches so a stale response cannot overwrite this write.
+      await queryClient.cancelQueries({ queryKey });
       queryClient.setQueryData(queryKey, data);
       setWatchUntilSettled(true);
       setError(null);

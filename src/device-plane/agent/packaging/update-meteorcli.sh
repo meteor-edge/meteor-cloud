@@ -278,7 +278,9 @@ config_dir() {
 }
 
 config_fingerprint() {
-  local dir="$1"
+  # Only enrollment/auth files: runtime state and agent-update.log change during
+  # every update (and console-ordered updates always write that log).
+  local dir="$1" name
   if [[ ! -e "$dir" ]]; then
     echo "absent"
     return 0
@@ -286,8 +288,8 @@ config_fingerprint() {
   [[ -d "$dir" ]] || die "config path ${dir} is not a directory"
   (
     cd "$dir"
-    find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do
-      sha256sum "$file"
+    for name in config.json device-token api-key mqtt.json mqtt-ca.crt claim-secret; do
+      if [[ -f "$name" ]]; then sha256sum "$name"; else echo "absent $name"; fi
     done
   )
 }
@@ -385,6 +387,10 @@ cleanup_staged() {
 }
 
 restore_previous() {
+  # Stop first when the rejected tree is already running (fail after start_if_needed).
+  if [[ "$WAS_ACTIVE" -eq 1 && "$SWAPPED" -eq 1 ]]; then
+    systemctl stop meteorcli >/dev/null 2>&1 || true
+  fi
   if [[ -d "$PREFIX" && "$SWAPPED" -eq 1 ]]; then
     rm -rf "${PREFIX}.failed"
     mv "$PREFIX" "${PREFIX}.failed"
@@ -400,7 +406,8 @@ restore_previous() {
   restore_helpers_from "${STATE_DIR}/previous-helpers" || true
   if [[ "$WAS_ACTIVE" -eq 1 ]]; then
     systemctl daemon-reload || true
-    systemctl start meteorcli || return 1
+    # restart: start alone does nothing when the rejected unit is still active.
+    systemctl restart meteorcli || return 1
   fi
   rm -rf "${PREFIX}.failed"
 }
@@ -480,10 +487,20 @@ confirm() {
   [[ "$answer" == "y" || "$answer" == "Y" ]] || die "aborted"
 }
 
+write_outcome() {
+  # Settlement reads this from the config dir (console-ordered updates).
+  local status="$1" version="${2:-}" dir
+  dir="$(config_dir 2>/dev/null)" || return 0
+  [[ -n "$dir" ]] || return 0
+  mkdir -p "$dir" 2>/dev/null || return 0
+  printf '{"status":"%s","version":"%s"}\n' "$status" "$version" > "${dir}/agent-update-outcome.json" || true
+}
+
 decide() {
   local current="$1" target="$2" explicit="$3"
   if [[ -n "$current" && "$current" == "$target" ]]; then
     echo "meteorcli ${current} is already installed"
+    write_outcome already_current "$current"
     exit 0
   fi
   if [[ -n "$current" ]] && ! version_is_newer "$target" "$current"; then
@@ -494,6 +511,7 @@ decide() {
       die "refusing to replace ${current} with older ${target}; pass --allow-downgrade to do that on purpose"
     else
       echo "installed meteorcli ${current} is newer than published ${target}"
+      write_outcome already_current "$current"
       exit 0
     fi
   fi
@@ -600,6 +618,7 @@ apply_update() {
   [[ "$before" == "$after" ]] || fail "device config changed during the update"
   install_updater_from_release || echo "warning: could not install the meteorcli-update command" >&2
   record_status || echo "warning: could not record update status" >&2
+  write_outcome updated "$TARGET"
   echo "updated meteorcli ${CURRENT_VERSION:-not installed} -> ${TARGET}"
   if [[ -d "${PREFIX}.previous" ]]; then
     echo "previous install kept at ${PREFIX}.previous"
@@ -749,7 +768,7 @@ main() {
   apply_update
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" == "$0" ]]; then
   # Copy out of the install tree before replacing it. bash reads the script
   # file as it runs; overwriting that file mid-update would execute a mix of
   # old and new bytes. A pipe (curl | bash) is not a file we replace.

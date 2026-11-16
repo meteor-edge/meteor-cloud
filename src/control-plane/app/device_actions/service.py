@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.secretbox import SecretBoxError, seal, unseal
 from app.device_actions.models import (
     KIND_ADD_USER,
@@ -94,13 +94,34 @@ class DeviceActionService:
         now = datetime.now(UTC)
         dirty = False
         for row in rows:
-            if row.state == STATE_PENDING and row.expires_at <= now:
+            if row.expires_at > now:
+                continue
+            if row.state == STATE_PENDING:
                 row.password_sealed = None
                 row.state = STATE_FAILED
                 row.last_error = _NOT_COLLECTED
                 row.reported_at = now
                 dirty = True
+            elif row.state == STATE_SENT and row.kind == KIND_UPDATE_AGENT:
+                # A lost collection response or unfinished updater must not block forever.
+                row.state = STATE_FAILED
+                row.last_error = "The device did not finish this agent update in time."
+                row.reported_at = now
+                dirty = True
         return dirty
+
+    def _expire_update_agent(self, device_id: uuid.UUID) -> bool:
+        """Expire pending and sent update_agent rows past their TTL."""
+        rows = list(
+            self.session.scalars(
+                select(DeviceAction).where(
+                    DeviceAction.device_id == device_id,
+                    DeviceAction.kind == KIND_UPDATE_AGENT,
+                    DeviceAction.state.in_((STATE_PENDING, STATE_SENT)),
+                )
+            )
+        )
+        return self._expire(rows)
 
     def _to_response(self, row: DeviceAction) -> DeviceActionResponse:
         return DeviceActionResponse.model_validate(row)
@@ -117,7 +138,7 @@ class DeviceActionService:
             .limit(20)
         )
         rows = list(self.session.scalars(statement))
-        if self._expire([row for row in rows if row.state == STATE_PENDING]):
+        if self._expire([row for row in rows if row.state in (STATE_PENDING, STATE_SENT)]):
             self.session.commit()
         actions = [
             self._to_response(row)
@@ -154,8 +175,14 @@ class DeviceActionService:
         audit_action: str,
         metadata: dict,
     ) -> DeviceActionsResponse:
+        # Serialize enqueue per device so concurrent update orders see each other's rows.
+        self.session.scalar(select(Device.id).where(Device.id == device.id).with_for_update())
         pending = self._pending(device.id, for_update=True)
-        self._expire(pending)
+        dirty = self._expire(pending)
+        if kind == KIND_UPDATE_AGENT:
+            dirty = self._expire_update_agent(device.id) or dirty
+        if dirty:
+            self.session.flush()
         pending = [row for row in pending if row.state == STATE_PENDING]
         if len(pending) >= _MAX_PENDING:
             raise ConflictError(
@@ -235,6 +262,11 @@ class DeviceActionService:
 
     def update_agent(self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID) -> DeviceActionsResponse:
         device = self._require_device(actor, organization_id, device_id, UPDATE_AGENT_PERMISSION)
+        if not device.agent_version:
+            raise ValidationAppError(
+                "agent_version_unknown",
+                "This device has not reported a meteorcli version yet. Wait for a heartbeat, then try again.",
+            )
         return self._enqueue(
             actor=actor,
             device=device,
