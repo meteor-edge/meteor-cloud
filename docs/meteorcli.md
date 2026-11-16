@@ -43,8 +43,11 @@ Use the **local** `install-meteorcli.sh` (or a release that accepts a URL argume
 URL after `bash -s --` is the tarball; do not pass it to an old installer that only
 understands `METEORCLI_DIST_URL`.
 
-**Publish a release** (maintainers): set the version in
-`src/device-plane/agent/pyproject.toml`, then:
+**Publish a release** (maintainers): bump the version in
+`src/device-plane/agent/pyproject.toml` (and `meteorcli/__init__.py`) in a PR. When it
+merges to `master`, the **meteorcli release** workflow creates tag `agent-v<version>` and
+the release; if that release already exists it does nothing. Pushing the tag by hand
+still works, as does running the workflow manually (**Actions → meteorcli release**):
 
 ```bash
 make agent-dist          # optional local check; writes dist/

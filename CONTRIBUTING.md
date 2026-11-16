@@ -24,7 +24,7 @@ Details: [docs/install-quickstart.md](docs/install-quickstart.md). Laptop testin
 curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
 ```
 
-See [docs/meteorcli.md](docs/meteorcli.md). Maintainers: `make agent-dist` then `git tag agent-v<version> && git push origin agent-v<version>`.
+See [docs/meteorcli.md](docs/meteorcli.md). Maintainers: bump the agent version in a PR; merging it to `master` publishes `agent-v<version>` (or push that tag by hand).
 
 **Bugs and features:** [GitHub Issues](https://github.com/meteor-edge/meteor-cloud/issues).
 

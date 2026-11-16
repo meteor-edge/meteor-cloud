@@ -23,7 +23,7 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 6. Deployment infrastructure stays under `deploy/` and `infrastructure/`, not domain modules.
 7. VPN is an optional deploy capability (Compose + Ansible). It is not a reason to split the repo.
 8. The console keeps same-origin API access in production (`window.location.origin`). Locally it uses `VITE_API_BASE_URL`.
-9. The device agent must be installable without cloning this repository. Publish with `git tag agent-v<pyproject-version>` (CI). Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `./installcli.sh` in `src/device-plane/agent/` (needs sibling `runtime/`).
+9. The device agent must be installable without cloning this repository. Publish by merging a version bump to `master` (CI tags `agent-v<pyproject-version>`), or push that tag. Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `./installcli.sh` in `src/device-plane/agent/` (needs sibling `runtime/`).
 10. Device types are configuration, not automatically separate codebases.
 
 `make check-plane-imports` enforces rule 3 on `src/`.
