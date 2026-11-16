@@ -64,6 +64,7 @@ Commands and APIs you look up while working.
 | --- | --- |
 | Local testing / contributor setup (`make dev`) | [Getting started](getting-started.md) · [Development](development.md) |
 | Production on a VM (`make up`) | [Install quickstart](install-quickstart.md) · [Deployment](deployment.md) |
+| Backups and restore (Compose, Ansible, Helm) | [Backups and restore](backups.md) |
 | Kubernetes (existing cluster) | [Kubernetes](kubernetes.md) |
 | DNS records to create (domain, apps, WireGuard) | [DNS records](dns.md) |
 | `installation.yaml` | [Installer configuration](installer-configuration.md) |

@@ -123,7 +123,7 @@ helm -n meteorcloud test meteorcloud --logs
 
 ## Security notes
 
-This deployment is suitable for demos and early production. Not included: full OS hardening, WAF, centralized monitoring, automated backups.
+This deployment is suitable for demos and early production. Not included: full OS hardening, WAF, centralized monitoring. Nightly local backups are on by default ([Backups and restore](backups.md)); copy them off the host with `backup_s3_uri`.
 
 Lock down `network.allowed_ssh_cidrs` to your IP in production.
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Starts the minimal production Compose stack (PostgreSQL, API, console,
 # Traefik; filesystem storage, no Redis/MinIO/MQTT) under its own project
-# name and ports, runs scripts/smoke_test.py, and removes everything again.
+# name and ports, runs scripts/smoke_test.py, then checks a backup and restore
+# round trip (scripts/backup.sh, wipe the volumes, scripts/restore.sh), and
+# removes everything again. SMOKE_BACKUP=0 skips the backup check.
 # Uses existing images meteorcloud/{backend,console}:$IMAGE_TAG (make images).
 set -euo pipefail
 
@@ -43,9 +45,11 @@ compose() {
   docker compose --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml "$@"
 }
 
+WORK="$(mktemp -d)"
 cleanup() {
   compose down -v --remove-orphans >/dev/null 2>&1 || true
   rm -f "$ENV_FILE"
+  rm -rf "$WORK"
 }
 trap cleanup EXIT
 
@@ -59,3 +63,26 @@ compose ps
 
 echo "==> Smoke test"
 python3 "$ROOT/scripts/smoke_test.py" "http://127.0.0.1:$HTTP_PORT"
+
+[ "${SMOKE_BACKUP:-1}" = "1" ] || exit 0
+python3 "$ROOT/scripts/smoke_test.py" "http://127.0.0.1:$HTTP_PORT" --state "$WORK/state.json" > /dev/null
+export COMPOSE="docker compose --env-file $ENV_FILE -f docker-compose.yml -f docker-compose.prod.yml"
+
+echo "==> Backup"
+BACKUP_DIR="$WORK/backups" "$ROOT/scripts/backup.sh"
+backup="$(find "$WORK/backups" -mindepth 1 -maxdepth 1 -type d -name '20*Z' | head -1)"
+
+echo "==> Wipe volumes and start an empty stack"
+compose down -v --remove-orphans
+if ! compose up -d --wait --wait-timeout 300; then
+  compose logs --tail 200
+  exit 1
+fi
+if python3 "$ROOT/scripts/smoke_test.py" "http://127.0.0.1:$HTTP_PORT" --verify "$WORK/state.json" > /dev/null 2>&1; then
+  echo "error: the saved user still works after wiping the volumes; the check proves nothing" >&2
+  exit 1
+fi
+
+echo "==> Restore"
+"$ROOT/scripts/restore.sh" --yes "$backup"
+python3 "$ROOT/scripts/smoke_test.py" "http://127.0.0.1:$HTTP_PORT" --verify "$WORK/state.json"

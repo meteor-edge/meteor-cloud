@@ -8,10 +8,17 @@ Works for any deployment (Compose + Traefik, Kubernetes ingress, EC2):
 Checks the public routes, then registers a throwaway user, creates an
 organization, uploads an artifact, and downloads it again. That exercises
 PostgreSQL and the configured object storage backend. Standard library only.
+
+    python3 scripts/smoke_test.py URL --state FILE    # also save the user and artifact to FILE
+    python3 scripts/smoke_test.py URL --verify FILE   # only log in and re-download them
+
+The backup/restore check in scripts/compose-smoke.sh uses --state before the backup
+and --verify after the restore.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import sys
@@ -72,7 +79,22 @@ def multipart(fields: dict[str, str], file_name: str, content: bytes) -> tuple[b
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
-def main(base: str) -> None:
+def verify(base: str, state_file: str) -> None:
+    """Log in as the saved user and check the saved artifact still downloads intact."""
+    api = f"{base.rstrip('/')}/api/v1"
+    wait_for(f"{base.rstrip('/')}/health")
+    with open(state_file, encoding="utf-8") as handle:
+        state = json.load(handle)
+    login = post_json(f"{api}/auth/login", {"email": state["email"], "password": state["password"]})
+    token = json.loads(expect("login as the saved user", *login, 200))["access_token"]
+    url = f"{api}/organizations/{state['organization_id']}/artifacts/{state['artifact_id']}/download"
+    downloaded = expect("download the saved artifact", *request("GET", url, headers={"Authorization": f"Bearer {token}"}), 200)
+    if hashlib.sha256(downloaded).hexdigest() != state["sha256"]:
+        raise SystemExit("FAIL saved artifact: content differs")
+    print("All restore checks passed.")
+
+
+def main(base: str, state_file: str | None = None) -> None:
     base = base.rstrip("/")
     api = f"{base}/api/v1"
     wait_for(f"{base}/health")
@@ -111,10 +133,26 @@ def main(base: str) -> None:
     if downloaded != content:
         raise SystemExit("FAIL download artifact: content differs from upload")
     print("OK   artifact round trip through object storage")
+    if state_file:
+        state = {
+            "email": email,
+            "password": password,
+            "organization_id": org["id"],
+            "artifact_id": artifact["id"],
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        with open(state_file, "w", encoding="utf-8") as handle:
+            json.dump(state, handle)
     print("All smoke checks passed.")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: smoke_test.py <base-url>")
-    main(sys.argv[1])
+    args = sys.argv[1:]
+    if len(args) == 1:
+        main(args[0])
+    elif len(args) == 3 and args[1] == "--state":
+        main(args[0], args[2])
+    elif len(args) == 3 and args[1] == "--verify":
+        verify(args[0], args[2])
+    else:
+        raise SystemExit("usage: smoke_test.py <base-url> [--state FILE | --verify FILE]")

@@ -17,7 +17,7 @@ render Prometheus Operator objects for clusters that already run it
 | API (`backend`) | Deployment + Service; init container runs `alembic upgrade head` and the optional first-admin step | always |
 | Console | Deployment + Service (nginx) | always |
 | Ingress | `/api`, `/health` -> API; `/v1` -> data API when enabled; `/` -> console | `ingress.enabled` (off by default; overlays turn it on) |
-| PostgreSQL | StatefulSet + PVC (single instance, no backups) | `postgresql.mode=bundled` (default) |
+| PostgreSQL | StatefulSet + PVC (single instance; optional nightly pg_dump CronJob) | `postgresql.mode=bundled` (default) |
 | Artifact volume | PVC | `objectStorage.provider=filesystem` (default) |
 | Data plane | Deployment (1 replica) | `mqtt.enabled` |
 | Application data API | Deployment + Service (`/v1` on 8082; ops on 8092 ClusterIP only) | `dataApi.enabled` |
@@ -242,7 +242,7 @@ The chart itself is the same everywhere; only values differ.
 
 ## Limitations
 
-- Bundled PostgreSQL is a single instance without backups or HA; use an external database for production data.
+- Bundled PostgreSQL is a single instance without HA. Backups are off unless you set `postgresql.bundled.backup.enabled=true` ([Backups and restore](backups.md)); use an external database for production data.
 - The data plane runs as one replica, because MQTT subscriptions are not shared.
 - The bundled broker is a single node, and its sessions and retained messages are not persisted.
 - `cache.provider=memory` keeps rate-limit counters per pod.
