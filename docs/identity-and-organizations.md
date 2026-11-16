@@ -56,7 +56,7 @@ Over the limit, `POST /api/v1/auth/login` answers `429 rate_limited` with `Retry
 <!-- coderabbit-ai-generated-section:v1:b39e44a316bf998fba36325fa09f9e261151acb5ef5aa317b77cd092ba98971d -->
 
 Counters live in Redis (`CACHE_PROVIDER=redis`, shared by all API replicas) or in process memory.
-When Redis counters are unavailable, enabled login limiters reject sign-in attempts with `429 rate_limited`. Device registration limiters continue to allow requests on counter errors.
+While Redis is unreachable, the login limits keep counting in each API process's memory, so guessing stays limited (per replica) and sign-in keeps working. Device registration limits allow requests while Redis is unreachable.
 
 <!-- /coderabbit-ai-generated:v1 -->
 `GET /api/v1/auth/config` (public) returns `{"signup_enabled": …}`; the console uses it to show or hide the sign-up form.

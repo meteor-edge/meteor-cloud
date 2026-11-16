@@ -200,7 +200,9 @@ def test_signup_can_be_turned_off(client: TestClient) -> None:
 
 @pytest.mark.parametrize("prefix", ["login_email_rl", "login_ip_rl"])
 @pytest.mark.parametrize("operation", ["incr", "expire"])
-def test_login_rejects_when_redis_counters_fail(monkeypatch: pytest.MonkeyPatch, prefix: str, operation: str) -> None:
+def test_login_counts_locally_when_redis_counters_fail(
+    monkeypatch: pytest.MonkeyPatch, prefix: str, operation: str
+) -> None:
     from unittest.mock import Mock
 
     from redis.exceptions import ConnectionError as RedisConnectionError
@@ -212,12 +214,18 @@ def test_login_rejects_when_redis_counters_fail(monkeypatch: pytest.MonkeyPatch,
     redis_client.incr.return_value = 1
     getattr(redis_client, operation).side_effect = RedisConnectionError("unavailable")
     monkeypatch.setattr("redis.Redis.from_url", lambda *_: redis_client)
-    monkeypatch.setattr(dependencies, "get_settings", lambda: Settings(CACHE_PROVIDER="redis"))
+    monkeypatch.setattr(
+        dependencies,
+        "get_settings",
+        lambda: Settings(CACHE_PROVIDER="redis", LOGIN_RATE_LIMIT_REQUESTS=2, LOGIN_IP_RATE_LIMIT_REQUESTS=2),
+    )
     builder = (
         dependencies._build_login_email_rate_limiter
         if prefix == "login_email_rl"
         else dependencies._build_login_ip_rate_limiter
     )
     limiter = builder.__wrapped__()
-    assert limiter.allow("test") is False
-    assert redis_client.incr.call_args.args[0].startswith(f"{prefix}:test:")
+    # Redis is down: the limit still holds, counted in this process.
+    assert [limiter.allow("test") for _ in range(3)] == [True, True, False]
+    assert limiter.allow("other") is True
+    assert redis_client.incr.call_args_list[0].args[0].startswith(f"{prefix}:test:")
