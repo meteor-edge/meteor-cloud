@@ -26,6 +26,7 @@ How to use the product day to day.
 | Roles and access | [Authorization (RBAC)](authorization/rbac.md) |
 | Who did what (audit trail) | [Audit log](audit-log.md) |
 | Device types and groups | [Device types and groups](fleet/device-types.md) |
+| Simulated devices (Pi, NUC, Jetson without hardware) | [Device simulator](fleet/simulator.md) |
 | Admin-initiated enroll | [Registration tokens](fleet/registration-tokens.md) · [Device registration](fleet/device-registration.md) |
 | Device-initiated enroll | [Enrollment API keys](fleet/enrollment-api-keys.md) · [Request / approve / claim](fleet/device-request-enrollment.md) · [First-boot image](../src/device-plane/agent/packaging/firstboot/README.md) |
 | Device HTTP auth & heartbeat | [Device authentication](fleet/device-authentication.md) · [Heartbeat](fleet/heartbeat.md) |

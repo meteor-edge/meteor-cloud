@@ -23,11 +23,12 @@ import { DeviceEditDialog } from "@/components/fleet/DeviceEditDialog";
 import { DevicesNav } from "@/components/fleet/DevicesNav";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { PendingEnrollmentRequests } from "@/components/fleet/PendingEnrollmentRequests";
-import { StatusBadge } from "@/components/fleet/StatusBadge";
+import { SimulatedBadge, StatusBadge } from "@/components/fleet/StatusBadge";
 import { DeviceSetupDialog } from "@/components/fleet/DeviceSetupDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isSimulatedDevice } from "@/lib/devices";
 import { canDeleteDevices, canManageEnrollmentKeys, canManageFleet } from "@/lib/permissions";
 import { cn, formatDateTime, formatRelativeTime } from "@/lib/utils";
 
@@ -505,6 +506,11 @@ export function DevicesPage() {
                     {!device.is_enabled && (
                       <span className="ml-2 rounded-full bg-horizon px-2 py-0.5 text-xs text-star-dust">
                         Disabled
+                      </span>
+                    )}
+                    {isSimulatedDevice(device) && (
+                      <span className="ml-2">
+                        <SimulatedBadge />
                       </span>
                     )}
                   </td>

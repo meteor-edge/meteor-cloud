@@ -1,0 +1,16 @@
+{
+  "name": "rpi5",
+  "description": "Raspberry Pi 5 Model B, 8 GB, 64 GB SD card",
+  "inventory": {
+    "hardware_model": "Raspberry Pi 5 Model B Rev 1.0",
+    "cpu_model": "ARM Cortex-A76",
+    "cpu_cores": 4,
+    "memory_mb": 8048,
+    "architecture": "aarch64"
+  },
+  "disk_gb": 64,
+  "thermal": {"idle_c": 50, "load_c": 80, "throttle_c": 85, "noise_c": 0.8},
+  "extras": "raspberry_pi",
+  "capabilities": {},
+  "boot_delay_seconds": 20
+}

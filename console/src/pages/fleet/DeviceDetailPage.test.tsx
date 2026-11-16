@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { getMyAccess } from "@/api/access";
+import { getDevice } from "@/api/fleet";
 import type { Device } from "@/api/fleet/types";
 import { DeviceDetailPage } from "@/pages/fleet/DeviceDetailPage";
 
@@ -112,6 +113,17 @@ describe("DeviceDetailPage logs", () => {
     expect(screen.getByText("ARM Cortex-A76")).toBeInTheDocument();
     expect(screen.getByText("192.168.1.20")).toBeInTheDocument();
     expect(screen.getByText("Local IP")).toBeInTheDocument();
+  });
+
+  it("marks a simulated device and only that one", async () => {
+    vi.mocked(getDevice).mockResolvedValueOnce({ ...device, metadata: { simulated: true } });
+    const { unmount } = renderPage();
+    expect(await screen.findByText("Simulated")).toBeInTheDocument();
+    unmount();
+
+    renderPage();
+    expect(await screen.findByText("10000000abcd1234")).toBeInTheDocument();
+    expect(screen.queryByText("Simulated")).not.toBeInTheDocument();
   });
 
   it("opens logs from the Access tab only when the user asks", async () => {

@@ -32,6 +32,25 @@ from app.mqtt.credentials import issue_mqtt_credentials, mqtt_config_version
 from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
 
 
+def mark_simulated(device: Device, simulated: bool) -> None:
+    """Keep ``metadata["simulated"]`` in step with what the agent reports.
+
+    The console marks simulated devices (docs/fleet/simulator.md). The key is owned by
+    the agent: a real device's next report removes it again.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    meta = dict(device.metadata_ or {})
+    if simulated == (meta.get("simulated") is True):
+        return
+    if simulated:
+        meta["simulated"] = True
+    else:
+        meta.pop("simulated", None)
+    device.metadata_ = meta
+    flag_modified(device, "metadata_")
+
+
 class RegistrationService:
     def __init__(self, session: Session, settings: Settings | None = None) -> None:
         self.session = session
@@ -193,6 +212,7 @@ class RegistrationService:
             device.labels = payload.labels
         if payload.metadata:
             device.metadata_ = payload.metadata
+        mark_simulated(device, payload.simulated)
 
     def _create_new(
         self,
@@ -307,6 +327,7 @@ class RegistrationService:
             device.memory_mb = payload.memory_mb
         if payload.local_ip:
             device.local_ip = payload.local_ip
+        mark_simulated(device, payload.simulated)
 
     def _identity_in_use(
         self,

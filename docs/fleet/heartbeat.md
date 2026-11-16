@@ -81,6 +81,9 @@ omits it, the server records the private address the heartbeat arrived from.
 A value that is not an IP address is ignored, as are `0.0.0.0`, loopback,
 link-local, and public addresses.
 
+`simulated: true` marks a [simulated device](simulator.md). It is stored as
+`metadata.simulated`, and a heartbeat without it removes that key again.
+
 `software_report` updates installed software for known
 workloads (unknown keys are ignored). The response includes current
 `desired_software`. Agents can also poll `GET /api/v1/agent/software`.

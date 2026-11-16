@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist sim-device sim-device-image
 
 COMPOSE_DIR := deploy/compose
 # Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
@@ -232,6 +232,22 @@ agent-test: ## Run reference agent tests
 
 agent-dist: ## Pack meteorcli (agent + runtime) into dist/ for a GitHub Release
 	./scripts/agent-dist.sh
+
+SIM_PROFILE ?= $(or $(PROFILE),rpi5)
+SIM_SERVER ?= http://localhost:8000
+SIM_NAME ?= sim-$(SIM_PROFILE)
+
+sim-device-image: ## Build the simulated-device image (meteorcli with METEORCLI_PLATFORM=simulated)
+	docker build -t meteorcloud/sim-device:dev -f src/device-plane/simulator/Dockerfile src/device-plane
+
+sim-device: sim-device-image ## Run a simulated device against `make dev` (PROFILE=rpi5 TOKEN=… or API_KEY=…)
+	@test -n "$(TOKEN)$(API_KEY)" || { echo "Set TOKEN=<registration token> or API_KEY=<enrollment API key>"; exit 2; }
+	docker run -d --name $(SIM_NAME) --network host --restart on-failure \
+		-e METEORCLI_SERVER=$(SIM_SERVER) -e METEORCLI_DEVICE_PROFILE=$(SIM_PROFILE) \
+		-e METEORCLI_SIM_ID=$(SIM_NAME) -e METEORCLI_TOKEN=$(TOKEN) -e METEORCLI_API_KEY=$(API_KEY) \
+		-v $(SIM_NAME):/var/lib/meteorcli meteorcloud/sim-device:dev
+	@echo "Simulated $(SIM_PROFILE) started as container $(SIM_NAME). Logs: docker logs -f $(SIM_NAME)"
+	@echo "Remove it: docker rm -f $(SIM_NAME) && docker volume rm $(SIM_NAME)"
 
 check-plane-imports: ## Fail if planes import each other's private Python packages
 	python scripts/check_plane_imports.py

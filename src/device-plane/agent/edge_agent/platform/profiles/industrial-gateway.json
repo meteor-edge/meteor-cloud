@@ -1,0 +1,16 @@
+{
+  "name": "industrial-gateway",
+  "description": "Generic DIN-rail gateway without Docker, to test deploy gating",
+  "inventory": {
+    "hardware_model": "Industrial Gateway IG-200",
+    "cpu_model": "Intel(R) Atom(TM) x6211E",
+    "cpu_cores": 2,
+    "memory_mb": 3840,
+    "architecture": "x86_64"
+  },
+  "disk_gb": 16,
+  "thermal": {"idle_c": 45, "load_c": 68, "throttle_c": 105, "noise_c": 0.6},
+  "extras": null,
+  "capabilities": {"docker": false, "docker_compose": false},
+  "boot_delay_seconds": 30
+}
