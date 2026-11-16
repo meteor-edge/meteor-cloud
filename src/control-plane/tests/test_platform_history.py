@@ -363,6 +363,53 @@ def test_equal_timestamps_keep_the_received_order() -> None:
     assert segments[-1].status == "offline"
 
 
+def test_lwt_offline_right_after_online_is_ignored() -> None:
+    from app.devices.history import debounce_status_changes, device_availability
+
+    now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+    online_at = now - timedelta(minutes=30)
+    lwt_at = online_at + timedelta(milliseconds=400)
+
+    def ev(at: datetime, status: str) -> dict:
+        return {"time": at.isoformat(), "data": {"status": status}}
+
+    assert debounce_status_changes([(online_at, "online"), (lwt_at, "offline")]) == [
+        (online_at, "online")
+    ]
+
+    dp = _PagedStatus([[ev(online_at, "online"), ev(lwt_at, "offline")]], previous=None)
+    body = device_availability(
+        dp, organization_id=uuid.uuid4(), device_id=uuid.uuid4(), range_="1h", now=now
+    )
+    assert body.offline_count == 0
+    assert body.segments[-1].status == "online"
+    # Unknown time before the first status does not count toward uptime.
+    assert body.uptime_percent == 100.0
+    assert [s.status for s in body.segments] == ["unknown", "online"]
+
+
+def test_live_online_corrects_trailing_offline_segment() -> None:
+    from app.devices.history import device_availability
+
+    now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+    offline_at = now - timedelta(minutes=20)
+
+    dp = _PagedStatus(
+        [[{"time": offline_at.isoformat(), "data": {"status": "offline"}}]],
+        previous={"time": (now - timedelta(hours=2)).isoformat(), "data": {"status": "online"}},
+    )
+    body = device_availability(
+        dp,
+        organization_id=uuid.uuid4(),
+        device_id=uuid.uuid4(),
+        range_="1h",
+        now=now,
+        live_status="online",
+    )
+    assert body.segments[-1].status == "online"
+    assert body.offline_count == 1
+
+
 def test_relay_pass_is_bounded(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.history import relay
 

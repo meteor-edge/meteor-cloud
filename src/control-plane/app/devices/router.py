@@ -391,9 +391,14 @@ def get_device_availability(
     range_: Annotated[TelemetryRange, Query(alias="range")] = "24h",
 ) -> DeviceAvailabilityResponse:
     """Online/offline segments and uptime from the agent's status messages and the broker's last will."""
-    service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+    device = service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
     return device_availability(
-        data_plane, organization_id=organization_id, device_id=device_id, range_=range_, now=datetime.now(UTC)
+        data_plane,
+        organization_id=organization_id,
+        device_id=device_id,
+        range_=range_,
+        now=datetime.now(UTC),
+        live_status=device.status,
     )
 
 

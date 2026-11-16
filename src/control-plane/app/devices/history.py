@@ -142,6 +142,31 @@ def _status_of(event: dict[str, Any]) -> str | None:
     return status if status in ("online", "offline") else None
 
 
+# Broker last-will "offline" often lands within a second of a fresh "online" when
+# the agent reconnects (old session cleanup). Drop that race so the strip does
+# not stick on yellow while the device is up.
+STATUS_LWT_RACE = timedelta(seconds=2)
+
+
+def debounce_status_changes(
+    changes: list[tuple[datetime, str]], *, race_window: timedelta = STATUS_LWT_RACE
+) -> list[tuple[datetime, str]]:
+    """Keep order; drop offline that arrives immediately after online."""
+    out: list[tuple[datetime, str]] = []
+    for at, status in sorted(changes, key=lambda change: change[0]):
+        if (
+            status == "offline"
+            and out
+            and out[-1][1] == "online"
+            and at - out[-1][0] <= race_window
+        ):
+            continue
+        if out and out[-1][1] == status:
+            continue
+        out.append((at, status))
+    return out
+
+
 def build_segments(
     start: datetime, end: datetime, previous: str | None, changes: list[tuple[datetime, str]]
 ) -> list[AvailabilitySegment]:
@@ -170,6 +195,7 @@ def device_availability(
     device_id: uuid.UUID,
     range_: TelemetryRange,
     now: datetime,
+    live_status: str | None = None,
 ) -> DeviceAvailabilityResponse:
     dp = require_data_plane(data_plane)
     window, _ = RANGES[range_]
@@ -202,14 +228,24 @@ def device_availability(
         status, at = _status_of(event), _parse_time(event.get("time"))
         if status and at:
             changes.append((at, status))
+    changes = debounce_status_changes(changes)
     segments = build_segments(start, end, previous, changes)
+    # Device header "Online" comes from last_seen (metrics/heartbeat). A reconnect
+    # can leave a trailing offline status event (broker last will) while the device
+    # is up; flip only that open-ended segment so the strip matches live state.
+    if live_status == "online" and segments and segments[-1].status != "online":
+        last = segments[-1]
+        segments[-1] = AvailabilitySegment(start=last.start, end=last.end, status="online")
+    elif live_status == "offline" and segments and segments[-1].status == "online":
+        last = segments[-1]
+        segments[-1] = AvailabilitySegment(start=last.start, end=last.end, status="offline")
     known = sum((s.end - s.start).total_seconds() for s in segments if s.status != "unknown")
     online = sum((s.end - s.start).total_seconds() for s in segments if s.status == "online")
     # Count transitions into offline, not offline messages: a repeated offline
     # (last will after a stop message) is the same outage.
     offline_count = 0
     state = previous
-    for _, status in sorted(changes, key=lambda change: change[0]):
+    for _, status in changes:
         if status == "offline" and state != "offline":
             offline_count += 1
         state = status
