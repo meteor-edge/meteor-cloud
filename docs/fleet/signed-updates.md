@@ -5,7 +5,7 @@ database dump (without the encryption key), a tampered artifact bucket or a prox
 that rewrites responses can no longer make devices run something nobody deployed.
 A Docker release that names its image by tag signs the tag, not the image content.
 A registry that changes the image behind that tag can still change what devices run.
-Pin the image by `@sha256:` digest to close this gap (see [Upgrading](#upgrading)).
+Pin the image by `@sha256:` digest to close this gap (see [Docker images](#docker-images)).
 
 ## How it works
 
