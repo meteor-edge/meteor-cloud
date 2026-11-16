@@ -208,7 +208,8 @@ def _start_via_systemd_run(*, script: Path, config_dir: Path, log_path: Path, ac
     ]
     completed = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
     if completed.returncode != 0:
-        raise OSError(completed.stderr.strip() or completed.stdout.strip() or f"systemd-run exited {completed.returncode}")
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise OSError(detail or f"systemd-run exited {completed.returncode}")
 
 
 def start_updater(*, config_dir: Path, action_id: object, from_version: str | None) -> str | None:
