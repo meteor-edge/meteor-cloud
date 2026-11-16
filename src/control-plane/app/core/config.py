@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     )
     # How long "Allow re-registration" lets known hardware register again without its
     # current device token (e.g. after the card was re-flashed).
+    # Docker releases: resolve the image tag to a digest when the release is saved, so
+    # devices pull exactly that image (docs/fleet/signed-updates.md). Public registries only.
+    release_resolve_image_digests: bool = True
+    # Refuse a docker release whose tag cannot be resolved (otherwise it keeps the tag).
+    release_require_image_digests: bool = False
     device_reregistration_window_seconds: int = Field(
         default=24 * 3600,
         ge=60,

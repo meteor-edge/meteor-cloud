@@ -109,6 +109,22 @@ def _default_runner(args: Sequence[str], *, check: bool = True) -> subprocess.Co
     )
 
 
+_DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
+
+
+def pinned_image(image: str, digest: str | None) -> str:
+    """``repo:tag`` plus a release's ``image_digest`` -> ``repo@sha256:…`` (Docker checks the content)."""
+    if not digest:
+        return image
+    if not _DIGEST_RE.match(digest):
+        raise DockerError(f"Invalid image digest {digest!r}.")
+    name = image.split("@", 1)[0]
+    last = name.rsplit("/", 1)[-1]
+    if ":" in last:
+        name = name[: len(name) - len(last)] + last.split(":", 1)[0]
+    return f"{name}@{digest}"
+
+
 class DockerAdapter:
     """Install and run one container (pull image or load a tarball)."""
 
@@ -126,10 +142,13 @@ class DockerAdapter:
         restart: str | None = "unless-stopped",
         command: str | None = None,
         volumes: list[str] | None = None,
+        image_digest: str | None = None,
     ) -> None:
         name = validate_container_name(container_name)
 
         resolved_image = (image or "").strip() or None
+        if resolved_image and tarball is None:
+            resolved_image = pinned_image(resolved_image, image_digest)
         if tarball is not None:
             loaded = self.load_tarball(tarball)
             if not resolved_image:

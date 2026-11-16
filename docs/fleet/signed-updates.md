@@ -58,5 +58,17 @@ pins the new key.
 - A new agent talking to an older control plane (no `/agent/signing-keys`) accepts
   unsigned items until the server starts signing, then pins and enforces.
 
-Image digests (pulling Docker images by `@sha256:` instead of a tag) are tracked
-separately in issue #57.
+## Docker images
+
+A signed docker item names its image by tag, which a registry could change. So docker
+releases are **pinned to a digest** when they are saved: the server resolves the tag on
+the registry (public HTTPS registries only, anonymous pull) and stores
+`spec.image_digest`, which is part of the signed spec. The device runs
+`image@sha256:…` and Docker checks the content against the digest.
+
+- Private registry: give `image_digest` (or `image@sha256:…`) in the release; the
+  server cannot log in to resolve it and otherwise keeps the tag.
+- `RELEASE_REQUIRE_IMAGE_DIGESTS=true` refuses docker releases that cannot be pinned.
+- `RELEASE_RESOLVE_IMAGE_DIGESTS=false` turns the registry lookup off (air-gapped installs).
+- Images inside a docker_compose file are not pinned yet: write `image@sha256:…` in the
+  compose file; the file itself is covered by the signed artifact hash.
