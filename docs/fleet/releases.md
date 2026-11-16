@@ -33,6 +33,9 @@ Reading requires `artifact.read`. Creating and updating require `artifact.create
 | `docker` | type `docker` tarball **or** none if pulling | `container_name`, and either `image` or an artifact |
 | `docker_compose` | type `docker_compose` (required) | `project_name`, optional `env` |
 
+Every kind also takes an optional `health_check`: devices wait for the update to be healthy
+and roll back to their previous release if it is not. See [automatic rollback](rollback.md).
+
 Uniqueness is per organization on kind + name + version (case-insensitive).
 
 ## UI

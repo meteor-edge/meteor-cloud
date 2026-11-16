@@ -12,6 +12,7 @@ const SYNC_LABELS: Record<string, string> = {
   updating: "Updating",
   failed: "Failed",
   cancelled: "Cancelled",
+  rolled_back: "Rolled back",
 };
 
 function releaseLabel(item: DeviceSoftware["desired_release"]): string {

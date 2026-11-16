@@ -206,6 +206,8 @@ timed out (or failed) ends as **failed**.
   again unless the rate dropped: use **Retry failed** first (it keeps the
   Deploy paused), or cancel / roll back.
 - **Cancel** works while paused (see [Cancel](#cancel)).
+- Devices can also roll back on their own when a release has a `health_check`
+  ([automatic rollback](rollback.md)). Such a device counts as failed here.
 - **Rollback** works on paused and finished Deploys and only targets devices
   that were activated (received the release). Queued devices are left alone.
   Once a Deploy is rolled back, **Resume** and **Retry failed** on it return
@@ -301,6 +303,7 @@ compose project was removed entirely): the device shows
 ## Related
 
 - [Releases](releases.md)
+- [Automatic rollback on each device](rollback.md)
 - [Heartbeat](heartbeat.md)
 - [Agent README](../../src/device-plane/agent/README.md) (Raspberry Pi OS install)
 - [RBAC](../authorization/rbac.md)
