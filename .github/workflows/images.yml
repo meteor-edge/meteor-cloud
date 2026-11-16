@@ -1,0 +1,154 @@
+# Publish the platform container images for a release.
+#
+# Push a tag that matches the Helm chart appVersion (deploy/kubernetes/helm/meteorcloud/Chart.yaml):
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Each image is built for linux/amd64 and linux/arm64, pushed to
+# ghcr.io/meteor-edge/meteorcloud-<name>, signed with cosign (keyless, GitHub OIDC),
+# and gets an SPDX SBOM (syft) attached as a signed attestation. BuildKit provenance
+# and SBOM attestations are pushed with the image too. The SBOM files are added to
+# the GitHub release for the tag. How to verify: docs/release-images.md.
+#
+# Run it by hand (Actions -> container images -> Run workflow) to publish sha-<commit>
+# tags only, for testing the pipeline without a release.
+name: container images
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/meteor-edge/meteorcloud-
+
+jobs:
+  version:
+    name: Check tag matches the chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Compare tag with Chart.yaml appVersion
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          chart="$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' deploy/kubernetes/helm/meteorcloud/Chart.yaml)"
+          if [ "$tag" != "$chart" ]; then
+            echo "::error::Tag v$tag does not match the chart appVersion $chart. Bump Chart.yaml first."
+            exit 1
+          fi
+
+  image:
+    name: ${{ matrix.name }}
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # push to GHCR
+      id-token: write      # keyless cosign signing
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: backend, context: src/control-plane }
+          - { name: data-plane, context: src/data-plane }
+          - { name: data-api, context: src/data-plane/go }
+          - { name: mosquitto, context: src/data-plane/broker/mosquitto }
+          - { name: console, context: console }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: sigstore/cosign-installer@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,enable=${{ github.event_name == 'workflow_dispatch' }}
+          labels: |
+            org.opencontainers.image.licenses=Apache-2.0
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=release-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}
+      - name: Sign the image
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE"
+      - name: Generate SBOM (SPDX, syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_PREFIX }}${{ matrix.name }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: meteorcloud-${{ matrix.name }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attach the SBOM as a signed attestation
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: cosign attest --yes --type spdxjson --predicate "meteorcloud-${{ matrix.name }}.spdx.json" "$IMAGE"
+      - name: Record the digest
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}${{ matrix.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "${IMAGE}@${DIGEST}" > "meteorcloud-${{ matrix.name }}.digest"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.name }}
+          path: |
+            meteorcloud-${{ matrix.name }}.spdx.json
+            meteorcloud-${{ matrix.name }}.digest
+
+  release:
+    name: Add SBOMs and digests to the GitHub release
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: sbom-*
+          merge-multiple: true
+          path: dist
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat dist/*.digest > dist/images.txt
+          rm dist/*.digest
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "MeteorCloud $TAG" \
+              --notes "Container images (signed with cosign, see docs/release-images.md):"$'\n\n```\n'"$(cat dist/images.txt)"$'\n```'
+          fi
+          gh release upload "$TAG" dist/* --clobber

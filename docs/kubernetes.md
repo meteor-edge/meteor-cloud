@@ -77,10 +77,12 @@ ingress, uninstalls, and deletes the cluster.
 You provide:
 
 1. **A cluster** (Kubernetes 1.25+) and `kubectl`/`helm` access to a namespace.
-2. **Images** in a registry the cluster can pull from. Build them from
-   `src/control-plane`, `src/data-plane`, `src/data-plane/go` (application data API),
+2. **Images.** The chart defaults to the signed release images on
+   `ghcr.io/meteor-edge/meteorcloud-*` at the chart `appVersion`; see
+   [Release images](release-images.md) to verify them and pin digests. To build your own,
+   use `src/control-plane`, `src/data-plane`, `src/data-plane/go` (application data API),
    `console`, and the Mosquitto broker image from `src/data-plane/broker/mosquitto`
-   (set `mqtt.mosquitto.image`). Set `imagePullSecrets` if the registry is private.
+   (set `mqtt.mosquitto.image`). Set `imagePullSecrets` if your registry is private.
 3. **PostgreSQL 14+**, reachable from the cluster (Cloud SQL, RDS, Azure Database,
    or self-hosted). Put the SQLAlchemy URL in `DATABASE_URL`, for example
    `postgresql+psycopg://user:pass@host:5432/edge_platform?sslmode=require`.

@@ -51,13 +51,13 @@ deployment:
   image_pull_policy: never
 ```
 
-Registry-based deploy:
+Registry-based deploy with the signed release images (see [release-images.md](release-images.md)):
 
 ```yaml
 deployment:
   image_source: registry
-  backend_image: ghcr.io/example/edge-platform-backend:0.2.0
-  frontend_image: ghcr.io/example/edge-platform-frontend:0.2.0
+  backend_image: ghcr.io/meteor-edge/meteorcloud-backend:0.2.0
+  frontend_image: ghcr.io/meteor-edge/meteorcloud-console:0.2.0
   image_pull_policy: always
 ```
 

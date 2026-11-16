@@ -9,12 +9,12 @@ platform_domain: fleet.example.com   # empty: plain HTTP on port 80
 # Images: build from git on the host, or pull prebuilt images from a registry.
 image_source: git
 git_ref: master
-# image_source: registry
-# backend_image: ghcr.io/your-org/meteorcloud-backend:0.2.0
-# data_plane_image: ghcr.io/your-org/meteorcloud-data-plane:0.2.0
-# data_api_image: ghcr.io/your-org/meteorcloud-data-api:0.2.0
-# mosquitto_image: ghcr.io/your-org/meteorcloud-mosquitto:0.2.0
-# frontend_image: ghcr.io/your-org/meteorcloud-console:0.2.0
+# image_source: registry   # signed release images, see docs/release-images.md
+# backend_image: ghcr.io/meteor-edge/meteorcloud-backend:0.2.0
+# data_plane_image: ghcr.io/meteor-edge/meteorcloud-data-plane:0.2.0
+# data_api_image: ghcr.io/meteor-edge/meteorcloud-data-api:0.2.0
+# mosquitto_image: ghcr.io/meteor-edge/meteorcloud-mosquitto:0.2.0
+# frontend_image: ghcr.io/meteor-edge/meteorcloud-console:0.2.0
 
 # Application data API (SDK). Needs EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN.
 # data_api_enabled: true

@@ -227,7 +227,7 @@ mqtt:
     host: ""
   mosquitto:
     image:
-      repository: meteorcloud/mosquitto
+      repository: ghcr.io/meteor-edge/meteorcloud-mosquitto
       tag: ""                  # defaults to the chart appVersion
       pullPolicy: IfNotPresent
     # How long the broker reuses an "allowed" topic decision (0 asks the API every time).
@@ -260,7 +260,7 @@ mqtt:
 # --- Workloads --------------------------------------------------------------
 backend:
   image:
-    repository: meteorcloud/backend
+    repository: ghcr.io/meteor-edge/meteorcloud-backend
     tag: ""                  # defaults to the chart appVersion
     pullPolicy: IfNotPresent
   replicaCount: 1
@@ -279,7 +279,7 @@ backend:
 
 console:
   image:
-    repository: meteorcloud/console
+    repository: ghcr.io/meteor-edge/meteorcloud-console
     tag: ""
     pullPolicy: IfNotPresent
   replicaCount: 1
@@ -292,7 +292,7 @@ console:
 
 dataPlane:
   image:
-    repository: meteorcloud/data-plane
+    repository: ghcr.io/meteor-edge/meteorcloud-data-plane
     tag: ""
     pullPolicy: IfNotPresent
   resources:
@@ -305,7 +305,7 @@ dataPlane:
 dataApi:
   enabled: false
   image:
-    repository: meteorcloud/data-api
+    repository: ghcr.io/meteor-edge/meteorcloud-data-api
     tag: ""
     pullPolicy: IfNotPresent
   replicaCount: 1
