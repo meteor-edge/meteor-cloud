@@ -53,6 +53,7 @@ data:
   OBJECT_STORAGE_PATH: /data/artifacts
   {{- with .Values.objectStorage.s3 }}
   OBJECT_STORAGE_ENDPOINT_URL: {{ .endpointUrl | quote }}
+  OBJECT_STORAGE_PUBLIC_ENDPOINT_URL: {{ .publicEndpointUrl | default "" | quote }}
   OBJECT_STORAGE_REGION: {{ .region | quote }}
   OBJECT_STORAGE_BUCKET: {{ .bucket | quote }}
   OBJECT_STORAGE_AUTO_CREATE_BUCKET: {{ .autoCreateBucket | toString | quote }}

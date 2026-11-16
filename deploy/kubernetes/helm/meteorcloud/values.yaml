@@ -196,6 +196,10 @@ objectStorage:
     keep: true
   s3:
     endpointUrl: ""          # empty for AWS S3; https://storage.googleapis.com for GCS
+    # Endpoint devices download from through presigned URLs. AWS S3 needs nothing here.
+    # Other endpoints: set the address devices can reach (GCS, R2: same as endpointUrl).
+    # Empty with a custom endpointUrl: downloads are streamed through the API.
+    publicEndpointUrl: ""
     region: us-east-1
     bucket: ""
     autoCreateBucket: false

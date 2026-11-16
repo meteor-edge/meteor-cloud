@@ -11,6 +11,8 @@ class InMemoryObjectStorage:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, str | None]] = {}
         self.fail_puts = False
+        # Set to a base URL to act like S3 with presigned downloads.
+        self.presign_base: str | None = None
 
     def put(self, key: str, data: BinaryIO, *, content_type: str | None = None) -> None:
         if self.fail_puts:
@@ -31,3 +33,8 @@ class InMemoryObjectStorage:
 
     def exists(self, key: str) -> bool:
         return key in self.objects
+
+    def presigned_get_url(self, key: str, *, expires_in: int, file_name: str | None = None) -> str | None:
+        if self.presign_base is None:
+            return None
+        return f"{self.presign_base}/{key}?expires={expires_in}"

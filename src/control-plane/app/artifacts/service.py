@@ -469,6 +469,27 @@ class ArtifactService:
         artifact = self._require_artifact(organization_id, artifact_id)
         return artifact, self._open(artifact)
 
+    def presigned_download(self, *, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> tuple[Artifact, str | None]:
+        """The artifact and a short-lived storage URL for an already-authorized caller.
+
+        The URL is None when the content has to be streamed (filesystem storage, a
+        bucket devices cannot reach, or signing failed).
+        """
+        artifact = self._require_artifact(organization_id, artifact_id)
+        presign = getattr(self.storage, "presigned_get_url", None)
+        if presign is None:
+            return artifact, None
+        try:
+            url = presign(
+                artifact.storage_key,
+                expires_in=self.settings.artifact_download_url_ttl_seconds,
+                file_name=artifact.file_name,
+            )
+        except Exception:
+            logger.exception("Could not presign an artifact download; streaming it instead")
+            return artifact, None
+        return artifact, url
+
     def create_download_link(
         self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID
     ) -> ArtifactDownloadLinkResponse:
