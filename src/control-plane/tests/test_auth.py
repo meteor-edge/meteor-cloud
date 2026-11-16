@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 from jose import jwt
 from sqlalchemy.orm import Session
@@ -148,10 +149,11 @@ def _register(client: TestClient, email: str = "jane@example.com", password: str
     assert response.status_code == 201, response.text
 
 
-def test_login_is_rate_limited_per_email(client: TestClient) -> None:
+def test_login_is_rate_limited_per_email(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.devices.rate_limit import InMemoryRateLimiter
     from app.identity.dependencies import get_login_email_rate_limiter
 
+    monkeypatch.setattr("app.devices.rate_limit.time.time", lambda: 1_800_000_000.0)
     limiter = InMemoryRateLimiter(limit=3, window_seconds=300)
     client.app.dependency_overrides[get_login_email_rate_limiter] = lambda: limiter
     _register(client)
@@ -165,10 +167,11 @@ def test_login_is_rate_limited_per_email(client: TestClient) -> None:
     assert blocked.headers.get("Retry-After")
 
 
-def test_login_is_rate_limited_per_source_ip(client: TestClient) -> None:
+def test_login_is_rate_limited_per_source_ip(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.devices.rate_limit import InMemoryRateLimiter
     from app.identity.dependencies import get_login_ip_rate_limiter
 
+    monkeypatch.setattr("app.devices.rate_limit.time.time", lambda: 1_800_000_000.0)
     limiter = InMemoryRateLimiter(limit=2, window_seconds=300)
     client.app.dependency_overrides[get_login_ip_rate_limiter] = lambda: limiter
     codes = [
@@ -193,3 +196,28 @@ def test_signup_can_be_turned_off(client: TestClient) -> None:
         assert response.json()["error"]["code"] == "signup_disabled"
     finally:
         client.app.dependency_overrides.pop(get_settings, None)
+
+
+@pytest.mark.parametrize("prefix", ["login_email_rl", "login_ip_rl"])
+@pytest.mark.parametrize("operation", ["incr", "expire"])
+def test_login_rejects_when_redis_counters_fail(monkeypatch: pytest.MonkeyPatch, prefix: str, operation: str) -> None:
+    from unittest.mock import Mock
+
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from app.core.config import Settings
+    from app.identity import dependencies
+
+    redis_client = Mock()
+    redis_client.incr.return_value = 1
+    getattr(redis_client, operation).side_effect = RedisConnectionError("unavailable")
+    monkeypatch.setattr("redis.Redis.from_url", lambda *_: redis_client)
+    monkeypatch.setattr(dependencies, "get_settings", lambda: Settings(CACHE_PROVIDER="redis"))
+    builder = (
+        dependencies._build_login_email_rate_limiter
+        if prefix == "login_email_rl"
+        else dependencies._build_login_ip_rate_limiter
+    )
+    limiter = builder.__wrapped__()
+    assert limiter.allow("test") is False
+    assert redis_client.incr.call_args.args[0].startswith(f"{prefix}:test:")

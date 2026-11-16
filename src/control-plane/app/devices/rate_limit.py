@@ -28,8 +28,9 @@ class RedisRateLimiter:
 
     A key of the form ``prefix:identifier:window`` is incremented on each call
     and expires after the window elapses. Requests are allowed while the count
-    stays at or below ``limit``. If Redis is unreachable the request is allowed
-    (fail-open) so a limiter outage cannot block legitimate registrations.
+    stays at or below ``limit``. Counter errors allow requests by default so an
+    outage cannot block registrations. Login limiters set ``fail_open=False``
+    to reject attempts when counters are unavailable.
     """
 
     def __init__(
@@ -39,11 +40,13 @@ class RedisRateLimiter:
         limit: int,
         window_seconds: int,
         prefix: str = "reg_rl",
+        fail_open: bool = True,
     ) -> None:
         self._redis = redis_client
         self._limit = limit
         self._window = window_seconds
         self._prefix = prefix
+        self._fail_open = fail_open
 
     def allow(self, identifier: str) -> bool:
         if self._limit <= 0:
@@ -55,8 +58,7 @@ class RedisRateLimiter:
             if count == 1:
                 self._redis.expire(key, self._window)
         except Exception:
-            # Fail open: never let a limiter outage block registration.
-            return True
+            return self._fail_open
         return int(count) <= self._limit
 
 

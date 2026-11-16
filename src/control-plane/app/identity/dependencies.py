@@ -92,6 +92,7 @@ def _login_limiter(limit: int, prefix: str) -> RateLimiter:
         limit=limit,
         window_seconds=settings.login_rate_limit_window_seconds,
         prefix=prefix,
+        fail_open=False,
     )
 
 
