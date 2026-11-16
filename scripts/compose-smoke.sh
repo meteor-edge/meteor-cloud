@@ -70,7 +70,9 @@ export COMPOSE="docker compose --env-file $ENV_FILE -f docker-compose.yml -f doc
 
 echo "==> Backup"
 BACKUP_DIR="$WORK/backups" "$ROOT/scripts/backup.sh"
-backup="$(find "$WORK/backups" -mindepth 1 -maxdepth 1 -type d -name '20*Z' | head -1)"
+# Names are <UTC>Z.<pid> (see scripts/backup.sh).
+backup="$(find "$WORK/backups" -mindepth 1 -maxdepth 1 -type d -name '20*Z*' | head -1)"
+[ -n "$backup" ] || { echo "error: backup.sh wrote no directory under $WORK/backups" >&2; exit 1; }
 
 echo "==> Wipe volumes and start an empty stack"
 compose down -v --remove-orphans
