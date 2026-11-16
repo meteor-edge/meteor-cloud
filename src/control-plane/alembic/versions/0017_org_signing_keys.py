@@ -1,7 +1,7 @@
 """org_signing_keys: per-organization Ed25519 keys that sign desired software.
 
-Revision ID: 0016_org_signing_keys
-Revises: 0015_user_token_version
+Revision ID: 0017_org_signing_keys
+Revises: 0016_user_token_version
 Create Date: 2026-11-16 12:00:00.000000
 """
 
@@ -14,8 +14,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0016_org_signing_keys"
-down_revision: str | Sequence[str] | None = "0015_user_token_version"
+revision: str = "0017_org_signing_keys"
+down_revision: str | Sequence[str] | None = "0016_user_token_version"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
