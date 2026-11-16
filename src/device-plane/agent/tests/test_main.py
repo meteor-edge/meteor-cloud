@@ -63,8 +63,26 @@ def test_register_with_token_file(tmp_path, monkeypatch, capsys) -> None:
     )
     assert code == 0
     assert client.register_calls[0]["token"] == "reg_from_file"
+    # First registration: no device token to prove anything with.
+    assert client.register_calls[0]["device_token"] is None
     # Token file consumed after success.
     assert not token_file.exists()
+
+    # Registering again sends the device token it now holds, so the server accepts it as the same device.
+    token_file.write_text("reg_again\n", encoding="utf-8")
+    code = main_module.main(
+        [
+            "--config-dir",
+            str(config_dir),
+            "register",
+            "--server",
+            "http://localhost:8000",
+            "--token-file",
+            str(token_file),
+        ]
+    )
+    assert code == 0
+    assert client.register_calls[1]["device_token"] == client.register_response["device_token"]
 
 
 def test_info_without_registration(tmp_path, capsys) -> None:

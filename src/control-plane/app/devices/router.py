@@ -539,6 +539,21 @@ def enable_device(
     )
 
 
+@router.post("/devices/{device_id}/allow-reregistration", response_model=DeviceResponse)
+def allow_device_reregistration(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+) -> DeviceResponse:
+    """Let this hardware register again with a registration token (e.g. after a re-flash)."""
+    return service.allow_device_reregistration(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+    )
+
+
 @router.post("/devices/{device_id}/disable", response_model=DeviceResponse)
 def disable_device(
     organization_id: uuid.UUID,

@@ -83,8 +83,9 @@ class FakeClient:
         token: str,
         inventory: dict[str, Any],
         name: str | None,
+        device_token: str | None = None,
     ) -> dict[str, Any]:
-        self.register_calls.append({"token": token, "inventory": inventory, "name": name})
+        self.register_calls.append({"token": token, "inventory": inventory, "name": name, "device_token": device_token})
         if self.register_error is not None:
             raise self.register_error
         return self.register_response

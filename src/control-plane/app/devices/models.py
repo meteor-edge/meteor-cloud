@@ -262,6 +262,19 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # Until when this hardware may register again without its current device token
+    # (an administrator allowed it, e.g. after re-flashing the card). None = not allowed.
+    reregistration_allowed_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # Previous credential, kept briefly so a lost register response can be retried
+    # with the old device token (see device_registration_retry_seconds).
+    previous_credential_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    previous_credential_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     registration_token_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("registration_tokens.id", ondelete="SET NULL"),

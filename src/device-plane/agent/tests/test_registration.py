@@ -68,3 +68,28 @@ def test_register_does_not_expose_secret_in_logs(agent_paths, caplog) -> None:
     joined = " ".join(record.getMessage() for record in caplog.records)
     assert "dev_secret-value" not in joined
     assert "reg_abc" not in joined
+
+
+def test_register_sends_device_token_only_to_same_server(agent_paths) -> None:
+    from edge_agent.config import AgentConfig, save_config
+    from edge_agent.credentials import write_device_token
+
+    save_config(
+        agent_paths,
+        AgentConfig(
+            server_url="http://localhost:8000",
+            device_id="device-1",
+            organization_id="org-1",
+            name="edge-01",
+            heartbeat_interval_seconds=60,
+        ),
+    )
+    write_device_token(agent_paths.token_path, "dev_existing")
+
+    same = FakeClient(server_url="http://localhost:8000/")
+    register(client=same, paths=agent_paths, token="reg_abc")
+    assert same.register_calls[-1]["device_token"] == "dev_existing"
+
+    other = FakeClient(server_url="http://other.example:8000")
+    register(client=other, paths=agent_paths, token="reg_abc")
+    assert other.register_calls[-1]["device_token"] is None

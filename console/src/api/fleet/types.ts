@@ -415,6 +415,8 @@ export type Device = {
   credential_prefix: string | null;
   last_seen_at: string | null;
   registered_at: string | null;
+  /** Until when this hardware may register again without its device token; null = not allowed. */
+  reregistration_allowed_until?: string | null;
   created_at: string;
   updated_at: string;
   mqtt_configured: boolean;

@@ -10,6 +10,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEV_CONNECTIVITY_INTERNAL_TOKEN = "dev-connectivity-internal"
 
+# Defaults and example values that are public (this repository, .env.example). Production
+# refuses them: a known JWT secret lets anyone sign in as any user.
+KNOWN_DEFAULT_SECRETS = frozenset(
+    {
+        "change-me",
+        "change-me-jwt",
+        "change-me-to-a-long-random-secret-key",
+        "change-me-jwt-secret-key-must-be-long",
+        "dev-mqtt-internal",
+        "dev-mqtt-platform",
+        DEV_CONNECTIVITY_INTERNAL_TOKEN,
+    }
+)
+# Shortest secret production accepts. The installers generate 32+ characters.
+MIN_SECRET_LENGTH = 16
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the Edge Platform backend."""
@@ -67,6 +83,21 @@ class Settings(BaseSettings):
     device_offline_threshold_seconds: int = Field(
         default=150,
         alias="DEVICE_OFFLINE_THRESHOLD_SECONDS",
+    )
+    # How long "Allow re-registration" lets known hardware register again without its
+    # current device token (e.g. after the card was re-flashed).
+    device_reregistration_window_seconds: int = Field(
+        default=24 * 3600,
+        ge=60,
+        alias="DEVICE_REREGISTRATION_WINDOW_SECONDS",
+    )
+    # How long the previous device credential still proves identity after a rotation,
+    # so a lost register response can be retried with the old token.
+    device_registration_retry_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        alias="DEVICE_REGISTRATION_RETRY_SECONDS",
     )
 
     # Device registration rate limiting (fixed window per source IP).
@@ -339,6 +370,37 @@ class Settings(BaseSettings):
                 "CONNECTIVITY_PROVIDER is enabled and APP_ENV=production"
             )
         return self
+
+
+    @model_validator(mode="after")
+    def _require_real_secrets_in_production(self) -> Settings:
+        if self.app_env != "production":
+            return self
+        required: dict[str, str] = {
+            "JWT_SECRET_KEY": self.jwt_secret_key,
+            "APP_SECRET_KEY": self.app_secret_key,
+        }
+        # Internal MQTT routes are mounted even when MQTT_ENABLED is false.
+        required["MQTT_INTERNAL_TOKEN"] = self.mqtt_internal_token
+        if self.mqtt_enabled:
+            required["MQTT_PLATFORM_PASSWORD"] = self.mqtt_platform_password
+        optional: dict[str, str] = {
+            "SECRETS_ENCRYPTION_KEY": self.secrets_encryption_key,
+            "DATA_PLANE_INTERNAL_TOKEN": self.data_plane_internal_token,
+        }
+        weak = [name for name, value in required.items() if _is_weak_secret(value)]
+        weak += [name for name, value in optional.items() if value and _is_weak_secret(value)]
+        if weak:
+            raise ValueError(
+                f"APP_ENV=production refuses default, example or short secrets: {', '.join(sorted(weak))}. "
+                f"Set each to a random value of at least {MIN_SECRET_LENGTH} characters "
+                "(for example: openssl rand -hex 32)."
+            )
+        return self
+
+
+def _is_weak_secret(value: str) -> bool:
+    return value in KNOWN_DEFAULT_SECRETS or len(value) < MIN_SECRET_LENGTH
 
 
 @lru_cache

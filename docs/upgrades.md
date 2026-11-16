@@ -44,6 +44,22 @@ deployment:
 
 Push Git changes first when using `image_source: git`.
 
+### Notes for specific changes
+
+- **Production secrets are checked at start-up.** With `APP_ENV=production` the API
+  refuses to start when `JWT_SECRET_KEY`, `APP_SECRET_KEY`, or `MQTT_INTERNAL_TOKEN`
+  is empty, a public default or example value, or shorter than 16 characters.
+  `MQTT_INTERNAL_TOKEN` is checked even when MQTT is off, because the internal MQTT
+  routes stay mounted. `MQTT_PLATFORM_PASSWORD` is checked when MQTT is on.
+  `SECRETS_ENCRYPTION_KEY` and `DATA_PLANE_INTERNAL_TOKEN` are checked when set.
+  If `EDGE_PLATFORM_MQTT_INTERNAL_TOKEN` is unset, Ansible generates one under
+  `/opt/edge-platform/secrets/mqtt_internal_token` and reuses it. Helm generates one
+  too. A hand-written env file or an `existingSecret` can still hit this.
+  Fix: `openssl rand -hex 32`.
+- **Re-registering known hardware needs proof** (agent 0.3.5): the device's current
+  token, or **Allow re-registration** on the device page. See
+  [Device registration](fleet/device-registration.md#re-registering-known-hardware).
+
 ## Idempotency
 
 Running `apply` again is safe — it will not duplicate EC2 instances or reset admin passwords.

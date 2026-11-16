@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import {
+  allowDeviceReregistration,
   deleteDevice,
   getDevice,
   listDeviceGroups,
@@ -140,6 +141,13 @@ export function DeviceDetailPage() {
     onSuccess: invalidate,
     onError: (err: unknown) =>
       setError(err instanceof ApiError ? err.message : "Could not update device."),
+  });
+
+  const reregisterMutation = useMutation({
+    mutationFn: () => allowDeviceReregistration(token!, organizationId, deviceId),
+    onSuccess: invalidate,
+    onError: (err: unknown) =>
+      setError(err instanceof ApiError ? err.message : "Could not allow re-registration."),
   });
 
   const rotateMutation = useMutation({
@@ -563,12 +571,25 @@ export function DeviceDetailPage() {
             </div>
           </div>
 
+          {device.reregistration_allowed_until && (
+            <p className="text-sm text-muted-foreground">
+              This hardware may register again with a registration token until{" "}
+              {new Date(device.reregistration_allowed_until).toLocaleString()}.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => enabledMutation.mutate(!device.is_enabled)}>
               {device.is_enabled ? "Disable device" : "Enable device"}
             </Button>
             <Button variant="secondary" onClick={() => rotateMutation.mutate()}>
               Rotate credential
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => reregisterMutation.mutate()}
+              title="After re-flashing this device's card: lets it register again with a registration token, for 24 hours"
+            >
+              Allow re-registration
             </Button>
             {device.credential_prefix && (
               <Button
