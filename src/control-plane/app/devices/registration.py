@@ -8,6 +8,7 @@ are never logged.
 
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
@@ -85,6 +86,7 @@ class RegistrationService:
         now = datetime.now(UTC)
 
         if match.device is not None:
+            self._require_reregistration_allowed(match.device, payload, now)
             device = self._update_existing(match.device, payload, identity, token, generated, now)
         else:
             device = self._create_new(payload, identity, token, generated, now)
@@ -118,6 +120,33 @@ class RegistrationService:
             name=device.name,
             heartbeat_interval_seconds=self.settings.device_heartbeat_interval_seconds,
             mqtt=mqtt,
+        )
+
+    def _require_reregistration_allowed(self, device: Device, payload: AgentRegisterRequest, now: datetime) -> None:
+        """Known hardware may take over its device record only with proof.
+
+        Serials and MACs are not secrets, so a registration token alone must not rotate an
+        existing device's credentials. Proof is the device's current token, or a window an
+        administrator opened with "Allow re-registration". A disabled device stays disabled.
+        """
+        if not device.is_enabled:
+            raise ConflictError(
+                "device_disabled",
+                "This hardware is registered as a disabled device. An administrator must enable it first.",
+            )
+        if payload.device_token and device.credential_hash:
+            if hmac.compare_digest(hash_token(payload.device_token), device.credential_hash):
+                return
+        allowed_until = device.reregistration_allowed_until
+        if allowed_until is not None:
+            if allowed_until.tzinfo is None:
+                allowed_until = allowed_until.replace(tzinfo=UTC)
+            if allowed_until > now:
+                return
+        raise ConflictError(
+            "device_already_registered",
+            f"This hardware is already registered as device '{device.name}'. "
+            "An administrator can allow re-registration for that device, or delete it.",
         )
 
     def _validate_token(self, plaintext: str) -> RegistrationToken:
@@ -247,7 +276,7 @@ class RegistrationService:
         device.last_seen_at = now
         device.registered_at = now
         device.registration_token_id = token.id
-        device.is_enabled = True
+        device.reregistration_allowed_until = None
         return self.devices.update(device)
 
     def mqtt_status(self) -> AgentMqttStatusResponse:

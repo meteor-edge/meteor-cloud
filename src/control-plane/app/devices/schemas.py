@@ -273,6 +273,7 @@ class DeviceResponse(BaseModel):
     credential_prefix: str | None
     last_seen_at: datetime | None
     registered_at: datetime | None
+    reregistration_allowed_until: datetime | None = None
     created_at: datetime
     updated_at: datetime
     mqtt_configured: bool = False
@@ -329,6 +330,9 @@ class DeviceCredentialResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 class AgentRegisterRequest(BaseModel):
     token: str = Field(min_length=1)
+    # The device's current credential, when it has one. Re-registering hardware that is
+    # already a device needs it, unless an administrator allowed re-registration.
+    device_token: str | None = Field(default=None, max_length=512)
     name: str | None = Field(default=None, max_length=255)
     serial_number: str | None = Field(default=None, max_length=255)
     mac_addresses: list[str] = Field(default_factory=list)

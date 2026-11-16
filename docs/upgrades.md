@@ -44,6 +44,19 @@ deployment:
 
 Push Git changes first when using `image_source: git`.
 
+### Notes for specific changes
+
+- **Production secrets are checked at start-up.** With `APP_ENV=production` the API
+  refuses to start when `JWT_SECRET_KEY` or `APP_SECRET_KEY` (and, with MQTT on,
+  `MQTT_INTERNAL_TOKEN` and `MQTT_PLATFORM_PASSWORD`) is empty, a public default or
+  example value, or shorter than 16 characters. `SECRETS_ENCRYPTION_KEY` and
+  `DATA_PLANE_INTERNAL_TOKEN` are checked the same way when set. The Ansible installer
+  and the Helm chart already generate long random values; only hand-written env files
+  or an `existingSecret` can hit this. Fix: `openssl rand -hex 32`.
+- **Re-registering known hardware needs proof** (agent 0.3.5): the device's current
+  token, or **Allow re-registration** on the device page. See
+  [Device registration](fleet/device-registration.md#re-registering-known-hardware).
+
 ## Idempotency
 
 Running `apply` again is safe — it will not duplicate EC2 instances or reset admin passwords.

@@ -85,15 +85,59 @@ def test_connectivity_and_shell_providers() -> None:
     assert Settings(_env_file=None, SHELL_PROVIDER="ssh_gateway").shell_provider == "ssh_gateway"
 
 
+STRONG = "x" * 40
+PRODUCTION_SECRETS = {
+    "APP_ENV": "production",
+    "JWT_SECRET_KEY": STRONG,
+    "APP_SECRET_KEY": STRONG,
+    "MQTT_ENABLED": False,
+}
+
+
 def test_production_connectivity_refuses_default_internal_token() -> None:
     with pytest.raises(ValidationError):
         Settings(
             _env_file=None,
-            APP_ENV="production",
+            **PRODUCTION_SECRETS,
             CONNECTIVITY_PROVIDER="wireguard",
             CONNECTIVITY_INTERNAL_TOKEN="dev-connectivity-internal",
         )
     assert Settings(
-        _env_file=None, APP_ENV="production", CONNECTIVITY_PROVIDER="wireguard", CONNECTIVITY_INTERNAL_TOKEN="s3cret"
+        _env_file=None, **PRODUCTION_SECRETS, CONNECTIVITY_PROVIDER="wireguard", CONNECTIVITY_INTERNAL_TOKEN="s3cret"
     ).connectivity_internal_token == "s3cret"
-    assert Settings(_env_file=None, APP_ENV="production", CONNECTIVITY_PROVIDER="none").connectivity_provider == "none"
+    assert Settings(_env_file=None, **PRODUCTION_SECRETS, CONNECTIVITY_PROVIDER="none").connectivity_provider == "none"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("JWT_SECRET_KEY", "change-me-jwt"),
+        ("JWT_SECRET_KEY", "change-me-jwt-secret-key-must-be-long"),
+        ("APP_SECRET_KEY", "change-me"),
+        ("APP_SECRET_KEY", "short"),
+        ("SECRETS_ENCRYPTION_KEY", "too-short"),
+        ("DATA_PLANE_INTERNAL_TOKEN", "dev"),
+    ],
+)
+def test_production_refuses_default_or_short_secrets(name: str, value: str) -> None:
+    with pytest.raises(ValidationError, match=name):
+        Settings(_env_file=None, **{**PRODUCTION_SECRETS, name: value}, CONNECTIVITY_PROVIDER="none")
+
+
+def test_production_checks_mqtt_secrets_only_when_mqtt_is_on() -> None:
+    base = {**PRODUCTION_SECRETS, "CONNECTIVITY_PROVIDER": "none"}
+    with pytest.raises(ValidationError, match="MQTT_INTERNAL_TOKEN"):
+        Settings(_env_file=None, **{**base, "MQTT_ENABLED": True, "MQTT_PLATFORM_PASSWORD": STRONG})
+    with pytest.raises(ValidationError, match="MQTT_PLATFORM_PASSWORD"):
+        Settings(_env_file=None, **{**base, "MQTT_ENABLED": True, "MQTT_INTERNAL_TOKEN": STRONG})
+    ok = Settings(
+        _env_file=None,
+        **{**base, "MQTT_ENABLED": True, "MQTT_INTERNAL_TOKEN": STRONG, "MQTT_PLATFORM_PASSWORD": STRONG},
+    )
+    assert ok.mqtt_enabled is True
+    # Off: the dev defaults are not used, so they are not checked.
+    assert Settings(_env_file=None, **base).mqtt_enabled is False
+
+
+def test_development_keeps_working_with_defaults() -> None:
+    assert Settings(_env_file=None, APP_ENV="development").jwt_secret_key == "change-me-jwt"

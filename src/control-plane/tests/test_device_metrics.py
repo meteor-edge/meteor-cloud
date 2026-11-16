@@ -36,8 +36,10 @@ def test_registration_outcomes_are_counted(client: TestClient, db_session: Sessi
     }
 
     body = {"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]}
-    assert client.post("/api/v1/agent/register", json=body).status_code == 201
-    assert client.post("/api/v1/agent/register", json=body).status_code == 201
+    first = client.post("/api/v1/agent/register", json=body)
+    assert first.status_code == 201
+    proof = {**body, "device_token": first.json()["device_token"]}
+    assert client.post("/api/v1/agent/register", json=proof).status_code == 201
     bad = {"token": "rt_not-a-token", "mac_addresses": ["aa:bb:cc:dd:ee:02"]}
     assert client.post("/api/v1/agent/register", json=bad).status_code == 401
 

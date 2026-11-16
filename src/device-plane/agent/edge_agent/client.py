@@ -132,10 +132,14 @@ class EdgeClient:
         token: str,
         inventory: dict[str, Any],
         name: str | None,
+        device_token: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"token": token, **inventory}
         if name:
             body["name"] = name
+        if device_token:
+            # Proves this is the device already registered for this hardware.
+            body["device_token"] = device_token
         return self._post("/api/v1/agent/register", body)
 
     def heartbeat(self, *, device_token: str, payload: dict[str, Any]) -> dict[str, Any]:
