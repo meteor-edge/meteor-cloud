@@ -91,6 +91,8 @@ PRODUCTION_SECRETS = {
     "JWT_SECRET_KEY": STRONG,
     "APP_SECRET_KEY": STRONG,
     "MQTT_ENABLED": False,
+    # Mounted even when MQTT is off; production must not keep the dev default.
+    "MQTT_INTERNAL_TOKEN": STRONG,
 }
 
 
@@ -124,18 +126,17 @@ def test_production_refuses_default_or_short_secrets(name: str, value: str) -> N
         Settings(_env_file=None, **{**PRODUCTION_SECRETS, name: value}, CONNECTIVITY_PROVIDER="none")
 
 
-def test_production_checks_mqtt_secrets_only_when_mqtt_is_on() -> None:
+def test_production_always_checks_mqtt_internal_token() -> None:
     base = {**PRODUCTION_SECRETS, "CONNECTIVITY_PROVIDER": "none"}
     with pytest.raises(ValidationError, match="MQTT_INTERNAL_TOKEN"):
-        Settings(_env_file=None, **{**base, "MQTT_ENABLED": True, "MQTT_PLATFORM_PASSWORD": STRONG})
+        Settings(_env_file=None, **{**base, "MQTT_INTERNAL_TOKEN": "dev-mqtt-internal"})
     with pytest.raises(ValidationError, match="MQTT_PLATFORM_PASSWORD"):
-        Settings(_env_file=None, **{**base, "MQTT_ENABLED": True, "MQTT_INTERNAL_TOKEN": STRONG})
+        Settings(_env_file=None, **{**base, "MQTT_ENABLED": True, "MQTT_PLATFORM_PASSWORD": "dev-mqtt-platform"})
     ok = Settings(
         _env_file=None,
-        **{**base, "MQTT_ENABLED": True, "MQTT_INTERNAL_TOKEN": STRONG, "MQTT_PLATFORM_PASSWORD": STRONG},
+        **{**base, "MQTT_ENABLED": True, "MQTT_PLATFORM_PASSWORD": STRONG},
     )
     assert ok.mqtt_enabled is True
-    # Off: the dev defaults are not used, so they are not checked.
     assert Settings(_env_file=None, **base).mqtt_enabled is False
 
 

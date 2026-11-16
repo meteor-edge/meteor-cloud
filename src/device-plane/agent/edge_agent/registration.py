@@ -39,12 +39,18 @@ def register(
     """
     inventory = collect_inventory()
     # Re-registering hardware the platform already knows needs the current device token
-    # (or an administrator's "Allow re-registration"), so send it when this device has one.
+    # (or an administrator's "Allow re-registration"). Only send a stored token to the
+    # same server that issued it — not to a different --server target.
+    stored = load_config(paths)
+    same_server = (
+        stored is not None
+        and stored.server_url.rstrip("/") == client.server_url.rstrip("/")
+    )
     response = client.register(
         token=token,
         inventory=inventory,
         name=name,
-        device_token=read_device_token(paths.token_path),
+        device_token=read_device_token(paths.token_path) if same_server else None,
     )
 
     persist_device_secrets(

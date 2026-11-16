@@ -91,6 +91,14 @@ class Settings(BaseSettings):
         ge=60,
         alias="DEVICE_REREGISTRATION_WINDOW_SECONDS",
     )
+    # How long the previous device credential still proves identity after a rotation,
+    # so a lost register response can be retried with the old token.
+    device_registration_retry_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        alias="DEVICE_REGISTRATION_RETRY_SECONDS",
+    )
 
     # Device registration rate limiting (fixed window per source IP).
     registration_rate_limit_requests: int = Field(
@@ -372,8 +380,9 @@ class Settings(BaseSettings):
             "JWT_SECRET_KEY": self.jwt_secret_key,
             "APP_SECRET_KEY": self.app_secret_key,
         }
+        # Internal MQTT routes are mounted even when MQTT_ENABLED is false.
+        required["MQTT_INTERNAL_TOKEN"] = self.mqtt_internal_token
         if self.mqtt_enabled:
-            required["MQTT_INTERNAL_TOKEN"] = self.mqtt_internal_token
             required["MQTT_PLATFORM_PASSWORD"] = self.mqtt_platform_password
         optional: dict[str, str] = {
             "SECRETS_ENCRYPTION_KEY": self.secrets_encryption_key,

@@ -235,11 +235,13 @@ class DeviceRepository:
         *,
         serial_number: str | None,
         mac_addresses: Sequence[str],
+        for_update: bool = False,
     ) -> list[Device]:
         """Return devices that could match an incoming identity (any org).
 
         Cross-organization candidates are included so the caller can reject
-        registrations that collide with another tenant.
+        registrations that collide with another tenant. ``for_update`` locks the
+        rows so concurrent re-registrations cannot both pass the same window.
         """
         conditions = []
         if serial_number:
@@ -249,6 +251,8 @@ class DeviceRepository:
         if not conditions:
             return []
         statement = select(Device).where(or_(*conditions))
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
         return list(self.session.scalars(statement).all())
 
     def create(self, device: Device) -> Device:

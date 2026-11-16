@@ -81,7 +81,10 @@ cannot take over an existing device record. Re-registration is accepted when:
 
 - the request carries the device's **current** credential in `device_token`
   (`meteorcli register` sends it automatically from agent 0.3.5 when the device
-  still has one), or
+  still has one and the `--server` matches the stored config), or
+- the request carries the **previous** credential within
+  `DEVICE_REGISTRATION_RETRY_SECONDS` (default 5 minutes) after a rotation, so a
+  lost register response can be retried without an administrator, or
 - an administrator clicked **Allow re-registration** on the device page
   (`POST /api/v1/organizations/{org}/devices/{device_id}/allow-reregistration`,
   permission `device.update`). The window lasts
