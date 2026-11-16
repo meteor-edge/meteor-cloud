@@ -69,6 +69,11 @@ Running `apply` again is safe — it will not duplicate EC2 instances or reset a
 `helm upgrade --install` with new image tags. The API's init container runs
 migrations before the new pods serve traffic. See [Kubernetes](kubernetes.md).
 
+The chart's image repositories default to the published release images
+(`ghcr.io/meteor-edge/meteorcloud-*`, see [Release images](release-images.md)). If you
+build and push your own images, keep setting `backend.image.repository` and the other
+`*.image.repository` values in your values file.
+
 ## Upgrading hosts deployed before `deploy/compose/`
 
 Older installs ran a single generated `/opt/edge-platform/docker-compose.yml`. The
