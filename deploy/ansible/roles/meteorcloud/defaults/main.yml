@@ -32,6 +32,20 @@ metrics_enabled: true
 registration_require_https: false
 docs_public_url: http://localhost:3000/docs
 
+# Nightly backups (scripts/backup.sh, docs/backups.md): PostgreSQL, ClickHouse and
+# artifacts into {{ platform_root }}/backups, kept backup_retention_days days. Set
+# backup_s3_uri (s3://bucket/prefix) to also copy each backup off the host; give keys
+# here, since containers cannot use the EC2 instance role (metadata guard).
+backup_enabled: true
+backup_on_calendar: "*-*-* 03:15:00"
+backup_retention_days: 7
+backup_s3_uri: ""
+backup_s3_endpoint_url: ""
+backup_s3_region: ""
+backup_s3_access_key_id: "{{ EDGE_PLATFORM_BACKUP_S3_ACCESS_KEY_ID | default(lookup('env', 'EDGE_PLATFORM_BACKUP_S3_ACCESS_KEY_ID'), true) }}"
+backup_s3_secret_access_key: "{{ EDGE_PLATFORM_BACKUP_S3_SECRET_ACCESS_KEY | default(lookup('env', 'EDGE_PLATFORM_BACKUP_S3_SECRET_ACCESS_KEY'), true) }}"
+backup_s3_session_token: "{{ EDGE_PLATFORM_BACKUP_S3_SESSION_TOKEN | default(lookup('env', 'EDGE_PLATFORM_BACKUP_S3_SESSION_TOKEN'), true) }}"
+
 # Images. image_source=git clones repository_url and builds on the host;
 # image_source=archive copies platform_source_archive (a controller .tar.gz of the
 # repository, e.g. `git archive`) and builds on the host (private repos, air-gapped);

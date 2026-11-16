@@ -136,7 +136,7 @@ connectivity:
 
 # --- PostgreSQL (required) -------------------------------------------------
 postgresql:
-  # bundled: single-instance StatefulSet in this release (no HA, no backups).
+  # bundled: single-instance StatefulSet in this release (no HA; optional nightly pg_dump below).
   # external: managed or customer PostgreSQL (Cloud SQL, RDS, Azure, on-prem).
   mode: bundled
   database: edge_platform
@@ -153,6 +153,19 @@ postgresql:
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits: { memory: 1Gi }
+    # Nightly pg_dump into its own volume (kept on helm uninstall), docs/backups.md.
+    # Off by default because `helm install --wait` waits for the new volume, which many
+    # storage classes bind only when the first backup job runs.
+    backup:
+      enabled: false
+      schedule: "15 3 * * *"
+      retentionDays: 7
+      # Abort a stalled pg_dump so concurrencyPolicy: Forbid cannot skip forever.
+      activeDeadlineSeconds: 3600
+      persistence:
+        size: 8Gi
+        storageClass: ""
+      resources: {}
   external:
     # Either a full SQLAlchemy URL (postgresql+psycopg://user:pass@host:5432/db?sslmode=require)
     url: ""
