@@ -33,6 +33,7 @@ How to use the product day to day.
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) · [Rollout strategies](fleet/deployments.md#rollout-strategies) |
+| Signed updates (device-side verification, key rotation) | [Signed updates](fleet/signed-updates.md) |
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
 | Device Wi-Fi from the console | [Wi-Fi](fleet/wifi.md) |
 | Restart, shut down, SSH users | [Device actions](fleet/device-actions.md) |

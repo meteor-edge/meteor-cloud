@@ -55,6 +55,11 @@ class DesiredSoftwareItem(BaseModel):
     artifact_id: uuid.UUID | None
     revision: int
     spec: dict[str, Any]
+    # Signed manifest (docs/fleet/signed-updates.md): the device verifies ``signature``
+    # with its pinned organization key ``key_id`` before downloading or applying.
+    artifact_sha256: str | None = None
+    key_id: str | None = None
+    signature: str | None = None
 
 
 class SoftwareReportItem(BaseModel):

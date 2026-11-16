@@ -23,6 +23,8 @@ def recover_device_secrets(config_dir: Path) -> None:
         shutil.rmtree(staging, ignore_errors=True)
         return
     _commit_staging(staging, config_dir)
+    # Invalidate pins before removing the DONE journal so a crash still retries both.
+    (config_dir / "signing-keys.json").unlink(missing_ok=True)
     shutil.rmtree(staging, ignore_errors=True)
 
 
@@ -48,6 +50,8 @@ def persist_device_secrets(
             write_secret_file(mqtt_path, json.dumps(data))
     write_secret_file(done_path(staging), json.dumps({"token_file": token_path.name}))
     _commit_staging(staging, config_dir)
+    # Invalidate pins before removing the DONE journal so a crash still retries both.
+    (config_dir / "signing-keys.json").unlink(missing_ok=True)
     shutil.rmtree(staging, ignore_errors=True)
 
 

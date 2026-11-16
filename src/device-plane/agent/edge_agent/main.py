@@ -25,7 +25,7 @@ from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
 from edge_agent.platform import combine_heartbeat_handlers
 from edge_agent.registration import register
-from edge_agent.software import reconcile_software
+from edge_agent.software import manifest_verifier, reconcile_software
 from edge_agent.wifi import WifiSync
 
 logger = logging.getLogger("edge_agent")
@@ -82,6 +82,9 @@ def _load_or_fail(paths: AgentPaths) -> tuple[AgentConfig, str] | None:
     if config is None:
         print("Agent is not registered. Run 'edge-agent register' first.", file=sys.stderr)
         return None
+    if not (config.device_id or "").strip():
+        print("Device id is missing from the agent config. Re-register the agent.", file=sys.stderr)
+        return None
     device_token = read_device_token(paths.token_path)
     if device_token is None:
         print("Device credential is missing. Re-register the agent.", file=sys.stderr)
@@ -120,7 +123,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
             except Exception:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {**collect_inventory(), "capabilities": collect_capabilities()}
-        reports = reconcile_software(client, device_token, artifacts_dir)
+        reports = reconcile_software(
+            client, device_token, artifacts_dir,
+            verifier=manifest_verifier(
+                client, device_token, paths.config_path.parent, config.device_id
+            ),
+        )
         if reports:
             payload["software_report"] = reports
         return payload

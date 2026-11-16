@@ -9,10 +9,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 from app.artifacts.dependencies import ArtifactSvc
 from app.artifacts.router import stream_artifact
 from app.core.config import Settings, get_settings
+from app.core.database import get_db
 from app.deployments.software_dependencies import DeviceSoftwareSvc
 from app.deployments.software_schemas import DesiredSoftwareItem
 from app.devices.dependencies import (
@@ -37,6 +39,8 @@ from app.devices.schemas import (
     AgentRegisterResponse,
 )
 from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
+from app.signing.schemas import SigningKeyResponse
+from app.signing.service import SigningService, signing_key_response
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +132,18 @@ def agent_list_software(
 ) -> list[DesiredSoftwareItem]:
     """Return current desired software for this device (MQTT wake-up / poll)."""
     return software.list_desired_for_agent(device_id=device.id)
+
+
+@router.get("/signing-keys", response_model=list[SigningKeyResponse])
+def agent_signing_keys(
+    device: CurrentDevice,
+    session: Annotated[Session, Depends(get_db)],
+) -> list[SigningKeyResponse]:
+    """The organization's signing keys. The agent pins them on first use and afterwards
+    accepts a new key only when a key it already trusts endorsed it."""
+    rows = SigningService(session).list_keys(device.organization_id)
+    session.commit()
+    return [signing_key_response(row) for row in rows]
 
 
 @router.get("/artifacts/{artifact_id}/download")

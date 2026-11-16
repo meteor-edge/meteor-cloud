@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.artifacts.repository import ArtifactRepository
 from app.authorization.service import AuthzService
 from app.core.exceptions import NotFoundError
 from app.deployments.software_models import DeviceSoftware, SoftwareHealth, SoftwareSyncStatus
@@ -24,6 +25,22 @@ from app.identity.models import User
 from app.releases.kinds import workload_key_from_spec
 from app.releases.models import Release
 from app.releases.repository import ReleaseRepository
+from app.signing.service import SigningService
+
+
+def signed_desired_payload(device_id: uuid.UUID, item: DesiredSoftwareItem) -> dict[str, Any]:
+    """The fields a signature covers. Must match ``edge_agent.signing.desired_payload``."""
+    return {
+        "device_id": str(device_id),
+        "workload_key": item.workload_key,
+        "kind": str(item.kind.value if hasattr(item.kind, "value") else item.kind),
+        "release_id": str(item.release_id),
+        "release_version": item.release_version,
+        "artifact_id": str(item.artifact_id) if item.artifact_id else None,
+        "artifact_sha256": item.artifact_sha256,
+        "revision": item.revision,
+        "spec": item.spec,
+    }
 
 
 class DeviceSoftwareService:
@@ -33,6 +50,7 @@ class DeviceSoftwareService:
         self.devices = DeviceRepository(session)
         self.releases = ReleaseRepository(session)
         self.authz = AuthzService(session)
+        self.artifacts = ArtifactRepository(session)
 
     def _release_summary(self, release: Release | None) -> ReleaseSummary | None:
         if release is None:
@@ -195,6 +213,7 @@ class DeviceSoftwareService:
 
     def list_desired_for_agent(self, *, device_id: uuid.UUID) -> list[DesiredSoftwareItem]:
         items: list[DesiredSoftwareItem] = []
+        signing = SigningService(self.session)
         for row in self.software.list_for_device(device_id=device_id):
             if row.desired_release_id is None:
                 continue
@@ -205,18 +224,27 @@ class DeviceSoftwareService:
             )
             if release is None:
                 continue
-            items.append(
-                DesiredSoftwareItem(
-                    workload_key=row.workload_key,
-                    kind=row.kind,
-                    release_id=release.id,
-                    release_name=release.name,
-                    release_version=release.version,
-                    artifact_id=release.artifact_id,
-                    revision=row.desired_revision,
-                    spec=row.desired_spec,
-                )
+            artifact_sha256 = None
+            if release.artifact_id is not None:
+                artifact = self.artifacts.get(organization_id=row.organization_id, artifact_id=release.artifact_id)
+                artifact_sha256 = artifact.checksum_sha256.lower() if artifact is not None else None
+            item = DesiredSoftwareItem(
+                workload_key=row.workload_key,
+                kind=row.kind,
+                release_id=release.id,
+                release_name=release.name,
+                release_version=release.version,
+                artifact_id=release.artifact_id,
+                revision=row.desired_revision,
+                spec=row.desired_spec,
+                artifact_sha256=artifact_sha256,
             )
+            item.key_id, item.signature = signing.sign_desired(
+                row.organization_id, signed_desired_payload(device_id, item)
+            )
+            items.append(item)
+        # The first call for an organization creates its signing key.
+        self.session.commit()
         return items
 
     def apply_software_reports(
