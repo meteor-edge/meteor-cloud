@@ -487,6 +487,42 @@ def test_phased_pauses_when_failure_threshold_is_reached(client: TestClient, db_
     assert detail["counts"]["queued"] == 2
 
 
+def test_device_rollback_counts_as_a_failure_and_pauses(client: TestClient, db_session: Session) -> None:
+    org, headers, token, release = _setup_release(client, db_session)
+    regs = _devices(client, token, 3, "c9")
+    body = _phased_deploy(
+        client, org.id, headers, release, regs, phases=CANARY_THEN_ALL, failure_threshold_percent=10
+    )
+    canary = _reg_for(regs, body["rollout"]["activated_device_ids"][0])
+    response = client.post(
+        "/api/v1/agent/heartbeat",
+        headers={"Authorization": f"Bearer {canary['device_token']}"},
+        json={
+            "software_report": [
+                {
+                    "workload_key": "camera-agent.service",
+                    "sync_status": "rolled_back",
+                    "progress_percent": 100,
+                    "health": "healthy",
+                    "last_error": "Rolled back to 1.1.0: Health check failed: unit is not active",
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    detail = _detail(client, org.id, headers, body["id"])
+    assert detail["status"] == "paused"
+    assert detail["rollout"]["state"]["paused_reason"] == "failure_threshold"
+    assert detail["counts"]["failed"] == 1
+    software = client.get(
+        f"/api/v1/organizations/{org.id}/devices/{canary['device_id']}/software", headers=headers
+    ).json()
+    [row] = software if isinstance(software, list) else software["items"]
+    assert row["sync_status"] == "rolled_back"
+    assert row["last_error"].startswith("Rolled back to 1.1.0")
+
+
 def test_phased_pauses_mid_phase_with_max_concurrent(client: TestClient, db_session: Session) -> None:
     org, headers, token, release = _setup_release(client, db_session)
     regs = _devices(client, token, 5, "c4")

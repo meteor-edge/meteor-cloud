@@ -1208,6 +1208,9 @@ class DeploymentService:
         status_map = {
             SoftwareSyncStatus.IN_SYNC.value: DeploymentDeviceStatus.SUCCEEDED.value,
             SoftwareSyncStatus.FAILED.value: DeploymentDeviceStatus.FAILED.value,
+            # The device restored the previous release: a failure for the Deploy and its
+            # phased failure budget (docs/fleet/rollback.md).
+            SoftwareSyncStatus.ROLLED_BACK.value: DeploymentDeviceStatus.FAILED.value,
             SoftwareSyncStatus.UPDATING.value: DeploymentDeviceStatus.UPDATING.value,
             SoftwareSyncStatus.PENDING.value: DeploymentDeviceStatus.PENDING.value,
             SoftwareSyncStatus.CANCELLED.value: DeploymentDeviceStatus.CANCELLED.value,

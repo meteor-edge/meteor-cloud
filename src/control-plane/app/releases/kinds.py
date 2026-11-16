@@ -26,9 +26,24 @@ REQUIRED_ARTIFACT_TYPE: dict[ReleaseKind, ArtifactType | None] = {
 }
 
 
+class HealthCheck(BaseModel):
+    """Wait for the workload after an update; roll back to the previous release if it fails.
+
+    The agent counts the workload as healthy when the runtime says so (unit active,
+    container running and its HEALTHCHECK passing) and ``http_url``, if set, answers
+    2xx or 3xx from the device, for ``stable_seconds`` in a row. See docs/fleet/rollback.md.
+    """
+
+    timeout_seconds: int = Field(default=60, ge=5, le=1800)
+    stable_seconds: int = Field(default=10, ge=0, le=600)
+    http_url: str | None = Field(default=None, max_length=512, pattern=r"^https?://[^\s]+$")
+    rollback: bool = True
+
+
 class SystemdSpec(BaseModel):
     unit_name: str = Field(min_length=1, max_length=255)
     start: bool = True
+    health_check: HealthCheck | None = None
 
     @field_validator("unit_name")
     @classmethod
@@ -60,6 +75,7 @@ class DockerSpec(BaseModel):
     restart: str | None = Field(default="unless-stopped", max_length=64)
     command: str | None = Field(default=None, max_length=1024)
     meteorcloud: MeteorCloudBinding | None = None
+    health_check: HealthCheck | None = None
 
     @field_validator("container_name")
     @classmethod
@@ -86,6 +102,7 @@ class DockerComposeSpec(BaseModel):
     project_name: str = Field(min_length=1, max_length=255)
     env: dict[str, str] = Field(default_factory=dict)
     meteorcloud: MeteorCloudBinding | None = None
+    health_check: HealthCheck | None = None
 
     @field_validator("project_name")
     @classmethod
@@ -116,6 +133,8 @@ def validate_release_spec(kind: ReleaseKind, spec: dict[str, Any]) -> dict[str, 
             "invalid_release_spec",
             f"Invalid {kind.value} release spec: {exc}",
         ) from exc
+    if validated.get("health_check") is None:
+        validated.pop("health_check", None)
     # Unbound workloads keep the spec shape they had before application bindings existed.
     if validated.get("meteorcloud") is None:
         validated.pop("meteorcloud", None)
