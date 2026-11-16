@@ -21,6 +21,14 @@ cd "${COMPOSE_DIR:-.}"
 read -r -a COMPOSE_CMD <<< "${COMPOSE:-docker compose -f docker-compose.yml -f docker-compose.prod.yml}"
 compose() { "${COMPOSE_CMD[@]}" "$@"; }
 
+LOCK_FILE="${BACKUP_LOCK_FILE:-${BACKUP_DIR:-./backups}/.lock}"
+mkdir -p "$(dirname "$LOCK_FILE")"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "error: another backup or restore holds $LOCK_FILE" >&2
+  exit 1
+fi
+
 running="$(compose ps --services --status running)"
 has() { grep -qx "$1" <<< "$running"; }
 need() { has "$1" || { echo "error: the backup has $2 but the $1 service is not running" >&2; exit 1; }; }
@@ -30,14 +38,7 @@ need() { has "$1" || { echo "error: the backup has $2 but the $1 service is not 
 [ -f "$SOURCE/minio.tar.gz" ] && need minio "MinIO data"
 [ -f "$SOURCE/artifacts.tar.gz" ] && need backend "filesystem artifacts"
 
-# Artifacts first, while the API container is still up (its volume holds them).
-if [ -f "$SOURCE/artifacts.tar.gz" ]; then
-  echo "==> Artifacts (filesystem storage)"
-  compose exec -T backend sh -c 'find /data/artifacts -mindepth 1 -delete && tar -C /data/artifacts --no-same-owner -xzf -' \
-    < "$SOURCE/artifacts.tar.gz"
-fi
-
-# Stop everything that writes to the databases or storage.
+# Stop everything that writes to the databases or storage before replacing any of it.
 stateful="postgres redis clickhouse minio nats mosquitto emqx vernemq traefik"
 writers=()
 for service in $running; do
@@ -46,6 +47,14 @@ done
 if [ "${#writers[@]}" -gt 0 ]; then
   echo "==> Stopping ${writers[*]}"
   compose stop "${writers[@]}"
+fi
+
+# Filesystem artifacts: backend is stopped; use a one-shot container with the same volume.
+if [ -f "$SOURCE/artifacts.tar.gz" ]; then
+  echo "==> Artifacts (filesystem storage)"
+  compose run --rm --no-deps -T --entrypoint sh backend -c \
+    'find /data/artifacts -mindepth 1 -delete && tar -C /data/artifacts --no-same-owner -xzf -' \
+    < "$SOURCE/artifacts.tar.gz"
 fi
 
 if [ -f "$SOURCE/minio.tar.gz" ]; then
@@ -70,15 +79,18 @@ if [ -d "$SOURCE/clickhouse" ]; then
   for view in $(ch --query "SELECT name FROM system.tables WHERE database = currentDatabase() AND engine LIKE '%View'"); do
     ch --query "DROP VIEW IF EXISTS \`$view\` SYNC"
   done
-  for schema in "$SOURCE"/clickhouse/*.sql; do
+  shopt -s nullglob
+  table_schemas=("$SOURCE"/clickhouse/*.sql)
+  view_schemas=("$SOURCE"/clickhouse/*.view.sql)
+  shopt -u nullglob
+  for schema in "${table_schemas[@]}"; do
     case "$schema" in *.view.sql) continue ;; esac
     table="$(basename "$schema" .sql)"
     ch --query "DROP TABLE IF EXISTS \`$table\` SYNC"
     ch --multiquery < "$schema"
     gzip -dc "$SOURCE/clickhouse/$table.native.gz" | ch --query "INSERT INTO \`$table\` FORMAT Native"
   done
-  for schema in "$SOURCE"/clickhouse/*.view.sql; do
-    [ -e "$schema" ] || continue
+  for schema in "${view_schemas[@]}"; do
     ch --multiquery < "$schema"
   done
 fi

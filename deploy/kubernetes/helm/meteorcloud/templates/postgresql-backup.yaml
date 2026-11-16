@@ -2,6 +2,8 @@
 {{- $fullname := include "meteorcloud.fullname" . }}
 {{- $pg := .Values.postgresql }}
 {{- $backup := $pg.bundled.backup }}
+{{- /* CronJob names must be ≤52 so the generated Job name stays within 63. */}}
+{{- $cronName := printf "%s-postgresql-backup" $fullname | trunc 52 | trimSuffix "-" }}
 # Nightly pg_dump of the bundled PostgreSQL into its own volume. The volume is kept
 # when the release is uninstalled. Restore steps: docs/backups.md.
 apiVersion: v1
@@ -24,7 +26,7 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ $fullname }}-postgresql-backup
+  name: {{ $cronName }}
   labels:
     {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "postgresql-backup") | nindent 4 }}
 spec:
@@ -35,6 +37,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: {{ $backup.activeDeadlineSeconds | default 3600 }}
       template:
         metadata:
           labels:
@@ -68,6 +71,12 @@ spec:
                 - sh
                 - -ec
                 - |
+                  # Drop abandoned partials, then expire old dumps before writing so a
+                  # full volume cannot block retention forever under `sh -e`.
+                  rm -f /backups/.*.partial
+                  if [ "$RETENTION_DAYS" -gt 0 ]; then
+                    find /backups -maxdepth 1 -name '20*Z.dump' -mtime +"$RETENTION_DAYS" -print -delete
+                  fi
                   name="$(date -u +%Y%m%dT%H%M%SZ).dump"
                   pg_dump -Fc -f "/backups/.$name.partial"
                   mv "/backups/.$name.partial" "/backups/$name"

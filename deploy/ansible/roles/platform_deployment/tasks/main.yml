@@ -266,17 +266,21 @@
     owner: root
     group: root
     mode: "0600"
-    # Quoted so both systemd (EnvironmentFile) and a shell (`set -a; . backup.env`) read it.
+    # systemd EnvironmentFile syntax (double-quoted, C escapes). Do not shell-source this
+    # file: restore via systemd-run --property=EnvironmentFile=… (docs/backups.md).
     content: |
-      COMPOSE_DIR="{{ platform_compose_dir }}"
-      COMPOSE="{{ platform_compose | trim }}"
-      BACKUP_DIR="{{ platform_root }}/backups"
-      BACKUP_RETENTION_DAYS="{{ backup_retention_days }}"
-      BACKUP_S3_URI="{{ backup_s3_uri }}"
-      BACKUP_S3_ENDPOINT_URL="{{ backup_s3_endpoint_url }}"
-      AWS_REGION="{{ backup_s3_region }}"
-      AWS_ACCESS_KEY_ID="{{ backup_s3_access_key_id }}"
-      AWS_SECRET_ACCESS_KEY="{{ backup_s3_secret_access_key }}"
+      {% macro systemd_env(value) -%}"{{ value | string | replace('\\', '\\\\') | replace('"', '\\"') | replace('\n', '\\n') }}"{%- endmacro %}
+      COMPOSE_DIR={{ systemd_env(platform_compose_dir) }}
+      COMPOSE={{ systemd_env(platform_compose | trim) }}
+      BACKUP_DIR={{ systemd_env(platform_root ~ '/backups') }}
+      BACKUP_LOCK_FILE={{ systemd_env(platform_root ~ '/backups/.lock') }}
+      BACKUP_RETENTION_DAYS={{ systemd_env(backup_retention_days) }}
+      BACKUP_S3_URI={{ systemd_env(backup_s3_uri) }}
+      BACKUP_S3_ENDPOINT_URL={{ systemd_env(backup_s3_endpoint_url) }}
+      AWS_REGION={{ systemd_env(backup_s3_region) }}
+      AWS_ACCESS_KEY_ID={{ systemd_env(backup_s3_access_key_id) }}
+      AWS_SECRET_ACCESS_KEY={{ systemd_env(backup_s3_secret_access_key) }}
+      AWS_SESSION_TOKEN={{ systemd_env(backup_s3_session_token) }}
   no_log: true
 
 - name: Install the backup units

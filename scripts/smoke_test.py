@@ -9,11 +9,12 @@ Checks the public routes, then registers a throwaway user, creates an
 organization, uploads an artifact, and downloads it again. That exercises
 PostgreSQL and the configured object storage backend. Standard library only.
 
-    python3 scripts/smoke_test.py URL --state FILE    # also save the user and artifact to FILE
-    python3 scripts/smoke_test.py URL --verify FILE   # only log in and re-download them
+    python3 scripts/smoke_test.py URL --state FILE              # also save the user and artifact to FILE
+    python3 scripts/smoke_test.py URL --verify FILE             # only log in and re-download them
+    python3 scripts/smoke_test.py URL --expect-login-rejected FILE  # login must return 401
 
-The backup/restore check in scripts/compose-smoke.sh uses --state before the backup
-and --verify after the restore.
+The backup/restore check in scripts/compose-smoke.sh uses --state before the backup,
+--expect-login-rejected after wiping volumes, and --verify after the restore.
 """
 
 from __future__ import annotations
@@ -79,12 +80,33 @@ def multipart(fields: dict[str, str], file_name: str, content: bytes) -> tuple[b
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
+def _load_state(state_file: str) -> dict:
+    with open(state_file, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def expect_login_rejected(base: str, state_file: str) -> None:
+    """Pass only when login fails with invalid credentials (proves the user was wiped)."""
+    api = f"{base.rstrip('/')}/api/v1"
+    wait_for(f"{base.rstrip('/')}/health")
+    state = _load_state(state_file)
+    status, payload = post_json(
+        f"{api}/auth/login", {"email": state["email"], "password": state["password"]}
+    )
+    if status == 200:
+        raise SystemExit("FAIL wipe check: saved user still authenticates after volumes were wiped")
+    if status != 401:
+        raise SystemExit(
+            f"FAIL wipe check: login returned HTTP {status} (wanted 401 invalid_credentials): {payload[:400]!r}"
+        )
+    print("OK   wipe check: saved user rejected with HTTP 401")
+
+
 def verify(base: str, state_file: str) -> None:
     """Log in as the saved user and check the saved artifact still downloads intact."""
     api = f"{base.rstrip('/')}/api/v1"
     wait_for(f"{base.rstrip('/')}/health")
-    with open(state_file, encoding="utf-8") as handle:
-        state = json.load(handle)
+    state = _load_state(state_file)
     login = post_json(f"{api}/auth/login", {"email": state["email"], "password": state["password"]})
     token = json.loads(expect("login as the saved user", *login, 200))["access_token"]
     url = f"{api}/organizations/{state['organization_id']}/artifacts/{state['artifact_id']}/download"
@@ -154,5 +176,10 @@ if __name__ == "__main__":
         main(args[0], args[2])
     elif len(args) == 3 and args[1] == "--verify":
         verify(args[0], args[2])
+    elif len(args) == 3 and args[1] == "--expect-login-rejected":
+        expect_login_rejected(args[0], args[2])
     else:
-        raise SystemExit("usage: smoke_test.py <base-url> [--state FILE | --verify FILE]")
+        raise SystemExit(
+            "usage: smoke_test.py <base-url> "
+            "[--state FILE | --verify FILE | --expect-login-rejected FILE]"
+        )

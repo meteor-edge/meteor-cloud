@@ -29,11 +29,14 @@ and deletes local backups older than the retention.
 | `backup_s3_uri` | empty | `s3://bucket/prefix`: also copy each backup there |
 | `backup_s3_endpoint_url` | empty | S3-compatible endpoint (MinIO, R2, Ceph) |
 | `backup_s3_region` | empty | Region for the upload |
-| `EDGE_PLATFORM_BACKUP_S3_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | env | Keys for the upload |
+| `EDGE_PLATFORM_BACKUP_S3_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` / `..._SESSION_TOKEN` | env | Keys for the upload (session token for temporary credentials) |
 
 The upload runs the `amazon/aws-cli` image. Containers cannot use the EC2 instance
 role (the metadata service guard blocks them), so give keys with write-only access to
 the prefix, and use bucket lifecycle rules for remote retention.
+
+Backup and restore share `/opt/edge-platform/backups/.lock` so a timer cannot run
+during a restore.
 
 ```bash
 sudo systemctl start meteorcloud-backup          # back up now
@@ -45,10 +48,12 @@ ls /opt/edge-platform/backups
 
 The restore replaces the current database, ClickHouse tables and artifacts. Application
 services are stopped while data is replaced and started again afterwards.
+`/opt/edge-platform/backup.env` is a systemd EnvironmentFile (not for shell `source`).
 
 ```bash
-sudo bash -c 'set -a; . /opt/edge-platform/backup.env; \
-  meteorcloud-restore --yes /opt/edge-platform/backups/20261116T031500Z'
+sudo systemd-run --wait --collect \
+  --property=EnvironmentFile=/opt/edge-platform/backup.env \
+  /usr/local/sbin/meteorcloud-restore --yes /opt/edge-platform/backups/20261116T031500Z
 ```
 
 To move to a new host: install the same version there with the same secrets
@@ -88,8 +93,10 @@ Copy dumps off the cluster as well (for example with a volume snapshot schedule)
 Run one now:
 
 ```bash
-kubectl create job --from=cronjob/meteorcloud-postgresql-backup backup-now
+kubectl create job --from=cronjob/<release>-postgresql-backup backup-now
 ```
+
+The CronJob name is truncated to 52 characters when the release name is long.
 
 Restore (release `meteorcloud`, default database names): stop the API, start a helper pod
 that mounts the backup volume, and run `pg_restore` from it.

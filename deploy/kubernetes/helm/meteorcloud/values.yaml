@@ -160,6 +160,8 @@ postgresql:
       enabled: false
       schedule: "15 3 * * *"
       retentionDays: 7
+      # Abort a stalled pg_dump so concurrencyPolicy: Forbid cannot skip forever.
+      activeDeadlineSeconds: 3600
       persistence:
         size: 8Gi
         storageClass: ""

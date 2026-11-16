@@ -78,10 +78,7 @@ if ! compose up -d --wait --wait-timeout 300; then
   compose logs --tail 200
   exit 1
 fi
-if python3 "$ROOT/scripts/smoke_test.py" "http://127.0.0.1:$HTTP_PORT" --verify "$WORK/state.json" > /dev/null 2>&1; then
-  echo "error: the saved user still works after wiping the volumes; the check proves nothing" >&2
-  exit 1
-fi
+python3 "$ROOT/scripts/smoke_test.py" "http://127.0.0.1:$HTTP_PORT" --expect-login-rejected "$WORK/state.json"
 
 echo "==> Restore"
 "$ROOT/scripts/restore.sh" --yes "$backup"
