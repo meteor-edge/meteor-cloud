@@ -27,6 +27,8 @@ CONSOLE_DIR := console
 INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := src/device-plane/agent
 INFRA_DIR := infrastructure
+# Terraform-compatible CLI: terraform, or OpenTofu (MPL-2.0) when only tofu is installed.
+TERRAFORM ?= $(shell command -v terraform >/dev/null 2>&1 && echo terraform || (command -v tofu >/dev/null 2>&1 && echo tofu) || echo terraform)
 ANSIBLE_DIR := deploy/ansible
 ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml wireguard.yml device.yml
 CHART := deploy/kubernetes/helm/meteorcloud
@@ -294,18 +296,18 @@ installer-test: ## Run installer tests only
 	cd $(INSTALLER_DIR) && python -m pytest -q
 
 terraform-check: ## Validate Terraform formatting and syntax (no cloud credentials)
-	cd $(INFRA_DIR)/terraform && terraform fmt -check -recursive
-	cd $(INFRA_DIR)/terraform/aws && terraform init -backend=false -input=false
-	cd $(INFRA_DIR)/terraform/aws && terraform validate
+	cd $(INFRA_DIR)/terraform && $(TERRAFORM) fmt -check -recursive
+	cd $(INFRA_DIR)/terraform/aws && $(TERRAFORM) init -backend=false -input=false
+	cd $(INFRA_DIR)/terraform/aws && $(TERRAFORM) validate
 
 E2E_DIR := tests/e2e
 
 e2e-check: ## Full-stack E2E tooling checks (unit tests, Terraform validate, shellcheck; no credentials)
 	cd $(E2E_DIR) && python -m pytest -q tests
-	cd $(E2E_DIR)/terraform && terraform fmt -check -recursive
+	cd $(E2E_DIR)/terraform && $(TERRAFORM) fmt -check -recursive
 	for root in aws onprem; do \
-		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate terraform init -backend=false -input=false >/dev/null \
-		&& TF_DATA_DIR=.terraform-validate terraform validate) || exit 1; done
+		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate $(TERRAFORM) init -backend=false -input=false >/dev/null \
+		&& TF_DATA_DIR=.terraform-validate $(TERRAFORM) validate) || exit 1; done
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/testapp/serve.sh; \
 	else echo "shellcheck not installed; skipped"; fi
 

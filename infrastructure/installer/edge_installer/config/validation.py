@@ -134,7 +134,12 @@ def _is_https_url(value: str) -> bool:
 
 def validate_dependencies(config: InstallationConfig | None = None) -> list[str]:
     errors: list[str] = []
-    for tool in ("terraform", "ansible-playbook", "ssh"):
+    from edge_installer.providers.aws.terraform import terraform_binary
+
+    terraform = terraform_binary()
+    if not command_exists(terraform):
+        errors.append(f"Required tool not found in PATH: {terraform} (install Terraform or OpenTofu)")
+    for tool in ("ansible-playbook", "ssh"):
         if not command_exists(tool):
             errors.append(f"Required tool not found in PATH: {tool}")
     return errors
