@@ -323,8 +323,8 @@ class DeviceRepository:
         enabled: bool | None = None,
         status: str | None = None,
         online_cutoff: datetime | None = None,
-        sort: str = "name",
-        order: str = "asc",
+        sort: str = "last_seen_at",
+        order: str = "desc",
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Device], int]:
@@ -351,9 +351,13 @@ class DeviceRepository:
             "last_seen_at": Device.last_seen_at,
             "created_at": Device.created_at,
             "registered_at": Device.registered_at,
-        }.get(sort, Device.name)
+        }.get(sort, Device.last_seen_at)
         direction = desc if order == "desc" else asc
-        statement = statement.order_by(direction(sort_column), Device.id.asc())
+        # Never-seen devices (null last_seen_at) stay at the end when sorting by activity.
+        ordered = direction(sort_column)
+        if sort_column is Device.last_seen_at:
+            ordered = ordered.nulls_last()
+        statement = statement.order_by(ordered, Device.id.asc())
         statement = statement.offset((page - 1) * page_size).limit(page_size)
 
         devices = list(self.session.scalars(statement).all())

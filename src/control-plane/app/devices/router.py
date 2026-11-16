@@ -328,8 +328,8 @@ def list_devices(
     architecture: Annotated[str | None, Query()] = None,
     enabled: Annotated[bool | None, Query()] = None,
     status: Annotated[str | None, Query(pattern="^(online|offline|never_seen)$")] = None,
-    sort: Annotated[str, Query(pattern="^(name|last_seen_at|created_at|registered_at)$")] = "name",
-    order: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
+    sort: Annotated[str, Query(pattern="^(name|last_seen_at|created_at|registered_at)$")] = "last_seen_at",
+    order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> Page[DeviceResponse]:
