@@ -158,9 +158,12 @@ the stack (data directories are kept) and stops `meteorcli` on the devices.
 - **Full-stack E2E** (`.github/workflows/e2e-full.yml`, manual): runs tests and
   infra checks, then `validate`, `up`, `logs`, uploads `report.json`,
   `summary.txt` and the logs as an artifact, and always runs `down --yes`
-  unless *keep_environment* is ticked. Inputs: gateway placement, device count.
-  Secrets `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`; variables
-  `E2E_DNS_ZONE_ID`, `E2E_DOMAIN` (optional `AWS_REGION`, `E2E_ACME_EMAIL`).
+  unless *keep_environment* is ticked. Inputs: gateway placement and device
+  count (default **5**, so stages 9b/9c progressive rollouts run; use 2 for a
+  cheaper fleet/tenancy-only run). Secrets `AWS_ACCESS_KEY_ID` /
+  `AWS_SECRET_ACCESS_KEY`; variables `E2E_DNS_ZONE_ID`, `E2E_DOMAIN` (optional
+  `AWS_REGION`, `E2E_ACME_EMAIL`). Set the DNS variables so stages 2 and the
+  public HTTPS app checks are required rather than `not_supported`.
 
 The older [EC2 smoke test](aws-ci.md) (`aws-ci.yml`) stays as a quick
 installer check.
