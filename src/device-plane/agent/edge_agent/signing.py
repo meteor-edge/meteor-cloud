@@ -3,9 +3,10 @@
 The control plane signs each desired-software item with the organization's Ed25519 key
 (``app/signing/service.py``). The agent pins the organization's public keys the first
 time it fetches them and afterwards trusts a new key only when a pinned key endorsed it
-(a key rotation). An item whose signature does not verify is refused, so whoever controls
-the API database, the artifact store or the network path cannot make the device install
-something the organization did not sign. See docs/fleet/signed-updates.md.
+(a key rotation). An item whose signature does not verify is refused, so a stolen
+database dump without the encryption key, a tampered artifact store or a rewritten
+network response cannot make the device install something the organization did not sign.
+See docs/fleet/signed-updates.md.
 
 Ed25519 verification uses ``cryptography`` when it is installed and otherwise a small
 pure-Python implementation of RFC 8032, so the agent keeps its single dependency.
@@ -148,17 +149,31 @@ def ed25519_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
 # --- pinned keys and manifest checks --------------------------------------
 
 
+def credential_fingerprint(device_token: str) -> str:
+    """Short hash of the device credential; pins are discarded when it changes."""
+    return hashlib.sha256(device_token.encode()).hexdigest()[:32]
+
+
 class ManifestVerifier:
     """Checks desired-software items against the organization keys this device pinned.
 
     ``fetch_keys`` returns the server's key list, or None when the server does not sign
     yet (an older control plane): then unsigned items are accepted until keys exist.
+    ``credential_fingerprint`` ties the pin file to the device token that fetched it so
+    a late save after re-enrollment cannot restore another organization's pins.
     """
 
-    def __init__(self, store: Path, device_id: str, fetch_keys: Callable[[], list[dict[str, Any]] | None]) -> None:
+    def __init__(
+        self,
+        store: Path,
+        device_id: str,
+        fetch_keys: Callable[[], list[dict[str, Any]] | None],
+        credential_fingerprint: str | None = None,
+    ) -> None:
         self.store = store
         self.device_id = device_id
         self.fetch_keys = fetch_keys
+        self.credential_fingerprint = credential_fingerprint
         self._server_signs: bool | None = None
 
     def _load(self) -> dict[str, str]:
@@ -166,12 +181,23 @@ class ManifestVerifier:
             data = json.loads(self.store.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
+        if not isinstance(data, dict):
+            return {}
+        if data.get("device_id") not in (None, "", self.device_id):
+            return {}
+        # Require an exact credential match when one is configured so a late save
+        # from a previous enrollment cannot restore that enrollment's pins.
+        if self.credential_fingerprint and data.get("credential_fp") != self.credential_fingerprint:
+            return {}
         return {str(k): str(v) for k, v in (data.get("keys") or {}).items()}
 
     def _save(self, keys: dict[str, str]) -> None:
         self.store.parent.mkdir(parents=True, exist_ok=True)
+        payload: dict[str, Any] = {"keys": keys, "device_id": self.device_id}
+        if self.credential_fingerprint:
+            payload["credential_fp"] = self.credential_fingerprint
         tmp = self.store.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"keys": keys}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         os.chmod(tmp, 0o600)
         os.replace(tmp, self.store)
 

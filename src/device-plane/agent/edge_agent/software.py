@@ -6,6 +6,7 @@ capabilities (Raspberry Pi OS / Debian with optional Docker Engine).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -14,7 +15,7 @@ from typing import Any
 from edge_agent.app_credentials import AppCredential, AppCredentialError, AppCredentialStore, binding_of
 from edge_agent.client import AgentApiError, EdgeClient
 from edge_agent.heartbeat import send_heartbeat
-from edge_agent.signing import ManifestVerifier
+from edge_agent.signing import ManifestVerifier, credential_fingerprint
 
 
 def manifest_verifier(
@@ -27,6 +28,7 @@ def manifest_verifier(
         state_dir / "signing-keys.json",
         str(device_id),
         lambda: client.get_signing_keys(device_token=device_token),
+        credential_fingerprint=credential_fingerprint(device_token),
     )
 
 
@@ -65,6 +67,16 @@ def _save_applied_workload(
     reapply: bool = False,
 ) -> None:
     state = _load_applied_state(path)
+    existing = state.get(workload_key)
+    # Keep revision as a high-water mark so a later write cannot lower it.
+    if isinstance(existing, dict):
+        try:
+            recorded_revision = int(existing.get("revision") or -1)
+        except (TypeError, ValueError):
+            recorded_revision = -1
+        if recorded_revision > revision:
+            revision = recorded_revision
+            release_id = str(existing.get("release_id") or release_id)
     state[workload_key] = {"release_id": release_id, "revision": revision}
     if reapply:
         # The running workload no longer matches what was applied (its token file was
@@ -83,6 +95,31 @@ def _desired_identity(item: dict[str, Any]) -> tuple[str, int] | None:
     except (TypeError, ValueError):
         revision = 0
     return str(release_id), revision
+
+
+def _recorded_revision(state: dict[str, Any], workload_key: str) -> int | None:
+    recorded = state.get(workload_key)
+    if not isinstance(recorded, dict):
+        return None
+    try:
+        return int(recorded.get("revision") or -1)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stale_revision(state: dict[str, Any], item: dict[str, Any]) -> str | None:
+    """Refuse a previously signed older revision for the same workload."""
+    identity = _desired_identity(item)
+    recorded_revision = _recorded_revision(state, str(item.get("workload_key") or ""))
+    if identity is None or recorded_revision is None:
+        return None
+    _, revision = identity
+    if revision < recorded_revision:
+        return (
+            f"Desired revision {revision} is older than applied revision "
+            f"{recorded_revision}; refusing rollback."
+        )
+    return None
 
 
 def _already_applied(state: dict[str, Any], item: dict[str, Any]) -> bool:
@@ -139,6 +176,17 @@ def _health_only(item: dict[str, Any], *, compose_work: Path) -> dict[str, Any] 
     return None
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _already_downloaded(path: Path, expected_checksum: str | None) -> bool:
     if not path.is_file():
         return False
@@ -147,6 +195,8 @@ def _already_downloaded(path: Path, expected_checksum: str | None) -> bool:
         return False
     stored = sidecar.read_text(encoding="utf-8").strip().lower()
     if expected_checksum and stored != expected_checksum.lower():
+        return False
+    if expected_checksum and _file_sha256(path) != expected_checksum.lower():
         return False
     return True
 
@@ -382,8 +432,8 @@ def reconcile_software(
     state_path = applied_state_path(artifacts_dir)
     applied = _load_applied_state(state_path)
     credentials = AppCredentialStore(artifacts_dir.parent / "app-credentials")
-    credentials.prune({str(item["workload_key"]) for item in desired if item.get("workload_key") and binding_of(item)})
     reports: list[dict[str, Any]] = []
+    accepted: list[dict[str, Any]] = []
     for item in desired:
         workload_key = item.get("workload_key")
         kind = item.get("kind")
@@ -400,6 +450,23 @@ def reconcile_software(
                 logger.warning("Refusing desired software for %s: %s", workload_key, refused)
                 reports.append(_failed(workload_key, refused))
                 continue
+
+        stale = _stale_revision(applied, item)
+        if stale is not None:
+            logger.warning("Refusing desired software for %s: %s", workload_key, stale)
+            reports.append(_failed(workload_key, stale))
+            continue
+
+        accepted.append(item)
+
+    # Prune only after verification so a refused item cannot drop stored credentials.
+    credentials.prune(
+        {str(item["workload_key"]) for item in accepted if item.get("workload_key") and binding_of(item)}
+    )
+
+    for item in accepted:
+        workload_key = item["workload_key"]
+        kind = item.get("kind")
 
         was_applied = _already_applied(applied, item)
         if was_applied:

@@ -1,8 +1,11 @@
 # Signed updates
 
 Devices install only desired software that their organization signed. A stolen
-database, a tampered artifact bucket or a proxy that rewrites responses can no longer
-make devices run something nobody deployed.
+database dump (without the encryption key), a tampered artifact bucket or a proxy
+that rewrites responses can no longer make devices run something nobody deployed.
+A Docker release that names its image by tag signs the tag, not the image content.
+A registry that changes the image behind that tag can still change what devices run.
+Pin the image by `@sha256:` digest to close this gap (see [Upgrading](#upgrading)).
 
 ## How it works
 
@@ -12,7 +15,8 @@ make devices run something nobody deployed.
 - Every item of `GET /api/v1/agent/software` carries `key_id`, `signature` and
   `artifact_sha256`. The signature covers the device id, workload, release id and
   version, revision, spec and the artifact's SHA-256, so an item cannot be moved to
-  another device, rolled back to an older revision, or pointed at a different file.
+  another device or pointed at a different file. The agent also refuses a revision
+  older than the one it already applied for that workload.
 - The agent (meteorcli 0.4.0 and later) **pins the organization's public keys** the
   first time it fetches `GET /api/v1/agent/signing-keys`, stored in
   `signing-keys.json` next to its config. From then on it refuses an item that is
@@ -22,9 +26,10 @@ make devices run something nobody deployed.
 - New device credentials (registration or enrollment) clear the pinned keys, so a device
   moved to another organization pins that organization's keys.
 
-Pinning on first use trusts the server once, over the same TLS connection the device
-used to enroll. Use HTTPS (`REGISTRATION_REQUIRE_HTTPS=true`) so that first fetch
-cannot be intercepted.
+Pinning on first use trusts the server once, on the first signing-key fetch. Configure
+the agent to reach the control plane over HTTPS so that first fetch cannot be
+intercepted. `REGISTRATION_REQUIRE_HTTPS=true` only rejects plain-HTTP registration
+and enrollment; it does not check the signing-key fetch.
 
 ## Rotating the key
 

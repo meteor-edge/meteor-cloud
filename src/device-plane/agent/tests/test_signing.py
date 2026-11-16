@@ -128,11 +128,35 @@ def test_rfc8032_vectors(seed: str, public: str, message: str, signature: str) -
 def test_first_use_pins_keys_and_accepts_a_valid_item(tmp_path: Path) -> None:
     verifier, fetch = _verifier(tmp_path, [_key(SEED_A)])
     assert verifier.check(_item()) is None
-    assert json.loads((tmp_path / "signing-keys.json").read_text())["keys"] == {
-        _key(SEED_A)["key_id"]: _key(SEED_A)["public_key"]
-    }
+    stored = json.loads((tmp_path / "signing-keys.json").read_text())
+    assert stored["keys"] == {_key(SEED_A)["key_id"]: _key(SEED_A)["public_key"]}
+    assert stored["device_id"] == DEVICE
     assert verifier.check(_item()) is None
     assert fetch.call_count == 1  # pinned keys are reused
+
+
+def test_pins_for_another_credential_are_ignored(tmp_path: Path) -> None:
+    from edge_agent.signing import credential_fingerprint
+
+    old = ManifestVerifier(
+        tmp_path / "signing-keys.json",
+        DEVICE,
+        MagicMock(return_value=[_key(SEED_A)]),
+        credential_fingerprint=credential_fingerprint("old-token"),
+    )
+    assert old.check(_item()) is None
+
+    fresh = ManifestVerifier(
+        tmp_path / "signing-keys.json",
+        DEVICE,
+        MagicMock(return_value=[_key(SEED_B, endorsed_by=SEED_A)]),
+        credential_fingerprint=credential_fingerprint("new-token"),
+    )
+    # Stale pins belong to the previous credential: first-use pin of the new fetch.
+    assert fresh.check(_item(SEED_B)) is None
+    assert json.loads((tmp_path / "signing-keys.json").read_text())["credential_fp"] == (
+        credential_fingerprint("new-token")
+    )
 
 
 @pytest.mark.parametrize(
@@ -195,6 +219,58 @@ def test_reconcile_does_not_apply_a_refused_item(tmp_path: Path) -> None:
     assert "does not verify" in reports[0]["last_error"]
     ensure.assert_not_called()
     apply.assert_not_called()
+
+
+def test_reconcile_refuses_an_older_revision(tmp_path: Path) -> None:
+    from edge_agent.software import _save_applied_workload, applied_state_path
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    _save_applied_workload(
+        applied_state_path(artifacts),
+        workload_key="cam.service",
+        release_id="8a1b",
+        revision=3,
+    )
+    # Signature must verify so the refusal is specifically about the revision.
+    item = _item(SEED_A)
+    item["revision"] = 2
+    item["signature"] = _b64(_sign(SEED_A, DESIRED_CONTEXT + canonical_json(desired_payload(DEVICE, item))))
+    client = MagicMock()
+    client.get_software.return_value = [item]
+    verifier, _ = _verifier(tmp_path, [_key(SEED_A)])
+    with patch("edge_agent.software._ensure_artifact") as ensure, patch("edge_agent.software._apply_systemd") as apply:
+        reports = reconcile_software(client, "dev", artifacts, verifier=verifier)
+    assert reports[0]["sync_status"] == "failed"
+    assert "older than applied revision" in reports[0]["last_error"]
+    ensure.assert_not_called()
+    apply.assert_not_called()
+
+
+def test_cached_artifact_bytes_must_match_the_signed_checksum(tmp_path: Path) -> None:
+    from edge_agent.software import checksum_sidecar_path
+
+    dest = tmp_path / "art-1"
+    dest.write_bytes(b"tampered")
+    checksum_sidecar_path(dest).write_text(hashlib.sha256(b"unit").hexdigest() + "\n", encoding="utf-8")
+    client = MagicMock()
+
+    def download(*, destination: Path, **_kwargs: Any) -> str:
+        destination.write_bytes(b"unit")
+        return hashlib.sha256(b"unit").hexdigest()
+
+    client.download_artifact.side_effect = download
+    with patch("edge_agent.software._report_updating"):
+        path = _ensure_artifact(
+            client,
+            "dev",
+            artifact_id="art-1",
+            workload_key="cam.service",
+            artifacts_dir=tmp_path,
+            expected_sha256=hashlib.sha256(b"unit").hexdigest(),
+        )
+    assert path.read_bytes() == b"unit"
+    client.download_artifact.assert_called_once()
 
 
 def test_download_must_match_the_signed_checksum(tmp_path: Path) -> None:

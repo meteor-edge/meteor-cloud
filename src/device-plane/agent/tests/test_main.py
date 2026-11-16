@@ -95,3 +95,16 @@ def test_run_without_registration(tmp_path, capsys) -> None:
     code = main_module.main(["--config-dir", str(tmp_path / "empty"), "run", "--once"])
     assert code == 1
     assert "not registered" in capsys.readouterr().err
+
+
+def test_run_rejects_config_without_device_id(tmp_path, capsys) -> None:
+    config_dir = tmp_path / "agent"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        '{"server_url":"http://localhost:8000","device_id":"","organization_id":"org"}',
+        encoding="utf-8",
+    )
+    (config_dir / "device-token").write_text("dev_secret", encoding="utf-8")
+    code = main_module.main(["--config-dir", str(config_dir), "run", "--once"])
+    assert code == 1
+    assert "Device id is missing" in capsys.readouterr().err
