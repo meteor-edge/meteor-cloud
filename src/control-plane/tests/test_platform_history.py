@@ -388,11 +388,23 @@ def test_lwt_offline_right_after_online_is_ignored() -> None:
     assert [s.status for s in body.segments] == ["unknown", "online"]
 
 
-def test_live_online_corrects_trailing_offline_segment() -> None:
+def test_debounce_uses_latest_online_for_race_window() -> None:
+    from app.devices.history import debounce_status_changes
+
+    first = datetime(2026, 11, 15, 11, 0, tzinfo=UTC)
+    reconfirm = first + timedelta(minutes=20)
+    lwt = reconfirm + timedelta(milliseconds=400)
+    assert debounce_status_changes(
+        [(first, "online"), (reconfirm, "online"), (lwt, "offline")]
+    ) == [(first, "online")]
+
+
+def test_live_online_splits_from_last_seen_not_whole_interval() -> None:
     from app.devices.history import device_availability
 
     now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
     offline_at = now - timedelta(minutes=20)
+    last_seen = now - timedelta(minutes=1)
 
     dp = _PagedStatus(
         [[{"time": offline_at.isoformat(), "data": {"status": "offline"}}]],
@@ -405,9 +417,28 @@ def test_live_online_corrects_trailing_offline_segment() -> None:
         range_="1h",
         now=now,
         live_status="online",
+        last_seen_at=last_seen,
     )
-    assert body.segments[-1].status == "online"
+    assert [s.status for s in body.segments] == ["online", "offline", "online"]
+    assert body.segments[-1].start == last_seen
     assert body.offline_count == 1
+
+
+def test_live_online_without_last_seen_leaves_history() -> None:
+    from app.devices.history import device_availability
+
+    now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+    dp = _PagedStatus([[]], previous=None)
+    body = device_availability(
+        dp,
+        organization_id=uuid.uuid4(),
+        device_id=uuid.uuid4(),
+        range_="1h",
+        now=now,
+        live_status="online",
+    )
+    assert body.uptime_percent is None
+    assert [s.status for s in body.segments] == ["unknown"]
 
 
 def test_relay_pass_is_bounded(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -399,6 +399,7 @@ def get_device_availability(
         range_=range_,
         now=datetime.now(UTC),
         live_status=device.status,
+        last_seen_at=device.last_seen_at,
     )
 
 

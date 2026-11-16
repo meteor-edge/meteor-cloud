@@ -151,18 +151,20 @@ STATUS_LWT_RACE = timedelta(seconds=2)
 def debounce_status_changes(
     changes: list[tuple[datetime, str]], *, race_window: timedelta = STATUS_LWT_RACE
 ) -> list[tuple[datetime, str]]:
-    """Keep order; drop offline that arrives immediately after online."""
+    """Keep order; drop offline that arrives immediately after the latest online."""
     out: list[tuple[datetime, str]] = []
+    last_online_at: datetime | None = None
     for at, status in sorted(changes, key=lambda change: change[0]):
-        if (
-            status == "offline"
-            and out
-            and out[-1][1] == "online"
-            and at - out[-1][0] <= race_window
-        ):
+        if status == "offline" and last_online_at is not None and at - last_online_at <= race_window:
             continue
-        if out and out[-1][1] == status:
+        if status == "online":
+            last_online_at = at
+            if out and out[-1][1] == "online":
+                continue
+        elif out and out[-1][1] == status:
             continue
+        else:
+            last_online_at = None
         out.append((at, status))
     return out
 
@@ -188,6 +190,33 @@ def build_segments(
     return segments
 
 
+def apply_live_status(
+    segments: list[AvailabilitySegment],
+    *,
+    live_status: str | None,
+    last_seen_at: datetime | None,
+    start: datetime,
+    end: datetime,
+) -> list[AvailabilitySegment]:
+    """Align only the open end with live connectivity, from last_seen onward.
+
+    Recorded intervals stay as status events wrote them. Without last_seen, leave
+    history alone (including an all-unknown window).
+    """
+    if not segments or live_status not in ("online", "offline") or last_seen_at is None:
+        return segments
+    seen = last_seen_at if last_seen_at.tzinfo else last_seen_at.replace(tzinfo=UTC)
+    at = min(max(seen, start), end)
+    last = segments[-1]
+    if last.status == live_status or at <= last.start or at >= last.end:
+        return segments
+    return [
+        *segments[:-1],
+        AvailabilitySegment(start=last.start, end=at, status=last.status),
+        AvailabilitySegment(start=at, end=last.end, status=live_status),  # type: ignore[arg-type]
+    ]
+
+
 def device_availability(
     data_plane: DataPlaneApi | None,
     *,
@@ -196,6 +225,7 @@ def device_availability(
     range_: TelemetryRange,
     now: datetime,
     live_status: str | None = None,
+    last_seen_at: datetime | None = None,
 ) -> DeviceAvailabilityResponse:
     dp = require_data_plane(data_plane)
     window, _ = RANGES[range_]
@@ -229,16 +259,13 @@ def device_availability(
         if status and at:
             changes.append((at, status))
     changes = debounce_status_changes(changes)
-    segments = build_segments(start, end, previous, changes)
-    # Device header "Online" comes from last_seen (metrics/heartbeat). A reconnect
-    # can leave a trailing offline status event (broker last will) while the device
-    # is up; flip only that open-ended segment so the strip matches live state.
-    if live_status == "online" and segments and segments[-1].status != "online":
-        last = segments[-1]
-        segments[-1] = AvailabilitySegment(start=last.start, end=last.end, status="online")
-    elif live_status == "offline" and segments and segments[-1].status == "online":
-        last = segments[-1]
-        segments[-1] = AvailabilitySegment(start=last.start, end=last.end, status="offline")
+    segments = apply_live_status(
+        build_segments(start, end, previous, changes),
+        live_status=live_status,
+        last_seen_at=last_seen_at,
+        start=start,
+        end=end,
+    )
     known = sum((s.end - s.start).total_seconds() for s in segments if s.status != "unknown")
     online = sum((s.end - s.start).total_seconds() for s in segments if s.status == "online")
     # Count transitions into offline, not offline messages: a repeated offline

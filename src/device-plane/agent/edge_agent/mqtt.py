@@ -190,6 +190,8 @@ class DeviceMqttSession:
         client = self._client
         self._metrics_stop.set()
         self._online_reconfirm_stop.set()
+        if self._online_reconfirm_thread and self._online_reconfirm_thread.is_alive():
+            self._online_reconfirm_thread.join(timeout=ONLINE_RECONFIRM_SECONDS + 0.5)
         if client is None:
             return
         try:
