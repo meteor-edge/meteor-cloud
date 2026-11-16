@@ -122,7 +122,8 @@ def test_rotation_endorses_the_new_key_with_the_old_one(client: TestClient, db_s
 
     [item] = client.get("/api/v1/agent/software", headers=device_headers).json()
     assert item["key_id"] == new["key_id"]
-    _verify(new["public_key"], item["signature"], DESIRED_CONTEXT + canonical_json(_payload(registration["device_id"], item)))
+    message = DESIRED_CONTEXT + canonical_json(_payload(registration["device_id"], item))
+    _verify(new["public_key"], item["signature"], message)
 
     events = db_session.scalars(select(AuditEvent).where(AuditEvent.action == "signing_key.rotated")).all()
     assert len(events) == 1
