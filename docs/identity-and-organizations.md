@@ -23,7 +23,15 @@ Authentication and multi-tenant organizations.
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 GET  /api/v1/auth/me
+POST /api/v1/auth/logout-all
 ```
+
+Access tokens are HS256 JWTs (PyJWT) signed with `JWT_SECRET_KEY`, valid for
+`JWT_ACCESS_TOKEN_EXPIRE_MINUTES` (30). Each carries the user's `token_version` as `ver`.
+`POST /api/v1/auth/logout-all` raises that version, so every token issued to the user
+so far, including the one used for the call, stops working (`401`). Deactivating a user
+or removing a membership already takes effect on the next request, because both are
+checked on every call.
 
 Register:
 

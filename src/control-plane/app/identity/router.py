@@ -48,3 +48,9 @@ def login(payload: UserLoginRequest, service: AuthService) -> TokenResponse:
 @router.get("/me", response_model=UserPublic)
 def get_me(current_user: CurrentUser) -> UserPublic:
     return UserPublic.model_validate(current_user)
+
+
+@router.post("/logout-all", status_code=204)
+def logout_all(current_user: CurrentUser, service: AuthService) -> None:
+    """Sign this user out of every session, this one included."""
+    service.revoke_all_sessions(current_user)

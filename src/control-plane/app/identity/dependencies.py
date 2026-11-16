@@ -6,9 +6,9 @@ import uuid
 from functools import lru_cache
 from typing import Annotated
 
+import jwt
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.core.audit_context import set_request_actor
@@ -46,7 +46,7 @@ def get_current_user(
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise UnauthorizedError(
             "invalid_credentials",
             "Could not validate credentials.",
@@ -65,6 +65,10 @@ def get_current_user(
         ) from exc
 
     user = service.require_active_user(user_id)
+    # Tokens from before "log out everywhere" (or issued before versions existed: no "ver",
+    # which counts as 0) stop working once the user's version moves on.
+    if payload.get("ver", 0) != (user.token_version or 0):
+        raise UnauthorizedError("invalid_credentials", "Your session has ended. Please sign in again.")
     set_request_actor(actor_type="user", actor_id=user.id, user_id=user.id)
     return user
 
