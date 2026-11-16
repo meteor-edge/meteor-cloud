@@ -69,6 +69,13 @@ class Settings(BaseSettings):
         default=30,
         alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
     )
+    # Whether anyone who reaches the API may create an account (POST /api/v1/auth/register).
+    # Off: people join only when an administrator adds them to an organization.
+    allow_signup: bool = Field(default=True, alias="ALLOW_SIGNUP")
+    # Sign-in attempts per fixed window, counted per email address and per source IP.
+    login_rate_limit_requests: int = Field(default=10, ge=0, alias="LOGIN_RATE_LIMIT_REQUESTS")
+    login_ip_rate_limit_requests: int = Field(default=60, ge=0, alias="LOGIN_IP_RATE_LIMIT_REQUESTS")
+    login_rate_limit_window_seconds: int = Field(default=300, ge=1, alias="LOGIN_RATE_LIMIT_WINDOW_SECONDS")
 
     redis_url: str = Field(
         default="redis://localhost:6379/0",

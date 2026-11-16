@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -146,18 +148,48 @@ def test_scoped_list_filters_before_pagination(client: TestClient, db_session: S
     org, _ = create_org_with_owner(db_session, owner)
     membership = add_member(db_session, org, operator, OrganizationRole.OPERATOR)
 
-    berlin = DeviceGroup(organization_id=org.id, name="Berlin", slug="berlin", labels={}, metadata_={})
-    munich = DeviceGroup(organization_id=org.id, name="Munich", slug="munich", labels={}, metadata_={})
-    paris = DeviceGroup(organization_id=org.id, name="Paris", slug="paris", labels={}, metadata_={})
+    # Fixed ids, increasing with name. Inserts in one transaction share created_at
+    # (PostgreSQL now() is the transaction time), so a timestamp tie must not
+    # swap the page via a random primary key.
+    berlin = DeviceGroup(
+        id=uuid.UUID("00000000-0000-4000-8000-000000000002"),
+        organization_id=org.id,
+        name="Berlin",
+        slug="berlin",
+        labels={},
+        metadata_={},
+    )
+    munich = DeviceGroup(
+        id=uuid.UUID("00000000-0000-4000-8000-000000000003"),
+        organization_id=org.id,
+        name="Munich",
+        slug="munich",
+        labels={},
+        metadata_={},
+    )
+    paris = DeviceGroup(
+        id=uuid.UUID("00000000-0000-4000-8000-000000000004"),
+        organization_id=org.id,
+        name="Paris",
+        slug="paris",
+        labels={},
+        metadata_={},
+    )
     db_session.add_all([berlin, munich, paris])
     db_session.flush()
     AuthzService(db_session).replace_device_group_scope(membership, [berlin.id, munich.id])
     assert {b.scope_id for b in membership.bindings} == {berlin.id, munich.id}
 
     # Out-of-scope devices sort first so a post-pagination filter would return an empty first page.
-    for name, group_id in [("a-paris", paris.id), ("b-loose", None), ("c-berlin", berlin.id), ("d-munich", munich.id)]:
+    for name, group_id, device_id in [
+        ("a-paris", paris.id, "00000000-0000-4000-8000-000000000011"),
+        ("b-loose", None, "00000000-0000-4000-8000-000000000012"),
+        ("c-berlin", berlin.id, "00000000-0000-4000-8000-000000000013"),
+        ("d-munich", munich.id, "00000000-0000-4000-8000-000000000014"),
+    ]:
         db_session.add(
             Device(
+                id=uuid.UUID(device_id),
                 organization_id=org.id,
                 name=name,
                 device_group_id=group_id,
@@ -170,7 +202,10 @@ def test_scoped_list_filters_before_pagination(client: TestClient, db_session: S
     db_session.commit()
 
     headers = auth_header(client, "ops@example.com")
-    response = client.get(f"/api/v1/organizations/{org.id}/devices?page_size=1", headers=headers)
+    response = client.get(
+        f"/api/v1/organizations/{org.id}/devices?page_size=1&sort=name&order=asc",
+        headers=headers,
+    )
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["total"] == 2

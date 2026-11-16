@@ -54,6 +54,7 @@ from app.devices.rate_limit import InMemoryRateLimiter
 from app.endpoints import models as _endpoint_models  # noqa: F401
 from app.history import models as _history_models  # noqa: F401
 from app.identity import models as _identity_models  # noqa: F401
+from app.identity.dependencies import get_login_email_rate_limiter, get_login_ip_rate_limiter
 from app.identity.models import User
 from app.main import create_app
 from app.network import models as _network_models  # noqa: F401
@@ -124,6 +125,12 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
     # Permissive limiter by default; tests that exercise rate limiting override
     # this on ``client.app.dependency_overrides``.
     application.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(limit=10_000, window_seconds=60)
+    application.dependency_overrides[get_login_email_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
+    application.dependency_overrides[get_login_ip_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
     application.dependency_overrides[get_enroll_request_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
