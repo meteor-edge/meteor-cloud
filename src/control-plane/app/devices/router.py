@@ -328,8 +328,8 @@ def list_devices(
     architecture: Annotated[str | None, Query()] = None,
     enabled: Annotated[bool | None, Query()] = None,
     status: Annotated[str | None, Query(pattern="^(online|offline|never_seen)$")] = None,
-    sort: Annotated[str, Query(pattern="^(name|last_seen_at|created_at|registered_at)$")] = "name",
-    order: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
+    sort: Annotated[str, Query(pattern="^(name|last_seen_at|created_at|registered_at)$")] = "last_seen_at",
+    order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> Page[DeviceResponse]:
@@ -391,9 +391,15 @@ def get_device_availability(
     range_: Annotated[TelemetryRange, Query(alias="range")] = "24h",
 ) -> DeviceAvailabilityResponse:
     """Online/offline segments and uptime from the agent's status messages and the broker's last will."""
-    service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
+    device = service.get_device(actor=current_user, organization_id=organization_id, device_id=device_id)
     return device_availability(
-        data_plane, organization_id=organization_id, device_id=device_id, range_=range_, now=datetime.now(UTC)
+        data_plane,
+        organization_id=organization_id,
+        device_id=device_id,
+        range_=range_,
+        now=datetime.now(UTC),
+        live_status=device.status,
+        last_seen_at=device.last_seen_at,
     )
 
 

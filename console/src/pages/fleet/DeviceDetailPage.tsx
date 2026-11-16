@@ -464,20 +464,6 @@ export function DeviceDetailPage() {
 
       {activeTab === "overview" && (
         <div className="space-y-4">
-          <DeviceResourceMeters
-            metrics={device.mqtt_metrics}
-            updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
-          />
-          {token ? (
-            <DeviceTelemetryCharts
-              token={token}
-              organizationId={organizationId}
-              deviceId={deviceId}
-            />
-          ) : null}
-          {token ? (
-            <DeviceAppsPanel token={token} organizationId={organizationId} deviceId={deviceId} />
-          ) : null}
           <div className="grid gap-4 rounded-lg border border-border bg-card p-6 shadow-glow sm:grid-cols-2">
             <Detail label="Serial number" value={device.serial_number} />
             <Detail
@@ -505,6 +491,20 @@ export function DeviceDetailPage() {
             />
             <Detail label="Credential prefix" value={device.credential_prefix} />
           </div>
+          <DeviceResourceMeters
+            metrics={device.mqtt_metrics}
+            updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
+          />
+          {token ? (
+            <DeviceTelemetryCharts
+              token={token}
+              organizationId={organizationId}
+              deviceId={deviceId}
+            />
+          ) : null}
+          {token ? (
+            <DeviceAppsPanel token={token} organizationId={organizationId} deviceId={deviceId} />
+          ) : null}
         </div>
       )}
 
