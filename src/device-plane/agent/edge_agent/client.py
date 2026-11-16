@@ -204,6 +204,16 @@ class EdgeClient:
             return result
         return []
 
+    def get_signing_keys(self, *, device_token: str) -> list[dict[str, Any]] | None:
+        """Organization signing keys, or None when the control plane does not sign (404)."""
+        try:
+            result = self._get("/api/v1/agent/signing-keys", bearer=device_token)
+        except AgentApiError as error:
+            if error.status == 404:
+                return None
+            raise
+        return result if isinstance(result, list) else []
+
     def download_artifact(
         self,
         *,

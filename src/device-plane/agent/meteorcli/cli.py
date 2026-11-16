@@ -39,7 +39,7 @@ from edge_agent.inventory import collect_inventory
 from edge_agent.platform import combine_heartbeat_handlers
 from edge_agent.registration import register
 from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_as_service, service_state
-from edge_agent.software import reconcile_software
+from edge_agent.software import manifest_verifier, reconcile_software
 from edge_agent.wifi import WifiSync
 from meteorcli import __version__
 from meteorcli import config as cli_config
@@ -1007,7 +1007,10 @@ def _run_agent(paths: CliPaths, args: argparse.Namespace) -> int:
             except Exception:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {**collect_inventory(), "capabilities": collect_capabilities()}
-        reports = reconcile_software(client, device_token, artifacts_dir)
+        reports = reconcile_software(
+            client, device_token, artifacts_dir,
+            verifier=manifest_verifier(client, device_token, paths.config_path.parent, config.device_id),
+        )
         # Under sudo, files this pass downloaded are root-owned; hand them back so a later
         # unprivileged run (and the meteorcli-systemd helper's owner check) can use them.
         try:

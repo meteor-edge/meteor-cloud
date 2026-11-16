@@ -59,6 +59,10 @@ Push Git changes first when using `image_source: git`.
 - **Re-registering known hardware needs proof** (agent 0.3.5): the device's current
   token, or **Allow re-registration** on the device page. See
   [Device registration](fleet/device-registration.md#re-registering-known-hardware).
+- **Signed desired software** (agent 0.4.0): devices pin the organization's signing key
+  on first use and then refuse unsigned or tampered updates. The key is encrypted with
+  `SECRETS_ENCRYPTION_KEY` / `APP_SECRET_KEY`: do not change those after upgrading. See
+  [Signed updates](fleet/signed-updates.md).
 
 ## Idempotency
 

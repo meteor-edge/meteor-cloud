@@ -60,6 +60,7 @@ from app.main import create_app
 from app.network import models as _network_models  # noqa: F401
 from app.releases import models as _release_models  # noqa: F401
 from app.shell import models as _shell_models  # noqa: F401
+from app.signing import models as _signing_models  # noqa: F401
 from app.tenancy import models as _organization_models  # noqa: F401
 from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole
 from tests.db_guard import assert_safe_test_database_url, ensure_database_exists

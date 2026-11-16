@@ -8,6 +8,7 @@ the release catalog. Who **executes** the Deploy is selected with
 With the default **native** provider, MeteorCloud writes **desired** software on
 each target and agents apply it (`systemd`, `docker`, `docker_compose` — see
 [Releases](releases.md)). Optional MQTT `sync_desired` wakes them to poll sooner.
+Desired software is signed per organization and verified on the device ([Signed updates](signed-updates.md)).
 Devices that reported they lack the release runtime (e.g.
 `capabilities.systemd: false`) are marked **skipped**, and so are devices that
 [already run the release](#already-installed-devices). Rollout may be

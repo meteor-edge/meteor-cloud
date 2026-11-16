@@ -25,7 +25,7 @@ from edge_agent.heartbeat import run_loop, send_heartbeat
 from edge_agent.inventory import collect_inventory
 from edge_agent.platform import combine_heartbeat_handlers
 from edge_agent.registration import register
-from edge_agent.software import reconcile_software
+from edge_agent.software import manifest_verifier, reconcile_software
 from edge_agent.wifi import WifiSync
 
 logger = logging.getLogger("edge_agent")
@@ -120,7 +120,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             except Exception:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {**collect_inventory(), "capabilities": collect_capabilities()}
-        reports = reconcile_software(client, device_token, artifacts_dir)
+        reports = reconcile_software(
+            client, device_token, artifacts_dir,
+            verifier=manifest_verifier(client, device_token, paths.config_path.parent, config.device_id),
+        )
         if reports:
             payload["software_report"] = reports
         return payload

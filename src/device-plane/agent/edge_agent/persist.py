@@ -24,6 +24,9 @@ def recover_device_secrets(config_dir: Path) -> None:
         return
     _commit_staging(staging, config_dir)
     shutil.rmtree(staging, ignore_errors=True)
+    # A new device credential may belong to another organization: pin its signing keys
+    # again on the next poll (edge_agent.signing).
+    (config_dir / "signing-keys.json").unlink(missing_ok=True)
 
 
 def persist_device_secrets(
@@ -49,6 +52,9 @@ def persist_device_secrets(
     write_secret_file(done_path(staging), json.dumps({"token_file": token_path.name}))
     _commit_staging(staging, config_dir)
     shutil.rmtree(staging, ignore_errors=True)
+    # A new device credential may belong to another organization: pin its signing keys
+    # again on the next poll (edge_agent.signing).
+    (config_dir / "signing-keys.json").unlink(missing_ok=True)
 
 
 def done_path(staging: Path) -> Path:

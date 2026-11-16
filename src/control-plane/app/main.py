@@ -47,6 +47,7 @@ from app.mqtt.vernemq_router import router as mqtt_vernemq_router
 from app.network.router import router as network_router
 from app.releases.router import router as releases_router
 from app.shell.router import router as shell_router
+from app.signing.router import router as signing_router
 from app.tenancy.router import router as organizations_router
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,7 @@ def create_app() -> FastAPI:
     application.include_router(network_router)
     application.include_router(device_actions_router)
     application.include_router(audit_router)
+    application.include_router(signing_router)
     application.include_router(agent_router)
     application.include_router(mqtt_internal_router)
     application.include_router(mqtt_vernemq_router)
