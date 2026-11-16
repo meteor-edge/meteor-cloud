@@ -264,6 +264,17 @@ backend:
     tag: ""                  # defaults to the chart appVersion
     pullPolicy: IfNotPresent
   replicaCount: 1
+  # API worker processes per pod (uvicorn WEB_CONCURRENCY). Scale with
+  # replicaCount first: with more than one worker, /metrics answers for one
+  # process at a time and the MQTT test page sees only that worker's messages.
+  # See docs/capacity.md.
+  workers: 1
+  # SQLAlchemy pool per worker process. Every pod opens up to
+  # workers x (size + maxOverflow) PostgreSQL connections; keep the total for all
+  # replicas under the server's max_connections (100 by default).
+  dbPool:
+    size: 5
+    maxOverflow: 10
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 768Mi }
