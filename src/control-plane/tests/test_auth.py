@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 from fastapi.testclient import TestClient
-from jose import jwt
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -138,3 +138,32 @@ def test_me_expired_token(client: TestClient, db_session: Session) -> None:
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 401
+
+
+def test_logout_everywhere_ends_existing_tokens(client: TestClient, db_session: Session) -> None:
+    create_user(db_session, email="owner@example.com")
+    first = auth_header(client, "owner@example.com")
+    second = auth_header(client, "owner@example.com")
+    assert client.get("/api/v1/auth/me", headers=first).status_code == 200
+
+    assert client.post("/api/v1/auth/logout-all", headers=first).status_code == 204
+    for headers in (first, second):
+        response = client.get("/api/v1/auth/me", headers=headers)
+        assert response.status_code == 401
+    # A new sign-in works again.
+    assert client.get("/api/v1/auth/me", headers=auth_header(client, "owner@example.com")).status_code == 200
+
+
+def test_token_without_version_claim_is_accepted_until_versions_move(client: TestClient, db_session: Session) -> None:
+    # Tokens issued before this change have no "ver"; they stay valid for their 30 minutes.
+    user = create_user(db_session, email="owner@example.com")
+    settings = get_settings()
+    legacy = jwt.encode(
+        {"sub": str(user.id), "exp": datetime.now(UTC) + timedelta(minutes=5)},
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+    headers = {"Authorization": f"Bearer {legacy}"}
+    assert client.get("/api/v1/auth/me", headers=headers).status_code == 200
+    client.post("/api/v1/auth/logout-all", headers=headers)
+    assert client.get("/api/v1/auth/me", headers=headers).status_code == 401

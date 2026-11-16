@@ -10,9 +10,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import bcrypt
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 
 from app.core.config import Settings, get_settings
 
@@ -57,7 +57,7 @@ def decode_access_token(token: str, *, settings: Settings | None = None) -> dict
     config = settings or get_settings()
     try:
         return jwt.decode(token, config.jwt_secret_key, algorithms=[config.jwt_algorithm])
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",

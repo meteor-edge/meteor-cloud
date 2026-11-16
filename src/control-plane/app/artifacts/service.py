@@ -14,7 +14,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, BinaryIO
 
-from jose import JWTError, jwt
+import jwt
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -524,7 +524,7 @@ class ArtifactService:
         try:
             claims = jwt.decode(ticket, self.settings.jwt_secret_key, algorithms=[self.settings.jwt_algorithm])
             user_id = uuid.UUID(str(claims["uid"]))
-        except (JWTError, KeyError, ValueError) as exc:
+        except (jwt.PyJWTError, KeyError, ValueError) as exc:
             raise invalid from exc
         if (
             claims.get("typ") != DOWNLOAD_TICKET_TYPE

@@ -26,7 +26,8 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | `pg8000` 1.31 (with `scramp`, `python-dateutil`) | SDK example `sdk/python/examples/stream-to-database` | [BSD-3-Clause](https://github.com/tlocke/pg8000/blob/main/LICENSE) (scramp MIT-0, python-dateutil Apache 2.0 / BSD-3-Clause) | **Yes** | Example only, run by the customer against their own database. Chosen over `psycopg` (LGPL-3.0) to keep the example permissive |
 | `golang:1.26-alpine` (build) / `alpine:3.21` (runtime) images | Data API image | BSD-3-Clause (Go) / MIT and GPL-2.0 userland (Alpine, BusyBox) | **Yes** | Unmodified base image; only the static Go binary is added. Same position as the other Alpine-based images |
 | MinIO | S3-compatible artifacts | [AGPLv3](https://github.com/minio/minio) | **No (as default)** | Dev/lab only. Production Ansible/Helm default to **filesystem** or real S3. Do not make MinIO the commercial default |
-| `cryptography` (Python, control plane) | Encrypts a Wi-Fi password while it waits for its device (AES-GCM) | [Apache-2.0 OR BSD-3-Clause](https://github.com/pyca/cryptography/blob/main/LICENSE) | **Yes** | Permissive. Already installed through `python-jose[cryptography]`; now also a direct dependency |
+| `cryptography` (Python, control plane) | Encrypts a Wi-Fi password while it waits for its device (AES-GCM) | [Apache-2.0 OR BSD-3-Clause](https://github.com/pyca/cryptography/blob/main/LICENSE) | **Yes** | Permissive. Direct dependency |
+| `PyJWT` (Python, control plane) | Signs console access tokens and artifact download tickets (HS256) | [MIT](https://github.com/jpadilla/pyjwt/blob/master/LICENSE) | **Yes** | Replaced `python-jose` (MIT, slow to fix CVEs) |
 | EMQX **5.9+** cluster | MQTT HA | BSL 1.1 | **Only with commercial license** | Multi-node / some commercial cases need an [EMQ deal](https://www.emqx.com/en/contact). Do not bump casually |
 
 **One-line policy**
