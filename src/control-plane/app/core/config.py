@@ -288,6 +288,9 @@ class Settings(BaseSettings):
         default=True,
         alias="OBJECT_STORAGE_AUTO_CREATE_BUCKET",
     )
+    # Endpoint devices use to reach the bucket, when it differs from the API's own
+    # (e.g. MinIO at http://minio:9000 inside Compose but https://s3.example.com outside).
+    object_storage_public_endpoint_url: str = Field(default="", alias="OBJECT_STORAGE_PUBLIC_ENDPOINT_URL")
 
     artifact_max_upload_bytes: int = Field(
         default=8 * 1024 * 1024 * 1024,
@@ -296,6 +299,12 @@ class Settings(BaseSettings):
     artifact_download_link_ttl_seconds: int = Field(
         default=300,
         alias="ARTIFACT_DOWNLOAD_LINK_TTL_SECONDS",
+    )
+    # Agents download artifacts straight from S3-compatible storage through a short-lived
+    # presigned URL instead of through the API (docs/fleet/artifacts.md).
+    artifact_download_redirect: bool = Field(default=True, alias="ARTIFACT_DOWNLOAD_REDIRECT")
+    artifact_download_url_ttl_seconds: int = Field(
+        default=900, ge=60, le=7 * 24 * 3600, alias="ARTIFACT_DOWNLOAD_URL_TTL_SECONDS"
     )
 
     # When True, agent registration over plain HTTP is rejected. Left False for

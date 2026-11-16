@@ -83,6 +83,9 @@ external_redis_url: "{{ EDGE_PLATFORM_REDIS_URL | default(lookup('env', 'EDGE_PL
 object_storage_provider: filesystem
 minio_enabled: false
 object_storage_endpoint_url: ""
+# Address devices download artifacts from through presigned URLs. Not needed for AWS S3;
+# empty with another endpoint (or with filesystem storage) streams downloads via the API.
+object_storage_public_endpoint_url: ""
 object_storage_region: us-east-1
 object_storage_bucket: meteorcloud-artifacts
 object_storage_auto_create_bucket: true

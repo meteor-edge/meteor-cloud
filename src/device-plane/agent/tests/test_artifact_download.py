@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import email.message
 import hashlib
 import io
+import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from edge_agent.client import AgentApiError, EdgeClient
+from edge_agent.client import _DOWNLOAD_OPENER, AgentApiError, EdgeClient
 from edge_agent.software import reconcile_downloads
 
 
@@ -39,7 +42,7 @@ def test_download_artifact_writes_file_and_verifies_checksum(tmp_path: Path) -> 
         {"X-Checksum-SHA256": digest, "Content-Length": str(len(content))},
     )
 
-    with patch("urllib.request.urlopen", return_value=response):
+    with patch.object(_DOWNLOAD_OPENER, "open", return_value=response):
         result = client.download_artifact(
             device_token="dev_test",
             artifact_id="art-1",
@@ -59,7 +62,7 @@ def test_download_artifact_rejects_checksum_mismatch(tmp_path: Path) -> None:
         {"X-Checksum-SHA256": "0" * 64, "Content-Length": str(len(content))},
     )
 
-    with patch("urllib.request.urlopen", return_value=response):
+    with patch.object(_DOWNLOAD_OPENER, "open", return_value=response):
         with pytest.raises(AgentApiError) as exc:
             client.download_artifact(
                 device_token="dev_test",
@@ -99,3 +102,66 @@ def test_reconcile_reports_failed_on_checksum_mismatch(tmp_path: Path) -> None:
     assert reports[0]["sync_status"] == "failed"
     assert "SHA-256" in (reports[0]["last_error"] or "")
     assert reports[0].get("installed_release_id") is None
+
+
+def _redirect(location: str, checksum: str | None) -> urllib.error.HTTPError:
+    headers = email.message.Message()
+    headers["Location"] = location
+    if checksum is not None:
+        headers["X-Checksum-SHA256"] = checksum
+    return urllib.error.HTTPError("https://cloud.test/x", 302, "Found", headers, io.BytesIO(b""))
+
+
+def test_download_follows_a_storage_redirect_without_the_device_token(tmp_path: Path) -> None:
+    content = b"image-bytes"
+    digest = hashlib.sha256(content).hexdigest()
+    requests: list[urllib.request.Request] = []
+
+    def open_(request: urllib.request.Request, timeout: float):
+        requests.append(request)
+        if len(requests) == 1:
+            raise _redirect("https://bucket.test/obj?X-Amz-Signature=abc", digest)
+        return _FakeResponse(content, {"Content-Length": str(len(content))})
+
+    client = EdgeClient("https://cloud.test")
+    with patch.object(_DOWNLOAD_OPENER, "open", side_effect=open_):
+        result = client.download_artifact(device_token="dev_secret", artifact_id="a1", destination=tmp_path / "a1")
+
+    assert result == digest
+    assert (tmp_path / "a1").read_bytes() == content
+    assert requests[0].get_header("X-meteorcli-redirect") == "1"
+    assert requests[1].full_url == "https://bucket.test/obj?X-Amz-Signature=abc"
+    assert requests[1].get_header("Authorization") is None
+
+
+def test_storage_copy_is_checked_against_the_redirect_checksum(tmp_path: Path) -> None:
+    responses = iter([_redirect("https://bucket.test/obj", "0" * 64)])
+
+    def open_(request: urllib.request.Request, timeout: float):
+        for redirect in responses:
+            raise redirect
+        return _FakeResponse(b"tampered", {"X-Checksum-SHA256": hashlib.sha256(b"tampered").hexdigest()})
+
+    client = EdgeClient("https://cloud.test")
+    with patch.object(_DOWNLOAD_OPENER, "open", side_effect=open_), pytest.raises(AgentApiError) as exc:
+        client.download_artifact(device_token="dev", artifact_id="a1", destination=tmp_path / "a1")
+    assert exc.value.code == "checksum_mismatch"
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("location", "checksum", "code"),
+    [
+        ("https://bucket.test/obj", None, "checksum_missing"),
+        ("http://bucket.test/obj", "a" * 64, "download_redirect_insecure"),
+        ("file:///etc/passwd", "a" * 64, "download_redirect_insecure"),
+    ],
+)
+def test_unsafe_redirects_are_refused(tmp_path: Path, location: str, checksum: str | None, code: str) -> None:
+    client = EdgeClient("https://cloud.test")
+    with (
+        patch.object(_DOWNLOAD_OPENER, "open", side_effect=_redirect(location, checksum)),
+        pytest.raises(AgentApiError) as exc,
+    ):
+        client.download_artifact(device_token="dev", artifact_id="a1", destination=tmp_path / "a1")
+    assert exc.value.code == code

@@ -8,13 +8,14 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.artifacts.dependencies import ArtifactSvc
 from app.artifacts.router import stream_artifact
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
+from app.core.metrics import ARTIFACT_DOWNLOADS
 from app.deployments.software_dependencies import DeviceSoftwareSvc
 from app.deployments.software_schemas import DesiredSoftwareItem
 from app.devices.dependencies import (
@@ -43,6 +44,9 @@ from app.signing.schemas import SigningKeyResponse
 from app.signing.service import SigningService, signing_key_response
 
 logger = logging.getLogger(__name__)
+
+# Sent by agents that can follow a download redirect to object storage.
+AGENT_REDIRECT_HEADER = "X-Meteorcli-Redirect"
 
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 
@@ -146,23 +150,41 @@ def agent_signing_keys(
     return [signing_key_response(row) for row in rows]
 
 
-@router.get("/artifacts/{artifact_id}/download")
+@router.get("/artifacts/{artifact_id}/download", response_model=None)
 def agent_download_artifact(
     artifact_id: uuid.UUID,
+    request: Request,
     device: CurrentDevice,
     software: DeviceSoftwareSvc,
     artifacts: ArtifactSvc,
-) -> StreamingResponse:
-    """Stream an artifact only if it is on this device's current desired software."""
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StreamingResponse | RedirectResponse:
+    """Send an artifact only if it is on this device's current desired software.
+
+    Agents that send ``X-Meteorcli-Redirect: 1`` get a ``302`` to a short-lived
+    object-storage URL when storage supports it, so the bytes do not pass through the
+    API. The redirect carries ``X-Checksum-SHA256``; the agent checks the download
+    against it. Older agents, and filesystem storage, get the content streamed.
+    """
     software.require_desired_artifact(
         organization_id=device.organization_id,
         device_id=device.id,
         artifact_id=artifact_id,
     )
+    if settings.artifact_download_redirect and request.headers.get(AGENT_REDIRECT_HEADER) == "1":
+        artifact, url = artifacts.presigned_download(organization_id=device.organization_id, artifact_id=artifact_id)
+        if url:
+            ARTIFACT_DOWNLOADS.labels(mode="redirect").inc()
+            return RedirectResponse(
+                url,
+                status_code=302,
+                headers={"X-Checksum-SHA256": artifact.checksum_sha256, "Cache-Control": "no-store"},
+            )
     artifact, stored = artifacts.open_content(
         organization_id=device.organization_id,
         artifact_id=artifact_id,
     )
+    ARTIFACT_DOWNLOADS.labels(mode="stream").inc()
     return stream_artifact(artifact, stored)
 
 
