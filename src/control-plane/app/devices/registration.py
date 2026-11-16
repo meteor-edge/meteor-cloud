@@ -9,7 +9,7 @@ are never logged.
 from __future__ import annotations
 
 import hmac
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -62,9 +62,12 @@ class RegistrationService:
             mac_addresses=payload.mac_addresses,
         )
 
+        # Lock matching rows before the window/proof check so two concurrent
+        # requests cannot both consume an administrator window or rotate credentials.
         candidates = self.devices.list_candidates_for_identity(
             serial_number=identity.serial_number,
             mac_addresses=identity.mac_addresses,
+            for_update=True,
         )
         match = match_existing_device(
             identity,
@@ -134,9 +137,22 @@ class RegistrationService:
                 "device_disabled",
                 "This hardware is registered as a disabled device. An administrator must enable it first.",
             )
-        if payload.device_token and device.credential_hash:
-            if hmac.compare_digest(hash_token(payload.device_token), device.credential_hash):
+        if payload.device_token:
+            presented = hash_token(payload.device_token)
+            if device.credential_hash and hmac.compare_digest(presented, device.credential_hash):
                 return
+            # Lost-response retry: the previous rotation may have committed while the
+            # agent still holds the old token.
+            previous_until = device.previous_credential_until
+            if (
+                device.previous_credential_hash
+                and previous_until is not None
+                and hmac.compare_digest(presented, device.previous_credential_hash)
+            ):
+                if previous_until.tzinfo is None:
+                    previous_until = previous_until.replace(tzinfo=UTC)
+                if previous_until > now:
+                    return
         allowed_until = device.reregistration_allowed_until
         if allowed_until is not None:
             if allowed_until.tzinfo is None:
@@ -271,6 +287,11 @@ class RegistrationService:
         if token.device_group_id is not None:
             device.device_group_id = token.device_group_id
         self._apply_inventory(device, payload, identity)
+        if device.credential_hash:
+            device.previous_credential_hash = device.credential_hash
+            device.previous_credential_until = now + timedelta(
+                seconds=self.settings.device_registration_retry_seconds
+            )
         device.credential_hash = generated.token_hash
         device.credential_prefix = generated.display_prefix
         device.last_seen_at = now

@@ -1,7 +1,7 @@
 """user_token_version: raising it signs the user out of every session.
 
-Revision ID: 0015_user_token_version
-Revises: 0014_device_reregistration
+Revision ID: 0016_user_token_version
+Revises: 0015_device_registration_retry
 Create Date: 2026-11-16 11:00:00.000000
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0015_user_token_version"
-down_revision: str | Sequence[str] | None = "0014_device_reregistration"
+revision: str = "0016_user_token_version"
+down_revision: str | Sequence[str] | None = "0015_device_registration_retry"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

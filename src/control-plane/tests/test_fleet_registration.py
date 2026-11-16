@@ -182,6 +182,39 @@ def test_reregistration_without_proof_cannot_take_over_a_device(client: TestClie
     assert heartbeat.status_code == 200
 
 
+def test_lost_register_response_can_retry_with_previous_device_token(
+    client: TestClient, db_session: Session
+) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers, max_uses=5)
+    body = {"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]}
+
+    first = client.post("/api/v1/agent/register", json=body).json()
+    second = client.post(
+        "/api/v1/agent/register",
+        json={**body, "device_token": first["device_token"]},
+    ).json()
+    # Simulate a lost response: the agent still has the pre-rotation token.
+    retry = client.post(
+        "/api/v1/agent/register",
+        json={**body, "device_token": first["device_token"]},
+    )
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["device_id"] == first["device_id"]
+    assert retry.json()["device_token"] != first["device_token"]
+    assert retry.json()["device_token"] != second["device_token"]
+    assert (
+        client.post(
+            "/api/v1/agent/heartbeat",
+            headers={"Authorization": f"Bearer {retry.json()['device_token']}"},
+            json={},
+        ).status_code
+        == 200
+    )
+
+
 def test_admin_window_allows_reregistration_once(client: TestClient, db_session: Session) -> None:
     owner = create_user(db_session, email="owner@example.com")
     org, _ = create_org_with_owner(db_session, owner)

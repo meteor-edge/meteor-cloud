@@ -18,6 +18,7 @@ data:
   LOG_FORMAT: {{ .Values.config.logFormat | quote }}
   METRICS_ENABLED: {{ .Values.metrics.enabled | toString | quote }}
   REGISTRATION_REQUIRE_HTTPS: {{ .Values.config.registrationRequireHttps | toString | quote }}
+  ALLOW_SIGNUP: {{ .Values.config.allowSignup | toString | quote }}
   FORWARDED_ALLOW_IPS: {{ .Values.config.forwardedAllowIps | quote }}
   DATABASE_PROVIDER: postgresql
   TELEMETRY_PROVIDER: postgresql

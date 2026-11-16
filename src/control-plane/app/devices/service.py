@@ -953,8 +953,8 @@ class FleetService:
         architecture: str | None = None,
         enabled: bool | None = None,
         status: str | None = None,
-        sort: str = "name",
-        order: str = "asc",
+        sort: str = "last_seen_at",
+        order: str = "desc",
         page: int = 1,
         page_size: int = 20,
     ) -> Page[DeviceResponse]:

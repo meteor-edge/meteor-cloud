@@ -55,12 +55,14 @@ Settings come from three places:
 
 Required secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD` and `EDGE_PLATFORM_JWT_SECRET`.
 Others are required only by the option that uses them, e.g.
-`EDGE_PLATFORM_MQTT_INTERNAL_TOKEN` and `EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD`
+`EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD` and `EDGE_PLATFORM_MQTT_INTERNAL_TOKEN`
 with MQTT, `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN` with the application data API,
 or `EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID` and
 `EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY` with bundled MinIO (optional for
 external S3 when the host has an IAM role). Every run checks these first and fails
-with a clear message.
+with a clear message. If `EDGE_PLATFORM_MQTT_INTERNAL_TOKEN` is unset, Ansible
+writes a random one to `/opt/edge-platform/secrets/mqtt_internal_token` and reuses
+it. Production rejects the built-in default even when MQTT is off.
 
 Infrastructure options:
 

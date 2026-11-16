@@ -1,15 +1,24 @@
 # Publish meteorcli (agent + runtime only) as a GitHub Release.
-# Create a tag that matches src/device-plane/agent/pyproject.toml:
-#   git tag agent-v0.2.0 && git push origin agent-v0.1.0
+# Happens by itself when a merge to master changes the version in
+# src/device-plane/agent/pyproject.toml (the workflow creates tag agent-v<version>).
+# A hand-pushed tag still works: git tag agent-v0.3.5 && git push origin agent-v0.3.5
 name: meteorcli release
 
 on:
   push:
     tags:
       - "agent-v*"
+    branches: [master]
+    paths:
+      - src/device-plane/agent/pyproject.toml
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: agent-release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -22,27 +31,46 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: src/device-plane/agent/pyproject.toml
-      - name: Check tag matches agent version
-        run: |
-          tag="${GITHUB_REF_NAME#agent-v}"
-          ver="$(python -c "import tomllib; print(tomllib.load(open('src/device-plane/agent/pyproject.toml', 'rb'))['project']['version'])")"
-          if [[ "${tag}" != "${ver}" ]]; then
-            echo "error: tag agent-v${tag} does not match pyproject version ${ver}" >&2
-            exit 1
-          fi
-      - name: Install agent test deps
-        run: python -m pip install -e "src/device-plane/agent[dev]"
-      - name: Test agent
-        working-directory: src/device-plane/agent
-        run: python -m pytest -q
-      - name: Pack release assets
-        run: make agent-dist
-      - name: Create GitHub Release
+      - name: Decide the release tag
+        id: tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ver="$(python -c "import tomllib; print(tomllib.load(open('src/device-plane/agent/pyproject.toml', 'rb'))['project']['version'])")"
-          gh release create "${GITHUB_REF_NAME}" \
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            if [[ "${tag#agent-v}" != "${ver}" ]]; then
+              echo "error: tag ${tag} does not match pyproject version ${ver}" >&2
+              exit 1
+            fi
+          else
+            tag="agent-v${ver}"
+          fi
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists; nothing to publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "name=${tag}" >> "$GITHUB_OUTPUT"
+      - name: Install agent test deps
+        if: steps.tag.outputs.skip != 'true'
+        run: python -m pip install -e "src/device-plane/agent[dev]"
+      - name: Test agent
+        if: steps.tag.outputs.skip != 'true'
+        working-directory: src/device-plane/agent
+        run: python -m pytest -q
+      - name: Pack release assets
+        if: steps.tag.outputs.skip != 'true'
+        run: make agent-dist
+      - name: Create GitHub Release
+        if: steps.tag.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          ver="$(python -c "import tomllib; print(tomllib.load(open('src/device-plane/agent/pyproject.toml', 'rb'))['project']['version'])")"
+          gh release create "${TAG}" --target "${GITHUB_SHA}" \
             --title "meteorcli ${ver}" \
             --notes "Device agent only (not the cloud repo). Install:
           \`\`\`bash

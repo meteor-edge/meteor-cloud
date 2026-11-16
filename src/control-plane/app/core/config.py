@@ -69,6 +69,13 @@ class Settings(BaseSettings):
         default=30,
         alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
     )
+    # Whether anyone who reaches the API may create an account (POST /api/v1/auth/register).
+    # Off: people join only when an administrator adds them to an organization.
+    allow_signup: bool = Field(default=True, alias="ALLOW_SIGNUP")
+    # Sign-in attempts per fixed window, counted per email address and per source IP.
+    login_rate_limit_requests: int = Field(default=10, ge=0, alias="LOGIN_RATE_LIMIT_REQUESTS")
+    login_ip_rate_limit_requests: int = Field(default=60, ge=0, alias="LOGIN_IP_RATE_LIMIT_REQUESTS")
+    login_rate_limit_window_seconds: int = Field(default=300, ge=1, alias="LOGIN_RATE_LIMIT_WINDOW_SECONDS")
 
     redis_url: str = Field(
         default="redis://localhost:6379/0",
@@ -90,6 +97,14 @@ class Settings(BaseSettings):
         default=24 * 3600,
         ge=60,
         alias="DEVICE_REREGISTRATION_WINDOW_SECONDS",
+    )
+    # How long the previous device credential still proves identity after a rotation,
+    # so a lost register response can be retried with the old token.
+    device_registration_retry_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        alias="DEVICE_REGISTRATION_RETRY_SECONDS",
     )
 
     # Device registration rate limiting (fixed window per source IP).
@@ -372,8 +387,9 @@ class Settings(BaseSettings):
             "JWT_SECRET_KEY": self.jwt_secret_key,
             "APP_SECRET_KEY": self.app_secret_key,
         }
+        # Internal MQTT routes are mounted even when MQTT_ENABLED is false.
+        required["MQTT_INTERNAL_TOKEN"] = self.mqtt_internal_token
         if self.mqtt_enabled:
-            required["MQTT_INTERNAL_TOKEN"] = self.mqtt_internal_token
             required["MQTT_PLATFORM_PASSWORD"] = self.mqtt_platform_password
         optional: dict[str, str] = {
             "SECRETS_ENCRYPTION_KEY": self.secrets_encryption_key,
