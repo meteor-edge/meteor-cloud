@@ -26,9 +26,10 @@ def test_registration_is_rate_limited(client: TestClient, db_session: Session) -
     limiter = InMemoryRateLimiter(limit=2, window_seconds=10**10)
     client.app.dependency_overrides[get_rate_limiter] = lambda: limiter
 
+    # Distinct hardware each time: re-registering a known device needs its device token.
     first = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]})
-    second = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]})
-    third = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]})
+    second = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:02"]})
+    third = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:03"]})
 
     assert first.status_code == 201
     assert second.status_code == 201
