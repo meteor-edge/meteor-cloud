@@ -59,6 +59,12 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
         "Restart and shut down devices",
         "Restart or shut down a device from the console.",
     ),
+    PermissionDef(
+        "device",
+        "update_agent",
+        "Update device agent",
+        "Order meteorcli on a device to install the latest published release.",
+    ),
     PermissionDef("device_type", "read", "View device types", "List and open device types."),
     PermissionDef("device_type", "create", "Create device types", "Create hardware models."),
     PermissionDef("device_type", "update", "Update device types", "Edit device types."),
@@ -158,7 +164,7 @@ _OPERATOR = _VIEWER | frozenset(
         "device.create",
         "device.update",
         "application.command",
-        # device.reboot / device.shell / device.users are owner/admin only.
+        # device.reboot / device.update_agent / device.shell / device.users are owner/admin only.
         "device.logs",
         "deployment.create",
         "deployment.cancel",

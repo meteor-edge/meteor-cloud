@@ -9,6 +9,7 @@ are never logged.
 from __future__ import annotations
 
 import hmac
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
@@ -31,6 +32,9 @@ from app.devices.status import connectivity_status
 from app.devices.tokens import generate_device_token, hash_token
 from app.mqtt.credentials import issue_mqtt_credentials, mqtt_config_version
 from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
+
+# Match agent-v* / pyproject versions (X.Y.Z plus optional pre-release suffix).
+_AGENT_VERSION = re.compile(r"^\d+\.\d+\.\d+[0-9A-Za-z._-]*$")
 
 
 class RegistrationService:
@@ -234,6 +238,9 @@ class RegistrationService:
         device.cpu_cores = payload.cpu_cores
         device.memory_mb = payload.memory_mb
         device.local_ip = payload.local_ip
+        version = (payload.agent_version or "").strip()
+        if version and _AGENT_VERSION.match(version):
+            device.agent_version = version
         if payload.labels:
             device.labels = payload.labels
         if payload.metadata:
@@ -357,6 +364,9 @@ class RegistrationService:
             device.memory_mb = payload.memory_mb
         if payload.local_ip:
             device.local_ip = payload.local_ip
+        version = (payload.agent_version or "").strip()
+        if version and _AGENT_VERSION.match(version):
+            device.agent_version = version
 
     def _identity_in_use(
         self,
