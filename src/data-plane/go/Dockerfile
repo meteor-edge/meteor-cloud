@@ -12,7 +12,7 @@ RUN for c in dataplane device-ingest rule-processor clickhouse-writer; do \
       CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/$c ./cmd/$c || exit 1; \
     done
 
-FROM alpine:3.21
+FROM alpine:3.24
 RUN adduser -D -H -u 10001 dataplane
 COPY --from=build /out/ /usr/local/bin/
 USER 10001
