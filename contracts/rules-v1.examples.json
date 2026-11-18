@@ -1,0 +1,223 @@
+[
+  {
+    "schema_version": 1,
+    "name": "High CPU usage",
+    "severity": "critical",
+    "scope": {
+      "type": "device",
+      "device_ids": [
+        "8f0c6a52-0000-4000-8000-000000000001"
+      ]
+    },
+    "condition": {
+      "type": "comparison",
+      "field": "cpu_percent",
+      "operator": "gt",
+      "value": 90
+    },
+    "actions": [
+      {
+        "type": "alert",
+        "severity": "critical"
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Sustained high memory",
+    "scope": {
+      "type": "organization",
+      "labels": {
+        "env": "production"
+      }
+    },
+    "condition": {
+      "type": "duration",
+      "duration": "5m",
+      "condition": {
+        "type": "comparison",
+        "field": "memory_percent",
+        "operator": "gt",
+        "value": 90
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "name": "Device silent for 10 minutes",
+    "scope": {
+      "type": "group",
+      "group_id": "3b1d2e40-0000-4000-8000-000000000002"
+    },
+    "condition": {
+      "type": "absence",
+      "duration": "10m"
+    }
+  },
+  {
+    "schema_version": 1,
+    "name": "Temperature spike",
+    "scope": {
+      "type": "device_type",
+      "device_type_id": "rpi-4"
+    },
+    "condition": {
+      "type": "aggregate",
+      "function": "delta",
+      "field": "temperature",
+      "window": "60s",
+      "operator": "gte",
+      "value": 10
+    }
+  },
+  {
+    "schema_version": 1,
+    "name": "Overheating with hysteresis",
+    "cooldown": "15m",
+    "scope": {
+      "type": "organization"
+    },
+    "condition": {
+      "type": "comparison",
+      "field": "temperature",
+      "operator": "gt",
+      "value": 80
+    },
+    "resolve": {
+      "type": "comparison",
+      "field": "temperature",
+      "operator": "lt",
+      "value": 70
+    },
+    "actions": [
+      {
+        "type": "alert"
+      },
+      {
+        "type": "webhook",
+        "on": [
+          "firing",
+          "resolved"
+        ],
+        "integration_id": "ops-webhook"
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "CPU flapping",
+    "scope": {
+      "type": "organization"
+    },
+    "condition": {
+      "type": "count_within",
+      "window": "10m",
+      "min_count": 5,
+      "condition": {
+        "type": "comparison",
+        "field": "cpu_percent",
+        "operator": "gt",
+        "value": 90
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "name": "Energy over budget",
+    "severity": "info",
+    "scope": {
+      "type": "organization",
+      "labels": {
+        "site": "berlin"
+      }
+    },
+    "condition": {
+      "type": "aggregate",
+      "function": "sum",
+      "field": "energy_wh",
+      "window": "1h",
+      "operator": "gt",
+      "value": 5000
+    }
+  },
+  {
+    "schema_version": 1,
+    "name": "Low battery, not charging",
+    "scope": {
+      "type": "organization"
+    },
+    "condition": {
+      "type": "all",
+      "conditions": [
+        {
+          "type": "comparison",
+          "field": "battery_percent",
+          "operator": "lt",
+          "value": 15
+        },
+        {
+          "type": "not",
+          "condition": {
+            "type": "comparison",
+            "field": "charging",
+            "operator": "eq",
+            "value": true
+          }
+        }
+      ]
+    },
+    "actions": [
+      {
+        "type": "alert",
+        "severity": "warning"
+      },
+      {
+        "type": "command",
+        "command": "power.save",
+        "params": {
+          "level": "max"
+        }
+      }
+    ]
+  },
+  {
+    "schema_version": 1,
+    "name": "Disk filling",
+    "scope": {
+      "type": "organization"
+    },
+    "condition": {
+      "type": "consecutive",
+      "count": 3,
+      "condition": {
+        "type": "comparison",
+        "field": "disk_percent",
+        "operator": "gte",
+        "value": 95
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "name": "Repeated disconnects",
+    "scope": {
+      "type": "organization"
+    },
+    "source": {
+      "streams": [
+        "meteor.device.status"
+      ]
+    },
+    "condition": {
+      "type": "count_within",
+      "window": "30m",
+      "min_count": 3,
+      "condition": {
+        "type": "comparison",
+        "field": "status",
+        "operator": "eq",
+        "value": "offline"
+      }
+    }
+  }
+]
