@@ -16,6 +16,9 @@ data:
   BACKEND_CORS_ORIGINS: {{ .Values.config.publicUrl | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  WEB_CONCURRENCY: {{ .Values.backend.workers | quote }}
+  DB_POOL_SIZE: {{ .Values.backend.dbPool.size | quote }}
+  DB_MAX_OVERFLOW: {{ .Values.backend.dbPool.maxOverflow | quote }}
   METRICS_ENABLED: {{ .Values.metrics.enabled | toString | quote }}
   REGISTRATION_REQUIRE_HTTPS: {{ .Values.config.registrationRequireHttps | toString | quote }}
   ALLOW_SIGNUP: {{ .Values.config.allowSignup | toString | quote }}
