@@ -92,6 +92,10 @@ run the image with `-e METEORCLI_SERVER=http://host.docker.internal:8000`. The i
 Docker inside, so docker and compose deployments report the runtime as missing. The
 registration token is passed as an environment variable: use it for local stacks only.
 
+The agent runs as the unprivileged user `meteor` (uid 10001), so `METEORCLI_SIM_USERS=host`
+has no effect in the container; use the VM below for that. Docker reports the container
+healthy once the device holds its credential.
+
 ## Local VM (first boot, real systemd)
 
 Use a VM to test first boot and the real `meteorcli.service`, for example an arm64 Debian VM
