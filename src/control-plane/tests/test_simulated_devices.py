@@ -52,3 +52,10 @@ def test_heartbeat_keeps_the_mark_in_step(client: TestClient, db_session: Sessio
     # The same device now reports as real hardware (e.g. the profile was switched off).
     client.post("/api/v1/agent/heartbeat", headers=agent, json={})
     assert "simulated" not in _device(client, org, headers, device_id)["metadata"]
+
+
+def test_real_device_drops_a_non_boolean_mark(client: TestClient, db_session: Session) -> None:
+    org, headers, device_id, _ = _register(client, db_session, metadata={"simulated": "true", "site": "lab"})
+    metadata = _device(client, org, headers, device_id)["metadata"]
+    assert "simulated" not in metadata
+    assert metadata.get("site") == "lab"

@@ -46,7 +46,9 @@ def mark_simulated(device: Device, simulated: bool) -> None:
     from sqlalchemy.orm.attributes import flag_modified
 
     meta = dict(device.metadata_ or {})
-    if simulated == (meta.get("simulated") is True):
+    if simulated and meta.get("simulated") is True:
+        return
+    if not simulated and "simulated" not in meta:
         return
     if simulated:
         meta["simulated"] = True
