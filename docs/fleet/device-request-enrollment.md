@@ -170,6 +170,11 @@ unlimited number of devices. Setting one needs `enrollment_key.manage` and
 reviewer, and are audited as `enrollment_request.auto_approve` by the key. They do not
 count against the pending cap. The key list shows the rule and `approved_count`.
 
+In the console, **Settings → Enrollment API keys** has an **Auto-approve** button per key
+(allow-list text or CSV upload, maximum, end time, type and group, **Turn off**), and the
+pending list has checkboxes with **Approve selected** / **Reject selected**. Selections
+over 500 are sent in batches.
+
 ## Rate limiting and security
 
 - Submit and key check: a limit per source IP that runs **before** the key is looked up
