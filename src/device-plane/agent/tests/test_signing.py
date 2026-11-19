@@ -300,3 +300,50 @@ def test_new_device_credentials_forget_pinned_keys(tmp_path: Path) -> None:
     (tmp_path / "signing-keys.json").write_text('{"keys": {"old": "x"}}', encoding="utf-8")
     persist_device_secrets(tmp_path, tmp_path / "device-token", "dev_new", None)
     assert not (tmp_path / "signing-keys.json").exists()
+
+
+def test_refused_item_keeps_its_app_credentials(tmp_path: Path) -> None:
+    from edge_agent.app_credentials import AppCredentialStore
+
+    artifacts = tmp_path / "artifacts"
+    store = AppCredentialStore(tmp_path / "app-credentials")
+    kept = store._dir("cam.service")
+    gone = store._dir("old.service")
+    for directory in (kept, gone):
+        directory.mkdir(parents=True)
+        (directory / "token").write_text("t", encoding="utf-8")
+    client = MagicMock()
+    client.get_software.return_value = [_item(revision=99)]  # signature no longer verifies
+    verifier, _ = _verifier(tmp_path, [_key(SEED_A)])
+    with patch("edge_agent.software._ensure_artifact"), patch("edge_agent.software._apply_systemd"):
+        reports = reconcile_software(client, "dev", artifacts, verifier=verifier)
+    assert reports[0]["sync_status"] == "failed"
+    assert (kept / "token").is_file()  # a refusal changes nothing that is installed
+    assert not gone.exists()  # workloads that are no longer desired still lose theirs
+
+
+def test_late_pin_save_from_the_old_credential_is_dropped(tmp_path: Path) -> None:
+    from edge_agent.persist import persist_device_secrets
+    from edge_agent.signing import credential_fingerprint
+    from edge_agent.software import manifest_verifier
+
+    (tmp_path / "device-token").write_text("old-token\n", encoding="utf-8")
+    new_pins = {
+        "keys": {_key(SEED_B)["key_id"]: _key(SEED_B)["public_key"]},
+        "device_id": DEVICE,
+        "credential_fp": credential_fingerprint("new-token"),
+    }
+
+    def fetch_while_reenrolling(*, device_token: str) -> list[dict[str, Any]]:
+        # Re-enrollment commits a new credential and the new verifier pins its keys
+        # before the old key request returns.
+        persist_device_secrets(tmp_path, tmp_path / "device-token", "new-token", None)
+        (tmp_path / "signing-keys.json").write_text(json.dumps(new_pins), encoding="utf-8")
+        return [_key(SEED_A)]
+
+    client = MagicMock()
+    client.get_signing_keys.side_effect = fetch_while_reenrolling
+    old = manifest_verifier(client, "old-token", tmp_path, DEVICE)
+    assert old is not None
+    old.check(_item())
+    assert json.loads((tmp_path / "signing-keys.json").read_text()) == new_pins

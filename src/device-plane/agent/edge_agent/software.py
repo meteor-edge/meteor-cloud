@@ -31,7 +31,17 @@ def manifest_verifier(
         str(device_id),
         lambda: client.get_signing_keys(device_token=device_token),
         credential_fingerprint=credential_fingerprint(device_token),
+        current_fingerprint=lambda: _stored_credential_fingerprint(state_dir / "device-token"),
     )
+
+
+def _stored_credential_fingerprint(token_path: Path) -> str | None:
+    """Fingerprint of the credential on disk now (None when there is none)."""
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return credential_fingerprint(token) if token else None
 
 
 logger = logging.getLogger("edge_agent")
@@ -620,6 +630,9 @@ def reconcile_software(
     credentials = AppCredentialStore(artifacts_dir.parent / "app-credentials")
     reports: list[dict[str, Any]] = []
     accepted: list[dict[str, Any]] = []
+    # Workloads whose desired item was refused this round keep whatever credentials they
+    # have: a refusal must not change what is installed, and that includes app tokens.
+    held: set[str] = set()
     for item in desired:
         workload_key = item.get("workload_key")
         kind = item.get("kind")
@@ -634,20 +647,24 @@ def reconcile_software(
             refused = verifier.check(item)
             if refused is not None:
                 logger.warning("Refusing desired software for %s: %s", workload_key, refused)
+                held.add(str(workload_key))
                 reports.append(_failed(workload_key, refused))
                 continue
 
         stale = _stale_revision(applied, item)
         if stale is not None:
             logger.warning("Refusing desired software for %s: %s", workload_key, stale)
+            held.add(str(workload_key))
             reports.append(_failed(workload_key, stale))
             continue
 
         accepted.append(item)
 
-    # Prune only after verification so a refused item cannot drop stored credentials.
+    # Prune only after verification, and never for a refused workload, so a refused item
+    # cannot drop stored credentials.
     credentials.prune(
         {str(item["workload_key"]) for item in accepted if item.get("workload_key") and binding_of(item)}
+        | held
     )
 
     for item in accepted:
