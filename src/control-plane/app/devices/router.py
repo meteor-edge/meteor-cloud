@@ -44,6 +44,10 @@ from app.devices.schemas import (
     EnrollmentApiKeyCreateResponse,
     EnrollmentApiKeyResponse,
     EnrollmentApproveRequest,
+    EnrollmentAutoApproveRule,
+    EnrollmentBulkApproveRequest,
+    EnrollmentBulkRejectRequest,
+    EnrollmentBulkResult,
     EnrollmentRejectRequest,
     Page,
     RegistrationTokenCreateRequest,
@@ -248,6 +252,38 @@ def revoke_enrollment_key(
     return service.revoke_enrollment_key(actor=current_user, organization_id=organization_id, key_id=key_id)
 
 
+@router.put(
+    "/enrollment-keys/{key_id}/auto-approve",
+    response_model=EnrollmentApiKeyResponse,
+)
+def set_enrollment_key_auto_approve(
+    organization_id: uuid.UUID,
+    key_id: uuid.UUID,
+    payload: EnrollmentAutoApproveRule,
+    current_user: CurrentUser,
+    service: FleetSvc,
+) -> EnrollmentApiKeyResponse:
+    """Approve matching requests from this key as soon as they arrive (factory batches)."""
+    return service.set_enrollment_key_auto_approve(
+        actor=current_user, organization_id=organization_id, key_id=key_id, rule=payload
+    )
+
+
+@router.delete(
+    "/enrollment-keys/{key_id}/auto-approve",
+    response_model=EnrollmentApiKeyResponse,
+)
+def clear_enrollment_key_auto_approve(
+    organization_id: uuid.UUID,
+    key_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: FleetSvc,
+) -> EnrollmentApiKeyResponse:
+    return service.set_enrollment_key_auto_approve(
+        actor=current_user, organization_id=organization_id, key_id=key_id, rule=None
+    )
+
+
 # ---------------------------------------------------------- device config file
 @router.post("/device-config", response_model=DeviceConfigResponse)
 def create_device_config(
@@ -275,6 +311,29 @@ def list_enrollment_requests(
     ] = None,
 ) -> list[DeviceEnrollmentRequestResponse]:
     return service.list_enrollment_requests(actor=current_user, organization_id=organization_id, status=status)
+
+
+@router.post("/enrollment-requests/approve", response_model=EnrollmentBulkResult)
+def bulk_approve_enrollment_requests(
+    organization_id: uuid.UUID,
+    payload: EnrollmentBulkApproveRequest,
+    current_user: CurrentUser,
+    service: FleetSvc,
+) -> EnrollmentBulkResult:
+    """Approve up to 500 pending requests at once; ids that are not pending come back as skipped."""
+    return service.bulk_approve_enrollment_requests(
+        actor=current_user, organization_id=organization_id, payload=payload
+    )
+
+
+@router.post("/enrollment-requests/reject", response_model=EnrollmentBulkResult)
+def bulk_reject_enrollment_requests(
+    organization_id: uuid.UUID,
+    payload: EnrollmentBulkRejectRequest,
+    current_user: CurrentUser,
+    service: FleetSvc,
+) -> EnrollmentBulkResult:
+    return service.bulk_reject_enrollment_requests(actor=current_user, organization_id=organization_id, payload=payload)
 
 
 @router.post(

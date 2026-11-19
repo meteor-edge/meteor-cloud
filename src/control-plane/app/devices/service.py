@@ -65,6 +65,11 @@ from app.devices.schemas import (
     EnrollmentApiKeyCreateResponse,
     EnrollmentApiKeyResponse,
     EnrollmentApproveRequest,
+    EnrollmentAutoApproveRule,
+    EnrollmentBulkApproveRequest,
+    EnrollmentBulkRejectRequest,
+    EnrollmentBulkResult,
+    EnrollmentBulkSkipped,
     EnrollmentRejectRequest,
     Page,
     RegistrationTokenCreateRequest,
@@ -686,6 +691,9 @@ class FleetService:
         if payload.expires_at is not None and payload.expires_at <= datetime.now(UTC):
             raise ConflictError("invalid_expiry", "Expiry must be in the future.")
 
+        if payload.auto_approve is not None:
+            self._check_auto_approve_rule(membership, organization_id, payload.auto_approve)
+
         generated = generate_api_key()
         key = EnrollmentApiKey(
             organization_id=organization_id,
@@ -695,6 +703,8 @@ class FleetService:
             expires_at=payload.expires_at,
             created_by_user_id=actor.id,
         )
+        if payload.auto_approve is not None:
+            self._apply_auto_approve_rule(key, payload.auto_approve)
         self.api_keys.create(key)
         self._record_audit(
             actor=actor,
@@ -702,7 +712,7 @@ class FleetService:
             action="enrollment_key.create",
             resource_type="enrollment_key",
             resource_id=key.id,
-            metadata={"name": key.name},
+            metadata={"name": key.name, **self._auto_approve_audit(payload.auto_approve)},
         )
         self.session.commit()
         self.session.refresh(key)
@@ -741,6 +751,77 @@ class FleetService:
             self.session.commit()
             self.session.refresh(key)
         return EnrollmentApiKeyResponse.model_validate(key)
+
+    def set_enrollment_key_auto_approve(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        key_id: uuid.UUID,
+        rule: EnrollmentAutoApproveRule | None,
+    ) -> EnrollmentApiKeyResponse:
+        """Turn on or replace a key's auto-approve rule, or turn it off with ``None``.
+
+        The approved count is kept, so raising ``max_devices`` allows that many more in total.
+        """
+        membership = self._require_membership(organization_id, actor.id)
+        self._require(membership, "enrollment_key.manage")
+        key = self.api_keys.get(organization_id=organization_id, key_id=key_id)
+        if key is None:
+            raise NotFoundError("enrollment_key_not_found", "Enrollment API key was not found.")
+        if rule is not None:
+            if key.revoked_at is not None:
+                raise ConflictError("enrollment_key_revoked", "A revoked key cannot auto-approve devices.")
+            self._check_auto_approve_rule(membership, organization_id, rule)
+            self._apply_auto_approve_rule(key, rule)
+        else:
+            key.auto_approve = False
+        self.api_keys.update(key)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="enrollment_key.auto_approve" if rule is not None else "enrollment_key.auto_approve_off",
+            resource_type="enrollment_key",
+            resource_id=key.id,
+            metadata=self._auto_approve_audit(rule),
+        )
+        self.session.commit()
+        self.session.refresh(key)
+        return EnrollmentApiKeyResponse.model_validate(key)
+
+    def _check_auto_approve_rule(self, membership, organization_id: uuid.UUID, rule: EnrollmentAutoApproveRule) -> None:
+        # The rule approves devices on the administrator's behalf, so it needs their right to add devices.
+        self._require(membership, "device.create")
+        if rule.until is not None and rule.until <= datetime.now(UTC):
+            raise ConflictError("invalid_expiry", "The auto-approve end time must be in the future.")
+        if rule.device_type_id is not None:
+            self._require_device_type(organization_id, rule.device_type_id)
+        if rule.device_group_id is not None:
+            self._require_device_group(organization_id, rule.device_group_id)
+
+    @staticmethod
+    def _apply_auto_approve_rule(key: EnrollmentApiKey, rule: EnrollmentAutoApproveRule) -> None:
+        key.auto_approve = True
+        key.auto_approve_device_type_id = rule.device_type_id
+        key.auto_approve_device_group_id = rule.device_group_id
+        key.auto_approve_allowlist = list(rule.allowlist)
+        key.auto_approve_max = rule.max_devices
+        key.auto_approve_until = rule.until
+        if key.auto_approve_count is None:
+            key.auto_approve_count = 0
+
+    @staticmethod
+    def _auto_approve_audit(rule: EnrollmentAutoApproveRule | None) -> dict[str, Any]:
+        if rule is None:
+            return {}
+        return {
+            "auto_approve": True,
+            "allowlist_size": len(rule.allowlist),
+            "max_devices": rule.max_devices,
+            "until": rule.until.isoformat() if rule.until else None,
+            "device_type_id": str(rule.device_type_id) if rule.device_type_id else None,
+            "device_group_id": str(rule.device_group_id) if rule.device_group_id else None,
+        }
 
     # ----------------------------------------------------- device config file
     def create_device_config(
@@ -930,6 +1011,110 @@ class FleetService:
         self.session.commit()
         self.session.refresh(request)
         return DeviceEnrollmentRequestResponse.model_validate(request)
+
+    def bulk_approve_enrollment_requests(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        payload: EnrollmentBulkApproveRequest,
+    ) -> EnrollmentBulkResult:
+        """Approve every pending request in ``request_ids``; the others are skipped with a reason."""
+        membership = self._require_membership(organization_id, actor.id)
+        self._require(membership, "device.create")
+        if payload.device_type_id is not None:
+            self._require_device_type(organization_id, payload.device_type_id)
+        if payload.device_group_id is not None:
+            self._require_device_group(organization_id, payload.device_group_id)
+
+        rows, skipped = self._bulk_pending(organization_id, payload.request_ids)
+        if rows:
+            # Keep the names the list showed, so a later request claiming first can't take them.
+            self.devices.lock_names(organization_id=organization_id)
+            every_request = self.enrollment_requests.list(organization_id=organization_id, status=None)
+            for row in rows:
+                if payload.device_type_id is not None:
+                    row.device_type_id = payload.device_type_id
+                if payload.device_group_id is not None:
+                    row.device_group_id = payload.device_group_id
+            suggested = self._suggested_names(organization_id, every_request, include_existing=False)
+            now = datetime.now(UTC)
+            for row in rows:
+                if not row.assigned_name:
+                    row.assigned_name = suggested.get(row.id)
+                row.status = "approved"
+                row.reviewed_by_user_id = actor.id
+                row.reviewed_at = now
+                self.enrollment_requests.update(row)
+                self._record_audit(
+                    actor=actor,
+                    organization_id=organization_id,
+                    action="enrollment_request.approve",
+                    resource_type="enrollment_request",
+                    resource_id=row.id,
+                    metadata={"bulk": True},
+                )
+        self.session.commit()
+        return self._bulk_result(rows, skipped)
+
+    def bulk_reject_enrollment_requests(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        payload: EnrollmentBulkRejectRequest,
+    ) -> EnrollmentBulkResult:
+        membership = self._require_membership(organization_id, actor.id)
+        self._require(membership, "device.create")
+        rows, skipped = self._bulk_pending(organization_id, payload.request_ids)
+        now = datetime.now(UTC)
+        for row in rows:
+            row.status = "rejected"
+            row.rejection_reason = payload.reason
+            row.reviewed_by_user_id = actor.id
+            row.reviewed_at = now
+            self.enrollment_requests.update(row)
+            self._record_audit(
+                actor=actor,
+                organization_id=organization_id,
+                action="enrollment_request.reject",
+                resource_type="enrollment_request",
+                resource_id=row.id,
+                metadata={"bulk": True},
+            )
+        self.session.commit()
+        return self._bulk_result(rows, skipped)
+
+    def _bulk_pending(
+        self, organization_id: uuid.UUID, request_ids: list[uuid.UUID]
+    ) -> tuple[list[DeviceEnrollmentRequest], list[EnrollmentBulkSkipped]]:
+        """The pending rows among ``request_ids`` (locked, in the order given) and the skipped ids."""
+        wanted = list(dict.fromkeys(request_ids))
+        found = {
+            row.id: row
+            for row in self.enrollment_requests.list_by_ids(organization_id=organization_id, request_ids=wanted)
+        }
+        rows: list[DeviceEnrollmentRequest] = []
+        skipped: list[EnrollmentBulkSkipped] = []
+        for request_id in wanted:
+            row = found.get(request_id)
+            if row is None:
+                skipped.append(EnrollmentBulkSkipped(request_id=request_id, reason="not_found"))
+            elif row.status != "pending":
+                skipped.append(EnrollmentBulkSkipped(request_id=request_id, reason="not_pending"))
+            else:
+                rows.append(row)
+        return rows, skipped
+
+    def _bulk_result(
+        self, rows: list[DeviceEnrollmentRequest], skipped: list[EnrollmentBulkSkipped]
+    ) -> EnrollmentBulkResult:
+        for row in rows:
+            self.session.refresh(row)
+        return EnrollmentBulkResult(
+            updated=[DeviceEnrollmentRequestResponse.model_validate(row) for row in rows],
+            skipped=skipped,
+        )
 
     def _require_enrollment_request(self, organization_id: uuid.UUID, request_id: uuid.UUID) -> DeviceEnrollmentRequest:
         request = self.enrollment_requests.get(organization_id=organization_id, request_id=request_id)
