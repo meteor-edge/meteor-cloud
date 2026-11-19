@@ -1,0 +1,101 @@
+{{- if and (eq .Values.postgresql.mode "bundled") .Values.postgresql.bundled.backup.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $pg := .Values.postgresql }}
+{{- $backup := $pg.bundled.backup }}
+{{- /* CronJob names must be ≤52 so the generated Job name stays within 63. */}}
+{{- $cronName := printf "%s-postgresql-backup" $fullname | trunc 52 | trimSuffix "-" }}
+# Nightly pg_dump of the bundled PostgreSQL into its own volume. The volume is kept
+# when the release is uninstalled. Restore steps: docs/backups.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-postgresql-backups
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "postgresql-backup") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $backup.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $backup.persistence.size }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $cronName }}
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "postgresql-backup") | nindent 4 }}
+spec:
+  schedule: {{ $backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: {{ $backup.activeDeadlineSeconds | default 3600 }}
+      template:
+        metadata:
+          labels:
+            {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "postgresql-backup") | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            fsGroup: 70
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: pg-dump
+              image: {{ printf "%s:%s" $pg.bundled.image.repository $pg.bundled.image.tag }}
+              imagePullPolicy: {{ $pg.bundled.image.pullPolicy }}
+              env:
+                - name: PGHOST
+                  value: {{ $fullname }}-postgresql
+                - name: PGUSER
+                  value: {{ $pg.username | quote }}
+                - name: PGDATABASE
+                  value: {{ $pg.database | quote }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: {{ include "meteorcloud.secretName" . }}, key: POSTGRES_PASSWORD }
+                - name: RETENTION_DAYS
+                  value: {{ $backup.retentionDays | quote }}
+              command:
+                - sh
+                - -ec
+                - |
+                  # Drop abandoned partials, then expire old dumps before writing so a
+                  # full volume cannot block retention forever under `sh -e`.
+                  rm -f /backups/.*.partial
+                  if [ "$RETENTION_DAYS" -gt 0 ]; then
+                    find /backups -maxdepth 1 -name '20*Z.dump' -mtime +"$RETENTION_DAYS" -print -delete
+                  fi
+                  name="$(date -u +%Y%m%dT%H%M%SZ).dump"
+                  pg_dump -Fc -f "/backups/.$name.partial"
+                  mv "/backups/.$name.partial" "/backups/$name"
+                  echo "wrote /backups/$name"
+                  if [ "$RETENTION_DAYS" -gt 0 ]; then
+                    find /backups -maxdepth 1 -name '20*Z.dump' -mtime +"$RETENTION_DAYS" -print -delete
+                  fi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                {{- toYaml $backup.resources | nindent 16 }}
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ $fullname }}-postgresql-backups
+{{- end }}

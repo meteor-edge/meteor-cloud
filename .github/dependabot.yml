@@ -1,0 +1,60 @@
+# Weekly dependency updates, grouped so each ecosystem opens at most one PR a week.
+# Licence rule (AGENTS.md, docs/licensing.md): check the licence of every upgrade before merging;
+# never take Redis > 7.2 or EMQX >= 5.9 (BSL) from these PRs.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directories:
+      - /src/control-plane
+      - /src/data-plane
+      - /src/device-plane/agent
+      - /infrastructure/installer
+      - /sdk/python
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /console
+    schedule:
+      interval: weekly
+    groups:
+      console:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directories:
+      - /src/data-plane/go
+      - /src/data-plane/broker/mosquitto/plugin
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories:
+      - /console
+      - /src/control-plane
+      - /src/data-plane
+      - /src/data-plane/go
+      - /src/data-plane/broker/mosquitto
+    schedule:
+      interval: weekly
+    ignore:
+      # Major base-image moves (Python, Node, Debian) are planned by hand.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      images:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

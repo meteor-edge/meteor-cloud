@@ -1,4 +1,58 @@
 ---
+# The API refuses the built-in MQTT_INTERNAL_TOKEN in production even when the
+# broker is off, because the internal MQTT routes stay mounted. Keep the value
+# we generate so the next run does not rotate it. An operator-supplied token
+# always wins. With MQTT on and no token anywhere, the assert below still fails.
+- name: Reuse or create an MQTT internal token when none was configured
+  when: mqtt_internal_token | default('') | trim | length == 0
+  block:
+    - name: Check for a saved MQTT internal token
+      ansible.builtin.stat:
+        path: "{{ platform_root }}/secrets/mqtt_internal_token"
+      register: mqtt_internal_token_file
+
+    - name: Read the saved MQTT internal token
+      ansible.builtin.slurp:
+        src: "{{ platform_root }}/secrets/mqtt_internal_token"
+      register: saved_mqtt_internal_token
+      no_log: true
+      when: mqtt_internal_token_file.stat.exists
+
+    - name: Create the platform secrets directory
+      ansible.builtin.file:
+        path: "{{ platform_root }}/secrets"
+        state: directory
+        owner: "{{ platform_owner }}"
+        group: "{{ platform_owner }}"
+        mode: "0755"
+      when: not mqtt_internal_token_file.stat.exists and not (mqtt_enabled | bool)
+
+    - name: Generate an MQTT internal token
+      ansible.builtin.command: openssl rand -hex 32
+      register: generated_mqtt_internal_token
+      changed_when: true
+      no_log: true
+      when: not mqtt_internal_token_file.stat.exists and not (mqtt_enabled | bool)
+
+    - name: Save the generated MQTT internal token
+      ansible.builtin.copy:
+        content: "{{ generated_mqtt_internal_token.stdout }}\n"
+        dest: "{{ platform_root }}/secrets/mqtt_internal_token"
+        owner: "{{ platform_owner }}"
+        group: "{{ platform_owner }}"
+        mode: "0600"
+      no_log: true
+      when: not mqtt_internal_token_file.stat.exists and not (mqtt_enabled | bool)
+
+    - name: Use the saved or generated MQTT internal token
+      ansible.builtin.set_fact:
+        mqtt_internal_token: >-
+          {{ (saved_mqtt_internal_token.content | b64decode | trim)
+             if mqtt_internal_token_file.stat.exists
+             else generated_mqtt_internal_token.stdout }}
+      no_log: true
+      when: mqtt_internal_token_file.stat.exists or not (mqtt_enabled | bool)
+
 - name: Check required secrets
   ansible.builtin.assert:
     that:

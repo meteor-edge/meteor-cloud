@@ -26,8 +26,13 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | `pg8000` 1.31 (with `scramp`, `python-dateutil`) | SDK example `sdk/python/examples/stream-to-database` | [BSD-3-Clause](https://github.com/tlocke/pg8000/blob/main/LICENSE) (scramp MIT-0, python-dateutil Apache 2.0 / BSD-3-Clause) | **Yes** | Example only, run by the customer against their own database. Chosen over `psycopg` (LGPL-3.0) to keep the example permissive |
 | `golang:1.26-alpine` (build) / `alpine:3.21` (runtime) images | Data API image | BSD-3-Clause (Go) / MIT and GPL-2.0 userland (Alpine, BusyBox) | **Yes** | Unmodified base image; only the static Go binary is added. Same position as the other Alpine-based images |
 | `python:3.13-slim` image (Debian userland), QEMU | Device simulator container (`make sim-device`) and the local VM recipe in [simulator](fleet/simulator.md) | PSF-2.0 (Python), Debian packages under their own free licenses (mostly GPL / LGPL / BSD / MIT), QEMU GPL-2.0 | **Yes** | Dev and test only, never part of a customer installation. Images are pulled at build time, not republished. QEMU and Raspberry Pi OS / Debian VM images are local tools the developer downloads |
-| MinIO | S3-compatible artifacts | [AGPLv3](https://github.com/minio/minio) | **No (as default)** | Dev/lab only. Production Ansible/Helm default to **filesystem** or real S3. Do not make MinIO the commercial default |
-| `cryptography` (Python, control plane) | Encrypts a Wi-Fi password while it waits for its device (AES-GCM) | [Apache-2.0 OR BSD-3-Clause](https://github.com/pyca/cryptography/blob/main/LICENSE) | **Yes** | Permissive. Already installed through `python-jose[cryptography]`; now also a direct dependency |
+| `psycopg` 3 (`psycopg[binary]`, control plane) | PostgreSQL driver | [LGPL-3.0](https://github.com/psycopg/psycopg/blob/master/LICENSE.txt) (wheel bundles libpq: PostgreSQL licence) | **Yes** | Used unmodified as a library, installed from PyPI into the image. LGPL lets us ship it in a commercial product as long as it is not modified and can be replaced |
+| Terraform **>= 1.6** | Installer provisioning (`make aws-up`, `edge-installer`) | [BSL 1.1](https://github.com/hashicorp/terraform/blob/main/LICENSE) | **Yes, with limits** | A tool the operator installs and runs; MeteorCloud does not ship it. Allowed for provisioning; do not bundle Terraform in a product offered as a competing service. **OpenTofu** (MPL-2.0) works too: the installer uses `tofu` when `terraform` is not installed, or set `EDGE_INSTALLER_TERRAFORM` / `make TERRAFORM=tofu` |
+| Ansible | Installer (`make up`) | [GPL-3.0](https://github.com/ansible/ansible/blob/devel/COPYING) | **Yes** | A tool run on the host, not linked into or shipped inside MeteorCloud images |
+| Device OS images (Raspberry Pi OS / Debian + Docker + `meteorcli`) | Golden images made with Meteor Imager | Mixed (GPL kernel and userland, Apache 2.0 Docker, Apache 2.0 agent) | **Yes, with obligations** | Handing an image to a customer is redistribution of GPL software: offer the corresponding source (Debian / Raspberry Pi OS source archives) and include [NOTICE](../NOTICE.md) |
+| MinIO | S3-compatible artifacts | [AGPLv3](https://github.com/minio/minio) | **No (as default)** | Dev/lab only. The dev image is `bitnamilegacy/minio` (frozen by Bitnami, no updates) and MinIO no longer publishes free images: keep it for local tests only. Production Ansible/Helm default to **filesystem** or real S3. Do not make MinIO the commercial default |
+| `cryptography` (Python, control plane) | Encrypts a Wi-Fi password while it waits for its device (AES-GCM) | [Apache-2.0 OR BSD-3-Clause](https://github.com/pyca/cryptography/blob/main/LICENSE) | **Yes** | Permissive. Direct dependency |
+| `PyJWT` (Python, control plane) | Signs console access tokens and artifact download tickets (HS256) | [MIT](https://github.com/jpadilla/pyjwt/blob/master/LICENSE) | **Yes** | Replaced `python-jose` (MIT, slow to fix CVEs) |
 | EMQX **5.9+** cluster | MQTT HA | BSL 1.1 | **Only with commercial license** | Multi-node / some commercial cases need an [EMQ deal](https://www.emqx.com/en/contact). Do not bump casually |
 
 **One-line policy**
@@ -63,6 +68,15 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | Data API Go modules | `src/data-plane/go/go.mod` | same |
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |
 | Observability | `deploy/compose/docker-compose.observability.yml` | not in the chart |
+
+## Automated check
+
+CI job **Supply chain → Licences of shipped dependencies** (`.github/workflows/supply-chain.yml`) runs
+`scripts/check_licenses.py` on the console's production npm packages, the Python services, agent
+and SDK (with all their dependencies), and the Go binaries (`go-licenses`). GPL, AGPL, LGPL, SSPL,
+BSL/BUSL, Commons Clause, Elastic and unknown licences fail the job unless the package is listed in
+`ALLOWED` in that script with a reason (today: `psycopg`, LGPL-3.0, used unmodified). Dev tooling
+and container images are not covered; images stay in the table above.
 
 ## For coding agents
 

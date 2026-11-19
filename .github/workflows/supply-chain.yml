@@ -1,0 +1,82 @@
+# Supply-chain checks: known vulnerabilities in dependencies and Dockerfiles (Trivy), and
+# licences of everything we ship (scripts/check_licenses.py, policy in docs/licensing.md).
+name: Supply chain
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vulnerabilities:
+    name: Dependency and Dockerfile vulnerabilities (Trivy)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      # Full report to Security > Code scanning (does not fail the job).
+      - name: Scan (report)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          severity: CRITICAL,HIGH,MEDIUM
+          format: sarif
+          output: trivy.sarif
+          skip-dirs: console/node_modules
+      - uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy.sarif') != ''
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+      # Gate: critical vulnerabilities that already have a fixed version.
+      - name: Fail on fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: console/node_modules
+
+  licences:
+    name: Licences of shipped dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/data-plane/go/go.mod
+          cache-dependency-path: src/data-plane/go/go.sum
+      - name: Console (npm production packages)
+        run: python scripts/check_licenses.py --npm console/package-lock.json
+      - name: Python services, agent and SDK
+        run: |
+          python -m venv /tmp/licences
+          /tmp/licences/bin/pip install --quiet ./src/control-plane ./src/data-plane ./src/device-plane/agent ./sdk/python
+          /tmp/licences/bin/python scripts/check_licenses.py --python \
+            edge-platform-backend meteorcloud-data-plane edge-agent meteorcloud
+      - name: Go data plane
+        working-directory: src/data-plane/go
+        run: |
+          go install github.com/google/go-licenses/v2@v2.0.1
+          # Only binaries we ship; the embedded NATS server is linked into tests only.
+          "$(go env GOPATH)/bin/go-licenses" csv ./cmd/... > /tmp/go-licences.csv
+          python ../../../scripts/check_licenses.py --go-csv /tmp/go-licences.csv

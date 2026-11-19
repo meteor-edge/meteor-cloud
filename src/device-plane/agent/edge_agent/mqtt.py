@@ -26,6 +26,9 @@ AGENT_VERSION = "0.3.0"
 COMMANDS_QOS = 1
 STATUS_QOS = 1
 METRICS_INTERVAL_SECONDS = 60.0
+# Re-publish online after connect so a stale last-will "offline" from the previous
+# MQTT session does not win the race and leave cloud availability stuck offline.
+ONLINE_RECONFIRM_SECONDS = 2.0
 DEVICE_PUBLISH_SUFFIXES = frozenset({"status", "metrics", "events", "commands/result"})
 EVENTS_QOS = 1
 DEVICE_SUBSCRIBE_SUFFIXES = frozenset({"commands"})
@@ -124,6 +127,8 @@ class DeviceMqttSession:
         self._client: mqtt.Client | None = None
         self._metrics_stop = Event()
         self._metrics_thread: Thread | None = None
+        self._online_reconfirm_stop = Event()
+        self._online_reconfirm_thread: Thread | None = None
 
     def _broker_host(self) -> str:
         return resolve_mqtt_broker_host(self.config.host, self.server_url)
@@ -185,6 +190,9 @@ class DeviceMqttSession:
     def stop(self) -> None:
         client = self._client
         self._metrics_stop.set()
+        self._online_reconfirm_stop.set()
+        if self._online_reconfirm_thread and self._online_reconfirm_thread.is_alive():
+            self._online_reconfirm_thread.join(timeout=ONLINE_RECONFIRM_SECONDS + 0.5)
         if client is None:
             return
         try:
@@ -224,13 +232,40 @@ class DeviceMqttSession:
             logger.warning("MQTT connect failed")
             return
         client.subscribe(self.commands_topic, qos=COMMANDS_QOS)
+        self._publish_online(client)
+        self._schedule_online_reconfirm()
+        logger.info("MQTT connected; subscribed to commands")
+
+    def _publish_online(self, client: mqtt.Client) -> None:
         client.publish(
             self.status_topic,
             payload=json.dumps(online_status_payload()),
             qos=STATUS_QOS,
             retain=True,
         )
-        logger.info("MQTT connected; subscribed to commands")
+
+    def _schedule_online_reconfirm(self) -> None:
+        self._online_reconfirm_stop.set()
+        if self._online_reconfirm_thread and self._online_reconfirm_thread.is_alive():
+            self._online_reconfirm_thread.join(timeout=0.1)
+        self._online_reconfirm_stop = Event()
+        stop = self._online_reconfirm_stop
+
+        def _reconfirm() -> None:
+            if stop.wait(ONLINE_RECONFIRM_SECONDS):
+                return
+            client = self._client
+            if client is None or stop.is_set():
+                return
+            try:
+                self._publish_online(client)
+            except Exception:
+                logger.debug("Could not reconfirm MQTT online status")
+
+        self._online_reconfirm_thread = Thread(
+            target=_reconfirm, name="mqtt-online-reconfirm", daemon=True
+        )
+        self._online_reconfirm_thread.start()
 
     def _on_disconnect(
         self,

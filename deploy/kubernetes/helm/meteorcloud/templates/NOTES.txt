@@ -35,6 +35,11 @@ Metrics: GET /metrics on service {{ include "meteorcloud.fullname" . }}-backend:
 {{- end }}
 {{- if eq .Values.postgresql.mode "bundled" }}
 
-PostgreSQL runs inside this release without backups. Use postgresql.mode=external
-for production data.
+{{- if .Values.postgresql.bundled.backup.enabled }}
+PostgreSQL runs inside this release. A nightly pg_dump ({{ .Values.postgresql.bundled.backup.schedule }})
+goes to volume {{ include "meteorcloud.fullname" . }}-postgresql-backups; copy it off the cluster too.
+{{- else }}
+PostgreSQL runs inside this release without backups. Set postgresql.bundled.backup.enabled=true
+for a nightly pg_dump, or use postgresql.mode=external for production data.
+{{- end }}
 {{- end }}

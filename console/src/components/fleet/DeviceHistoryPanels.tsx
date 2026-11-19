@@ -58,12 +58,18 @@ export function AvailabilityStrip({
   }
   const t0 = Date.parse(data.start);
   const span = Math.max(1, Date.parse(data.end) - t0);
+  const knownSeconds = data.segments.reduce((sum, s) => {
+    if (s.status === "unknown") return sum;
+    return sum + Math.max(0, Date.parse(s.end) - Date.parse(s.start)) / 1000;
+  }, 0);
   const summary =
     data.uptime_percent == null
-      ? "No online/offline changes recorded in this range yet"
-      : `${data.uptime_percent.toFixed(1)}% online · went offline ${data.offline_count} ${
-          data.offline_count === 1 ? "time" : "times"
-        }`;
+      ? "No connect/disconnect messages in this range yet"
+      : knownSeconds < 60
+        ? `Just started recording · ${data.uptime_percent.toFixed(0)}% online so far`
+        : `${data.uptime_percent.toFixed(1)}% online · went offline ${data.offline_count} ${
+            data.offline_count === 1 ? "time" : "times"
+          }`;
   return (
     <div className="rounded-xl border border-border bg-field/80 p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -72,6 +78,10 @@ export function AvailabilityStrip({
         </span>
         <span className="text-xs tabular-nums text-muted-foreground">{summary}</span>
       </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Connect and disconnect over time. Grey means we have not recorded a status message yet
+        (different from the Online badge above, which uses recent heartbeats).
+      </p>
       <div
         className="relative mt-3 h-4 overflow-hidden rounded bg-muted"
         role="img"
@@ -80,10 +90,12 @@ export function AvailabilityStrip({
         {data.segments.map((s) => {
           const left = ((Date.parse(s.start) - t0) / span) * 100;
           const width = ((Date.parse(s.end) - Date.parse(s.start)) / span) * 100;
+          const label =
+            s.status === "online" ? "Online" : s.status === "offline" ? "Offline" : "No data yet";
           return (
             <span
               key={s.start}
-              title={`${s.status} · ${formatDateTime(s.start)} – ${formatDateTime(s.end)}`}
+              title={`${label} · ${formatDateTime(s.start)} – ${formatDateTime(s.end)}`}
               className={cn("absolute inset-y-0", SEGMENT_STYLES[s.status])}
               style={{ left: `${left}%`, width: `max(${width}%, 2px)` }}
             />
@@ -95,7 +107,7 @@ export function AvailabilityStrip({
           [
             ["online", "Online"],
             ["offline", "Offline"],
-            ["unknown", "No data"],
+            ["unknown", "No data yet"],
           ] as const
         ).map(([status, label]) => (
           <span key={status} className="inline-flex items-center gap-1.5">

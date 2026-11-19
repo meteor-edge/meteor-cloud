@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -953,8 +953,8 @@ class FleetService:
         architecture: str | None = None,
         enabled: bool | None = None,
         status: str | None = None,
-        sort: str = "name",
-        order: str = "asc",
+        sort: str = "last_seen_at",
+        order: str = "desc",
         page: int = 1,
         page_size: int = 20,
     ) -> Page[DeviceResponse]:
@@ -1137,6 +1137,36 @@ class FleetService:
                 resource_id=device.id,
                 metadata={"name": device.name},
             )
+        self.session.commit()
+        self.session.refresh(device)
+        return self._to_device_response(device)
+
+    def allow_device_reregistration(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+    ) -> DeviceResponse:
+        """Let this hardware register again with a registration token, for a limited time.
+
+        Needed after a card is re-flashed and the device lost its token; without it, a
+        registration token plus a known serial or MAC cannot take over the device record.
+        """
+        membership = self._require_membership(organization_id, actor.id)
+        device = self._require_device(organization_id, device_id)
+        self._require(membership, "device.update", device_group_id=device.device_group_id)
+        window = timedelta(seconds=self.settings.device_reregistration_window_seconds)
+        device.reregistration_allowed_until = datetime.now(UTC) + window
+        self.devices.update(device)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.reregistration_allowed",
+            resource_type="device",
+            resource_id=device.id,
+            metadata={"name": device.name, "until": device.reregistration_allowed_until.isoformat()},
+        )
         self.session.commit()
         self.session.refresh(device)
         return self._to_device_response(device)
@@ -1372,11 +1402,13 @@ class FleetService:
             cpu_cores=device.cpu_cores,
             memory_mb=device.memory_mb,
             local_ip=device.local_ip,
+            agent_version=device.agent_version,
             labels=device.labels,
             metadata=device.metadata_,
             credential_prefix=device.credential_prefix,
             last_seen_at=device.last_seen_at,
             registered_at=device.registered_at,
+            reregistration_allowed_until=device.reregistration_allowed_until,
             created_at=device.created_at,
             updated_at=device.updated_at,
             mqtt_configured=self._mqtt_configured(device.id),

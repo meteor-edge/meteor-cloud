@@ -1,6 +1,11 @@
 import { apiRequest } from "@/api/http";
 
-export type DeviceActionKind = "reboot" | "shutdown" | "set_password" | "add_user";
+export type DeviceActionKind =
+  | "reboot"
+  | "shutdown"
+  | "set_password"
+  | "add_user"
+  | "update_agent";
 export type DeviceActionState = "pending" | "sent" | "done" | "failed";
 
 export type DeviceAction = {
@@ -9,6 +14,7 @@ export type DeviceAction = {
   state: DeviceActionState;
   username: string | null;
   sudo: boolean;
+  from_version?: string | null;
   last_error: string | null;
   created_at: string;
   sent_at: string | null;
@@ -46,6 +52,17 @@ export function shutdownDevice(
   deviceId: string,
 ): Promise<DeviceActions> {
   return apiRequest<DeviceActions>(path(organizationId, deviceId, "/shutdown"), {
+    token,
+    method: "POST",
+  });
+}
+
+export function updateDeviceAgent(
+  token: string,
+  organizationId: string,
+  deviceId: string,
+): Promise<DeviceActions> {
+  return apiRequest<DeviceActions>(path(organizationId, deviceId, "/update-agent"), {
     token,
     method: "POST",
   });

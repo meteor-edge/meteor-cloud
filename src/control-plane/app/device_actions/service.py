@@ -19,18 +19,20 @@ from sqlalchemy.orm import Session
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.secretbox import SecretBoxError, seal, unseal
 from app.device_actions.models import (
     KIND_ADD_USER,
     KIND_REBOOT,
     KIND_SET_PASSWORD,
     KIND_SHUTDOWN,
+    KIND_UPDATE_AGENT,
     POWER_KINDS,
     STATE_DONE,
     STATE_FAILED,
     STATE_PENDING,
     STATE_SENT,
+    UPDATE_AGENT_KINDS,
     USER_KINDS,
     DeviceAction,
 )
@@ -52,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 POWER_PERMISSION = "device.reboot"
 USERS_PERMISSION = "device.users"
+UPDATE_AGENT_PERMISSION = "device.update_agent"
 _NOT_COLLECTED = "The device did not collect this action in time."
 _UNREADABLE = "The stored password could not be read (the server's encryption key changed). Enter it again."
 _MAX_PENDING = 5
@@ -91,13 +94,34 @@ class DeviceActionService:
         now = datetime.now(UTC)
         dirty = False
         for row in rows:
-            if row.state == STATE_PENDING and row.expires_at <= now:
+            if row.expires_at > now:
+                continue
+            if row.state == STATE_PENDING:
                 row.password_sealed = None
                 row.state = STATE_FAILED
                 row.last_error = _NOT_COLLECTED
                 row.reported_at = now
                 dirty = True
+            elif row.state == STATE_SENT and row.kind == KIND_UPDATE_AGENT:
+                # A lost collection response or unfinished updater must not block forever.
+                row.state = STATE_FAILED
+                row.last_error = "The device did not finish this agent update in time."
+                row.reported_at = now
+                dirty = True
         return dirty
+
+    def _expire_update_agent(self, device_id: uuid.UUID) -> bool:
+        """Expire pending and sent update_agent rows past their TTL."""
+        rows = list(
+            self.session.scalars(
+                select(DeviceAction).where(
+                    DeviceAction.device_id == device_id,
+                    DeviceAction.kind == KIND_UPDATE_AGENT,
+                    DeviceAction.state.in_((STATE_PENDING, STATE_SENT)),
+                )
+            )
+        )
+        return self._expire(rows)
 
     def _to_response(self, row: DeviceAction) -> DeviceActionResponse:
         return DeviceActionResponse.model_validate(row)
@@ -106,6 +130,7 @@ class DeviceActionService:
         membership = self.authz.require_membership(user_id=actor.id, organization_id=organization_id)
         can_power = self.authz.check(membership, POWER_PERMISSION, device_group_id=device.device_group_id)
         can_users = self.authz.check(membership, USERS_PERMISSION, device_group_id=device.device_group_id)
+        can_update = self.authz.check(membership, UPDATE_AGENT_PERMISSION, device_group_id=device.device_group_id)
         statement = (
             select(DeviceAction)
             .where(DeviceAction.device_id == device.id)
@@ -113,14 +138,28 @@ class DeviceActionService:
             .limit(20)
         )
         rows = list(self.session.scalars(statement))
-        if self._expire([row for row in rows if row.state == STATE_PENDING]):
+        if self._expire([row for row in rows if row.state in (STATE_PENDING, STATE_SENT)]):
             self.session.commit()
         actions = [
             self._to_response(row)
             for row in rows
-            if (row.kind in POWER_KINDS and can_power) or (row.kind in USER_KINDS and can_users)
+            if (row.kind in POWER_KINDS and can_power)
+            or (row.kind in USER_KINDS and can_users)
+            or (row.kind in UPDATE_AGENT_KINDS and can_update)
         ]
         return DeviceActionsResponse(actions=actions)
+
+    def _in_flight_update(self, device_id: uuid.UUID) -> DeviceAction | None:
+        return self.session.scalar(
+            select(DeviceAction)
+            .where(
+                DeviceAction.device_id == device_id,
+                DeviceAction.kind == KIND_UPDATE_AGENT,
+                DeviceAction.state.in_((STATE_PENDING, STATE_SENT)),
+            )
+            .order_by(DeviceAction.created_at.desc())
+            .limit(1)
+        )
 
     def _enqueue(
         self,
@@ -132,11 +171,18 @@ class DeviceActionService:
         password: str | None = None,
         sudo: bool = False,
         authorized_key: str | None = None,
+        from_version: str | None = None,
         audit_action: str,
         metadata: dict,
     ) -> DeviceActionsResponse:
+        # Serialize enqueue per device so concurrent update orders see each other's rows.
+        self.session.scalar(select(Device.id).where(Device.id == device.id).with_for_update())
         pending = self._pending(device.id, for_update=True)
-        self._expire(pending)
+        dirty = self._expire(pending)
+        if kind == KIND_UPDATE_AGENT:
+            dirty = self._expire_update_agent(device.id) or dirty
+        if dirty:
+            self.session.flush()
         pending = [row for row in pending if row.state == STATE_PENDING]
         if len(pending) >= _MAX_PENDING:
             raise ConflictError(
@@ -148,11 +194,17 @@ class DeviceActionService:
                 "power_action_pending",
                 "A restart or shut-down is already waiting for this device.",
             )
+        if kind == KIND_UPDATE_AGENT and self._in_flight_update(device.id) is not None:
+            raise ConflictError(
+                "agent_update_pending",
+                "An agent update is already waiting for this device or still running.",
+            )
         row = DeviceAction(
             organization_id=device.organization_id,
             device_id=device.id,
             kind=kind,
             state=STATE_PENDING,
+            from_version=from_version,
             username=username,
             sudo=sudo,
             authorized_key=authorized_key,
@@ -176,14 +228,15 @@ class DeviceActionService:
 
     # ------------------------------------------------------------- operators
     def list_actions(self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID) -> DeviceActionsResponse:
-        # Either permission is enough to open the panel; each action is filtered inside.
+        # Any of the operate permissions is enough to open the panel; each action is filtered inside.
         device = self.devices.get(organization_id=organization_id, device_id=device_id)
         if device is None:
             raise NotFoundError("device_not_found", "Device was not found.")
         membership = self.authz.require_membership(user_id=actor.id, organization_id=organization_id)
         can_power = self.authz.check(membership, POWER_PERMISSION, device_group_id=device.device_group_id)
         can_users = self.authz.check(membership, USERS_PERMISSION, device_group_id=device.device_group_id)
-        if not can_power and not can_users:
+        can_update = self.authz.check(membership, UPDATE_AGENT_PERMISSION, device_group_id=device.device_group_id)
+        if not can_power and not can_users and not can_update:
             self.authz.require(membership, POWER_PERMISSION, device_group_id=device.device_group_id)
         return self._view(actor, organization_id, device)
 
@@ -205,6 +258,22 @@ class DeviceActionService:
             kind=KIND_SHUTDOWN,
             audit_action="device.action.shutdown",
             metadata={"name": device.name},
+        )
+
+    def update_agent(self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID) -> DeviceActionsResponse:
+        device = self._require_device(actor, organization_id, device_id, UPDATE_AGENT_PERMISSION)
+        if not device.agent_version:
+            raise ValidationAppError(
+                "agent_version_unknown",
+                "This device has not reported a meteorcli version yet. Wait for a heartbeat, then try again.",
+            )
+        return self._enqueue(
+            actor=actor,
+            device=device,
+            kind=KIND_UPDATE_AGENT,
+            from_version=device.agent_version,
+            audit_action="device.action.update_agent",
+            metadata={"name": device.name, "from_version": device.agent_version},
         )
 
     def set_password(
@@ -285,6 +354,7 @@ class DeviceActionService:
                     password=password,
                     sudo=row.sudo,
                     authorized_key=row.authorized_key,
+                    from_version=row.from_version,
                 )
             )
         if dirty:

@@ -42,9 +42,14 @@ enrollment request is approved it connects (heartbeats, MQTT, WireGuard).
 
 A user install puts the venv in `~/.local/share/meteorcli` and the command in
 `~/.local/bin`. A system install uses `/opt/meteorcli` and `/usr/local/bin`.
-Re-run the script to upgrade. Uninstall with `./installcli.sh --uninstall`
-(removes the venv, systemd unit, `~/.config/meteorcli` or `/etc/meteorcli`,
-and brings `wg0` down when the helper is present).
+Upgrade an existing device with `sudo meteorcli update --yes` (or
+`update-meteorcli.sh` from the release). That keeps the previous install and
+restores it if the new service does not stay up. See
+[meteorcli update](../../../docs/meteorcli.md#update). Re-running `installcli.sh`
+still upgrades, but it replaces the install in place. Uninstall with
+`./installcli.sh --uninstall` (removes the venv, systemd unit,
+`~/.config/meteorcli` or `/etc/meteorcli`, and brings `wg0` down when the helper
+is present).
 
 `meteorcli run` downloads desired artifacts and applies **systemd**, **docker**,
 and **docker_compose** releases. Run it as the device user (not `sudo meteorcli`).

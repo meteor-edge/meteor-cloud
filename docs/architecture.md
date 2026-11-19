@@ -23,7 +23,7 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 6. Deployment infrastructure stays under `deploy/` and `infrastructure/`, not domain modules.
 7. VPN is an optional deploy capability (Compose + Ansible). It is not a reason to split the repo.
 8. The console keeps same-origin API access in production (`window.location.origin`). Locally it uses `VITE_API_BASE_URL`.
-9. The device agent must be installable without cloning this repository. Publish with `git tag agent-v<pyproject-version>` (CI). Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `./installcli.sh` in `src/device-plane/agent/` (needs sibling `runtime/`).
+9. The device agent must be installable without cloning this repository. Publish by merging a version bump to `master` (CI tags `agent-v<pyproject-version>`), or push that tag. Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `./installcli.sh` in `src/device-plane/agent/` (needs sibling `runtime/`).
 10. Device types are configuration, not automatically separate codebases.
 
 `make check-plane-imports` enforces rule 3 on `src/`.
@@ -134,7 +134,7 @@ Source: [`src/device-plane/agent/`](../src/device-plane/agent/). Runtime adapter
 the same field names / action kinds; a board-specific OS only swaps the Linux
 default adapters. See [Device platform](fleet/device-platform.md).
 
-**On a device:** `curl` `install-meteorcli.sh` from GitHub Releases (`latest` or `METEORCLI_VERSION=`). The tarball is agent + `runtime` + `installcli.sh` only (`make agent-dist`). SHA256SUMS is checked when `sha256sum` is present. First-boot enroll (request-token + poll until approved): `install-meteorcli-firstboot.sh` from the same release or [packaging/firstboot](../src/device-plane/agent/packaging/firstboot/README.md).
+**On a device:** `curl` `install-meteorcli.sh` from GitHub Releases (`latest` or `METEORCLI_VERSION=`). The tarball is agent + `runtime` + `installcli.sh` only (`make agent-dist`). SHA256SUMS is checked when `sha256sum` is present. To move an existing device to a newer agent release, run `update-meteorcli.sh` from that release (or `meteorcli update` on 0.3.4+): the checksum is required, the previous install is kept, and the service is restored if the new one does not stay up. See [meteorcli](meteorcli.md#update). First-boot enroll (request-token + poll until approved): `install-meteorcli-firstboot.sh` from the same release or [packaging/firstboot](../src/device-plane/agent/packaging/firstboot/README.md).
 
 **Publish:** tag `agent-v<version>` matching [`pyproject.toml`](../src/device-plane/agent/pyproject.toml); workflow [`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml). From a checkout: `./installcli.sh` in the agent directory.
 

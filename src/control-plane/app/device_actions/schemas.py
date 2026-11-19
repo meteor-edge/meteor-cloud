@@ -90,6 +90,7 @@ class DeviceActionResponse(BaseModel):
     state: str
     username: str | None
     sudo: bool
+    from_version: str | None = None
     last_error: str | None
     created_at: datetime
     sent_at: datetime | None
@@ -97,18 +98,20 @@ class DeviceActionResponse(BaseModel):
 
 
 class DeviceActionsResponse(BaseModel):
-    # Only the kinds the caller may order: power actions with device.reboot, user changes with device.users.
+    # Only the kinds the caller may order (power, users, update_agent).
     actions: list[DeviceActionResponse]
 
 
 # ------------------------------------------------------------------ agent side
 class AgentDeviceAction(BaseModel):
     id: uuid.UUID
-    kind: Literal["reboot", "shutdown", "set_password", "add_user"]
+    kind: Literal["reboot", "shutdown", "set_password", "add_user", "update_agent"]
     username: str | None = None
     password: str | None = None
     sudo: bool = False
     authorized_key: str | None = None
+    # Version stored when update_agent was ordered (agent reports done when newer).
+    from_version: str | None = None
 
 
 class AgentDeviceActionsResponse(BaseModel):

@@ -132,10 +132,9 @@ the smoke test, and removes it again.
 
 ## Backups
 
-Back up PostgreSQL and the artifact store. Nothing else holds state:
-
-```bash
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > postgres.dump
-```
-
-Artifact files live in `/opt/edge-platform/data/artifacts` or your bucket.
+Installs from `make up` / Ansible back up PostgreSQL, ClickHouse and artifacts every
+night into `/opt/edge-platform/backups` (7 days kept, optional copy to S3). Run one now
+with `sudo systemctl start meteorcloud-backup`; restore with
+`sudo meteorcloud-restore --yes /opt/edge-platform/backups/<timestamp>` after loading
+the settings from `/opt/edge-platform/backup.env`. Details, settings and the Kubernetes
+CronJob: [Backups and restore](backups.md).

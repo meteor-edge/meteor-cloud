@@ -1,6 +1,7 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 
+import { fetchAuthConfig } from "@/api/auth";
 import { ApiError } from "@/api/http";
 import { useAuth } from "@/auth/AuthContext";
 import { BrandMark } from "@/components/BrandMark";
@@ -16,6 +17,21 @@ export function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [signupEnabled, setSignupEnabled] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    // Unknown (older API, network error): show the form; the API still decides.
+    Promise.resolve()
+      .then(fetchAuthConfig)
+      .then((config) => {
+        if (active && config) setSignupEnabled(config.signup_enabled !== false);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (isAuthenticated) {
     return <Navigate to="/organizations" replace />;
@@ -49,45 +65,54 @@ export function RegisterPage() {
       <p className="mt-2 text-sm text-muted-foreground">
         Register to create and join organizations.
       </p>
-      <form className="mt-6 space-y-4" onSubmit={onSubmit}>
-        <div>
-          <Label htmlFor="full_name">Full name</Label>
-          <Input
-            id="full_name"
-            value={fullName}
-            onChange={(event) => setFullName(event.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <Label htmlFor="email">Email</Label>
-          <Input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            minLength={10}
-          />
-          <p className="mt-1 text-xs text-muted-foreground">Minimum 10 characters.</p>
-        </div>
-        {error && (
-          <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
-        )}
-        <Button type="submit" className="w-full" disabled={submitting}>
-          {submitting ? "Creating account…" : "Register"}
-        </Button>
-      </form>
+      {!signupEnabled ? (
+        <p className="mt-6 rounded-md border border-border p-3 text-sm">
+          Sign-up is turned off on this platform. Ask an administrator of your organization to add
+          you; they will give you a temporary password.
+        </p>
+      ) : (
+        <form className="mt-6 space-y-4" onSubmit={onSubmit}>
+          <div>
+            <Label htmlFor="full_name">Full name</Label>
+            <Input
+              id="full_name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              minLength={10}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">Minimum 10 characters.</p>
+          </div>
+          {error && (
+            <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">
+              {error}
+            </p>
+          )}
+          <Button type="submit" className="w-full" disabled={submitting}>
+            {submitting ? "Creating account…" : "Register"}
+          </Button>
+        </form>
+      )}
       <p className="mt-4 text-sm text-muted-foreground">
         Already registered?{" "}
         <Link className="text-link hover:underline" to="/login">

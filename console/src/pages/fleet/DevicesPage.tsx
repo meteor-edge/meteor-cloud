@@ -55,8 +55,8 @@ export function DevicesPage() {
   const [status, setStatus] = useState<ConnectivityStatus | "">("");
   const [typeId, setTypeId] = useState("");
   const [groupId, setGroupId] = useState("");
-  const [sort, setSort] = useState<DeviceListParams["sort"]>("name");
-  const [order, setOrder] = useState<DeviceListParams["order"]>("asc");
+  const [sort, setSort] = useState<DeviceListParams["sort"]>("last_seen_at");
+  const [order, setOrder] = useState<DeviceListParams["order"]>("desc");
   const [page, setPage] = useState(1);
 
   // Add-device flow: define type + group, mint a one-time registration token.
@@ -456,8 +456,12 @@ export function DevicesPage() {
                   type="button"
                   className="hover:text-foreground"
                   onClick={() => {
-                    setSort("name");
-                    setOrder(order === "asc" ? "desc" : "asc");
+                    if (sort === "name") {
+                      setOrder(order === "asc" ? "desc" : "asc");
+                    } else {
+                      setSort("name");
+                      setOrder("asc");
+                    }
                   }}
                 >
                   Name {sort === "name" ? (order === "asc" ? "↑" : "↓") : ""}
@@ -472,8 +476,12 @@ export function DevicesPage() {
                   type="button"
                   className="hover:text-foreground"
                   onClick={() => {
-                    setSort("last_seen_at");
-                    setOrder(order === "asc" ? "desc" : "asc");
+                    if (sort === "last_seen_at") {
+                      setOrder(order === "asc" ? "desc" : "asc");
+                    } else {
+                      setSort("last_seen_at");
+                      setOrder("desc");
+                    }
                   }}
                 >
                   Last Seen {sort === "last_seen_at" ? (order === "asc" ? "↑" : "↓") : ""}

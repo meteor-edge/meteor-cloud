@@ -10,6 +10,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEV_CONNECTIVITY_INTERNAL_TOKEN = "dev-connectivity-internal"
 
+# Defaults and example values that are public (this repository, .env.example). Production
+# refuses them: a known JWT secret lets anyone sign in as any user.
+KNOWN_DEFAULT_SECRETS = frozenset(
+    {
+        "change-me",
+        "change-me-jwt",
+        "change-me-to-a-long-random-secret-key",
+        "change-me-jwt-secret-key-must-be-long",
+        "dev-mqtt-internal",
+        "dev-mqtt-platform",
+        DEV_CONNECTIVITY_INTERNAL_TOKEN,
+    }
+)
+# Shortest secret production accepts. The installers generate 32+ characters.
+MIN_SECRET_LENGTH = 16
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the Edge Platform backend."""
@@ -53,6 +69,13 @@ class Settings(BaseSettings):
         default=30,
         alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
     )
+    # Whether anyone who reaches the API may create an account (POST /api/v1/auth/register).
+    # Off: people join only when an administrator adds them to an organization.
+    allow_signup: bool = Field(default=True, alias="ALLOW_SIGNUP")
+    # Sign-in attempts per fixed window, counted per email address and per source IP.
+    login_rate_limit_requests: int = Field(default=10, ge=0, alias="LOGIN_RATE_LIMIT_REQUESTS")
+    login_ip_rate_limit_requests: int = Field(default=60, ge=0, alias="LOGIN_IP_RATE_LIMIT_REQUESTS")
+    login_rate_limit_window_seconds: int = Field(default=300, ge=1, alias="LOGIN_RATE_LIMIT_WINDOW_SECONDS")
 
     redis_url: str = Field(
         default="redis://localhost:6379/0",
@@ -67,6 +90,26 @@ class Settings(BaseSettings):
     device_offline_threshold_seconds: int = Field(
         default=150,
         alias="DEVICE_OFFLINE_THRESHOLD_SECONDS",
+    )
+    # How long "Allow re-registration" lets known hardware register again without its
+    # current device token (e.g. after the card was re-flashed).
+    # Docker releases: resolve the image tag to a digest when the release is saved, so
+    # devices pull exactly that image (docs/fleet/signed-updates.md). Public registries only.
+    release_resolve_image_digests: bool = True
+    # Refuse a docker release whose tag cannot be resolved (otherwise it keeps the tag).
+    release_require_image_digests: bool = False
+    device_reregistration_window_seconds: int = Field(
+        default=24 * 3600,
+        ge=60,
+        alias="DEVICE_REREGISTRATION_WINDOW_SECONDS",
+    )
+    # How long the previous device credential still proves identity after a rotation,
+    # so a lost register response can be retried with the old token.
+    device_registration_retry_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        alias="DEVICE_REGISTRATION_RETRY_SECONDS",
     )
 
     # Device registration rate limiting (fixed window per source IP).
@@ -245,6 +288,9 @@ class Settings(BaseSettings):
         default=True,
         alias="OBJECT_STORAGE_AUTO_CREATE_BUCKET",
     )
+    # Endpoint devices use to reach the bucket, when it differs from the API's own
+    # (e.g. MinIO at http://minio:9000 inside Compose but https://s3.example.com outside).
+    object_storage_public_endpoint_url: str = Field(default="", alias="OBJECT_STORAGE_PUBLIC_ENDPOINT_URL")
 
     artifact_max_upload_bytes: int = Field(
         default=8 * 1024 * 1024 * 1024,
@@ -253,6 +299,12 @@ class Settings(BaseSettings):
     artifact_download_link_ttl_seconds: int = Field(
         default=300,
         alias="ARTIFACT_DOWNLOAD_LINK_TTL_SECONDS",
+    )
+    # Agents download artifacts straight from S3-compatible storage through a short-lived
+    # presigned URL instead of through the API (docs/fleet/artifacts.md).
+    artifact_download_redirect: bool = Field(default=True, alias="ARTIFACT_DOWNLOAD_REDIRECT")
+    artifact_download_url_ttl_seconds: int = Field(
+        default=900, ge=60, le=7 * 24 * 3600, alias="ARTIFACT_DOWNLOAD_URL_TTL_SECONDS"
     )
 
     # When True, agent registration over plain HTTP is rejected. Left False for
@@ -339,6 +391,37 @@ class Settings(BaseSettings):
                 "CONNECTIVITY_PROVIDER is enabled and APP_ENV=production"
             )
         return self
+
+
+    @model_validator(mode="after")
+    def _require_real_secrets_in_production(self) -> Settings:
+        if self.app_env != "production":
+            return self
+        required: dict[str, str] = {
+            "JWT_SECRET_KEY": self.jwt_secret_key,
+            "APP_SECRET_KEY": self.app_secret_key,
+        }
+        # Internal MQTT routes are mounted even when MQTT_ENABLED is false.
+        required["MQTT_INTERNAL_TOKEN"] = self.mqtt_internal_token
+        if self.mqtt_enabled:
+            required["MQTT_PLATFORM_PASSWORD"] = self.mqtt_platform_password
+        optional: dict[str, str] = {
+            "SECRETS_ENCRYPTION_KEY": self.secrets_encryption_key,
+            "DATA_PLANE_INTERNAL_TOKEN": self.data_plane_internal_token,
+        }
+        weak = [name for name, value in required.items() if _is_weak_secret(value)]
+        weak += [name for name, value in optional.items() if value and _is_weak_secret(value)]
+        if weak:
+            raise ValueError(
+                f"APP_ENV=production refuses default, example or short secrets: {', '.join(sorted(weak))}. "
+                f"Set each to a random value of at least {MIN_SECRET_LENGTH} characters "
+                "(for example: openssl rand -hex 32)."
+            )
+        return self
+
+
+def _is_weak_secret(value: str) -> bool:
+    return value in KNOWN_DEFAULT_SECRETS or len(value) < MIN_SECRET_LENGTH
 
 
 @lru_cache

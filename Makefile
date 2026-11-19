@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist sim-device sim-device-image
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist sim-device sim-device-image
 
 COMPOSE_DIR := deploy/compose
 # Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
@@ -27,6 +27,8 @@ CONSOLE_DIR := console
 INSTALLER_DIR := infrastructure/installer
 AGENT_DIR := src/device-plane/agent
 INFRA_DIR := infrastructure
+# Terraform-compatible CLI: terraform, or OpenTofu (MPL-2.0) when only tofu is installed.
+TERRAFORM ?= $(shell command -v terraform >/dev/null 2>&1 && echo terraform || (command -v tofu >/dev/null 2>&1 && echo tofu) || echo terraform)
 ANSIBLE_DIR := deploy/ansible
 ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml wireguard.yml device.yml
 CHART := deploy/kubernetes/helm/meteorcloud
@@ -310,18 +312,18 @@ installer-test: ## Run installer tests only
 	cd $(INSTALLER_DIR) && python -m pytest -q
 
 terraform-check: ## Validate Terraform formatting and syntax (no cloud credentials)
-	cd $(INFRA_DIR)/terraform && terraform fmt -check -recursive
-	cd $(INFRA_DIR)/terraform/aws && terraform init -backend=false -input=false
-	cd $(INFRA_DIR)/terraform/aws && terraform validate
+	cd $(INFRA_DIR)/terraform && $(TERRAFORM) fmt -check -recursive
+	cd $(INFRA_DIR)/terraform/aws && $(TERRAFORM) init -backend=false -input=false
+	cd $(INFRA_DIR)/terraform/aws && $(TERRAFORM) validate
 
 E2E_DIR := tests/e2e
 
 e2e-check: ## Full-stack E2E tooling checks (unit tests, Terraform validate, shellcheck; no credentials)
 	cd $(E2E_DIR) && python -m pytest -q tests
-	cd $(E2E_DIR)/terraform && terraform fmt -check -recursive
+	cd $(E2E_DIR)/terraform && $(TERRAFORM) fmt -check -recursive
 	for root in aws onprem; do \
-		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate terraform init -backend=false -input=false >/dev/null \
-		&& TF_DATA_DIR=.terraform-validate terraform validate) || exit 1; done
+		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate $(TERRAFORM) init -backend=false -input=false >/dev/null \
+		&& TF_DATA_DIR=.terraform-validate $(TERRAFORM) validate) || exit 1; done
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/testapp/serve.sh; \
 	else echo "shellcheck not installed; skipped"; fi
 
@@ -368,8 +370,17 @@ observability-check: ## Validate Prometheus, Loki and Alertmanager config and al
 	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability/alertmanager:/cfg:ro --entrypoint amtool \
 		$(OBS_IMAGES_ALERTMANAGER) check-config /cfg/alertmanager.yml /cfg/alertmanager.webhook.yml /cfg/alertmanager.webhook-heartbeat.yml
 
-compose-smoke: ## Start the minimal production Compose stack, smoke-test it, remove it
+compose-smoke: ## Start the minimal production Compose stack, smoke-test it, check backup + restore, remove it
 	IMAGE_TAG=$(IMAGE_TAG) ./scripts/compose-smoke.sh
+
+# Local (make dev) stack. Installs from `make up` get a nightly systemd timer and
+# /usr/local/sbin/meteorcloud-backup and meteorcloud-restore instead (docs/backups.md).
+backup: ## Back up the local Compose stack (PostgreSQL, ClickHouse, artifacts) into deploy/compose/backups
+	BACKUP_DIR=$(COMPOSE_DIR)/backups COMPOSE="$(COMPOSE)" ./scripts/backup.sh
+
+restore: ## Restore a backup into the running Compose stack: make restore BACKUP=deploy/compose/backups/<timestamp>
+	@test -n "$(BACKUP)" || (echo "Set BACKUP=<backup directory>" && exit 1)
+	COMPOSE="$(COMPOSE)" ./scripts/restore.sh --yes $(BACKUP)
 
 # values-monitoring.yaml renders Prometheus Operator objects, so declare their API.
 # helm lint cannot, so that overlay is only rendered (and must fail without the CRDs).
@@ -384,6 +395,9 @@ helm-lint: ## Lint the Helm chart and render it with every values file
 		--set mqtt.enabled=true,mqtt.tls.existingSecret=ci,mqtt.publicHost=mqtt.example.com \
 		-f $(CHART)/values-monitoring.yaml > /dev/null
 	! helm template meteorcloud $(CHART) -f $(CHART)/values-monitoring.yaml > /dev/null 2>&1
+	@# Bundled PostgreSQL backup CronJob.
+	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set postgresql.bundled.backup.enabled=true \
+		| grep -q 'kind: CronJob'
 	@# Application data API: off (defaults), MQTT bus with EMQX direct MQTT, and fail-closed cases.
 	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set dataApi.enabled=false > /dev/null
 	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml \

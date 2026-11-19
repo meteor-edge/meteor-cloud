@@ -34,6 +34,7 @@ How to use the product day to day.
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) · [Rollout strategies](fleet/deployments.md#rollout-strategies) |
+| Signed updates (device-side verification, key rotation) | [Signed updates](fleet/signed-updates.md) |
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
 | Device Wi-Fi from the console | [Wi-Fi](fleet/wifi.md) |
 | Restart, shut down, SSH users | [Device actions](fleet/device-actions.md) |
@@ -55,6 +56,7 @@ Commands and APIs you look up while working.
 | MQTT ↔ control-plane contract | [`contracts/mqtt-http.md`](../contracts/mqtt-http.md) |
 | Architecture & providers | [Architecture](architecture.md) |
 | Bundled infra licenses (Postgres, Redis, MQTT brokers, MinIO, …) | [Licensing](licensing.md) |
+| Release images: names, tags, verifying signatures and SBOMs | [Release images](release-images.md) |
 | Planned work (not implemented yet) | [Future plans](future-plans.md) |
 
 ## Deploy and operate
@@ -63,6 +65,7 @@ Commands and APIs you look up while working.
 | --- | --- |
 | Local testing / contributor setup (`make dev`) | [Getting started](getting-started.md) · [Development](development.md) |
 | Production on a VM (`make up`) | [Install quickstart](install-quickstart.md) · [Deployment](deployment.md) |
+| Backups and restore (Compose, Ansible, Helm) | [Backups and restore](backups.md) |
 | Kubernetes (existing cluster) | [Kubernetes](kubernetes.md) |
 | DNS records to create (domain, apps, WireGuard) | [DNS records](dns.md) |
 | `installation.yaml` | [Installer configuration](installer-configuration.md) |

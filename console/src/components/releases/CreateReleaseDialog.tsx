@@ -64,6 +64,8 @@ export function CreateReleaseDialog({
   const [image, setImage] = useState("");
   const [projectName, setProjectName] = useState("");
   const [description, setDescription] = useState("");
+  const [healthGate, setHealthGate] = useState(false);
+  const [healthUrl, setHealthUrl] = useState("");
   const [yamlText, setYamlText] = useState(
     [
       "name: camera-agent",
@@ -165,6 +167,9 @@ export function CreateReleaseDialog({
       };
     } else {
       spec = { project_name: projectName.trim() };
+    }
+    if (healthGate) {
+      spec.health_check = healthUrl.trim() ? { http_url: healthUrl.trim() } : {};
     }
 
     setSaving(true);
@@ -421,6 +426,33 @@ export function CreateReleaseDialog({
               </p>
             </div>
           )}
+
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={healthGate}
+                onChange={(event) => setHealthGate(event.target.checked)}
+              />
+              Roll back automatically if the update is not healthy
+            </label>
+            {healthGate && (
+              <>
+                <Label htmlFor="release-health-url">Health URL on the device (optional)</Label>
+                <Input
+                  id="release-health-url"
+                  value={healthUrl}
+                  onChange={(event) => setHealthUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:8080/health"
+                  maxLength={512}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Each device waits up to 60 seconds for the new version to be healthy for 10 seconds in a
+                  row, and otherwise goes back to the version it ran before.
+                </p>
+              </>
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="release-description">Description (optional)</Label>

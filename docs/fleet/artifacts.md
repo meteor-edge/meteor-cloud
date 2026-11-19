@@ -52,6 +52,9 @@ prefer filesystem or cloud S3 in commercial production — see [Licensing](../li
 | `OBJECT_STORAGE_AUTO_CREATE_BUCKET` | `true` | Disable when the bucket is provisioned by infrastructure |
 | `ARTIFACT_MAX_UPLOAD_BYTES` | 8 GiB | Larger uploads return `413 artifact_too_large` |
 | `ARTIFACT_DOWNLOAD_LINK_TTL_SECONDS` | `300` | Lifetime of browser download links |
+| `OBJECT_STORAGE_PUBLIC_ENDPOINT_URL` | empty | Endpoint devices download from. Not needed for AWS S3. For GCS or R2 set it to the endpoint; for MinIO, the address devices reach it at |
+| `ARTIFACT_DOWNLOAD_REDIRECT` | `true` | Let agents download straight from S3-compatible storage (see below) |
+| `ARTIFACT_DOWNLOAD_URL_TTL_SECONDS` | `900` | Lifetime of a device's presigned download URL (60 s to 7 days) |
 
 ## Uniqueness
 
@@ -81,6 +84,31 @@ Types: `os_image`, `firmware`, `docker_compose`, `systemd`, `configuration`, `ot
 
 Downloads include `Content-Length`, `Content-Disposition`, and
 `X-Checksum-SHA256` headers.
+
+## Device downloads
+
+Devices fetch an artifact with `GET /api/v1/agent/artifacts/{id}/download`, and only while it
+is in their desired software. With S3-compatible storage the bytes do not have to pass through
+the API:
+
+1. An agent that can follow the redirect sends `X-Meteorcli-Redirect: 1` (meteorcli releases after this change).
+2. The API checks the device may have the artifact, then answers `302` with a presigned URL
+   that is valid for `ARTIFACT_DOWNLOAD_URL_TTL_SECONDS`. The redirect carries
+   `X-Checksum-SHA256`.
+3. The agent downloads from the bucket **without** its device token and checks the bytes
+   against that checksum. A redirect without a checksum, or from HTTPS to plain HTTP, is
+   refused.
+
+The content is streamed through the API instead when:
+
+- storage is `filesystem`
+- the S3 endpoint is custom and `OBJECT_STORAGE_PUBLIC_ENDPOINT_URL` is empty (a private MinIO,
+  for example)
+- `ARTIFACT_DOWNLOAD_REDIRECT=false`
+- the agent is older and does not send the header
+
+`meteorcloud_agent_artifact_downloads_total{mode="redirect"|"stream"}` counts both. A CDN in
+front of the bucket works as long as it passes the signed query string through to the bucket.
 
 ## Meteor Imager (public OS images)
 

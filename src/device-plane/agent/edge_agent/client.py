@@ -11,10 +11,25 @@ import hashlib
 import http.client
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+# Sent on artifact downloads: this agent can follow a redirect to object storage.
+REDIRECT_HEADER = "X-Meteorcli-Redirect"
+_REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Hand redirects back to the caller, so the device token never follows one."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_DOWNLOAD_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 class AgentApiError(Exception):
@@ -132,10 +147,14 @@ class EdgeClient:
         token: str,
         inventory: dict[str, Any],
         name: str | None,
+        device_token: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"token": token, **inventory}
         if name:
             body["name"] = name
+        if device_token:
+            # Proves this is the device already registered for this hardware.
+            body["device_token"] = device_token
         return self._post("/api/v1/agent/register", body)
 
     def heartbeat(self, *, device_token: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -171,9 +190,7 @@ class EdgeClient:
 
     def mint_app_credential(self, *, device_token: str, workload_key: str) -> dict[str, Any]:
         """Device-scoped application token for a workload bound to a MeteorCloud application."""
-        return self._post(
-            "/api/v1/agent/applications/credentials", {"workload_key": workload_key}, bearer=device_token
-        )
+        return self._post("/api/v1/agent/applications/credentials", {"workload_key": workload_key}, bearer=device_token)
 
     def get_wifi_changes(self, *, device_token: str) -> list[dict[str, Any]]:
         """Wi-Fi changes waiting for this device. The answer can hold a Wi-Fi password: do not log it."""
@@ -200,6 +217,16 @@ class EdgeClient:
             return result
         return []
 
+    def get_signing_keys(self, *, device_token: str) -> list[dict[str, Any]] | None:
+        """Organization signing keys, or None when the control plane does not sign (404)."""
+        try:
+            result = self._get("/api/v1/agent/signing-keys", bearer=device_token)
+        except AgentApiError as error:
+            if error.status == 404:
+                return None
+            raise
+        return result if isinstance(result, list) else []
+
     def download_artifact(
         self,
         *,
@@ -210,17 +237,28 @@ class EdgeClient:
     ) -> str:
         """Download an artifact, verify ``X-Checksum-SHA256``, and return the hex digest.
 
+        The server may answer with a redirect to a short-lived object-storage URL
+        (``X-Meteorcli-Redirect: 1`` says this agent can follow one). The checksum then
+        comes from the redirect, and the storage URL is fetched without the device token.
+
         Raises ``AgentApiError`` with code ``checksum_mismatch`` when the digest
         does not match. Partial files are removed on failure.
         """
         url = f"{self.server_url}/api/v1/agent/artifacts/{artifact_id}/download"
-        headers = {"Authorization": f"Bearer {device_token}", "Accept": "*/*"}
+        headers = {"Authorization": f"Bearer {device_token}", "Accept": "*/*", REDIRECT_HEADER: "1"}
         request = urllib.request.Request(url, headers=headers, method="GET")
         destination.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = destination.with_suffix(destination.suffix + ".partial")
         try:
-            with urllib.request.urlopen(request, timeout=self.download_timeout) as response:
-                expected = (response.headers.get("X-Checksum-SHA256") or "").strip().lower()
+            redirect_checksum = ""
+            try:
+                response = _DOWNLOAD_OPENER.open(request, timeout=self.download_timeout)
+            except urllib.error.HTTPError as exc:
+                if exc.code not in _REDIRECT_CODES:
+                    raise
+                response, redirect_checksum = self._follow_storage_redirect(url, exc)
+            with response:
+                expected = (redirect_checksum or response.headers.get("X-Checksum-SHA256") or "").strip().lower()
                 total_header = response.headers.get("Content-Length")
                 total = int(total_header) if total_header and total_header.isdigit() else None
                 digest = hashlib.sha256()
@@ -246,6 +284,7 @@ class EdgeClient:
             tmp_path.replace(destination)
             return expected or actual
         except AgentApiError:
+            tmp_path.unlink(missing_ok=True)
             raise
         except urllib.error.HTTPError as exc:
             tmp_path.unlink(missing_ok=True)
@@ -256,3 +295,24 @@ class EdgeClient:
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise
+
+    def _follow_storage_redirect(self, api_url: str, redirect: urllib.error.HTTPError) -> tuple[Any, str]:
+        """Open the object-storage URL a download redirected to, without the device token.
+
+        Returns the open response and the checksum the server sent with the redirect.
+        """
+        headers = redirect.headers
+        location = (headers.get("Location") if headers is not None else None) or ""
+        checksum = ((headers.get("X-Checksum-SHA256") if headers is not None else None) or "").strip().lower()
+        redirect.close()
+        if not location:
+            raise AgentApiError(redirect.code, "download_redirect_invalid", "The download redirect has no location.")
+        if len(checksum) != 64:
+            # Without the server's checksum the storage copy cannot be checked: refuse it.
+            raise AgentApiError(0, "checksum_missing", "The download redirect did not include a SHA-256 checksum.")
+        target = urllib.parse.urljoin(api_url, location)
+        scheme = urllib.parse.urlsplit(target).scheme
+        if scheme not in ("https", "http") or (scheme == "http" and api_url.startswith("https://")):
+            raise AgentApiError(0, "download_redirect_insecure", "Refusing to download over an insecure redirect.")
+        storage_request = urllib.request.Request(target, headers={"Accept": "*/*"}, method="GET")
+        return _DOWNLOAD_OPENER.open(storage_request, timeout=self.download_timeout), checksum

@@ -13,6 +13,7 @@ Subcommands
   mqtt-test    Publish one TLS MQTT message (default: devices/{id}/status).
   mqtt-listen  Print inbound commands (default: devices/{id}/commands).
   status       Show persisted (non-secret) configuration.
+  update       Install a newer meteorcli, or restore the previous one.
   logs         List or print device logs (journal, systemd, Docker, /var/log).
 
 Secrets are never printed by any command except when the user explicitly
@@ -38,7 +39,7 @@ from edge_agent.platform import combine_heartbeat_handlers
 from edge_agent.platform.selection import collect_capabilities, collect_inventory
 from edge_agent.registration import register
 from edge_agent.service import NOT_INSTALLED, UNIT, duplicate_run_message, running_as_service, service_state
-from edge_agent.software import reconcile_software
+from edge_agent.software import manifest_verifier, reconcile_software
 from edge_agent.wifi import WifiSync
 from meteorcli import __version__
 from meteorcli import config as cli_config
@@ -1006,7 +1007,10 @@ def _run_agent(paths: CliPaths, args: argparse.Namespace) -> int:
             except Exception:
                 logger.exception("MQTT sync failed; continuing with heartbeats")
         payload: dict = {**collect_inventory(), "capabilities": collect_capabilities()}
-        reports = reconcile_software(client, device_token, artifacts_dir)
+        reports = reconcile_software(
+            client, device_token, artifacts_dir,
+            verifier=manifest_verifier(client, device_token, paths.config_path.parent, config.device_id),
+        )
         # Under sudo, files this pass downloaded are root-owned; hand them back so a later
         # unprivileged run (and the meteorcli-systemd helper's owner check) can use them.
         try:
@@ -1046,7 +1050,7 @@ def _run_agent(paths: CliPaths, args: argparse.Namespace) -> int:
             payload_factory=_payload,
             on_response=combine_heartbeat_handlers(
                 WifiSync(client, device_token).on_heartbeat,
-                ActionSync(client, device_token).on_heartbeat,
+                ActionSync(client, device_token, config_dir=paths.config_path.parent).on_heartbeat,
             ),
         )
     except AgentApiError:
@@ -1232,6 +1236,29 @@ def _cmd_mqtt_listen(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_update(args: argparse.Namespace) -> int:
+    from meteorcli.self_update import build_update_args, run_self_update
+
+    if running_as_service():
+        print(
+            "error: meteorcli update cannot run inside meteorcli.service. "
+            f"Run it from a shell: sudo {PROG} update --yes",
+            file=sys.stderr,
+        )
+        return 1
+    if args.rollback and args.check:
+        print("error: --rollback and --check cannot be used together", file=sys.stderr)
+        return 1
+    argv = build_update_args(
+        check=args.check,
+        yes=args.yes,
+        to=args.to,
+        allow_downgrade=args.allow_downgrade,
+        rollback=args.rollback,
+    )
+    return run_self_update(argv, config_dir=args.config_dir)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -1250,6 +1277,8 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} mqtt-listen\n"
             f"  {PROG} mqtt-listen commands\n"
             f"  {PROG} status\n"
+            f"  {PROG} update --check\n"
+            f"  {PROG} update --yes\n"
             "\n"
             "Environment variables:\n"
             f"  {ENV_DOMAIN}       Server host or IP (used as-is; HTTP for IPs).\n"
@@ -1512,6 +1541,32 @@ def build_parser() -> argparse.ArgumentParser:
         description="Show persisted configuration. Never prints credentials.",
     )
     status_parser.set_defaults(func=_cmd_status)
+
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Install a newer meteorcli, or restore the previous one.",
+        description=(
+            "Download a published meteorcli release, require its SHA256, and switch to it "
+            "only after the new binary reports that version. If meteorcli.service was running "
+            "and does not stay active, the previous install is restored. Device config is not "
+            "modified. --check does not change the device (exit 10 when a newer release exists)."
+        ),
+    )
+    update_parser.add_argument("--check", action="store_true", help="Report whether a newer release exists.")
+    update_parser.add_argument("--yes", action="store_true", help="Proceed without a prompt.")
+    update_parser.add_argument(
+        "--to",
+        default=None,
+        metavar="VERSION",
+        help="Install X.Y.Z instead of the newest release.",
+    )
+    update_parser.add_argument(
+        "--allow-downgrade",
+        action="store_true",
+        help="Allow --to to replace a newer install.",
+    )
+    update_parser.add_argument("--rollback", action="store_true", help="Restore the previous install.")
+    update_parser.set_defaults(func=_cmd_update)
 
     logs_parser = subparsers.add_parser(
         "logs",

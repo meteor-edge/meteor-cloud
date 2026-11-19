@@ -51,9 +51,11 @@ def test_recover_commits_complete_staging(tmp_path: Path) -> None:
         '{"host":"localhost","port":8883,"username":"u","tls":true,"password":"mqtt_p"}',
     )
     write_secret_file(staging / DONE_NAME, '{"token_file":"device-token"}')
+    (tmp_path / "signing-keys.json").write_text('{"keys":{"old":"x"}}', encoding="utf-8")
     recover_device_secrets(tmp_path)
     assert read_device_token(tmp_path / "device-token") == "dev_recovered"
     loaded = read_mqtt_config(tmp_path)
     assert loaded is not None
     assert loaded.password == "mqtt_p"
     assert not staging.exists()
+    assert not (tmp_path / "signing-keys.json").exists()

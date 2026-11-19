@@ -21,6 +21,8 @@ class SoftwareSyncStatus(enum.StrEnum):
     UPDATING = "updating"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # The new release failed its health check and the device runs the previous one again.
+    ROLLED_BACK = "rolled_back"
 
 
 class SoftwareHealth(enum.StrEnum):
