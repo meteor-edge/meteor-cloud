@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 
 import pytest
@@ -130,7 +131,10 @@ def _register(client: TestClient, db_session: Session, email: str, name: str) ->
     token = client.post(
         f"/api/v1/organizations/{org.id}/registration-tokens", headers=headers, json={"name": "Bootstrap"}
     ).json()["token"]
-    mac = "aa:bb:cc:dd:ee:%02x" % (abs(hash(name)) % 255)
+    # Deterministic per name: hash() is salted per run, so two names could share a MAC and the
+    # second registration would be refused as registered elsewhere.
+    digest = hashlib.sha256(name.encode()).hexdigest()
+    mac = "aa:bb:cc:" + ":".join(digest[i : i + 2] for i in range(0, 6, 2))
     response = client.post("/api/v1/agent/register", json={"token": token, "name": name, "mac_addresses": [mac]})
     assert response.status_code == 201, response.text
     body = response.json()
