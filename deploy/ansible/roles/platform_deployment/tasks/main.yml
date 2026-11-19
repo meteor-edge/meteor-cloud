@@ -260,6 +260,28 @@
     group: root
     mode: "0755"
 
+- name: Check the backup settings fit on one line
+  # systemd EnvironmentFile keeps "\n" inside quotes as a backslash and an n, so a value
+  # with a line break would change on its way to the backup. Refuse it instead.
+  ansible.builtin.assert:
+    that:
+      - (item | string) is not search('[\r\n]')
+    fail_msg: A backup setting contains a line break; remove it.
+    quiet: true
+  loop:
+    - "{{ platform_compose_dir }}"
+    - "{{ platform_compose | trim }}"
+    - "{{ backup_retention_days }}"
+    - "{{ backup_s3_uri }}"
+    - "{{ backup_s3_endpoint_url }}"
+    - "{{ backup_s3_region }}"
+    - "{{ backup_s3_access_key_id }}"
+    - "{{ backup_s3_secret_access_key }}"
+    - "{{ backup_s3_session_token }}"
+  loop_control:
+    label: backup setting
+  no_log: true
+
 - name: Write the backup settings
   ansible.builtin.copy:
     dest: "{{ platform_root }}/backup.env"
@@ -269,7 +291,7 @@
     # systemd EnvironmentFile syntax (double-quoted, C escapes). Do not shell-source this
     # file: restore via systemd-run --property=EnvironmentFile=… (docs/backups.md).
     content: |
-      {% macro systemd_env(value) -%}"{{ value | string | replace('\\', '\\\\') | replace('"', '\\"') | replace('\n', '\\n') }}"{%- endmacro %}
+      {% macro systemd_env(value) -%}"{{ value | string | replace('\\', '\\\\') | replace('"', '\\"') }}"{%- endmacro %}
       COMPOSE_DIR={{ systemd_env(platform_compose_dir) }}
       COMPOSE={{ systemd_env(platform_compose | trim) }}
       BACKUP_DIR={{ systemd_env(platform_root ~ '/backups') }}

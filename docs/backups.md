@@ -86,7 +86,8 @@ postgresql:
 ```
 
 Dumps go to the PVC `<release>-postgresql-backups`, which is kept when the release is
-uninstalled. It is off by default because `helm install --wait` waits for the new volume,
+uninstalled. Dumps older than `retentionDays` are deleted, except the newest one, so a
+failing dump never leaves you without a recovery point. It is off by default because `helm install --wait` waits for the new volume,
 which storage classes with `WaitForFirstConsumer` bind only when the first job runs.
 Copy dumps off the cluster as well (for example with a volume snapshot schedule).
 

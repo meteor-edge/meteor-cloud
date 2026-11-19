@@ -15,11 +15,12 @@ pure-Python implementation of RFC 8032, so the agent keeps its single dependency
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -149,6 +150,30 @@ def ed25519_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
 # --- pinned keys and manifest checks --------------------------------------
 
 
+PIN_LOCK_NAME = "signing-keys.lock"
+
+
+@contextlib.contextmanager
+def pin_lock(config_dir: Path) -> Iterator[None]:
+    """Serialize writes of the pin file with credential commits (edge_agent.persist).
+
+    ``meteorcli register`` can store a new credential while the agent is running; the
+    lock makes "is my credential still current? then save" atomic against that commit.
+    """
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - non-POSIX
+        yield
+        return
+    config_dir.mkdir(parents=True, exist_ok=True)
+    with open(config_dir / PIN_LOCK_NAME, "a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def credential_fingerprint(device_token: str) -> str:
     """Short hash of the device credential; pins are discarded when it changes."""
     return hashlib.sha256(device_token.encode()).hexdigest()[:32]
@@ -169,11 +194,13 @@ class ManifestVerifier:
         device_id: str,
         fetch_keys: Callable[[], list[dict[str, Any]] | None],
         credential_fingerprint: str | None = None,
+        current_fingerprint: Callable[[], str | None] | None = None,
     ) -> None:
         self.store = store
         self.device_id = device_id
         self.fetch_keys = fetch_keys
         self.credential_fingerprint = credential_fingerprint
+        self.current_fingerprint = current_fingerprint
         self._server_signs: bool | None = None
 
     def _load(self) -> dict[str, str]:
@@ -192,6 +219,17 @@ class ManifestVerifier:
         return {str(k): str(v) for k, v in (data.get("keys") or {}).items()}
 
     def _save(self, keys: dict[str, str]) -> None:
+        with pin_lock(self.store.parent):
+            if self.current_fingerprint is not None and self.credential_fingerprint is not None:
+                current = self.current_fingerprint()
+                if current != self.credential_fingerprint:
+                    # A new credential was stored while our key request ran: these pins
+                    # belong to the previous enrollment and must not replace its pins.
+                    logger.warning("Device credential changed; not saving signing keys from the old one")
+                    return
+            self._write(keys)
+
+    def _write(self, keys: dict[str, str]) -> None:
         self.store.parent.mkdir(parents=True, exist_ok=True)
         payload: dict[str, Any] = {"keys": keys, "device_id": self.device_id}
         if self.credential_fingerprint:

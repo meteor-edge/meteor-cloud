@@ -22,9 +22,11 @@ Pin the image by `@sha256:` digest to close this gap (see [Docker images](#docke
   `signing-keys.json` next to its config. From then on it refuses an item that is
   unsigned, signed by a key it does not trust, or whose signature does not verify, and
   it checks the downloaded artifact against the signed SHA-256. A refused item shows
-  as **failed** on the device's software list with the reason.
+  as **failed** on the device's software list with the reason. A refused item changes
+  nothing on the device: the installed version and its application credentials stay.
 - New device credentials (registration or enrollment) clear the pinned keys, so a device
-  moved to another organization pins that organization's keys.
+  moved to another organization pins that organization's keys. A key request that was
+  still running with the old credential does not save its keys afterwards.
 
 Pinning on first use trusts the server once, on the first signing-key fetch. Configure
 the agent to reach the control plane over HTTPS so that first fetch cannot be

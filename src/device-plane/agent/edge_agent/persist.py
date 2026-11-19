@@ -8,6 +8,7 @@ from pathlib import Path
 
 from edge_agent.credentials import write_secret_file
 from edge_agent.mqtt_config import MqttConfig, write_mqtt_config
+from edge_agent.signing import pin_lock
 
 STAGING_DIRNAME = ".device-secrets-staging"
 DONE_NAME = "DONE"
@@ -22,9 +23,7 @@ def recover_device_secrets(config_dir: Path) -> None:
     if not done.is_file():
         shutil.rmtree(staging, ignore_errors=True)
         return
-    _commit_staging(staging, config_dir)
-    # Invalidate pins before removing the DONE journal so a crash still retries both.
-    (config_dir / "signing-keys.json").unlink(missing_ok=True)
+    _commit_and_invalidate_pins(staging, config_dir)
     shutil.rmtree(staging, ignore_errors=True)
 
 
@@ -49,10 +48,20 @@ def persist_device_secrets(
             data["ca_cert_path"] = str(config_dir / "mqtt-ca.crt")
             write_secret_file(mqtt_path, json.dumps(data))
     write_secret_file(done_path(staging), json.dumps({"token_file": token_path.name}))
-    _commit_staging(staging, config_dir)
-    # Invalidate pins before removing the DONE journal so a crash still retries both.
-    (config_dir / "signing-keys.json").unlink(missing_ok=True)
+    _commit_and_invalidate_pins(staging, config_dir)
     shutil.rmtree(staging, ignore_errors=True)
+
+
+def _commit_and_invalidate_pins(staging: Path, config_dir: Path) -> None:
+    """Commit the staged credential and drop the previous enrollment's signing pins.
+
+    Both happen under the pin lock so a key fetch that started with the old credential
+    cannot save its pins after this (edge_agent.signing.ManifestVerifier._save). The
+    pins go before the DONE journal is removed, so a crash retries both.
+    """
+    with pin_lock(config_dir):
+        _commit_staging(staging, config_dir)
+        (config_dir / "signing-keys.json").unlink(missing_ok=True)
 
 
 def done_path(staging: Path) -> Path:
