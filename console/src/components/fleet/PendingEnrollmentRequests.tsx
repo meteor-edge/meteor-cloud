@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   approveEnrollmentRequest,
+  bulkApproveEnrollmentRequests,
+  bulkRejectEnrollmentRequests,
   listDeviceGroups,
   listDeviceTypes,
   listDevices,
@@ -39,6 +41,20 @@ function sameName(a: string, b: string): boolean {
 }
 
 const NAME_CHECK_DELAY_MS = 400;
+/** The API reviews at most this many requests per call. */
+const BULK_BATCH = 500;
+
+async function inBatches(
+  ids: string[],
+  call: (batch: string[]) => Promise<{ skipped: unknown[] }>,
+): Promise<number> {
+  let skipped = 0;
+  for (let start = 0; start < ids.length; start += BULK_BATCH) {
+    const result = await call(ids.slice(start, start + BULK_BATCH));
+    skipped += result.skipped.length;
+  }
+  return skipped;
+}
 
 type PendingEnrollmentRequestsProps = {
   organizationId: string;
@@ -62,6 +78,11 @@ export function PendingEnrollmentRequests({
   const [approveTypeId, setApproveTypeId] = useState("");
   const [approveSuggestedName, setApproveSuggestedName] = useState("");
   const [approveGroupId, setApproveGroupId] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkApproveOpen, setBulkApproveOpen] = useState(false);
+  const [bulkTypeId, setBulkTypeId] = useState("");
+  const [bulkGroupId, setBulkGroupId] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const requestsQuery = useQuery({
     queryKey: ["enrollment-requests", organizationId, token],
@@ -84,13 +105,95 @@ export function PendingEnrollmentRequests({
     [requestsQuery.data],
   );
 
+  const pendingIds = useMemo(
+    () => activeRequests.filter((entry) => entry.status === "pending").map((entry) => entry.id),
+    [activeRequests],
+  );
+  // Only requests still pending in the list count, so a refresh drops ones someone else reviewed.
+  const selectedIds = pendingIds.filter((id) => selected.has(id));
+  const allSelected = pendingIds.length > 0 && selectedIds.length === pendingIds.length;
+
+  function toggle(id: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(pendingIds));
+  }
+
+  async function afterBulk(skipped: number, verb: string) {
+    setSelected(new Set());
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["enrollment-requests", organizationId] }),
+      queryClient.invalidateQueries({ queryKey: ["devices", organizationId] }),
+    ]);
+    if (skipped > 0) {
+      onError?.(
+        `${skipped} request${skipped === 1 ? " was" : "s were"} no longer pending and not ${verb}.`,
+      );
+    }
+  }
+
+  async function onBulkApprove(event: FormEvent) {
+    event.preventDefault();
+    setBulkBusy(true);
+    try {
+      const skipped = await inBatches(selectedIds, (request_ids) =>
+        bulkApproveEnrollmentRequests(token, organizationId, {
+          request_ids,
+          device_type_id: bulkTypeId || undefined,
+          device_group_id: bulkGroupId || undefined,
+        }),
+      );
+      setBulkApproveOpen(false);
+      setBulkTypeId("");
+      setBulkGroupId("");
+      await afterBulk(skipped, "approved");
+    } catch (err) {
+      onError?.(err instanceof ApiError ? err.message : "Could not approve the requests.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function onBulkReject() {
+    const reason = window.prompt(
+      `Reject ${selectedIds.length} request${selectedIds.length === 1 ? "" : "s"}? Optional reason:`,
+      "",
+    );
+    if (reason === null) {
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const skipped = await inBatches(selectedIds, (request_ids) =>
+        bulkRejectEnrollmentRequests(token, organizationId, {
+          request_ids,
+          reason: reason || undefined,
+        }),
+      );
+      await afterBulk(skipped, "rejected");
+    } catch (err) {
+      onError?.(err instanceof ApiError ? err.message : "Could not reject the requests.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   // Repeated names are allowed, so this only warns. A device keeps its suggested name without a check.
   const typedName = useDebounced(approveName.trim(), NAME_CHECK_DELAY_MS);
   const checkName = Boolean(approveId && typedName && typedName !== approveDefaultName);
   const namesakesQuery = useQuery({
     queryKey: ["devices", organizationId, "name", typedName, token],
-    queryFn: () =>
-      listDevices(token, organizationId, { name: typedName, page_size: 1 }),
+    queryFn: () => listDevices(token, organizationId, { name: typedName, page_size: 1 }),
     enabled: checkName,
   });
   const nameInUse =
@@ -108,8 +211,7 @@ export function PendingEnrollmentRequests({
       return;
     }
     const type = (typesQuery.data ?? []).find((item) => item.id === typeId);
-    const name =
-      (type && typedDefaultName(type.slug, entry.name_suffix)) || approveSuggestedName;
+    const name = (type && typedDefaultName(type.slug, entry.name_suffix)) || approveSuggestedName;
     setApproveName(name);
     setApproveDefaultName(name);
   }
@@ -160,10 +262,39 @@ export function PendingEnrollmentRequests({
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-semibold">Pending enrollment requests</h2>
+      {canManage && selectedIds.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm"
+          role="region"
+          aria-label="Bulk actions"
+        >
+          <span className="font-medium">{selectedIds.length} selected</span>
+          <Button size="sm" disabled={bulkBusy} onClick={() => setBulkApproveOpen(true)}>
+            Approve selected
+          </Button>
+          <Button size="sm" variant="ghost" disabled={bulkBusy} onClick={onBulkReject}>
+            Reject selected
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
       <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-glow">
         <table className="min-w-full text-left text-sm">
           <thead className="border-b border-border bg-background text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
+              {canManage && (
+                <th className="w-10 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all pending requests"
+                    checked={allSelected}
+                    disabled={pendingIds.length === 0}
+                    onChange={toggleAll}
+                  />
+                </th>
+              )}
               <th className="px-4 py-3 font-semibold">Name</th>
               <th className="px-4 py-3 font-semibold">Hostname</th>
               <th className="px-4 py-3 font-semibold">MAC address</th>
@@ -177,16 +308,28 @@ export function PendingEnrollmentRequests({
           <tbody>
             {activeRequests.map((entry) => (
               <tr key={entry.id} className="border-b border-border">
-                <td className="px-4 py-3 font-medium">
-                  {displayName(entry)}
-                </td>
+                {canManage && (
+                  <td className="w-10 px-4 py-3">
+                    {entry.status === "pending" && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${displayName(entry)}`}
+                        checked={selected.has(entry.id)}
+                        onChange={() => toggle(entry.id)}
+                      />
+                    )}
+                  </td>
+                )}
+                <td className="px-4 py-3 font-medium">{displayName(entry)}</td>
                 <td className="px-4 py-3 text-muted-foreground">
                   {entry.hostname ?? "—"}
                   {entry.hardware_model && (
                     <span className="block text-xs">{entry.hardware_model}</span>
                   )}
                 </td>
-                <td className="px-4 py-3 font-mono text-xs">{primaryMac(entry.mac_addresses) ?? "—"}</td>
+                <td className="px-4 py-3 font-mono text-xs">
+                  {primaryMac(entry.mac_addresses) ?? "—"}
+                </td>
                 <td className="px-4 py-3 text-muted-foreground">{enrollmentKeyLabel(entry)}</td>
                 <td className="px-4 py-3 text-muted-foreground">{entry.architecture ?? "—"}</td>
                 <td className="px-4 py-3 text-muted-foreground">
@@ -195,7 +338,7 @@ export function PendingEnrollmentRequests({
                 <td className="px-4 py-3 whitespace-nowrap">
                   {entry.status === "approved" ? (
                     <span className="inline-flex whitespace-nowrap rounded-full bg-ember px-2 py-0.5 text-xs font-medium text-midnight">
-                      Awaiting device
+                      {entry.auto_approved ? "Auto-approved, awaiting device" : "Awaiting device"}
                     </span>
                   ) : (
                     <span className="inline-flex whitespace-nowrap rounded-full bg-sky-blue px-2 py-0.5 text-xs font-medium text-midnight">
@@ -240,7 +383,7 @@ export function PendingEnrollmentRequests({
               <tr>
                 <td
                   className="px-4 py-6 text-center text-muted-foreground"
-                  colSpan={canManage ? 8 : 7}
+                  colSpan={canManage ? 9 : 7}
                 >
                   No pending enrollment requests.
                 </td>
@@ -249,6 +392,69 @@ export function PendingEnrollmentRequests({
           </tbody>
         </table>
       </div>
+
+      {canManage && bulkApproveOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Approve selected devices"
+        >
+          <form
+            className="grid w-full max-w-lg gap-3 rounded-lg border border-border bg-card p-6 shadow-glow"
+            onSubmit={onBulkApprove}
+          >
+            <div>
+              <h2 className="text-lg font-semibold">
+                Approve {selectedIds.length} device{selectedIds.length === 1 ? "" : "s"}
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Each device keeps its suggested name. The type and group apply to all of them.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="bulk-type">Device type</Label>
+              <select
+                id="bulk-type"
+                className="flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm"
+                value={bulkTypeId}
+                onChange={(event) => setBulkTypeId(event.target.value)}
+              >
+                <option value="">None</option>
+                {(typesQuery.data ?? []).map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="bulk-group">Device group</Label>
+              <select
+                id="bulk-group"
+                className="flex h-10 w-full rounded-md border border-input bg-field text-foreground px-3 text-sm"
+                value={bulkGroupId}
+                onChange={(event) => setBulkGroupId(event.target.value)}
+              >
+                <option value="">None</option>
+                {(groupsQuery.data ?? []).map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="secondary" onClick={() => setBulkApproveOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={bulkBusy}>
+                Approve {selectedIds.length}
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {canManage && approveId && (
         <div

@@ -33,13 +33,7 @@ export type DeviceGroup = {
 };
 
 export type ArtifactType =
-  | "os_image"
-  | "firmware"
-  | "docker"
-  | "docker_compose"
-  | "systemd"
-  | "configuration"
-  | "other";
+  "os_image" | "firmware" | "docker" | "docker_compose" | "systemd" | "configuration" | "other";
 
 export type ReleaseKind = "systemd" | "docker" | "docker_compose";
 
@@ -468,6 +462,21 @@ export type EnrollmentApiKey = {
   created_by_user_id: string;
   created_at: string;
   updated_at: string;
+  /** Approves matching requests from this key without a person; null when off. */
+  auto_approve_rule?: EnrollmentAutoApproveRuleState | null;
+};
+
+export type EnrollmentAutoApproveRule = {
+  device_type_id?: string | null;
+  device_group_id?: string | null;
+  /** Serial numbers and MAC addresses; empty means any device (then max_devices is required). */
+  allowlist?: string[];
+  max_devices?: number | null;
+  until?: string | null;
+};
+
+export type EnrollmentAutoApproveRuleState = Required<EnrollmentAutoApproveRule> & {
+  approved_count: number;
 };
 
 export type EnrollmentApiKeyWithSecret = EnrollmentApiKey & {
@@ -504,6 +513,8 @@ export type DeviceEnrollmentRequest = {
   reviewed_by_user_id: string | null;
   reviewed_at: string | null;
   rejection_reason: string | null;
+  /** Approved by the enrollment key's auto-approve rule rather than by a person. */
+  auto_approved?: boolean;
   claimed_at: string | null;
   device_id: string | null;
   enrollment_key_id: string | null;
@@ -512,4 +523,9 @@ export type DeviceEnrollmentRequest = {
   expires_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type EnrollmentBulkResult = {
+  updated: DeviceEnrollmentRequest[];
+  skipped: { request_id: string; reason: "not_found" | "not_pending" }[];
 };
