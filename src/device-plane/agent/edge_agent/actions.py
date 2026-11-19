@@ -73,6 +73,11 @@ class ActionSync:
         self.config_dir = Path(config_dir) if config_dir is not None else _default_config_dir()
         if host is not None:
             self._host = host
+        elif runner is None and installed is None:
+            # The configured platform: systemd on a real device, recorded on a simulated one.
+            from edge_agent.platform.selection import active_platform
+
+            self._host = active_platform().host_actions
         else:
             kwargs: dict[str, Any] = {}
             if runner is not None:

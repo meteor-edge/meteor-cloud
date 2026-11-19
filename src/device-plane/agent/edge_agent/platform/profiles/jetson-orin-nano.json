@@ -1,0 +1,17 @@
+{
+  "name": "jetson-orin-nano",
+  "description": "NVIDIA Jetson Orin Nano Developer Kit, 8 GB, 128 GB NVMe",
+  "inventory": {
+    "hardware_model": "NVIDIA Jetson Orin Nano Developer Kit",
+    "cpu_model": "ARM Cortex-A78AE",
+    "cpu_cores": 6,
+    "memory_mb": 7620,
+    "architecture": "aarch64"
+  },
+  "disk_gb": 128,
+  "thermal": {"idle_c": 42, "load_c": 70, "throttle_c": 95, "noise_c": 1.0},
+  "extras": "jetson",
+  "jetson": {"power_mode": "15W"},
+  "capabilities": {},
+  "boot_delay_seconds": 45
+}

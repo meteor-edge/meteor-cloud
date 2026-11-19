@@ -84,6 +84,9 @@ link-local, and public addresses. `agent_version` is the installed meteorcli
 `X.Y.Z`; the console Overview shows it, and Manage device can order an update
 to the latest release.
 
+`simulated: true` marks a [simulated device](simulator.md). It is stored as
+`metadata.simulated`, and a heartbeat without it removes that key again.
+
 `software_report` updates installed software for known
 workloads (unknown keys are ignored). The response includes current
 `desired_software`. Agents can also poll `GET /api/v1/agent/software`.

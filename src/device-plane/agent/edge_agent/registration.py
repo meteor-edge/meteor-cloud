@@ -9,9 +9,9 @@ from pathlib import Path
 from edge_agent.client import EdgeClient
 from edge_agent.config import AgentConfig, AgentPaths, load_config, save_config
 from edge_agent.credentials import read_device_token, remove_file
-from edge_agent.inventory import collect_inventory
 from edge_agent.mqtt_config import mqtt_from_api_payload
 from edge_agent.persist import persist_device_secrets
+from edge_agent.platform.selection import collect_inventory
 
 logger = logging.getLogger("edge_agent")
 

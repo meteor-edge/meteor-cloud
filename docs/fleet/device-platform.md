@@ -18,8 +18,9 @@ Implementors for a new board or OS:
 1. Keep the field names and action kinds above (control plane and console depend on them).
 2. Add an adapter that implements the ports (start from `LinuxPlatform` /
    `SystemdHostActions`).
-3. Select it from configuration later if needed; today the agent uses
-   `default_platform()` (Linux + systemd).
+3. Select it with `METEORCLI_PLATFORM` in `edge_agent/platform/selection.py`.
+   Today the choices are `linux` (the default, Linux + systemd) and `simulated`
+   (a [simulated device](simulator.md) for development and tests).
 
 ### Small example (another OS)
 

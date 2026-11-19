@@ -15,9 +15,10 @@ from threading import Event, Thread
 
 import paho.mqtt.client as mqtt
 
-from edge_agent.metrics import collect_metrics, read_uptime_seconds
+from edge_agent.metrics import read_uptime_seconds
 from edge_agent.mqtt_config import MqttConfig, resolve_mqtt_broker_host
 from edge_agent.observer import DeviceObserver
+from edge_agent.platform.selection import collect_metrics
 
 logger = logging.getLogger("edge_agent")
 

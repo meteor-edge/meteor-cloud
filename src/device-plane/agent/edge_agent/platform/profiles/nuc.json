@@ -1,0 +1,16 @@
+{
+  "name": "nuc",
+  "description": "Intel NUC 13 Pro (i5-1340P), 16 GB, 512 GB NVMe",
+  "inventory": {
+    "hardware_model": "NUC13ANHi5",
+    "cpu_model": "13th Gen Intel(R) Core(TM) i5-1340P",
+    "cpu_cores": 16,
+    "memory_mb": 15715,
+    "architecture": "x86_64"
+  },
+  "disk_gb": 512,
+  "thermal": {"idle_c": 38, "load_c": 72, "throttle_c": 100, "noise_c": 1.2},
+  "extras": null,
+  "capabilities": {},
+  "boot_delay_seconds": 15
+}

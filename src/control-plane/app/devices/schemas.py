@@ -350,6 +350,8 @@ class AgentRegisterRequest(BaseModel):
     agent_version: str | None = Field(default=None, max_length=32)
     labels: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # A simulated device (docs/fleet/simulator.md); stored as metadata["simulated"].
+    simulated: bool = False
 
 
 class AgentRegisterResponse(BaseModel):
@@ -376,6 +378,8 @@ class AgentHeartbeatRequest(BaseModel):
     local_ip: LocalIp = Field(default=None, max_length=64)
     agent_version: str | None = Field(default=None, max_length=32)
     metrics: dict[str, Any] = Field(default_factory=dict)
+    # A simulated device (docs/fleet/simulator.md); stored as metadata["simulated"].
+    simulated: bool = False
     # Agent-reported install capabilities (systemd, docker, docker_compose, …).
     capabilities: dict[str, Any] = Field(default_factory=dict)
     # Installed / sync status for known workloads; unknown keys are ignored.

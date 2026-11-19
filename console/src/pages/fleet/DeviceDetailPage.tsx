@@ -37,7 +37,7 @@ import { DeviceActionsPanel } from "@/components/fleet/DeviceActionsPanel";
 import { DeviceWifiPanel } from "@/components/fleet/DeviceWifiPanel";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
-import { StatusBadge } from "@/components/fleet/StatusBadge";
+import { SimulatedBadge, StatusBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +53,7 @@ import {
   canUpdateDeviceAgent,
   canViewDeviceLogs,
 } from "@/lib/permissions";
+import { isSimulatedDevice } from "@/lib/devices";
 import { formatDateTime } from "@/lib/utils";
 
 function Detail({ label, value }: { label: string; value: string | null | undefined }) {
@@ -294,6 +295,7 @@ export function DeviceDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-semibold tracking-tight">{device.name}</h1>
             <StatusBadge status={device.status} />
+            {isSimulatedDevice(device) && <SimulatedBadge />}
           </div>
           <p className="mt-2 text-muted-foreground">
             {device.hostname ?? device.mac_addresses[0] ?? "—"}

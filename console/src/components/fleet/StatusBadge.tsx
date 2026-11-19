@@ -75,3 +75,15 @@ export function HealthBadge({ status, stale = false }: { status: string | null; 
     </span>
   );
 }
+
+/** Marks a simulated device, so it is never mistaken for real hardware. */
+export function SimulatedBadge() {
+  return (
+    <span
+      className="inline-flex items-center rounded-full border border-dashed border-link px-2.5 py-0.5 text-xs font-medium text-link"
+      title="A simulated device: the board model, CPU and temperature come from a device profile, not real hardware."
+    >
+      Simulated
+    </span>
+  );
+}
