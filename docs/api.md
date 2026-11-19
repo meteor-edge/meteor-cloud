@@ -57,8 +57,8 @@ Prefix: `/api/v1/organizations/{organization_id}`
 | Device types | `/device-types`, `/device-types/{type_id}` |
 | Device groups | `/device-groups`, `/device-groups/{group_id}` |
 | Registration tokens | `/registration-tokens` (+ revoke) |
-| Enrollment keys | `/enrollment-keys` (+ revoke) |
-| Enrollment requests | list / approve / reject under enrollment request routes |
+| Enrollment keys | `/enrollment-keys` (+ revoke, `/auto-approve` rule) |
+| Enrollment requests | list / approve / reject under enrollment request routes, plus bulk `/enrollment-requests/approve` and `/reject` |
 | Devices | `/devices`, `/devices/{device_id}`, enable/disable, MQTT revoke |
 | Connectivity | `/devices/{device_id}/connectivity`, `.../connectivity/revoke` |
 | Browser SSH | `POST .../devices/{device_id}/shell-sessions` then WebSocket `/api/v1/shell-sessions/{id}/ws?ticket=` |

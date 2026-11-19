@@ -431,6 +431,20 @@ class DeviceEnrollmentRequestRepository:
         statement = statement.order_by(DeviceEnrollmentRequest.created_at.desc())
         return list(self.session.scalars(statement).unique().all())
 
+    def list_by_ids(
+        self, *, organization_id: uuid.UUID, request_ids: Sequence[uuid.UUID]
+    ) -> list[DeviceEnrollmentRequest]:
+        """Requests of one organization by id, locked so a concurrent review waits for this one."""
+        statement = (
+            select(DeviceEnrollmentRequest)
+            .where(
+                DeviceEnrollmentRequest.organization_id == organization_id,
+                DeviceEnrollmentRequest.id.in_(list(request_ids)),
+            )
+            .with_for_update(of=DeviceEnrollmentRequest)
+        )
+        return list(self.session.scalars(statement).unique().all())
+
     def list_active_unclaimed(self, *, organization_id: uuid.UUID) -> list[DeviceEnrollmentRequest]:
         """Pending or approved requests that have not yet claimed a device token."""
         statement = (

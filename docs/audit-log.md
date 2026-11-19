@@ -37,8 +37,8 @@ setups do this).
 | Organization | `organization.create`, `organization.update` (before/after of name, slug, description), `organization.delete` |
 | Members and teams | `member.invite`, `member.role_change`, `member.scope_change`, `member.remove`, `member.leave`, `team.create`, `team.update`, `team.delete`, `team.member_add`, `team.member_remove` |
 | Device catalog | `device_type.create/update/delete`, `device_group.create/update/delete` |
-| Enrollment secrets | `registration_token.create/revoke`, `enrollment_key.create/revoke` |
-| Enrollment | `enrollment_request.submit` (device), `enrollment_request.approve/reject` (operator), `enrollment_request.claim` (device receives its credential), `device.register`, `device.reregister` |
+| Enrollment secrets | `registration_token.create/revoke`, `enrollment_key.create/revoke`, `enrollment_key.auto_approve/auto_approve_off` |
+| Enrollment | `enrollment_request.submit` (device), `enrollment_request.approve/reject` (operator, `bulk: true` from the bulk endpoints), `enrollment_request.auto_approve` (the key's rule), `enrollment_request.claim` (device receives its credential), `device.register`, `device.reregister` |
 | Devices | `device.update` (before/after of name, type, group), `device.enable`, `device.disable`, `device.delete`, `device.credential.rotate`, `device.credential.revoke`, `device.mqtt_credential.issue`, `device.mqtt_credential.revoke`, `device.command.ping`, `mqtt.test_publish` |
 | Remote access | `connectivity.enroll` (first or new WireGuard key), `connectivity.revoke`, `connectivity.reenroll`, `connectivity.key_change_rejected`, `connectivity.host_key_mismatch`, `device.shell.start/end/denied`, `device.shell.certificate` (`meteorcloud-ssh`), `device.logs.start/end/list/denied` |
 | Software | `artifact.upload/update/delete`, `artifact.download_link.create`, `release.create/update/delete`, `deployment.create/cancel/pause/resume/retry_failed/rollback` |

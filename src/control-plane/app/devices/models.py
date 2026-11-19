@@ -336,6 +336,47 @@ class EnrollmentApiKey(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
 
+    # Auto-approve rule (optional). A matching request is approved as soon as it is
+    # submitted; see EnrollmentService._auto_approve_rule_matches.
+    auto_approve: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    auto_approve_device_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("device_types.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    auto_approve_device_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("device_groups.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Normalized serial numbers and MAC addresses; empty means any device (then a maximum is required).
+    auto_approve_allowlist: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default="[]",
+    )
+    auto_approve_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    auto_approve_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    auto_approve_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    @property
+    def auto_approve_rule(self) -> dict[str, Any] | None:
+        """The auto-approve rule as the API shows it, or None when it is off."""
+        if not self.auto_approve:
+            return None
+        return {
+            "device_type_id": self.auto_approve_device_type_id,
+            "device_group_id": self.auto_approve_device_group_id,
+            "allowlist": list(self.auto_approve_allowlist or []),
+            "max_devices": self.auto_approve_max,
+            "until": self.auto_approve_until,
+            "approved_count": self.auto_approve_count,
+        }
+
 
 class DeviceEnrollmentRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """A device-initiated enrollment request awaiting admin review.
@@ -439,6 +480,8 @@ class DeviceEnrollmentRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Approved by the enrollment key's auto-approve rule rather than by a person.
+    auto_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     claimed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

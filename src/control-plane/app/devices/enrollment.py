@@ -19,7 +19,7 @@ from app.audit.service import AuditRecorder
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError, ConflictError, UnauthorizedError
 from app.core.metrics import ENROLLMENT_POLLS, ENROLLMENT_REQUESTS
-from app.devices.identity import DeviceIdentity, match_existing_device
+from app.devices.identity import DeviceIdentity, identity_in_allowlist, match_existing_device
 from app.devices.models import (
     Device,
     DeviceEnrollmentRequest,
@@ -51,6 +51,7 @@ class EnrollmentService:
         self.api_keys = EnrollmentApiKeyRepository(session)
         self.requests = DeviceEnrollmentRequestRepository(session)
         self.devices = DeviceRepository(session)
+        self._approved_on_submit = False
 
     # ------------------------------------------------------------- submit
     def submit_request(
@@ -59,13 +60,14 @@ class EnrollmentService:
         api_key: EnrollmentApiKey,
         payload: AgentEnrollRequest,
     ) -> AgentEnrollResponse:
+        self._approved_on_submit = False
         try:
             response = self._submit_request(api_key, payload)
         except Exception:
             self.session.rollback()
             ENROLLMENT_REQUESTS.labels(result="error").inc()
             raise
-        ENROLLMENT_REQUESTS.labels(result="submitted").inc()
+        ENROLLMENT_REQUESTS.labels(result="auto_approved" if self._approved_on_submit else "submitted").inc()
         return response
 
     def _submit_request(
@@ -89,8 +91,9 @@ class EnrollmentService:
         # and concurrent submissions must not all pass the pending cap.
         self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(str(api_key.organization_id), 0))))
         existing = None if identity.is_empty else self._find_reusable_request(api_key, identity)
+        auto_approve = self._auto_approve_rule_matches(api_key, identity, now)
         if existing is not None:
-            if existing.status == "pending" and not self._counted_for_key(existing, api_key, now):
+            if existing.status == "pending" and not auto_approve and not self._counted_for_key(existing, api_key, now):
                 # Moving another key's request, or reviving an expired one, takes a new slot.
                 self._enforce_pending_cap(api_key, now)
             request = existing
@@ -115,7 +118,8 @@ class EnrollmentService:
             request.expires_at = expires_at
             self.requests.update(request)
         else:
-            self._enforce_pending_cap(api_key, now)
+            if not auto_approve:
+                self._enforce_pending_cap(api_key, now)
             request = DeviceEnrollmentRequest(
                 organization_id=api_key.organization_id,
                 api_key_id=api_key.id,
@@ -155,6 +159,9 @@ class EnrollmentService:
                 },
             )
 
+        if auto_approve and request.status == "pending":
+            self._approve_by_rule(api_key, request, now)
+
         api_key.last_used_at = now
         self.api_keys.update(api_key)
 
@@ -166,6 +173,58 @@ class EnrollmentService:
             status=request.status,
             poll_interval_seconds=self.settings.enrollment_poll_interval_seconds,
             expires_at=request.expires_at,
+        )
+
+    def _auto_approve_rule_matches(self, api_key: EnrollmentApiKey, identity: DeviceIdentity, now: datetime) -> bool:
+        """Whether the key's auto-approve rule covers this device right now.
+
+        Hardware that is already a device (here or in another organization) always
+        waits for a person: claiming would replace that device's credential.
+        """
+        if not api_key.auto_approve or identity.is_empty:
+            return False
+        until = api_key.auto_approve_until
+        if until is not None:
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=UTC)
+            if until <= now:
+                return False
+        if api_key.auto_approve_max is not None and api_key.auto_approve_count >= api_key.auto_approve_max:
+            return False
+        allowlist = api_key.auto_approve_allowlist or []
+        if allowlist and not identity_in_allowlist(identity, allowlist):
+            return False
+        known = self.devices.list_candidates_for_identity(
+            serial_number=identity.serial_number,
+            mac_addresses=identity.mac_addresses,
+        )
+        return not any(identity.matches(device) for device in known)
+
+    def _approve_by_rule(self, api_key: EnrollmentApiKey, request: DeviceEnrollmentRequest, now: datetime) -> None:
+        if api_key.auto_approve_device_type_id is not None:
+            request.device_type_id = api_key.auto_approve_device_type_id
+        if api_key.auto_approve_device_group_id is not None:
+            request.device_group_id = api_key.auto_approve_device_group_id
+        request.status = "approved"
+        request.auto_approved = True
+        self._approved_on_submit = True
+        request.reviewed_by_user_id = None
+        request.reviewed_at = now
+        self.requests.update(request)
+        api_key.auto_approve_count = (api_key.auto_approve_count or 0) + 1
+        AuditRecorder(self.session).record(
+            organization_id=api_key.organization_id,
+            action="enrollment_request.auto_approve",
+            resource_type="enrollment_request",
+            resource_id=request.id,
+            actor_type="enrollment_key",
+            actor_id=api_key.id,
+            metadata={
+                "key_prefix": api_key.key_prefix,
+                "serial_number": request.serial_number,
+                "approved_count": api_key.auto_approve_count,
+                "max_devices": api_key.auto_approve_max,
+            },
         )
 
     def _enforce_pending_cap(self, api_key: EnrollmentApiKey, now: datetime) -> None:
