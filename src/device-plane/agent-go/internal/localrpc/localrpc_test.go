@@ -194,9 +194,10 @@ func TestSystemGroups(t *testing.T) {
 func TestConnectionLimitAndAuditFields(t *testing.T) {
 	logs := &syncBuffer{}
 	s := &Server{
-		Log:       slog.New(slog.NewTextHandler(logs, nil)),
-		Authorize: func(Peer, string) error { return nil },
-		MaxConns:  1,
+		Log:        slog.New(slog.NewTextHandler(logs, nil)),
+		Authorize:  func(Peer, string) error { return nil },
+		MaxConns:   1,
+		MaxPerUser: 5,
 		Handlers: map[string]Handler{
 			"install": {
 				Run: func(context.Context, Peer, json.RawMessage) (any, error) { return "ok", nil },
@@ -233,10 +234,58 @@ func TestConnectionLimitAndAuditFields(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	out := logs.String()
-	if !strings.Contains(out, "too many connections") || !strings.Contains(out, "name=demo.service") {
+	if !strings.Contains(out, "connection refused: too many connections") || !strings.Contains(out, "name=demo.service") {
 		t.Errorf("log:\n%s", out)
 	}
 	if strings.Contains(out, "hunter2") || strings.Contains(out, "content") {
 		t.Errorf("audit line carries params:\n%s", out)
+	}
+}
+
+func TestPerUserLimitKeepsRoomForOthers(t *testing.T) {
+	logs := &syncBuffer{}
+	s := &Server{
+		Log: slog.New(slog.NewTextHandler(logs, nil)), Authorize: func(Peer, string) error { return nil },
+		MaxConns: 10, MaxPerUser: 2,
+		Handlers: map[string]Handler{"status": {Run: func(context.Context, Peer, json.RawMessage) (any, error) { return "ok", nil }}},
+	}
+	path := serve(t, s)
+	// This user holds its two slots with requests it never finishes.
+	for range 2 {
+		c, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := Call(context.Background(), path, "status", nil, nil); err == nil {
+		t.Error("third connection from one user was served")
+	}
+	if !strings.Contains(logs.String(), "too many connections from this user") {
+		t.Errorf("log:\n%s", logs.String())
+	}
+}
+
+func TestAdmit(t *testing.T) {
+	s := &Server{MaxConns: 4, MaxPerUser: 2}
+	tests := []struct {
+		uid              uint32
+		inFlight, fromMe int
+		refused          bool
+	}{
+		{1000, 0, 0, false},
+		{1000, 1, 1, false},
+		{1000, 2, 2, true},  // this user has its share
+		{1001, 2, 0, false}, // another user still gets in
+		{1001, 4, 0, true},  // the server is full
+		{0, 4, 4, false},    // root uses the reserve, no per-user cap
+		{0, 4 + rootReserve, 0, true},
+	}
+	for _, tt := range tests {
+		why := s.admit(Peer{UID: tt.uid}, tt.inFlight, tt.fromMe)
+		if (why != "") != tt.refused {
+			t.Errorf("uid %d inFlight %d fromMe %d: %q", tt.uid, tt.inFlight, tt.fromMe, why)
+		}
 	}
 }

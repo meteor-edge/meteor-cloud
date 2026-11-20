@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -115,42 +117,91 @@ func TestSocketStatusAndModuleRestart(t *testing.T) {
 		t.Errorf("no params: %v", err)
 	}
 
-	// Restarting the socket module itself answers first, then serves on a new socket.
-	before := SocketID(p.AgentSocket())
+	// Restarting the socket module itself answers first, then a new run serves.
+	// Each run sets a new Since, and a run starts only after the previous one
+	// closed its socket, so a new Since means the old server is gone.
+	before := sinceOf(reply)
 	if err := localrpc.Call(ctx, p.AgentSocket(), "module.restart", ModuleRestartParams{Name: "socket"}, nil); err != nil {
 		t.Fatalf("restart socket: %v", err)
 	}
 	eventually(t, "new socket serves", func() bool {
-		id := SocketID(p.AgentSocket())
-		return id != "" && id != before && localrpc.Call(ctx, p.AgentSocket(), "status", nil, &reply) == nil
+		var r StatusReply
+		return localrpc.Call(ctx, p.AgentSocket(), "status", nil, &r) == nil && sinceOf(r) != before
 	})
 }
 
-func TestRemoveStaleSocket(t *testing.T) {
+// sinceOf is when the socket module's current run started.
+func sinceOf(r StatusReply) string {
+	if h := r.Modules["socket"]; h.Since != nil {
+		return fmt.Sprint(*h.Since)
+	}
+	return ""
+}
+
+func TestAgentSocketOwnership(t *testing.T) {
 	p := agentRoot(t)
 	path := p.AgentSocket()
-	if err := removeStaleSocket(path); err != nil {
-		t.Errorf("missing path: %v", err)
-	}
-	// A live socket (another agent) is left alone.
-	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+
+	// A socket left by a dead agent (nobody holds the lock) is replaced.
+	stale, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := removeStaleSocket(path); err == nil || !strings.Contains(err.Error(), "another process") {
-		t.Errorf("live socket: %v", err)
+	stale.SetUnlinkOnClose(false)
+	stale.Close()
+
+	// Agents starting at the same time: exactly one gets the socket.
+	type result struct {
+		l       *net.UnixListener
+		release func()
+		err     error
 	}
-	// A socket nobody serves any more (a crashed agent) is removed.
-	l.SetUnlinkOnClose(false)
+	results := make(chan result, 8)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			l, release, err := listenAgentSocket(path)
+			results <- result{l, release, err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	var owner result
+	won := 0
+	for r := range results {
+		if r.err == nil {
+			won++
+			owner = r
+		} else if !strings.Contains(r.err.Error(), "another agent owns") {
+			t.Errorf("loser error: %v", r.err)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d agents got the socket", won)
+	}
+	if c, err := net.Dial("unix", path); err != nil {
+		t.Errorf("owner's socket is gone: %v", err)
+	} else {
+		c.Close()
+	}
+
+	// After the owner closes, the next agent takes over.
+	owner.l.Close()
+	owner.release()
+	l, release, err := listenAgentSocket(path)
+	if err != nil {
+		t.Fatalf("after release: %v", err)
+	}
 	l.Close()
-	if err := removeStaleSocket(path); err != nil || exists(path) {
-		t.Errorf("stale socket: %v, exists %v", err, exists(path))
-	}
-	// Anything else is refused.
+	release()
+
+	// Anything that is not a socket is refused and kept.
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := removeStaleSocket(path); err == nil || !exists(path) {
+	if _, _, err := listenAgentSocket(path); err == nil || !exists(path) {
 		t.Errorf("regular file: %v", err)
 	}
 }

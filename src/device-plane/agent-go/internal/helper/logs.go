@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,7 +36,7 @@ type LogsRequest struct {
 	Lines int `json:"lines"`
 	// Since is 15m, 1h, 7d, ... (optional).
 	Since string `json:"since"`
-	// Grep keeps lines that contain this text, ignoring case (optional).
+	// Grep keeps lines that contain this text, ignoring ASCII case (optional).
 	Grep string `json:"grep"`
 }
 
@@ -114,21 +115,27 @@ func auditLogs(raw json.RawMessage) []any {
 	return []any{"source", r.Source, "unit", r.Unit, "lines", r.Lines}
 }
 
-// maxLineBytes cuts very long journal lines; the rest of the line is dropped.
+// maxLineBytes is how much of one journal line is kept. A longer line is still
+// searched in full, and the kept part ends with a truncation note.
 const maxLineBytes = 16 << 10
 
 // matcher keeps the last n lines that contain needle (any line when empty) while
-// journalctl writes into it, so memory stays near n lines whatever the output size.
+// journalctl writes into it, so memory stays near n × maxLineBytes whatever the
+// output size or line length. Matching ignores ASCII case.
 type matcher struct {
-	needle  string
-	n       int
-	keep    []string
-	partial []byte
-	cut     bool // the current line passed maxLineBytes
+	needle []byte // lower-cased
+	n      int
+	keep   []string
+
+	// The line being written.
+	kept    []byte // its first maxLineBytes
+	dropped int    // bytes after that
+	found   bool   // needle seen anywhere in it
+	tail    []byte // last len(needle)-1 lower-cased bytes, for matches across writes
 }
 
 func newMatcher(needle string, n int) *matcher {
-	return &matcher{needle: strings.ToLower(needle), n: n}
+	return &matcher{needle: lowerASCII([]byte(needle)), n: n}
 }
 
 // Write implements io.Writer.
@@ -136,42 +143,57 @@ func (m *matcher) Write(p []byte) (int, error) {
 	total := len(p)
 	for len(p) > 0 {
 		i := bytes.IndexByte(p, '\n')
-		chunk := p
+		seg := p
 		if i >= 0 {
-			chunk = p[:i]
+			seg = p[:i]
 		}
-		if !m.cut {
-			room := maxLineBytes - len(m.partial)
-			if len(chunk) > room {
-				chunk, m.cut = chunk[:room], true
-			}
-			m.partial = append(m.partial, chunk...)
-		}
+		m.add(seg)
 		if i < 0 {
 			break
 		}
-		m.line(string(m.partial))
-		m.partial, m.cut = m.partial[:0], false
+		m.endLine()
 		p = p[i+1:]
 	}
 	return total, nil
 }
 
-func (m *matcher) line(s string) {
-	if m.needle != "" && !strings.Contains(strings.ToLower(s), m.needle) {
+// add appends part of the current line: keep what fits, search all of it.
+func (m *matcher) add(seg []byte) {
+	room := maxLineBytes - len(m.kept)
+	if room > 0 {
+		m.kept = append(m.kept, seg[:min(len(seg), room)]...)
+	}
+	m.dropped += max(0, len(seg)-max(room, 0))
+	if len(m.needle) == 0 || m.found {
 		return
 	}
-	m.keep = append(m.keep, s)
-	if len(m.keep) >= 2*m.n {
-		m.keep = append(m.keep[:0], m.keep[len(m.keep)-m.n:]...)
+	window := append(m.tail, lowerASCII(seg)...)
+	if bytes.Contains(window, m.needle) {
+		m.found = true
+		return
 	}
+	keep := min(len(window), len(m.needle)-1)
+	m.tail = append(m.tail[:0], window[len(window)-keep:]...)
+}
+
+func (m *matcher) endLine() {
+	if len(m.needle) == 0 || m.found {
+		line := string(m.kept)
+		if m.dropped > 0 {
+			line += fmt.Sprintf(" …[truncated %d bytes]", m.dropped)
+		}
+		m.keep = append(m.keep, line)
+		if len(m.keep) >= 2*m.n {
+			m.keep = append(m.keep[:0], m.keep[len(m.keep)-m.n:]...)
+		}
+	}
+	m.kept, m.dropped, m.found, m.tail = m.kept[:0], 0, false, m.tail[:0]
 }
 
 // lines returns the kept lines, including an unterminated last one.
 func (m *matcher) lines() []string {
-	if len(m.partial) > 0 {
-		m.line(string(m.partial))
-		m.partial = m.partial[:0]
+	if len(m.kept) > 0 || m.dropped > 0 {
+		m.endLine()
 	}
 	if len(m.keep) > m.n {
 		m.keep = m.keep[len(m.keep)-m.n:]
@@ -180,4 +202,17 @@ func (m *matcher) lines() []string {
 		return []string{}
 	}
 	return m.keep
+}
+
+// lowerASCII lower-cases A-Z only, so a multi-byte character split across
+// writes is never altered.
+func lowerASCII(b []byte) []byte {
+	out := make([]byte, len(b))
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		out[i] = c
+	}
+	return out
 }

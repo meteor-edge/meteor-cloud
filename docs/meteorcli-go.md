@@ -108,8 +108,13 @@ sudo usermod -aG meteorcli,meteorcli-admin alice   # then log in again
 
 Every request is logged to the journal with the caller's uid and pid, the method, the outcome and
 a few named fields (a module or unit name); raw request parameters are never logged. Answers never
-contain secrets (status says `present`/`missing`). The socket serves at most 16 connections at once
-and gives a client 5 seconds to send its request.
+contain secrets (status says `present`/`missing`). The socket serves at most 16 connections at once,
+at most 4 from one user (root has a few extra slots), and gives a client 5 seconds to send its
+request, so one user holding connections open locks out neither other users nor root.
+
+The agent holds an `flock` on `agent.sock.lock` while it serves `agent.sock`. A second agent with
+the same paths refuses to start instead of replacing the live socket; after a crash the kernel drops
+the lock and the next start replaces the stale socket.
 
 ### Root helper
 
@@ -133,7 +138,8 @@ installs units from releases it verified.
 
 Tools (`systemctl`, `journalctl`) are looked up only in a fixed root-owned `PATH`, never in the
 helper's environment. `logs.read` streams `journalctl` output into a buffer of the requested
-number of matching lines, and cuts single lines at 16 KiB.
+number of matching lines. `grep` searches every line in full (ignoring ASCII case); a line longer
+than 16 KiB is returned cut, ending in `…[truncated N bytes]`.
 
 Docker and file logs, `systemd.control`, users and Wi-Fi follow the Python helpers in later pull
 requests.

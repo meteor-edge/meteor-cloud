@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"meteorcloud/meteorcli/internal/agent"
+	"meteorcloud/meteorcli/internal/localrpc"
 )
 
 // groupsOf puts the test user in the given groups for the agent socket.
@@ -82,18 +84,17 @@ func TestStatusAndModuleRestartThroughAgent(t *testing.T) {
 	}
 
 	sock := filepath.Join(root, "run", "meteorcli", "agent.sock")
-	before := agent.SocketID(sock)
+	before := socketSince(t, sock)
 	r := meteorcli(t, root, nil, "module", "restart", "socket")
 	if r.code != 0 || !strings.Contains(r.stdout, "Module socket restarted.") {
 		t.Errorf("module restart = %+v", r)
 	}
-	// The restarted socket module listens on a new socket; the old one may still
-	// answer for a moment, so wait for the new one before going on.
+	// A new run of the socket module (new Since) starts only after the old one
+	// closed its socket; wait for it, or the next request may reach neither.
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		id := agent.SocketID(sock)
-		if id != "" && id != before && strings.Contains(meteorcli(t, root, nil, "status").stdout, "Agent:          running") {
-			break
+	for since := ""; since == "" || since == before; since = socketSince(t, sock) {
+		if time.Now().After(deadline) {
+			t.Fatal("the restarted socket module never served again")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -103,6 +104,20 @@ func TestStatusAndModuleRestartThroughAgent(t *testing.T) {
 	if r := meteorcli(t, root, nil, "module", "stop", "x"); r.code != 2 {
 		t.Errorf("usage = %+v", r)
 	}
+}
+
+// socketSince is when the agent's socket module started its current run ("" if
+// the agent does not answer).
+func socketSince(t *testing.T, sock string) string {
+	t.Helper()
+	var r agent.StatusReply
+	if err := localrpc.Call(context.Background(), sock, "status", nil, &r); err != nil {
+		return ""
+	}
+	if h := r.Modules["socket"]; h.Since != nil {
+		return fmt.Sprint(*h.Since)
+	}
+	return ""
 }
 
 func TestReadGroupCannotRestartModules(t *testing.T) {

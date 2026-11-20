@@ -34,5 +34,10 @@ RUN printf '{"version":1,"domain":"meteor.example"}\n' > /etc/meteorcli/config.j
  && chown -R meteor:meteor /var/lib/meteorcli/identity \
  && chmod 0600 /var/lib/meteorcli/identity/*
 
+HEALTHCHECK --interval=10s --timeout=5s --retries=12 CMD ["systemctl", "is-active", "--quiet", "meteorcli.service"]
 STOPSIGNAL SIGRTMIN+3
+# systemd must start as root (PID 1); the agent itself runs as meteor (User= in
+# meteorcli.service), which is what this image tests.
+# trivy:ignore:DS-0002
+USER root
 CMD ["/sbin/init"]

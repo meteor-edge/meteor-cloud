@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -144,18 +145,30 @@ func TestMatcher(t *testing.T) {
 		t.Errorf("empty output: %#v", got)
 	}
 
-	// An oversized line is cut, and the lines after it are still searched.
+	// A long line is searched in full (the match is past the kept part and split
+	// across writes), kept cut with a note, and the lines after it are searched too.
 	m = newMatcher("ERROR", 10)
-	big := strings.Repeat("a", 3*maxLineBytes) + " error hidden at the end\n"
-	for _, chunk := range []string{big[:1000], big[1000:], "short error li", "ne\nok\n", "tail error"} {
+	big := strings.Repeat("a", 3*maxLineBytes) + " Err"
+	for _, chunk := range []string{big[:1000], big[1000:], "or at the end\nno match\nshort error li", "ne\nok\n", "tail ERROR"} {
 		_, _ = m.Write([]byte(chunk))
 	}
 	got := m.lines()
-	if len(got) != 2 || got[0] != "short error line" || got[1] != "tail error" {
-		t.Errorf("lines %q", got)
+	if len(got) != 3 {
+		t.Fatalf("lines %d: %.80q", len(got), got)
 	}
-	if len(m.keep[0]) > maxLineBytes {
-		t.Error("kept an uncut line")
+	wantDropped := 3*maxLineBytes + len(" Error at the end") - maxLineBytes
+	if !strings.HasSuffix(got[0], fmt.Sprintf(" …[truncated %d bytes]", wantDropped)) || len(got[0]) > maxLineBytes+40 {
+		t.Errorf("long line %d bytes, ends %q", len(got[0]), got[0][len(got[0])-40:])
+	}
+	if got[1] != "short error line" || got[2] != "tail ERROR" {
+		t.Errorf("lines %q", got[1:])
+	}
+
+	// A long line that does not match is not kept; non-ASCII text is untouched.
+	m = newMatcher("zzz", 5)
+	_, _ = m.Write([]byte(strings.Repeat("y", 2*maxLineBytes) + "\nÄrger zzz\n"))
+	if got := m.lines(); len(got) != 1 || got[0] != "Ärger zzz" {
+		t.Errorf("got %q", got)
 	}
 }
 

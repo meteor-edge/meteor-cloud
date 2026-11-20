@@ -31,6 +31,11 @@ const (
 	DefaultMaxRequest = 512 << 10
 	// DefaultMaxConns bounds connections served at once; more are closed at once.
 	DefaultMaxConns = 16
+	// DefaultMaxPerUser bounds connections one uid holds, so one user cannot
+	// take every slot and lock the others out.
+	DefaultMaxPerUser = 4
+	// rootReserve is extra room only root may use when the server is full.
+	rootReserve = 4
 	// readTimeout bounds sending the request, so a slow client frees its slot.
 	readTimeout = 5 * time.Second
 )
@@ -102,6 +107,8 @@ type Server struct {
 	MaxRequest int64
 	// MaxConns bounds connections served at once; zero means DefaultMaxConns.
 	MaxConns int
+	// MaxPerUser bounds connections from one uid; zero means DefaultMaxPerUser.
+	MaxPerUser int
 	// Idle, when set, makes Serve return after this long without a connection
 	// (socket-activated services exit and systemd starts them again on demand).
 	Idle time.Duration
@@ -115,6 +122,7 @@ func (s *Server) Serve(ctx context.Context, l *net.UnixListener) error {
 	defer cancel()
 	done := make(chan struct{})
 	conns := make(chan *net.UnixConn)
+	type ended struct{ uid uint32 }
 	acceptErr := make(chan error, 1)
 	go func() { // owned: ends when the listener closes below
 		defer close(done)
@@ -134,7 +142,8 @@ func (s *Server) Serve(ctx context.Context, l *net.UnixListener) error {
 	}()
 
 	var inFlight int
-	finished := make(chan struct{})
+	perUser := map[uint32]int{}
+	finished := make(chan ended)
 	var idle <-chan time.Time
 	resetIdle := func() {
 		if s.Idle > 0 && inFlight == 0 {
@@ -154,19 +163,29 @@ loop:
 			result = fmt.Errorf("accept: %w", err)
 			break loop
 		case c := <-conns:
-			if inFlight >= s.maxConns() {
-				s.Log.Warn("too many connections; closing one", "limit", s.maxConns())
+			peer, err := PeerOf(c)
+			if err != nil {
+				s.Log.Warn("rejected connection without peer credentials", "err", err)
+				c.Close()
+				continue
+			}
+			if why := s.admit(peer, inFlight, perUser[peer.UID]); why != "" {
+				s.Log.Warn("connection refused: "+why, "uid", peer.UID, "pid", peer.PID)
 				c.Close()
 				continue
 			}
 			inFlight++
+			perUser[peer.UID]++
 			idle = nil
 			go func() { // owned: Serve waits for it below
-				defer func() { finished <- struct{}{} }()
-				s.handle(ctx, c)
+				defer func() { finished <- ended{peer.UID} }()
+				s.handle(ctx, c, peer)
 			}()
-		case <-finished:
+		case e := <-finished:
 			inFlight--
+			if perUser[e.uid]--; perUser[e.uid] <= 0 {
+				delete(perUser, e.uid)
+			}
 			resetIdle()
 		}
 	}
@@ -179,17 +198,28 @@ loop:
 	return result
 }
 
-func (s *Server) handle(ctx context.Context, c *net.UnixConn) {
+// admit says why a new connection from p is refused, or "" to serve it. Each uid
+// gets at most MaxPerUser slots, and root has a few slots beyond MaxConns, so a
+// user holding connections open can lock out neither other users nor root.
+func (s *Server) admit(p Peer, inFlight, fromPeer int) string {
+	limit := s.maxConns()
+	if p.UID == 0 {
+		limit += rootReserve
+	} else if fromPeer >= s.maxPerUser() {
+		return "too many connections from this user"
+	}
+	if inFlight >= limit {
+		return "too many connections"
+	}
+	return ""
+}
+
+func (s *Server) handle(ctx context.Context, c *net.UnixConn, peer Peer) {
 	defer c.Close()
 	start := time.Now()
 	_ = c.SetReadDeadline(start.Add(readTimeout))
 	_ = c.SetWriteDeadline(start.Add(readTimeout + s.timeout() + 10*time.Second))
 
-	peer, err := PeerOf(c)
-	if err != nil {
-		s.Log.Warn("rejected connection without peer credentials", "err", err)
-		return
-	}
 	req, err := s.read(c)
 	if err != nil {
 		s.Log.Warn("bad request", "uid", peer.UID, "pid", peer.PID, "err", err)
@@ -262,6 +292,13 @@ func (s *Server) maxConns() int {
 	return DefaultMaxConns
 }
 
+func (s *Server) maxPerUser() int {
+	if s.MaxPerUser > 0 {
+		return s.MaxPerUser
+	}
+	return DefaultMaxPerUser
+}
+
 func (s *Server) timeout() time.Duration {
 	if s.Timeout > 0 {
 		return s.Timeout
@@ -305,60 +342,4 @@ func PeerOf(c *net.UnixConn) (Peer, error) {
 		return Peer{}, fmt.Errorf("SO_PEERCRED: %w", credErr)
 	}
 	return Peer{UID: cred.Uid, GID: cred.Gid, PID: cred.Pid}, nil
-}
-
-// Call sends one request to the socket at path and decodes the result into out
-// (when not nil). A missing socket or one nobody listens on returns CodeUnavailable;
-// a socket the caller may not open returns CodeDenied.
-func Call(ctx context.Context, path, method string, params, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, callTimeout(ctx))
-	defer cancel()
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", path)
-	if err != nil {
-		switch {
-		case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
-			return Errorf(CodeDenied, "cannot open %s: permission denied", path)
-		case errors.Is(err, syscall.ENOENT), errors.Is(err, syscall.ECONNREFUSED):
-			return Errorf(CodeUnavailable, "nothing listens on %s", path)
-		}
-		return Errorf(CodeUnavailable, "%v", err)
-	}
-	defer conn.Close()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-	req := Request{Method: method}
-	if params != nil {
-		if req.Params, err = json.Marshal(params); err != nil {
-			return fmt.Errorf("%s: %w", method, err)
-		}
-	}
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return fmt.Errorf("%s: send: %w", method, err)
-	}
-	var resp Response
-	if err := json.NewDecoder(io.LimitReader(conn, 16<<20)).Decode(&resp); err != nil {
-		return fmt.Errorf("%s: no answer: %w", method, err)
-	}
-	if !resp.OK {
-		if resp.Error == nil {
-			return Errorf(CodeFailed, "%s failed", method)
-		}
-		return resp.Error
-	}
-	if out != nil && len(resp.Result) > 0 {
-		if err := json.Unmarshal(resp.Result, out); err != nil {
-			return fmt.Errorf("%s: decode answer: %w", method, err)
-		}
-	}
-	return nil
-}
-
-// callTimeout keeps an earlier deadline from ctx, else allows 60 s.
-func callTimeout(ctx context.Context) time.Duration {
-	if d, ok := ctx.Deadline(); ok {
-		return time.Until(d)
-	}
-	return 60 * time.Second
 }

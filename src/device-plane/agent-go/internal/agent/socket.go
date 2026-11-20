@@ -93,10 +93,12 @@ func (m *SocketModule) Critical() bool { return true }
 
 // Run implements Module: listen, serve until ctx ends.
 func (m *SocketModule) Run(ctx context.Context, d Deps) error {
-	l, err := listenAgentSocket(d.Paths.AgentSocket())
+	l, release, err := listenAgentSocket(d.Paths.AgentSocket())
 	if err != nil {
 		return err
 	}
+	// Released after Serve returned and closed (and unlinked) the socket.
+	defer release()
 	srv := &localrpc.Server{
 		Handlers:  m.handlers(d),
 		Authorize: m.authorize,
@@ -194,9 +196,68 @@ func status(d Deps) StatusReply {
 	return r
 }
 
-// removeStaleSocket removes a socket left by a crashed agent. It refuses when
-// something still answers on it (another agent with the same paths) or when the
-// path is not a socket.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// listenAgentSocket takes the socket's lock, replaces a stale socket, and makes
+// the new one meteor:meteorcli 0660, so only the groups can connect. The lock
+// (an flock on <path>.lock, freed by the kernel if the agent dies) is held until
+// release is called, after the listener closed: two agents with the same paths
+// can never remove each other's live socket.
+func listenAgentSocket(path string) (l *net.UnixListener, release func(), err error) {
+	unlock, err := lockSocket(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			unlock()
+		}
+	}()
+	// We hold the lock, so whatever socket is there has no owner any more.
+	if err := removeStaleSocket(path); err != nil {
+		return nil, nil, err
+	}
+	l, err = net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		return nil, nil, fmt.Errorf("socket: %w", err)
+	}
+	l.SetUnlinkOnClose(true)
+	if err := os.Chmod(path, 0o660); err != nil {
+		l.Close()
+		return nil, nil, fmt.Errorf("socket: chmod %s: %w", path, err)
+	}
+	if gid, ok := localrpc.LookupGID(GroupRead); ok {
+		// The agent may hand the socket to a group it belongs to
+		// (SupplementaryGroups=meteorcli in the unit); no capability needed.
+		if err := os.Chown(path, -1, gid); err != nil {
+			l.Close()
+			return nil, nil, fmt.Errorf("socket: chgrp %s %s: %w", GroupRead, path, err)
+		}
+	}
+	return l, unlock, nil
+}
+
+// lockSocket takes an exclusive, non-blocking flock on path+".lock".
+func lockSocket(path string) (unlock func(), err error) {
+	f, err := os.OpenFile(path+".lock", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("socket: lock: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("socket: another agent owns %s", path)
+		}
+		return nil, fmt.Errorf("socket: lock %s: %w", path, err)
+	}
+	return func() { f.Close() }, nil // closing the file drops the lock
+}
+
+// removeStaleSocket removes a socket left by an agent that died. The caller
+// holds the socket's lock. Anything that is not a socket is left alone.
 func removeStaleSocket(path string) error {
 	st, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -208,57 +269,8 @@ func removeStaleSocket(path string) error {
 	if st.Mode()&fs.ModeSocket == 0 {
 		return fmt.Errorf("socket: %s exists and is not a socket", path)
 	}
-	if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
-		c.Close()
-		return fmt.Errorf("socket: another process serves %s; is a second agent running?", path)
-	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("socket: remove stale %s: %w", path, err)
 	}
 	return nil
-}
-
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// listenAgentSocket replaces a stale socket and makes the new one
-// meteor:meteorcli 0660, so only the groups can connect.
-func listenAgentSocket(path string) (*net.UnixListener, error) {
-	if err := removeStaleSocket(path); err != nil {
-		return nil, err
-	}
-	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-	if err != nil {
-		return nil, fmt.Errorf("socket: %w", err)
-	}
-	l.SetUnlinkOnClose(true)
-	if err := os.Chmod(path, 0o660); err != nil {
-		l.Close()
-		return nil, fmt.Errorf("socket: chmod %s: %w", path, err)
-	}
-	if gid, ok := localrpc.LookupGID(GroupRead); ok {
-		// The agent may hand the socket to a group it belongs to
-		// (SupplementaryGroups=meteorcli in the unit); no capability needed.
-		if err := os.Chown(path, -1, gid); err != nil {
-			l.Close()
-			return nil, fmt.Errorf("socket: chgrp %s %s: %w", GroupRead, path, err)
-		}
-	}
-	return l, nil
-}
-
-// SocketID identifies the socket file at path ("" when there is none): inode and
-// change time, since a new socket often gets the inode of the one just removed.
-// Tests use it to see that a restarted socket module listens on a new socket.
-func SocketID(path string) string {
-	st, err := os.Stat(path)
-	if err != nil {
-		return ""
-	}
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-		return fmt.Sprintf("%d-%d.%09d", sys.Ino, sys.Ctim.Sec, sys.Ctim.Nsec)
-	}
-	return st.ModTime().String()
 }
