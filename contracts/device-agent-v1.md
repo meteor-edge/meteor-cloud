@@ -85,12 +85,12 @@ All under `/api/v1/agent`. Request and answer schemas: `schemas/agent/http/<name
 | Method and path | Auth | Request | Answer |
 | --- | --- | --- | --- |
 | `POST /register` | token in body | `register.request` | `201` `register.response` |
-| `POST /enroll/check` (also `GET`) | API key | `{}` | `200` `enroll-check.response` |
+| `POST /enroll/check` (also `GET`) | API key | `{}` or no body | `200` `enroll-check.response` |
 | `POST /enroll/request` | API key | `enroll-request.request` | `201` `enroll-request.response` |
 | `POST /enroll/poll` | claim secret in body | `enroll-poll.request` | `200` `enroll-poll.response` |
 | `POST /heartbeat` | device | `heartbeat.request` | `200` `heartbeat.response` |
 | `GET /mqtt` | device | | `200` `mqtt.response` |
-| `POST /mqtt/credentials` | device | `{}` | `200` `mqtt-credentials.response` |
+| `POST /mqtt/credentials` | device | `{}` or no body | `200` `mqtt-credentials.response` |
 | `GET /software` | device | | `200` `software.response` |
 | `GET /signing-keys` | device | | `200` `signing-keys.response`; `404` = server does not sign |
 | `GET /artifacts/{artifact_id}/download` | device | | `200` bytes, or `302` to storage |
@@ -179,7 +179,8 @@ always. Only these topics; anything else is denied by the broker policy.
 
 ## Changing the contract
 
-1. Change the schema under `schemas/agent/` and this page in the same PR.
+1. Change the schema under `schemas/agent/` and this page in the same PR. Request schemas carry the
+   same length, range and count limits as the API's request models; a control-plane test fails when they differ.
 2. Additive change: protocol stays 1. Breaking change: protocol 2, and the server must keep
    serving protocol 1 until no agent uses it.
 3. Run `make backend-test` (validates the control plane) and `make agent-contract-test`

@@ -52,7 +52,7 @@
         "body": {
           "public_key": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
           "ssh_user": "pi",
-          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIContractHostKeyContractHostKeyContract0 root@device"
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK root@device"
         }
       },
       "response": {
@@ -229,7 +229,7 @@
               "username": "ops",
               "password": "<new_user_password>",
               "sudo": true,
-              "authorized_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpsKeyOpsKeyOpsKeyOpsKeyOpsKeyOpsKey ops"
+              "authorized_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJvgpEA2/Sahz06f6XiJaTLEAeFCFEsf/Oxp6vAfeyvz ops"
             },
             {
               "id": "<uuid:6>",

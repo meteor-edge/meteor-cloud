@@ -82,6 +82,7 @@ def make_certs(directory: Path) -> None:
 
 def _wait_for_tls(host: str, port: int, ca_path: Path, timeout: float = 30.0) -> None:
     context = ssl.create_default_context(cafile=str(ca_path))
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     deadline = time.monotonic() + timeout
     while True:
         try:
@@ -152,7 +153,7 @@ class Observer:
     def _connect(self, client_id: str) -> mqtt.Client:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, protocol=mqtt.MQTTv311)
         client.username_pw_set("platform", "contract")
-        client.tls_set(ca_certs=str(self.broker.ca_path))
+        client.tls_set(ca_certs=str(self.broker.ca_path), tls_version=ssl.PROTOCOL_TLS_CLIENT)
         connected = threading.Event()
         client.on_connect = lambda *_a, **_k: connected.set()
         client.connect(self.broker.host, self.broker.port, 30)

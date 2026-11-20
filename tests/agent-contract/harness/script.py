@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +11,14 @@ from typing import Any
 from harness.fake_cp import Reply
 
 ORG_ID = "5d1c7a4e-3b0f-4c3a-9a51-7c1f00000001"
+
+
+def ssh_key(label: str, comment: str = "") -> str:
+    """A well-formed ssh-ed25519 public key (the server checks the blob names its type)."""
+    kind = b"ssh-ed25519"
+    raw = hashlib.sha256(label.encode()).digest()
+    blob = len(kind).to_bytes(4, "big") + kind + len(raw).to_bytes(4, "big") + raw
+    return f"ssh-ed25519 {base64.b64encode(blob).decode()}" + (f" {comment}" if comment else "")
 
 
 def now() -> str:

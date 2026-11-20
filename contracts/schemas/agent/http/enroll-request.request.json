@@ -13,7 +13,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "maxLength": 255
     },
     "labels": {
       "type": "object"

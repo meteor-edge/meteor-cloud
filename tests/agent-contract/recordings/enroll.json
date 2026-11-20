@@ -6,10 +6,7 @@
       "request": {
         "method": "GET",
         "path": "/api/v1/health",
-        "headers": {
-          "user-agent": "meteorcli/<version>",
-          "x-meteor-agent-protocol": "1"
-        },
+        "headers": {},
         "body": null
       },
       "response": {

@@ -13,7 +13,6 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-import httpx
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 
@@ -90,18 +89,17 @@ def check(method: str, path: str, status: int, body: Any) -> None:
         raise ContractError(f"{method} {path} -> {status} breaks {relative}:\n  " + "\n  ".join(problems))
 
 
-def check_response(response: httpx.Response) -> None:
-    """httpx response hook for the TestClient."""
+def check_response(response: Any) -> None:
+    """Response hook for the TestClient (an httpx-style client; typed loosely, CI installs httpx2)."""
     request = response.request
     path = request.url.path
-    if not path.startswith("/api/v1/agent/") or operation(request.method, path) is None:
+    op = operation(request.method, path) if path.startswith("/api/v1/agent/") else None
+    if op is None:
         return
-    content_type = response.headers.get("content-type", "")
-    if response.status_code >= 400 and "json" not in content_type:
-        return
-    if 200 <= response.status_code < 400 and "json" not in content_type:
-        op = operation(request.method, path)
-        if op is not None and op["responses"].get(str(response.status_code), "") is None:
-            return
+    status = response.status_code
+    if status < 400 and op["responses"].get(str(status), "") is None:
+        return  # binary download or redirect: no JSON body
+    if "json" not in response.headers.get("content-type", ""):
+        raise ContractError(f"{request.method} {path} -> {status}: answer is not JSON")
     response.read()
-    check(request.method, path, response.status_code, response.json())
+    check(request.method, path, status, response.json())

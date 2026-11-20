@@ -28,10 +28,11 @@ from typing import Any
 import pytest
 
 from harness.device import SimulatedDevice
+from harness.script import ssh_key
 
 WG_PRIVATE = "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
 WG_PUBLIC = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
-SSH_HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIContractHostKeyContractHostKeyContract0 root@device"
+SSH_HOST_KEY = ssh_key("contract host key", "root@device")
 
 
 class PythonAgent:

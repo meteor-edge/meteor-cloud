@@ -70,7 +70,11 @@
     }
   },
   "patternProperties": {
-    "^app\\.[^.]{1,50}\\.(up|restarts|healthy|health_ms|cpu|mem)$": {
+    "^app\\.[A-Za-z0-9_.~-]{1,50}\\.(up|restarts|healthy|mem)$": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "^app\\.[A-Za-z0-9_.~-]{1,50}\\.(cpu|health_ms)$": {
       "type": "number"
     }
   }

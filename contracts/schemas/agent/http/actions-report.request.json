@@ -6,6 +6,7 @@
   "properties": {
     "results": {
       "type": "array",
+      "maxItems": 50,
       "items": {
         "type": "object",
         "required": [

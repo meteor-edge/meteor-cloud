@@ -45,7 +45,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 255
         },
         "mac_addresses": {
           "type": "array",
@@ -57,61 +58,71 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 255
         },
         "os_name": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 255
         },
         "os_version": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 255
         },
         "kernel_version": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 255
         },
         "architecture": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 64
         },
         "hardware_model": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 255
         },
         "cpu_model": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 255
         },
         "cpu_cores": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "minimum": 0
         },
         "memory_mb": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "minimum": 0
         },
         "local_ip": {
           "type": [
             "string",
             "null"
           ],
+          "maxLength": 64,
           "description": "Private LAN address. Absent: the server uses the request's source address when it is private."
         },
         "agent_version": {
@@ -119,6 +130,7 @@
             "string",
             "null"
           ],
+          "maxLength": 32,
           "description": "Installed agent version, X.Y.Z."
         }
       }

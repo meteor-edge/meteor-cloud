@@ -184,7 +184,10 @@ def recorded_http(plane: FakeControlPlane, normalizer: Any) -> list[dict[str, An
             "request": {
                 "method": req.method,
                 "path": normalizer.text(req.path),
-                "headers": normalizer.headers(req.headers),
+                # Off the agent API (health, object storage) only the token's presence is contract;
+                # the HTTP client's own User-Agent (Python-urllib/3.x, Go-http-client) is not.
+                "headers": normalizer.headers(req.headers) if req.path.startswith(AGENT_PREFIX)
+                else {k: v for k, v in normalizer.headers(req.headers).items() if k == "authorization"},
                 "body": normalizer.value(req.body, inventory=inventory),
             },
             "response": {

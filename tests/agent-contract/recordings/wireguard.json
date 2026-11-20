@@ -52,7 +52,7 @@
         "body": {
           "public_key": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
           "ssh_user": "pi",
-          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIContractHostKeyContractHostKeyContract0 root@device"
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK root@device"
         }
       },
       "response": {
@@ -69,7 +69,7 @@
           "ssh_user": "pi",
           "ssh_gateway_public_key": null,
           "ssh_gateway_key_retired": false,
-          "ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIContractSshCaContractSshCaContractSsh",
+          "ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpsvta4s4xBtRznzCfvuvquZdmvivF9WXvUCD/6vUf7",
           "ssh_principal": "device-<uuid:1>"
         }
       }
@@ -86,8 +86,8 @@
         "body": {
           "public_key": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
           "ssh_user": "pi",
-          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIContractHostKeyContractHostKeyContract0 root@device",
-          "ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIContractSshCaContractSshCaContractSsh"
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK root@device",
+          "ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpsvta4s4xBtRznzCfvuvquZdmvivF9WXvUCD/6vUf7"
         }
       },
       "response": {
@@ -104,7 +104,7 @@
           "ssh_user": "pi",
           "ssh_gateway_public_key": null,
           "ssh_gateway_key_retired": false,
-          "ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIContractSshCaContractSshCaContractSsh",
+          "ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpsvta4s4xBtRznzCfvuvquZdmvivF9WXvUCD/6vUf7",
           "ssh_principal": "device-<uuid:1>"
         }
       }

@@ -22,13 +22,15 @@
         "string",
         "null"
       ],
+      "maxLength": 512,
       "description": "Current device token, sent only to the server that issued it; proves a re-registration."
     },
     "name": {
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "maxLength": 255
     },
     "labels": {
       "type": "object"

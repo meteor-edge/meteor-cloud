@@ -9,7 +9,7 @@ from harness.broker import Observer
 from harness.device import APP, LOADED_IMAGE
 from harness.ed25519 import b64url, public_key
 from harness.fake_cp import Reply
-from harness.script import accepted, heartbeat, now, register_and_basics
+from harness.script import accepted, heartbeat, now, register_and_basics, ssh_key
 
 ARTIFACT = b"docker save tarball of demo/app:1.0 (simulated)\n"
 
@@ -55,7 +55,7 @@ def test_actions(contract, agent, device) -> None:
         {"id": str(uuid.uuid4()), "kind": "reboot"},
         {"id": str(uuid.uuid4()), "kind": "set_password", "username": "pi", "password": contract.secret("user_password")},
         {"id": str(uuid.uuid4()), "kind": "add_user", "username": "ops", "password": contract.secret("new_user_password"),
-         "sudo": True, "authorized_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpsKeyOpsKeyOpsKeyOpsKeyOpsKeyOpsKey ops"},
+         "sudo": True, "authorized_key": ssh_key("ops user", "ops")},
         {"id": str(uuid.uuid4()), "kind": "frobnicate"},
     ]}, off_contract="future action kind: agents must report it failed, unsupported"), Reply(200, {"actions": []}))
     contract.script("POST", "/api/v1/agent/actions/report", accepted(1), accepted(3))
@@ -103,7 +103,7 @@ def test_wireguard(contract, agent, device) -> None:
         "server_public_key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
         "server_endpoint": "127.0.0.1:51820", "allowed_ips": "10.8.0.1/32", "persistent_keepalive": 25,
         "ssh_user": "pi", "ssh_gateway_public_key": None, "ssh_gateway_key_retired": False,
-        "ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIContractSshCaContractSshCaContractSsh",
+        "ssh_ca_public_key": ssh_key("contract ssh ca"),
         "ssh_principal": f"device-{device_id}",
     })
     contract.script("POST", "/api/v1/agent/connectivity/wireguard", reply)

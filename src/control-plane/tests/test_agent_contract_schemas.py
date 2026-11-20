@@ -35,6 +35,68 @@ def test_every_agent_route_is_in_the_contract() -> None:
     assert contract - served == set(), "contract lists agent routes the API does not serve"
 
 
+_LIMITS = ("maxLength", "minLength", "maximum", "minimum", "maxItems")
+
+
+def _limits(schema: dict, resolve, prefix: str = "") -> dict[str, dict]:
+    """Field path -> length/range limits, following $ref, allOf, nullable anyOf and arrays of objects."""
+    schema = resolve(schema)
+    props: dict = {}
+    for part in schema.get("allOf", []):
+        props.update(resolve(part).get("properties", {}))
+    props.update(schema.get("properties", {}))
+    out: dict[str, dict] = {}
+    for name, prop in props.items():
+        prop = resolve(prop)
+        options = [resolve(o) for o in prop.get("anyOf", [])] or [prop]
+        found = {k: float(v) for o in options for k, v in o.items() if k in _LIMITS}
+        if found:
+            out[prefix + name] = found
+        for option in options:
+            if option.get("properties") or option.get("allOf"):
+                out.update(_limits(option, resolve, f"{prefix}{name}."))
+            if "items" in option:
+                out.update(_limits(option["items"], resolve, f"{prefix}{name}[]."))
+    return out
+
+
+def test_request_limits_match_the_api() -> None:
+    """Every length, range and count limit the API enforces is in the request schema, with the same value.
+
+    Otherwise an agent could pass the contract suite and still be refused by the server.
+    """
+    spec = create_app().openapi()
+    components = spec["components"]["schemas"]
+
+    def from_api(node: dict) -> dict:
+        while "$ref" in node:
+            node = components[node["$ref"].rsplit("/", 1)[-1]]
+        return node
+
+    common = json.loads((SCHEMA_DIR / "common.json").read_text(encoding="utf-8"))
+
+    def from_contract(node: dict) -> dict:
+        # Every $ref in the contract points into common.json ("../common.json#/$defs/x" or "#/$defs/x").
+        while "$ref" in node:
+            node = common["$defs"][node["$ref"].rsplit("/", 1)[-1]]
+        return node
+
+    mismatches = []
+    for op in index()["http"]:
+        if not op["request"]:
+            continue
+        api_op = spec["paths"][op["path"]][op["method"].lower()]
+        body = api_op.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema")
+        if body is None:
+            continue
+        contract_file = SCHEMA_DIR / op["request"]
+        contract = _limits(json.loads(contract_file.read_text(encoding="utf-8")), from_contract)
+        for field, limits in _limits(body, from_api).items():
+            if contract.get(field) != limits:
+                mismatches.append(f"{op['method']} {op['path']} {field}: API {limits}, contract {contract.get(field)}")
+    assert not mismatches, "\n".join(mismatches)
+
+
 def test_every_schema_file_is_valid_json_schema() -> None:
     for path in SCHEMA_DIR.rglob("*.json"):
         if path.name != "index.json":

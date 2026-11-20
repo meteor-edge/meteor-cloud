@@ -24,19 +24,23 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 64
             },
             "signal_percent": {
               "type": [
                 "integer",
                 "null"
-              ]
+              ],
+              "minimum": 0,
+              "maximum": 100
             },
             "interface": {
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 32
             },
             "wired_connected": {
               "type": "boolean",
@@ -44,6 +48,7 @@
             },
             "saved_networks": {
               "type": "array",
+              "maxItems": 64,
               "items": {
                 "type": "object",
                 "required": [
@@ -65,13 +70,16 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 16,
+              "description": "wifi, ethernet, cellular ...; a value the server does not know is stored as 'other'."
             },
             "uplink_interface": {
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 32
             }
           }
         },
@@ -82,6 +90,7 @@
     },
     "results": {
       "type": "array",
+      "maxItems": 64,
       "items": {
         "type": "object",
         "required": [
@@ -109,7 +118,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 500
           }
         }
       }

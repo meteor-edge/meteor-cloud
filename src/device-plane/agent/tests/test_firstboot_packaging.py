@@ -1070,12 +1070,15 @@ esac
 """,
     )
 
+    # "Early" is measured with bash's whole-second SECONDS against WAIT/2. With a 1 s wait a
+    # second boundary during the stub made a return count as normal (flaky in CI); 20 s is unambiguous.
+    env = {**_poll_env(tmp_path, stub_bin, config_dir, boot), "METEOR_WAIT_SECONDS": "20"}
     result = subprocess.run(
         ["bash", str(FIRSTBOOT / "meteorcli-firstboot.sh"), "--poll"],
         check=False,
         capture_output=True,
         text=True,
-        env=_poll_env(tmp_path, stub_bin, config_dir, boot),
+        env=env,
         timeout=30,
     )
 
