@@ -292,3 +292,26 @@ func TestEnsureDirMakesParentsTraversable(t *testing.T) {
 		t.Errorf("dir mode %v", st.Mode().Perm())
 	}
 }
+
+func TestImportPythonSameDeviceOtherFieldsKeepsPythonConfig(t *testing.T) {
+	p := DefaultPaths(t.TempDir())
+	pythonInstall(t, p.LegacyDir)
+	// Same device id, but the name and heartbeat differ from the Python config.
+	writeFile(t, p.DeviceFile(), `{"version":1,"device_id":"4f1c2a8e-0000-4000-8000-000000000001",
+ "organization_id":"4f1c2a8e-0000-4000-8000-000000000002","name":"old-name","heartbeat_interval_seconds":60}`)
+
+	rep, err := ImportPython(p.LegacyDir, p, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(rep.Imported, "config.json") {
+		t.Fatalf("config converted although device.json differs: %+v", rep)
+	}
+	if _, err := ImportPython(p.LegacyDir, p, ImportOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := LoadDevice(p.DeviceFile())
+	if d.Name != "edge-01" || d.HeartbeatIntervalSeconds != 30 {
+		t.Errorf("force did not import the Python facts: %+v", d)
+	}
+}
