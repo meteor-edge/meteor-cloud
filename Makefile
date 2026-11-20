@@ -232,8 +232,11 @@ console-test: ## Run console tests
 agent-test: ## Run reference agent tests
 	cd $(AGENT_DIR) && python -m pytest -q
 
-agent-go-test: ## Go meteorcli: gofmt, vet, go test -race (src/device-plane/agent-go)
-	cd src/device-plane/agent-go && test -z "$$(gofmt -l .)" && go vet ./... && go test -race -cover ./...
+# The race detector needs 48-bit virtual addresses: Raspberry Pi kernels (39-bit)
+# and 32-bit ARM cannot run it. There: make agent-go-test GO_RACE=
+GO_RACE ?= -race
+agent-go-test: ## Go meteorcli: gofmt, vet, go test -race (src/device-plane/agent-go; on a Pi: GO_RACE=)
+	cd src/device-plane/agent-go && test -z "$$(gofmt -l .)" && go vet ./... && go test $(GO_RACE) -cover ./...
 
 agent-go-build: ## Go meteorcli: static binaries for linux arm64, arm v6, amd64 into src/device-plane/agent-go/bin
 	cd src/device-plane/agent-go && ./scripts/build.sh bin
