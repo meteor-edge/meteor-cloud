@@ -14,9 +14,11 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | Config: new file layout, import of a Python install | Done |
 | State: versioned state files, persistent outbox | Done |
 | API client: health, enrollment, register, heartbeat, MQTT settings | Done (the other routes come with their modules) |
-| CLI: `config`, `config import`, `status`, `--version`, `agent` (alias `run`) | Done |
+| CLI: `config`, `config import`, `status`, `module restart`, `helper`, `--version`, `agent` (alias `run`) | Done |
+| Agent socket with a group policy per command; root helper (`power.*`, `logs.read`, `systemd.install_unit`) | Done |
+| systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done (nothing installs them yet) |
 | Modules: identity, heartbeat, MQTT bus, actions, deploy, network, telemetry, update | Next pull requests |
-| Agent socket, root helper, updater, installer and systemd units | Next pull requests |
+| Updater, installer | Next pull requests |
 
 ## Files
 
@@ -26,7 +28,7 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | `/var/lib/meteorcli/identity/` | meteor 0700, files 0600 | `device.json` (device id, organization, name, heartbeat interval), `device-token`, `mqtt.json`, `mqtt-ca.crt`, `api-key`, `pending-claim.json`, `wireguard/` keys |
 | `/var/lib/meteorcli/state/` | meteor 0700 | Versioned module state (`signing-keys.json`, `applied-software.json`, ...) and `outbox/` |
 | `/var/lib/meteorcli/artifacts/` | meteor 0750 | Downloaded release artifacts |
-| `/run/meteorcli/` | meteor:meteorcli 0750 | `agent.sock`, `helper.sock` |
+| `/run/meteorcli/` | meteor:meteorcli 0750 | `agent.sock` (meteor:meteorcli 0660), `helper.sock` (root:meteor 0660) |
 
 Every JSON file has a `version` field and keeps keys this version does not know. Files are written
 atomically (temp file, fsync, rename). A file that does not parse is moved to
@@ -75,12 +77,74 @@ The modules that own them recreate them.
 | `meteorcli config --domain HOST [--api-base URL] [--http] [--api-key KEY]` | Yes | Same URL rules (IPs and localhost use HTTP, `api.<ip>` is stripped). Changing the server removes the old server's credentials. Needs root. |
 | `meteorcli config --show` | Yes | Never prints secrets. |
 | `meteorcli config import [--from DIR] [--force]` | New | See above. |
-| `meteorcli status` | Yes, same lines | Checks secret files by `stat` only and never reads them. Exits 1 until enrolled. |
+| `meteorcli status` | Yes, same lines | Asks the running agent over `agent.sock` (adds an `Agent:` line and one line per module). When the agent is not running it reads the files and checks secrets by `stat` only. Never shows secrets. Exits 1 until enrolled. |
+| `meteorcli module restart NAME` | New | Restarts (or unparks) one module of the running agent. Needs `meteorcli-admin`. |
+| `meteorcli helper` | Service entry point | The root helper behind `meteorcli-helper.socket`. |
+| `meteorcli helper call OP [JSON]` | New | Sends one request to the helper; only the meteor user is served. For debugging and tests. |
 | `meteorcli -V`, `--version` | Yes | |
 | `meteorcli agent` (alias `run`) | Service entry point | Runs until SIGTERM. Keeps running when not configured. |
 
-Until the agent socket exists, `status` reads `device.json` directly, so the enrollment lines need
+When the agent is not running, `status` reads `device.json` directly, so the enrollment lines need
 root (or the meteor user). Other users see `unknown (permission denied; use sudo)`.
+
+## Who may do what
+
+The agent runs as the unprivileged `meteor` user. Local users talk to it over
+`/run/meteorcli/agent.sock`; the agent asks the kernel who is calling (`SO_PEERCRED`) and checks a
+policy per command (`socketPolicy` in `internal/agent/socket.go`):
+
+| Group | May run |
+| --- | --- |
+| `meteorcli` | `status`, `logs`, `test`, `doctor`, `mqtt-listen` |
+| `meteorcli-admin` | the above, plus `register`, `request-token`, `claim`, `config set`, `update`, `module restart` |
+| root | everything |
+
+Today the socket serves `status` and `module restart`; the other commands arrive with their modules.
+`agent.sock` belongs to the `meteorcli` group, so an administrator is in **both** groups:
+
+```bash
+sudo usermod -aG meteorcli,meteorcli-admin alice   # then log in again
+```
+
+Every request is logged to the journal with the caller's uid and pid, the method and the outcome.
+Answers never contain secrets (status says `present`/`missing`).
+
+### Root helper
+
+The few privileged operations go through `meteorcli helper`, a root service started on demand by
+`meteorcli-helper.socket` (`/run/meteorcli/helper.sock`, root:meteor 0660). It serves only the uid
+of the `meteor` user (root and other members of the `meteor` group are refused), runs only the
+operations in `internal/helper/ops.go` with typed, validated parameters (unknown fields are
+rejected), runs tools with an argument list and a fixed `PATH`, logs every request, and exits after
+a minute without requests.
+
+| Operation | Params | Does |
+| --- | --- | --- |
+| `power.reboot`, `power.shutdown` | none | `systemctl --no-block reboot` / `poweroff` (answers first) |
+| `logs.read` | `source` (`journal` or `systemd`), `unit`, `lines` (1-10000, default 200), `since` (`15m`, `1h`, `7d`), `grep` (up to 200 printable characters) | `journalctl` with fixed options; returns `lines` |
+| `systemd.install_unit` | `name` (`^[a-z0-9][a-z0-9._-]{0,62}$`, ending `.service`, never `meteorcli*`), `content` (needs `[Service]`, at most 256 KiB), `no_start` | Atomic write to `/etc/systemd/system`, `daemon-reload`, `enable`, `restart` |
+
+Docker and file logs, `systemd.control`, users and Wi-Fi follow the Python helpers in later pull
+requests.
+
+### Packaging
+
+[`src/device-plane/agent-go/packaging/`](../src/device-plane/agent-go/packaging/) holds
+`meteorcli.service`, `meteorcli-helper.service`, `meteorcli-helper.socket`,
+`sysusers.d/meteorcli.conf` (user `meteor`, groups `meteorcli` and `meteorcli-admin`) and
+`tmpfiles.d/meteorcli.conf` (the directories above).
+
+- `meteorcli.service`: `Type=notify`, `WatchdogSec=60`, `User=meteor`, no capabilities,
+  `ProtectSystem=strict`, `SystemCallFilter=@system-service`, `MemoryMax=128M`, `Restart=always`.
+  `systemd-analyze security` exposure 1.6.
+- `meteorcli-helper.service`: root with a limited capability set, `NoNewPrivileges`, `PrivateTmp`,
+  `ProtectKernelModules`, `ProtectHome=read-only` and a system call filter. Exposure 3.0.
+- `/run/meteorcli` comes from tmpfiles.d instead of `RuntimeDirectory=`: systemd would delete it,
+  with `helper.sock`, whenever the agent stops, and would give it to `meteor:meteor`, locking the
+  `meteorcli` group out. The agent has `SupplementaryGroups=meteorcli` so it can give `agent.sock` to
+  that group without a capability.
+
+CI fails when the agent's exposure reaches 2.0 or the helper's reaches 6.0.
 
 ## How the core works
 
@@ -107,7 +171,19 @@ make agent-go-build    # static linux arm64, arm v6, amd64 binaries in src/devic
 ```
 
 CI (`Agent (Go meteorcli)`) also runs staticcheck, govulncheck, a coverage floor of 70% on the core
-packages, and fails when a binary is over 15 MB. Today's binaries are about 6.5 MB and the idle agent
+packages, the `systemd-analyze security` gate, and the systemd container test, and fails when a
+binary is over 15 MB.
+
+```bash
+make agent-go-systemd-test   # Docker, --privileged: Debian 12 with systemd as PID 1
+```
+
+The container test installs the units, sysusers and tmpfiles files, creates test users, and checks:
+a `meteorcli-admin` user runs `status` and `module restart` without sudo, a `meteorcli` user may run
+`status` but not `module restart`, a user in neither group is refused, the helper refuses every uid
+except `meteor` (also root, and a user in the `meteor` group), `logs.read` and
+`systemd.install_unit` work for `meteor`, the audit lines are in the journal, and no token is
+logged. Today's binaries are about 6.5 MB and the idle agent
 uses about 11 MB RSS.
 
 The API client tests replay the Python agent's recorded exchanges in
@@ -115,4 +191,5 @@ The API client tests replay the Python agent's recorded exchanges in
 body keys, and the answers decode.
 
 No third-party Go modules yet: the module uses the standard library only. staticcheck (MIT) and
-govulncheck (BSD-3-Clause) run in CI and are not shipped.
+govulncheck (BSD-3-Clause) run in CI and are not shipped; neither is the test-only `debian:12.8-slim`
+image ([licensing](licensing.md)).

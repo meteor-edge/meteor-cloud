@@ -74,6 +74,10 @@ func NewSupervisor(modules []Module, d Deps) *Supervisor {
 	}
 }
 
+// Add registers a module that needs the supervisor itself (the socket module).
+// Call it before Run.
+func (s *Supervisor) Add(m Module) { s.modules = append(s.modules, m) }
+
 // Run starts all modules and blocks until ctx is cancelled and every module has
 // returned. It tells systemd READY=1 once the modules are started.
 func (s *Supervisor) Run(ctx context.Context) error {

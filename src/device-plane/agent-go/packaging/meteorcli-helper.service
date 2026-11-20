@@ -1,0 +1,39 @@
+# The meteorcli root helper: started by meteorcli-helper.socket, serves only uid
+# meteor, runs only the operations in internal/helper/ops.go, and exits when idle.
+[Unit]
+Description=MeteorCloud device agent root helper (meteorcli helper)
+Documentation=https://github.com/meteor-edge/meteor-cloud/blob/master/docs/meteorcli-go.md
+Requires=meteorcli-helper.socket
+After=meteorcli-helper.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/meteorcli helper
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+UMask=0022
+
+# Root, but only with what the operations need (units in /etc/systemd/system,
+# users, WireGuard and Wi-Fi later).
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_ADMIN CAP_AUDIT_WRITE
+NoNewPrivileges=yes
+ProtectSystem=true
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+KeyringMode=private
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+SystemCallFilter=@system-service
+SystemCallFilter=~@resources @mount @swap @raw-io @module @obsolete @cpu-emulation @debug @clock
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native

@@ -1,0 +1,15 @@
+# Socket for the meteorcli root helper. Only the meteor user (the agent) can
+# connect; the helper also checks the caller's uid on every request.
+[Unit]
+Description=MeteorCloud device agent root helper socket
+Documentation=https://github.com/meteor-edge/meteor-cloud/blob/master/docs/meteorcli-go.md
+
+[Socket]
+ListenStream=/run/meteorcli/helper.sock
+SocketUser=root
+SocketGroup=meteor
+SocketMode=0660
+Accept=no
+
+[Install]
+WantedBy=sockets.target

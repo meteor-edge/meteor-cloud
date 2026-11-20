@@ -241,6 +241,14 @@ jobs:
         run: ./scripts/check-coverage.sh "$RUNNER_TEMP/cover.txt" 70 agent api config state identity deploy update helper
       - name: Cross-build (linux arm64, arm v6, amd64; static, under 15 MB)
         run: ./scripts/build.sh "$RUNNER_TEMP/bin" 0.0.0-ci
+      # Exposure is scored 0-10; --threshold takes it times ten.
+      - name: Unit hardening (systemd-analyze security; agent < 2.0, helper < 6.0)
+        working-directory: src/device-plane/agent-go/packaging
+        run: |
+          systemd-analyze security --offline=true --threshold=20 meteorcli.service
+          systemd-analyze security --offline=true --threshold=60 meteorcli-helper.service
+      - name: Socket and helper permissions under systemd (Debian 12 container)
+        run: ./test/systemd/run.sh
 
   agent-contract:
     name: Agent contract (Python meteorcli)

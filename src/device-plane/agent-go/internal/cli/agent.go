@@ -5,11 +5,13 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 
 	"meteorcloud/meteorcli/internal/agent"
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/state"
 )
 
@@ -60,11 +62,19 @@ func runAgent(ctx context.Context, env *Env, args []string) int {
 		return 1
 	}
 
+	// tmpfiles.d creates it on a device; this covers --root and development.
+	if err := os.MkdirAll(p.RuntimeDir, 0o750); err != nil {
+		core.Error("runtime directory", "err", err)
+		return 1
+	}
+
 	deps := agent.Deps{
-		Paths: p, Config: c, API: client, State: store, Outbox: outbox,
+		Version: env.Version, Paths: p, Config: c, API: client, State: store, Outbox: outbox,
 		Signals: agent.NewSignals(), Health: agent.NewHealth(), Log: log,
+		Helper: helper.NewClient(p.HelperSocket()),
 	}
 	sup := agent.NewSupervisor(agent.Modules(), deps)
+	sup.Add(agent.NewSocketModule(sup, env.groups()))
 	sup.Notifier = agent.NotifierFromEnv()
 	core.Info("starting", "version", env.Version, "server", c.Server())
 	if err := sup.Run(ctx); err != nil {
