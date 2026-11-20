@@ -11,6 +11,9 @@ StartLimitIntervalSec=0
 [Service]
 Type=notify
 NotifyAccess=main
+# Applies a first-boot meteorenv file from the boot partition, as root ("+"),
+# before the unprivileged agent starts; never blocks the start ("-").
+ExecStartPre=-+/usr/local/bin/meteorcli config meteorenv
 ExecStart=/usr/local/bin/meteorcli agent
 Restart=always
 RestartSec=5

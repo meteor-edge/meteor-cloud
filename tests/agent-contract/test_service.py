@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import uuid
 
+import pytest
+
 from harness.broker import Observer
 from harness.device import APP, LOADED_IMAGE
 from harness.ed25519 import b64url, public_key
@@ -14,6 +16,7 @@ from harness.script import accepted, heartbeat, now, register_and_basics, ssh_ke
 ARTIFACT = b"docker save tarball of demo/app:1.0 (simulated)\n"
 
 
+@pytest.mark.requires("mqtt")
 def test_heartbeat_mqtt(contract, agent, device, broker) -> None:
     """Two heartbeats with MQTT on: credentials refresh, status, metrics, events, ping."""
     connect = contract.broker(broker)
@@ -46,6 +49,7 @@ def test_heartbeat_mqtt(contract, agent, device, broker) -> None:
     contract.finish(observer, retained={"status": retained})
 
 
+@pytest.mark.requires("actions")
 def test_actions(contract, agent, device) -> None:
     """Restart is reported before it runs; an unknown action kind is reported failed: unsupported."""
     device_id = register_and_basics(contract)
@@ -71,6 +75,7 @@ def test_actions(contract, agent, device) -> None:
     contract.finish()
 
 
+@pytest.mark.requires("wifi")
 def test_wifi(contract, agent, device) -> None:
     """Join a new network (checked against the server before it is kept) and forget another."""
     device.wifi_saved.append("old-lab")
@@ -95,6 +100,7 @@ def test_wifi(contract, agent, device) -> None:
     contract.finish()
 
 
+@pytest.mark.requires("wireguard")
 def test_wireguard(contract, agent, device) -> None:
     """Register the public key, bring the tunnel up, trust the SSH CA, and say so at once."""
     device_id = register_and_basics(contract)
@@ -118,6 +124,7 @@ def test_wireguard(contract, agent, device) -> None:
     contract.finish()
 
 
+@pytest.mark.requires("docker")
 def test_docker_deploy(contract, agent, device) -> None:
     """A signed docker release: pin the key, download through a storage redirect, load, run, report."""
     register_and_basics(contract)

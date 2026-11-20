@@ -12,6 +12,8 @@ import (
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/helper"
+	"meteorcloud/meteorcli/internal/identity"
+	"meteorcloud/meteorcli/internal/platform"
 	"meteorcloud/meteorcli/internal/state"
 )
 
@@ -31,16 +33,24 @@ type Module interface {
 
 // Deps is everything a module may use. Modules never call each other: they share
 // only what is here, talk through Signals, and leave reports in the Outbox.
-// Identity and Bus are added with their packages.
+// Bus is added with its package.
 type Deps struct {
 	// Version is this agent's version (status, User-Agent).
 	Version string
 	// Paths says where files live.
 	Paths config.Paths
-	// Config is the operator's settings, read at start. nil until configured.
+	// Config is the operator's settings as read at start. nil until configured.
+	// The identity module reloads the server when config.json changes and
+	// publishes ConfigChanged; modules that need a current value reread it then.
 	Config *config.Config
-	// API calls the control plane. nil until a server is configured.
+	// API calls the control plane. It always exists; calls fail with
+	// api.ErrNoServer until a server is configured.
 	API *api.Client
+	// Identity is the device token and MQTT credentials. Report a 401/403
+	// with Identity.AuthFailed; never act on it yourself.
+	Identity *identity.Source
+	// Host reads facts about this machine (inventory, metrics, tools).
+	Host *platform.Host
 	// State keeps small versioned files across restarts.
 	State *state.Store
 	// Outbox keeps reports until the server accepted them.

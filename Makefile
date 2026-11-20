@@ -241,8 +241,9 @@ agent-go-build: ## Go meteorcli: static binaries for linux arm64, arm v6, amd64 
 agent-go-systemd-test: ## Go meteorcli: units, sockets and group policy under systemd in a container (Docker, --privileged)
 	cd src/device-plane/agent-go && ./test/systemd/run.sh
 
-agent-contract-test: ## Device agent contract suite (Python meteorcli vs contracts/device-agent-v1.md; needs Docker for Mosquitto)
+agent-contract-test: ## Device agent contract suite (Python and Go meteorcli vs contracts/device-agent-v1.md; needs Docker for Mosquitto, Go)
 	cd tests/agent-contract && python -m pytest -q && AGENT_CONTRACT_MODE=replay python -m pytest -q
+	cd tests/agent-contract && AGENT_CONTRACT_AGENT=go python -m pytest -q -rs && AGENT_CONTRACT_AGENT=go AGENT_CONTRACT_MODE=replay python -m pytest -q
 
 agent-dist: ## Pack meteorcli (agent + runtime) into dist/ for a GitHub Release
 	./scripts/agent-dist.sh

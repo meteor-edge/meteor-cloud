@@ -252,7 +252,7 @@ jobs:
         run: ./test/systemd/run.sh
 
   agent-contract:
-    name: Agent contract (Python meteorcli)
+    name: Agent contract (Python and Go meteorcli)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -277,6 +277,21 @@ jobs:
         run: python -m pytest -q
       - name: Replay the recordings
         env:
+          AGENT_CONTRACT_MODE: replay
+        run: python -m pytest -q
+      # The Go agent must produce the same transcripts; scenarios for features it does not
+      # have yet are skipped (see the requires marker in conftest.py).
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/device-plane/agent-go/go.mod
+          cache: false
+      - name: Verify the Go agent against the recordings
+        env:
+          AGENT_CONTRACT_AGENT: go
+        run: python -m pytest -q -rs
+      - name: Replay the recordings to the Go agent
+        env:
+          AGENT_CONTRACT_AGENT: go
           AGENT_CONTRACT_MODE: replay
         run: python -m pytest -q
 

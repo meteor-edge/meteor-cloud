@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"meteorcloud/meteorcli/internal/identity"
 	"net"
 	"os"
 	"path/filepath"
@@ -29,7 +30,7 @@ func (f fakeGroups) Member(uid, _ uint32, group string) bool {
 }
 
 func TestSocketPolicy(t *testing.T) {
-	m := NewSocketModule(nil, fakeGroups{1000: {GroupAdmin}, 1001: {GroupRead}, 1002: {"docker"}})
+	m := NewSocketModule(nil, fakeGroups{1000: {GroupAdmin}, 1001: {GroupRead}, 1002: {"docker"}}, nil)
 	tests := []struct {
 		uid    uint32
 		method string
@@ -79,14 +80,21 @@ func TestSocketStatusAndModuleRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := (&config.Config{Domain: "meteor.example"}).Save(p.ConfigFile, config.Owner{}); err != nil {
+		t.Fatal(err)
+	}
+
 	var ticks atomic.Int64
 	worker := ticker("telemetry", &ticks)
 	d := testDeps(nil)
 	d.Paths, d.Version = p, "9.9.9"
-	d.Config = &config.Config{Domain: "meteor.example"}
+	d.Identity = identity.NewSource(p)
+	if err := d.Identity.Load(); err != nil {
+		t.Fatal(err)
+	}
 	sup := fast(NewSupervisor([]Module{worker}, d))
 	me := uint32(os.Getuid())
-	sup.Add(NewSocketModule(sup, fakeGroups{me: {GroupAdmin}}))
+	sup.Add(NewSocketModule(sup, fakeGroups{me: {GroupAdmin}}, nil))
 	stop := start(t, sup)
 	defer stop()
 
@@ -226,7 +234,9 @@ func TestSocketRefusesOutsideGroups(t *testing.T) {
 	d := testDeps(nil)
 	d.Paths = p
 	sup := fast(NewSupervisor(nil, d))
-	sup.Add(NewSocketModule(sup, fakeGroups{}))
+	sock := NewSocketModule(sup, fakeGroups{}, nil)
+	sock.OwnUID = uint32(os.Getuid()) + 1 // the group policy decides, not the same-uid rule
+	sup.Add(sock)
 	stop := start(t, sup)
 	defer stop()
 
@@ -254,15 +264,28 @@ func TestStatusStates(t *testing.T) {
 	p := agentRoot(t)
 	d := testDeps(nil)
 	d.Paths = p
+	d.Identity = identity.NewSource(p)
+	load := func() {
+		t.Helper()
+		if err := d.Identity.Load(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	load()
 	if s := status(d); s.State != StateNotConfigured {
 		t.Errorf("state %s", s.State)
 	}
-	d.Config = &config.Config{Domain: "meteor.example"}
-	if s := status(d); s.State != StateWaitingForEnrollment || s.HeartbeatSeconds != 60 {
-		t.Errorf("state %s", s.State)
+	if err := (&config.Config{Domain: "meteor.example"}).Save(p.ConfigFile, config.Owner{}); err != nil {
+		t.Fatal(err)
 	}
 	_ = os.WriteFile(filepath.Join(p.IdentityDir, "api-key"), []byte("k"), 0o600)
-	if s := status(d); !s.APIKey {
-		t.Error("api key not seen")
+	load()
+	if s := status(d); s.State != StateWaitingForEnrollment || s.HeartbeatSeconds != 60 || !s.APIKey {
+		t.Errorf("status %+v", s)
+	}
+	_ = os.WriteFile(p.PendingClaimFile(), []byte(`{"request_id":"r-1","claim_secret":"clm_x"}`), 0o600)
+	load()
+	if s := status(d); s.State != StatePendingApproval || s.PendingRequestID != "r-1" || !s.PendingClaim {
+		t.Errorf("status %+v", s)
 	}
 }

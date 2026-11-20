@@ -4,7 +4,11 @@ AGENT_CONTRACT_MODE:
   verify (default)  scripted fake control plane; the transcript must equal recordings/<scenario>.json
   record            same, but (re)write recordings/<scenario>.json
   replay            the fake control plane answers from the recording instead of the script
-AGENT_CONTRACT_AGENT: which adapter drives the agent (only ``python`` today).
+AGENT_CONTRACT_AGENT: which adapter drives the agent: ``python`` (default) or ``go``.
+
+A scenario marked ``@pytest.mark.requires("feature", ...)`` is skipped for an adapter whose
+``features`` lack one of them (the Go agent gains MQTT, actions, Wi-Fi, WireGuard and deploys
+in later pull requests).
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ import os
 import secrets
 import uuid
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +37,28 @@ if TYPE_CHECKING:
     from agents.python_agent import PythonAgent
 
 MODE = os.environ.get("AGENT_CONTRACT_MODE", "verify")
+AGENT = os.environ.get("AGENT_CONTRACT_AGENT", "python")
+
+
+def adapter_class() -> Any:
+    if AGENT == "python":
+        from agents.python_agent import PythonAgent
+
+        return PythonAgent
+    if AGENT == "go":
+        from agents.go_agent import GoAgent
+
+        return GoAgent
+    pytest.fail(f"no adapter for agent {AGENT!r}")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    features = adapter_class().features
+    for item in items:
+        for mark in item.iter_markers("requires"):
+            missing = [f for f in mark.args if f not in features]
+            if missing:
+                item.add_marker(pytest.mark.skip(reason=f"the {AGENT} agent lacks {', '.join(missing)}"))
 SIGNING_SEED = bytes(range(32))  # test-only organization signing key
 
 
@@ -44,15 +70,16 @@ def device() -> SimulatedDevice:
 @pytest.fixture
 def agent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, device: SimulatedDevice, contract: Contract
-) -> PythonAgent:
-    name = os.environ.get("AGENT_CONTRACT_AGENT", "python")
-    if name != "python":
-        pytest.fail(f"no adapter for agent {name!r}")
-    from agents.python_agent import PythonAgent
-
-    adapter = PythonAgent(monkeypatch, tmp_path, device)
+) -> Iterator[PythonAgent]:
+    cls = adapter_class()
+    if AGENT == "go":
+        adapter = cls(tmp_path, device, contract.plane)
+    else:
+        adapter = cls(monkeypatch, tmp_path, device)
     contract.bind(adapter)  # replay re-signs desired software for this agent's device id
-    return adapter
+    yield adapter
+    if hasattr(adapter, "close"):
+        adapter.close()
 
 
 @pytest.fixture(scope="session")
@@ -172,12 +199,22 @@ class Contract:
             seen[json.dumps(normalized, sort_keys=True)] = normalized
         return [seen[key] for key in sorted(seen)]
 
-    def finish(self, observer: Observer | None = None, retained: dict[str, Any] | None = None) -> dict[str, Any]:
+    def finish(
+        self, observer: Observer | None = None, retained: dict[str, Any] | None = None,
+        routes: Iterable[tuple[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """Check and record the transcript. ``routes`` limits it to those (method, path) pairs,
+        for an agent that keeps working in the background (the Go agent beats as soon as it is
+        enrolled); every exchange is still checked against the contract."""
         problems = list(self.plane.violations)
+        exchanges = self.plane.exchanges
+        if routes is not None:
+            wanted = set(routes)
+            exchanges = [e for e in exchanges if (e.request.method, e.request.path) in wanted]
         result: dict[str, Any] = {
             "scenario": self.scenario,
             "contract": "contracts/device-agent-v1.md",
-            "http": recorded_http(self.plane, self.normalizer),
+            "http": recorded_http(exchanges, self.normalizer),
         }
         if observer is not None:
             result["mqtt"] = self.check_mqtt(observer)

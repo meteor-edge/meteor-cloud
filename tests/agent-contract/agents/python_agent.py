@@ -37,6 +37,7 @@ SSH_HOST_KEY = ssh_key("contract host key", "root@device")
 
 class PythonAgent:
     name = "python"
+    features = frozenset({"mqtt", "actions", "wifi", "wireguard", "docker"})
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, workdir: Path, device: SimulatedDevice) -> None:
         self.config_dir = workdir / "meteorcli"

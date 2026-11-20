@@ -126,7 +126,7 @@ func printAgentStatus(ctx context.Context, env *Env, r agent.StatusReply) int {
 	fmt.Fprintf(out, "MQTT:           %s\n", yes(r.MQTT, "configured", "not configured"))
 	fmt.Fprintf(out, "WireGuard:      %s\n", yes(r.WireGuard, "key pair present", "not set up"))
 	if r.PendingClaim {
-		fmt.Fprintln(out, "Pending claim:  waiting for an operator to approve this device")
+		fmt.Fprintf(out, "Pending claim:  request %s is waiting for an operator to approve this device\n", orDash(r.PendingRequestID))
 	}
 	names := make([]string, 0, len(r.Modules))
 	for name := range r.Modules {

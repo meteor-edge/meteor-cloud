@@ -32,6 +32,9 @@ type Config struct {
 	ServerURL string `json:"server_url"`
 	// CAFile is an optional PEM file trusted in addition to the system CAs.
 	CAFile string `json:"ca_file"`
+	// EnrollName is the device name to ask for when the agent submits an
+	// enrollment request by itself (from a meteorenv file at first boot).
+	EnrollName string `json:"enroll_name"`
 
 	extra Object
 }

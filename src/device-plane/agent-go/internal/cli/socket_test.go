@@ -38,12 +38,14 @@ func runningAgent(t *testing.T, groups groupsOf) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
-	write(t, filepath.Join(root, "etc", "meteorcli", "config.json"), `{"version":1,"domain":"meteor.example"}`)
+	// Nothing listens on port 9: the heartbeat fails at once instead of reaching out.
+	write(t, filepath.Join(root, "etc", "meteorcli", "config.json"), `{"version":1,"domain":"meteor.example","api_base":"http://127.0.0.1:9"}`)
 	write(t, filepath.Join(root, "var", "lib", "meteorcli", "identity", "device.json"), `{"version":1,"device_id":"d-1","name":"edge"}`)
 	write(t, filepath.Join(root, "var", "lib", "meteorcli", "identity", "device-token"), "dev_secret")
 
 	var logs bytes.Buffer
-	e := &Env{Version: "9.9.9", Stdout: &logs, Stderr: &logs, Getenv: func(string) string { return "" }, Groups: groups}
+	notMe := uint32(os.Getuid()) + 1 // the policy must decide, not the same-uid rule
+	e := &Env{Version: "9.9.9", Stdout: &logs, Stderr: &logs, Getenv: func(string) string { return "" }, Groups: groups, AgentUID: &notMe}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
 	go func() { done <- run(ctx, e, []string{"--root", root, "agent"}) }()

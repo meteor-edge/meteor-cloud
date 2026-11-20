@@ -19,6 +19,11 @@ import (
 // reportVersion is the format of one outbox file.
 const reportVersion = 1
 
+// KindSoftwareReport is the outbox kind of software_report items. The heartbeat
+// carries them (contracts/device-agent-v1.md) and acks them once the server
+// accepted the heartbeat; the deploy module puts them.
+const KindSoftwareReport = "software_report"
+
 // DefaultOutboxLimit bounds the outbox so a device offline for weeks cannot fill
 // its disk. The oldest reports go first.
 const DefaultOutboxLimit = 500

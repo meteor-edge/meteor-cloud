@@ -8,7 +8,7 @@ RUN apt-get update \
  && systemctl mask getty.target console-getty.service systemd-logind.service \
       systemd-firstboot.service systemd-remount-fs.service
 
-COPY meteorcli holdconn /usr/local/bin/
+COPY meteorcli holdconn fakeserver /usr/local/bin/
 COPY packaging/meteorcli.service packaging/meteorcli-helper.service packaging/meteorcli-helper.socket /etc/systemd/system/
 COPY packaging/sysusers.d/meteorcli.conf /usr/lib/sysusers.d/meteorcli.conf
 COPY packaging/tmpfiles.d/meteorcli.conf /usr/lib/tmpfiles.d/meteorcli.conf
@@ -33,6 +33,13 @@ RUN printf '{"version":1,"domain":"meteor.example"}\n' > /etc/meteorcli/config.j
  && printf 'dev_faketokenfaketokenfaketoken\n' > /var/lib/meteorcli/identity/device-token \
  && chown -R meteor:meteor /var/lib/meteorcli/identity \
  && chmod 0600 /var/lib/meteorcli/identity/*
+
+# A fake control plane for the enrollment checks (test only), as a unit so it
+# survives the container restart that stands in for a reboot.
+RUN mkdir -p /var/lib/fakeserver \
+ && printf '[Unit]\nDescription=fake control plane (test)\nBefore=meteorcli.service\n[Service]\nExecStart=/usr/local/bin/fakeserver\n[Install]\nWantedBy=multi-user.target\n' \
+      > /etc/systemd/system/fakeserver.service \
+ && systemctl enable fakeserver.service
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=12 CMD ["systemctl", "is-active", "--quiet", "meteorcli.service"]
 STOPSIGNAL SIGRTMIN+3

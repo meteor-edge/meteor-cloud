@@ -22,6 +22,7 @@ esac
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=systemd-test" \
 	-o "$ctx/meteorcli" ./cmd/meteorcli
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$ctx/holdconn" ./test/systemd/holdconn
+CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$ctx/fakeserver" ./test/systemd/fakeserver
 cp -r packaging test/systemd/Dockerfile "$ctx/"
 docker build -q --platform "linux/$arch" -t meteorcli-systemd-test "$ctx" >/dev/null
 docker run -d --platform "linux/$arch" --name "$name" --privileged --cgroupns=private \
@@ -124,6 +125,91 @@ expect 0 "" "no token in any journal" -- ctr sh -c '! journalctl --no-pager | gr
 # Hardening as systemd sees it on the running units.
 expect 0 "" "agent exposure under 2.0" -- ctr systemd-analyze security --threshold=19 meteorcli.service
 expect 0 "" "helper exposure under 6.0" -- ctr systemd-analyze security --threshold=59 meteorcli-helper.service
+
+# ---------------------------------------------------------------- enrollment
+# Against test/systemd/fakeserver on 127.0.0.1:8099; it logs one line per request.
+server_log=/var/log/fakeserver.log
+now_ms() { ctr date +%s%3N; }
+# wait_for <pattern> <after unix ms> <seconds>: prints the ms of the first matching log line after then.
+wait_for() {
+	local pattern="$1" after="$2" deadline=$(($(date +%s) + $3)) line
+	while (($(date +%s) < deadline)); do
+		line="$(ctr awk -v after="$after" -v pat="$pattern" '$1 >= after && index($0, pat) { print $1; exit }' "$server_log" 2>/dev/null || true)"
+		[[ -n $line ]] && { echo "$line"; return 0; }
+		sleep 0.1
+	done
+	return 1
+}
+wait_active() {
+	for _ in $(seq 60); do
+		[[ "$(ctr systemctl is-active meteorcli.service 2>/dev/null || true)" == active ]] &&
+			ctr test -S /run/meteorcli/agent.sock && return 0
+		sleep 0.5
+	done
+	return 1
+}
+
+# Done criterion: with the service running, `meteorcli register` by a
+# meteorcli-admin user without sudo makes the device online within 5 s.
+# Changing the server (root) drops the old identity.
+expect 0 "Cleared previous enrollment" "root points the device at a new server" -- \
+	ctr meteorcli config --api-base http://127.0.0.1:8099
+ctr sh -c 'printf "reg_systemdtestregtoken\n" > /home/alice/reg-token && chown alice: /home/alice/reg-token && chmod 0600 /home/alice/reg-token'
+start="$(now_ms)"
+expect 0 "Registered device 11111111" "alice (meteorcli-admin) registers without sudo" -- \
+	as alice register --token-file /home/alice/reg-token --name edge-test
+if beat="$(wait_for "POST /api/v1/agent/heartbeat auth=yes" "$start" 10)" && ((beat - start <= 5000)); then
+	pass "online $((beat - start)) ms after register (limit 5000)"
+else
+	fail "no heartbeat within 5 s of register (${beat:-none})"
+fi
+expect 0 "" "the token file is removed after success" -- ctr test ! -e /home/alice/reg-token
+expect 0 "Agent:          running systemd-test (enrolled)" "status shows the new enrollment" -- as alice status
+
+# Done criterion: approving a pending request brings the device online with no
+# command on the device, also after a reboot while pending.
+expect 0 "Cleared previous enrollment" "root moves the device to another server URL" -- \
+	ctr meteorcli config --api-base http://localhost:8099
+expect 0 "submitted" "alice requests approval without sudo" -- as alice request-token --api-key key_systemdtestapikey
+# status exits 1 until the device is enrolled, like the Python CLI.
+expect 1 "request aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee is waiting" "status shows the pending request" -- as alice status
+ctr systemctl stop meteorcli.service
+ctr touch /var/lib/fakeserver/approve # approved in the console while the device is off
+start="$(now_ms)"
+docker restart "$name" >/dev/null
+if wait_active && beat="$(wait_for "POST /api/v1/agent/heartbeat auth=yes" "$start" 30)"; then
+	pass "online after the reboot with no command ($((beat - start)) ms after the restart began)"
+else
+	fail "no heartbeat after approving and rebooting"
+fi
+expect 0 "" "the API key is deleted after enrollment" -- ctr test ! -e /var/lib/meteorcli/identity/api-key
+
+# First boot: a meteorenv file on the boot partition is applied by root before the
+# agent starts, removed, and the agent asks for approval by itself. A first boot
+# is not enrolled: drop the identity by moving to another server URL first.
+ctr rm -f /var/lib/fakeserver/approve
+ctr systemctl stop meteorcli.service
+expect 0 "Cleared previous enrollment" "root clears the enrollment (stands in for a fresh image)" -- \
+	ctr meteorcli config --api-base http://127.0.0.1:8099
+ctr mkdir -p /boot/firmware
+ctr sh -c 'printf "# first boot\nMETEOR_API_BASE=http://127.0.0.1:8099\nMETEOR_API_KEY=key_systemdtestbootkey\nMETEOR_NAME=lobby-cam\n" > /boot/firmware/meteorenv.txt'
+start="$(now_ms)"
+ctr systemctl restart meteorcli.service
+if wait_active && wait_for "POST /api/v1/agent/enroll/request auth=yes name=lobby-cam" "$start" 15 >/dev/null; then
+	pass "meteorenv applied at start; the agent requested approval by itself"
+else
+	fail "no enrollment request after a meteorenv start"
+fi
+expect 0 "" "meteorenv.txt is removed" -- ctr test ! -e /boot/firmware/meteorenv.txt
+ctr touch /var/lib/fakeserver/approve
+start="$(now_ms)"
+if beat="$(wait_for "POST /api/v1/agent/heartbeat auth=yes" "$start" 20)"; then
+	pass "approved in the console: online with no command ($((beat - start)) ms)"
+else
+	fail "no heartbeat after approving the meteorenv request"
+fi
+expect 0 "" "no enrollment secret in any journal" -- \
+	ctr sh -c '! journalctl --no-pager | grep -E -q "systemdtest(devicetoken|regtoken|apikey|bootkey|claimsecret)"'
 
 if [[ $failures -gt 0 ]]; then
 	echo "--- meteorcli journal"; ctr journalctl -u meteorcli.service -u meteorcli-helper.service --no-pager | tail -40

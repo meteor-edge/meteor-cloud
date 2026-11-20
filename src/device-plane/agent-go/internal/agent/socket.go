@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"meteorcloud/meteorcli/internal/api"
-	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/identity"
 	"meteorcloud/meteorcli/internal/localrpc"
 )
 
@@ -37,7 +37,12 @@ const (
 // Add a method: its handler in handlers() and one line here.
 var socketPolicy = map[string]access{
 	"status":         readAccess,
+	"test":           readAccess,
 	"module.restart": adminAccess,
+	"register":       adminAccess,
+	"enroll.request": adminAccess,
+	"enroll.claim":   adminAccess,
+	"config.reload":  adminAccess,
 }
 
 // StatusReply answers `meteorcli status`. It says whether secrets exist, never
@@ -52,6 +57,7 @@ type StatusReply struct {
 	MQTT             bool                        `json:"mqtt_configured"`
 	WireGuard        bool                        `json:"wireguard_key_present"`
 	PendingClaim     bool                        `json:"pending_claim"`
+	PendingRequestID string                      `json:"pending_request_id"`
 	DeviceID         string                      `json:"device_id"`
 	OrganizationID   string                      `json:"organization_id"`
 	Name             string                      `json:"name"`
@@ -59,11 +65,13 @@ type StatusReply struct {
 	Modules          map[string]api.ModuleHealth `json:"modules"`
 }
 
-// Agent states shown by status.
+// Agent states shown by status (the identity's state).
 const (
-	StateNotConfigured        = "not_configured"
-	StateWaitingForEnrollment = "waiting_for_enrollment"
-	StateEnrolled             = "enrolled"
+	StateNotConfigured        = identity.StateNotConfigured
+	StateWaitingForEnrollment = identity.StateWaiting
+	StatePendingApproval      = identity.StatePending
+	StateEnrolled             = identity.StateEnrolled
+	StateCredentialRejected   = identity.StateRejected
 )
 
 // ModuleRestartParams is the body of module.restart.
@@ -74,15 +82,23 @@ type ModuleRestartParams struct {
 // SocketModule serves /run/meteorcli/agent.sock for the CLI. It is critical: the
 // device must stay manageable even when every feature module is broken.
 type SocketModule struct {
-	sup    *Supervisor
-	groups localrpc.Groups
+	sup      *Supervisor
+	groups   localrpc.Groups
+	identity *identity.Service
+	// OwnUID is the agent's own uid (the meteor user). That user owns every
+	// file of the agent already, so it may call every method; this also lets
+	// tests and development run the agent and the CLI as one user. Tests of
+	// the group policy set another uid.
+	OwnUID uint32
 	// tick is how often the module reports progress to the health registry.
 	tick time.Duration
 }
 
-// NewSocketModule returns the socket module for sup, which handles module.restart.
-func NewSocketModule(sup *Supervisor, groups localrpc.Groups) *SocketModule {
-	return &SocketModule{sup: sup, groups: groups, tick: 30 * time.Second}
+// NewSocketModule returns the socket module. sup handles module.restart; id
+// performs register, request-token, claim, test and config reload (nil in
+// tests that do not need them).
+func NewSocketModule(sup *Supervisor, groups localrpc.Groups, id *identity.Service) *SocketModule {
+	return &SocketModule{sup: sup, groups: groups, identity: id, OwnUID: uint32(os.Getuid()), tick: 30 * time.Second}
 }
 
 // Name implements Module.
@@ -128,7 +144,7 @@ func (m *SocketModule) authorize(p localrpc.Peer, method string) error {
 	if !ok {
 		return localrpc.Errorf(localrpc.CodeUnknownMethod, "unknown method %q", method)
 	}
-	if p.UID == 0 || m.groups.Member(p.UID, p.GID, GroupAdmin) {
+	if p.UID == 0 || p.UID == m.OwnUID || m.groups.Member(p.UID, p.GID, GroupAdmin) {
 		return nil
 	}
 	if need == readAccess && m.groups.Member(p.UID, p.GID, GroupRead) {
@@ -142,7 +158,7 @@ func (m *SocketModule) authorize(p localrpc.Peer, method string) error {
 }
 
 func (m *SocketModule) handlers(d Deps) map[string]localrpc.Handler {
-	return map[string]localrpc.Handler{
+	h := map[string]localrpc.Handler{
 		"status": {Run: func(context.Context, localrpc.Peer, json.RawMessage) (any, error) {
 			return status(d), nil
 		}},
@@ -164,36 +180,32 @@ func (m *SocketModule) handlers(d Deps) map[string]localrpc.Handler {
 			return map[string]string{"restarted": p.Name}, nil
 		}},
 	}
+	for name, handler := range m.enrollHandlers() {
+		h[name] = handler
+	}
+	return h
 }
 
-// status collects what `meteorcli status` shows, as the agent user sees it.
+// status collects what `meteorcli status` shows from the live identity.
 func status(d Deps) StatusReply {
-	p := d.Paths
-	r := StatusReply{
-		Version:      d.Version,
-		State:        StateNotConfigured,
-		APIKey:       exists(p.APIKeyFile()),
-		Credential:   exists(p.DeviceTokenFile()),
-		MQTT:         exists(p.MQTTFile()),
-		WireGuard:    exists(filepath.Join(p.WireGuardDir(), "public.key")),
-		PendingClaim: exists(p.PendingClaimFile()),
-		Modules:      d.Health.Snapshot(),
+	st := d.Identity.Status()
+	return StatusReply{
+		Version:          d.Version,
+		State:            st.State,
+		Domain:           st.Domain,
+		Server:           st.Server,
+		APIKey:           st.APIKey,
+		Credential:       st.Credential,
+		MQTT:             st.MQTT,
+		WireGuard:        exists(filepath.Join(d.Paths.WireGuardDir(), "public.key")),
+		PendingClaim:     st.PendingRequestID != "",
+		PendingRequestID: st.PendingRequestID,
+		DeviceID:         st.DeviceID,
+		OrganizationID:   st.OrganizationID,
+		Name:             st.Name,
+		HeartbeatSeconds: st.HeartbeatSeconds,
+		Modules:          d.Health.Snapshot(),
 	}
-	if d.Config != nil {
-		r.Domain, r.Server = d.Config.Domain, d.Config.Server()
-	}
-	dev, err := config.LoadDevice(p.DeviceFile())
-	if err == nil {
-		r.DeviceID, r.OrganizationID, r.Name = dev.DeviceID, dev.OrganizationID, dev.Name
-	}
-	r.HeartbeatSeconds = int(dev.Heartbeat().Seconds())
-	switch {
-	case r.Credential && r.DeviceID != "":
-		r.State = StateEnrolled
-	case r.Server != "":
-		r.State = StateWaitingForEnrollment
-	}
-	return r
 }
 
 func exists(path string) bool {
