@@ -332,10 +332,10 @@
       "payload": {
         "timestamp": "<timestamp>",
         "<host readings>": true,
-        "app.demo-app.cpu": "<number>",
-        "app.demo-app.mem": "<number>",
-        "app.demo-app.restarts": "<number>",
-        "app.demo-app.up": "<number>"
+        "app.demo-app.cpu": 1.5,
+        "app.demo-app.mem": 10485760,
+        "app.demo-app.restarts": 0,
+        "app.demo-app.up": 1
       }
     },
     {

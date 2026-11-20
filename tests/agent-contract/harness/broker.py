@@ -19,6 +19,7 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -176,7 +177,7 @@ class Observer:
         info = self._client.publish(f"devices/{self.device_id}/{suffix}", json.dumps(payload), qos=1, retain=False)
         info.wait_for_publish(timeout=10)
 
-    def wait_for(self, predicate, timeout: float = 20.0) -> Message:
+    def wait_for(self, predicate: Callable[[Message], bool], timeout: float = 20.0) -> Message:
         """The first message matching ``predicate``; waits for it up to ``timeout`` seconds."""
         deadline = time.monotonic() + timeout
         with self._lock:

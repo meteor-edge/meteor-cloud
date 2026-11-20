@@ -96,8 +96,8 @@ class Normalizer:
         if not isinstance(payload, dict):
             return payload
         if topic_suffix == "metrics":
-            # Host readings vary; app metrics come from the simulated device and stay.
-            kept = {k: "<number>" for k in payload if k.startswith("app.")}
+            # Host readings vary; app metrics come from the simulated device and are kept as sent.
+            kept = {k: v for k, v in payload.items() if k.startswith("app.")}
             return {"timestamp": self.value(payload.get("timestamp")), "<host readings>": True, **dict(sorted(kept.items()))}
         normalized = self.value(payload)
         if topic_suffix == "status":

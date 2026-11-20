@@ -17,7 +17,8 @@ import secrets
 import uuid
 from collections import deque
 from collections.abc import Iterator
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -27,6 +28,9 @@ from harness.broker import start as start_broker
 from harness.device import SimulatedDevice
 from harness.ed25519 import sign_desired
 from harness.fake_cp import FakeControlPlane, Reply, Request, recorded_http
+
+if TYPE_CHECKING:
+    from agents.python_agent import PythonAgent
 
 MODE = os.environ.get("AGENT_CONTRACT_MODE", "verify")
 SIGNING_SEED = bytes(range(32))  # test-only organization signing key
@@ -38,7 +42,9 @@ def device() -> SimulatedDevice:
 
 
 @pytest.fixture
-def agent(monkeypatch: pytest.MonkeyPatch, tmp_path, device: SimulatedDevice, contract: Contract):
+def agent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, device: SimulatedDevice, contract: Contract
+) -> PythonAgent:
     name = os.environ.get("AGENT_CONTRACT_AGENT", "python")
     if name != "python":
         pytest.fail(f"no adapter for agent {name!r}")
@@ -50,7 +56,7 @@ def agent(monkeypatch: pytest.MonkeyPatch, tmp_path, device: SimulatedDevice, co
 
 
 @pytest.fixture(scope="session")
-def broker(tmp_path_factory) -> Iterator[Broker]:
+def broker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Broker]:
     try:
         started = start_broker(tmp_path_factory.mktemp("broker"))
     except BrokerUnavailable as error:
