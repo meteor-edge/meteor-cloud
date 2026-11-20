@@ -16,7 +16,7 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 ## Rules
 
 1. The control plane remains Python.
-2. Data-plane and device-plane implementations may use other languages later. No language migration is in progress.
+2. Data-plane and device-plane implementations may use other languages. The device agent is moving to Go in `src/device-plane/agent-go/` (approved; see [meteorcli in Go](meteorcli-go.md)); the Python agent stays the installed one until that is complete.
 3. Planes must not import one another’s private Python packages (`app`, `data_plane`, `edge_agent`, `meteorcli`).
 4. Cross-plane traffic uses documented HTTP/MQTT contracts ([`contracts/mqtt-http.md`](../contracts/mqtt-http.md), control-plane `/internal/*`). The device agent speaks [`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md), checked by JSON Schemas on both sides.
 5. PostgreSQL is the control-plane database. Other stores stay behind existing ports.
