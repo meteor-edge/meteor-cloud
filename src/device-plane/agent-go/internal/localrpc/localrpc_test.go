@@ -192,6 +192,9 @@ func TestSystemGroups(t *testing.T) {
 }
 
 func TestConnectionLimitAndAuditFields(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root is exempt from the connection limits")
+	}
 	logs := &syncBuffer{}
 	s := &Server{
 		Log:        slog.New(slog.NewTextHandler(logs, nil)),
@@ -243,6 +246,9 @@ func TestConnectionLimitAndAuditFields(t *testing.T) {
 }
 
 func TestPerUserLimitKeepsRoomForOthers(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root is exempt from the connection limits")
+	}
 	logs := &syncBuffer{}
 	s := &Server{
 		Log: slog.New(slog.NewTextHandler(logs, nil)), Authorize: func(Peer, string) error { return nil },
@@ -287,5 +293,25 @@ func TestAdmit(t *testing.T) {
 		if (why != "") != tt.refused {
 			t.Errorf("uid %d inFlight %d fromMe %d: %q", tt.uid, tt.inFlight, tt.fromMe, why)
 		}
+	}
+}
+
+func TestShutdownDoesNotWaitForIdleClients(t *testing.T) {
+	path, l := listen(t)
+	s := &Server{Log: slog.New(slog.DiscardHandler), Authorize: func(Peer, string) error { return nil }}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, l) }()
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	time.Sleep(50 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	<-done
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("shutdown waited %v for a client that sent nothing", d)
 	}
 }

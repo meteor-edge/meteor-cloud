@@ -85,6 +85,9 @@ func TestStatusAndModuleRestartThroughAgent(t *testing.T) {
 
 	sock := filepath.Join(root, "run", "meteorcli", "agent.sock")
 	before := socketSince(t, sock)
+	if before == "" {
+		t.Fatal("could not read the socket module's start time before the restart")
+	}
 	r := meteorcli(t, root, nil, "module", "restart", "socket")
 	if r.code != 0 || !strings.Contains(r.stdout, "Module socket restarted.") {
 		t.Errorf("module restart = %+v", r)

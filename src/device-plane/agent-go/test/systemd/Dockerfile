@@ -3,7 +3,7 @@
 FROM debian:12.8-slim
 ENV container=docker DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
- && apt-get install -y --no-install-recommends systemd systemd-sysv dbus \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv dbus netcat-openbsd \
  && rm -rf /var/lib/apt/lists/* \
  && systemctl mask getty.target console-getty.service systemd-logind.service \
       systemd-firstboot.service systemd-remount-fs.service

@@ -110,13 +110,16 @@ Every request is logged to the journal with the caller's uid and pid, the method
 a few named fields (a module or unit name); raw request parameters are never logged. Answers never
 contain secrets (status says `present`/`missing`). The socket serves at most 16 connections at once,
 at most 4 from one user (root has a few extra slots), and gives a client 5 seconds to send its
-request, so one user holding connections open locks out neither other users nor root. Several
-members of the group acting together can still fill the 16 slots for 5 seconds at a time; only add
-trusted local accounts to `meteorcli`.
+request, so one user holding connections open locks out neither other users nor root (the
+container test checks this). Four or more members of the group acting together can keep all 16
+slots full by reopening connections, which blocks `status` and `module restart` for everyone but
+root while they do; only add trusted local accounts to `meteorcli`.
 
 The agent holds an `flock` on `agent.sock.lock` while it serves `agent.sock`. A second agent with
 the same paths refuses to start instead of replacing the live socket; after a crash the kernel drops
-the lock and the next start replaces the stale socket.
+the lock and the next start replaces the stale socket. As a second guard the agent removes an old
+socket only when connecting to it is refused; a socket that answers, or one it cannot check, is
+left alone and the agent fails to start (stop the other process first).
 
 ### Root helper
 

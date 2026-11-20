@@ -71,6 +71,19 @@ expect 1 "permission denied" "bob (no group) is refused module restart" -- as bo
 expect 1 "add you to the meteorcli group" "erin (only meteorcli-admin) is told to join meteorcli too" -- as erin status
 expect 0 "Agent:          running" "root runs status" -- ctr meteorcli status
 
+# carol holds her 4 connection slots with requests she never sends (each lasts
+# up to the 5 s read deadline); she is refused more, alice and root still get in.
+for _ in 1 2 3 4; do
+	docker exec -d "$name" setpriv --reuid=carol --regid=carol --init-groups sh -c 'sleep 4 | nc -U /run/meteorcli/agent.sock'
+done
+sleep 0.5
+expect 1 "status: no answer" "carol cannot open a fifth connection" -- as carol status
+expect 0 "Agent:          running" "alice runs status while carol holds her slots" -- as alice status
+expect 0 "Module socket restarted." "alice runs module restart while carol holds her slots" -- as alice module restart socket
+sleep 1
+expect 0 "Agent:          running" "root runs status while carol holds her slots" -- ctr meteorcli status
+sleep 4
+
 # Helper: only uid meteor.
 expect 0 '"lines"' "meteor reads the journal through the helper" -- \
 	as meteor helper call logs.read '{"source":"systemd","unit":"meteorcli.service","lines":5}'

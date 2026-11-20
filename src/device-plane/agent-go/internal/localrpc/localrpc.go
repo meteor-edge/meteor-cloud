@@ -122,7 +122,10 @@ func (s *Server) Serve(ctx context.Context, l *net.UnixListener) error {
 	defer cancel()
 	done := make(chan struct{})
 	conns := make(chan *net.UnixConn)
-	type ended struct{ uid uint32 }
+	type ended struct {
+		uid  uint32
+		conn *net.UnixConn
+	}
 	acceptErr := make(chan error, 1)
 	go func() { // owned: ends when the listener closes below
 		defer close(done)
@@ -143,6 +146,7 @@ func (s *Server) Serve(ctx context.Context, l *net.UnixListener) error {
 
 	var inFlight int
 	perUser := map[uint32]int{}
+	open := map[*net.UnixConn]bool{}
 	finished := make(chan ended)
 	var idle <-chan time.Time
 	resetIdle := func() {
@@ -176,13 +180,15 @@ loop:
 			}
 			inFlight++
 			perUser[peer.UID]++
+			open[c] = true
 			idle = nil
 			go func() { // owned: Serve waits for it below
-				defer func() { finished <- ended{peer.UID} }()
+				defer func() { finished <- ended{peer.UID, c} }()
 				s.handle(ctx, c, peer)
 			}()
 		case e := <-finished:
 			inFlight--
+			delete(open, e.conn)
 			if perUser[e.uid]--; perUser[e.uid] <= 0 {
 				delete(perUser, e.uid)
 			}
@@ -191,6 +197,10 @@ loop:
 	}
 	l.Close()
 	cancel()
+	// A client that has not sent its request yet does not hold up shutdown.
+	for c := range open {
+		_ = c.SetReadDeadline(time.Now())
+	}
 	for ; inFlight > 0; inFlight-- {
 		<-finished
 	}

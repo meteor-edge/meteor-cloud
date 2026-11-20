@@ -257,7 +257,10 @@ func lockSocket(path string) (unlock func(), err error) {
 }
 
 // removeStaleSocket removes a socket left by an agent that died. The caller
-// holds the socket's lock. Anything that is not a socket is left alone.
+// holds the socket's lock; as a second guard (against a process that does not
+// take the lock) a socket is removed only when connecting is refused outright.
+// A socket that answers, any other dial error, and anything that is not a
+// socket are left alone.
 func removeStaleSocket(path string) error {
 	st, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -268,6 +271,14 @@ func removeStaleSocket(path string) error {
 	}
 	if st.Mode()&fs.ModeSocket == 0 {
 		return fmt.Errorf("socket: %s exists and is not a socket", path)
+	}
+	c, err := net.DialTimeout("unix", path, time.Second)
+	if err == nil {
+		c.Close()
+		return fmt.Errorf("socket: another process serves %s; stop it first", path)
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		return fmt.Errorf("socket: cannot tell whether %s is stale: %w", path, err)
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("socket: remove stale %s: %w", path, err)

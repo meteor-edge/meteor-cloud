@@ -197,6 +197,21 @@ func TestAgentSocketOwnership(t *testing.T) {
 	l.Close()
 	release()
 
+	// A live socket from a process that does not take the lock is kept.
+	live, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := listenAgentSocket(path); err == nil || !strings.Contains(err.Error(), "another process serves") {
+		t.Errorf("live socket without lock: %v", err)
+	}
+	if c, err := net.Dial("unix", path); err != nil {
+		t.Errorf("live socket was removed: %v", err)
+	} else {
+		c.Close()
+	}
+	live.Close()
+
 	// Anything that is not a socket is refused and kept.
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
