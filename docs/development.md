@@ -31,7 +31,7 @@ For a product walkthrough (console + first device), start with [Getting started]
 ```bash
 make dev                 # all Compose files (shared network meteorcloud)
 make dev-control-plane   # bundled infra (postgres/redis/minio profiles) + control-plane API
-make dev-data-plane      # MQTT broker + data-plane MQTT gateway
+make dev-data-plane      # MQTT broker + data-plane MQTT forwarder (Go)
 make dev-console         # operator console
 ```
 

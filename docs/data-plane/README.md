@@ -7,6 +7,7 @@ The data plane lets applications publish data, subscribe to live data, query his
 | Write an application | [SDK guide](../../sdk/python/README.md) |
 | Register applications, permissions and credentials | [Applications and credentials](applications.md) |
 | Run, configure, monitor and troubleshoot it | [Operations](operations.md) |
+| Understand how device MQTT reaches the control plane (`data-plane` service, shared subscription, backpressure) | [MQTT forwarder](mqtt-forwarder.md) |
 | Understand the device event path (MQTT → NATS JetStream → rule processor, ClickHouse writer) | [Device event path](jetstream.md) |
 | Understand device CPU, memory, disk and temperature history (ClickHouse, console charts) | [Device telemetry history](device-telemetry.md) |
 | Understand online/offline, deployment, app lifecycle and saved-warning history | [Platform history](platform-history.md) |

@@ -7,7 +7,8 @@ services:
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
-  data-plane:
+  # The Go forwarder (data-plane) has no hot reload: `docker compose up --build data-plane`.
+  data-plane-python:
     volumes:
       - ../../src/data-plane:/app
     command: uvicorn data_plane.main:app --host 0.0.0.0 --port 8081 --reload

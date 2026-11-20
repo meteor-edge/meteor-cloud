@@ -30,6 +30,9 @@ console:
   replicaCount: 2
 dataPlane:
   image: { repository: ghcr.io/meteor-edge/meteorcloud-data-plane, tag: "0.2.0" }
+# The MQTT forwarder (dataPlane.gateway: go) runs from the data API image.
+dataApi:
+  image: { repository: ghcr.io/meteor-edge/meteorcloud-data-api, tag: "0.2.0" }
 
 postgresql:
   mode: external              # DATABASE_URL comes from the existing Secret

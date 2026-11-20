@@ -1,5 +1,7 @@
 # Data plane: MQTT gateway, application data API, plus one optional bundled broker.
-#   mqtt        data-plane service (needed whenever MQTT_ENABLED=true)
+#   mqtt        data-plane service: the Go MQTT forwarder (needed whenever MQTT_ENABLED=true)
+#   mqtt-python the previous Python gateway, kept for one release. Use it INSTEAD of
+#               mqtt (never both): COMPOSE_PROFILES=...,mqtt-python
 #   data-api    application data plane (Go): publish, subscribe, query, commands for
 #               applications that use the MeteorCloud SDK (contracts/data-plane-v1.md)
 # Pick ONE broker profile and set MQTT_PROVIDER to the same name
@@ -165,14 +167,18 @@ services:
     networks:
       - meteorcloud
 
+  # Device MQTT -> control plane (POST /internal/mqtt/ingest) and the publish/watch API
+  # the control plane calls at DATA_PLANE_URL (contracts/mqtt-http.md). Go binary from
+  # the data-api image (docs/data-plane/mqtt-forwarder.md).
   data-plane:
-    image: ${DATA_PLANE_IMAGE:-meteorcloud/data-plane:dev}
+    image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}
     build:
-      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/go
     profiles: [mqtt]
+    entrypoint: ["mqtt-forwarder"]
     env_file:
       - ${METEORCLOUD_ENV_FILE:-.env}
-    environment:
+    environment: &data-plane-env
       CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
       HTTP_ADDR: ":8081"
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
@@ -183,7 +189,7 @@ services:
       - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
     ports:
       - "8081:8081"
-    depends_on:
+    depends_on: &data-plane-depends
       mosquitto:
         condition: service_healthy
         required: false
@@ -193,13 +199,40 @@ services:
       vernemq:
         condition: service_healthy
         required: false
+    # Queued messages are forwarded on stop (MQTT_FORWARDER_DRAIN_TIMEOUT, 20 s).
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "mqtt-forwarder", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - meteorcloud
+
+  # The Python gateway, for one release as a fallback (profile mqtt-python instead of
+  # mqtt). It answers to "data-plane" too, so DATA_PLANE_URL does not change.
+  data-plane-python:
+    image: ${DATA_PLANE_IMAGE:-meteorcloud/data-plane:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane
+    profiles: [mqtt-python]
+    env_file:
+      - ${METEORCLOUD_ENV_FILE:-.env}
+    environment: *data-plane-env
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
+    ports:
+      - "8081:8081"
+    depends_on: *data-plane-depends
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
     networks:
-      - meteorcloud
+      meteorcloud:
+        aliases:
+          - data-plane
 
   data-api:
     image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}

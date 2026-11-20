@@ -1,6 +1,13 @@
 {{- if .Values.mqtt.enabled }}
 {{- $fullname := include "meteorcloud.fullname" . }}
 {{- $secretName := include "meteorcloud.secretName" . }}
+{{- $gateway := .Values.dataPlane.gateway | default "go" }}
+{{- if not (has $gateway (list "go" "python")) }}
+{{- fail "dataPlane.gateway must be go or python" }}
+{{- end }}
+{{- $go := eq $gateway "go" }}
+{{- /* go: the MQTT forwarder binary from the data API image. python: the previous gateway. */}}
+{{- $image := ternary .Values.dataApi.image .Values.dataPlane.image $go }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,10 +15,18 @@ metadata:
   labels:
     {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "data-plane") | nindent 4 }}
 spec:
+  {{- if $go }}
+  # Replicas share the device topics through an MQTT shared subscription.
+  replicas: {{ .Values.dataPlane.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  {{- else }}
   # One MQTT subscriber; a second replica would process every message twice.
   replicas: 1
   strategy:
     type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "data-plane") | nindent 6 }}
@@ -34,8 +49,11 @@ spec:
         # Talks to the control plane only over HTTP and to the broker over MQTT;
         # it gets just the MQTT credentials, not the API's database secrets.
         - name: data-plane
-          image: {{ include "meteorcloud.image" (dict "ctx" . "image" .Values.dataPlane.image) }}
-          imagePullPolicy: {{ .Values.dataPlane.image.pullPolicy }}
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" $image) }}
+          imagePullPolicy: {{ $image.pullPolicy }}
+          {{- if $go }}
+          command: ["mqtt-forwarder"]
+          {{- end }}
           ports:
             - name: http
               containerPort: 8081
@@ -68,6 +86,12 @@ spec:
             - name: MQTT_INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef: { name: {{ $secretName }}, key: MQTT_INTERNAL_TOKEN }
+            {{- if $go }}
+            {{- range $k, $v := .Values.dataPlane.forwarder }}
+            - name: {{ printf "MQTT_FORWARDER_%s" ($k | snakecase | upper) }}
+              value: {{ $v | toString | quote }}
+            {{- end }}
+            {{- end }}
           readinessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 10
@@ -85,6 +109,10 @@ spec:
             - name: mqtt-ca
               mountPath: /certs
               readOnly: true
+      {{- if $go }}
+      # Queued messages are forwarded before exit (drainTimeout, 20 s by default).
+      terminationGracePeriodSeconds: 40
+      {{- end }}
       volumes:
         - name: mqtt-ca
           secret:

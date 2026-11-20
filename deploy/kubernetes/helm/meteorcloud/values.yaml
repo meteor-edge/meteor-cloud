@@ -310,7 +310,22 @@ console:
   tolerations: []
   affinity: {}
 
+# MQTT gateway ("data-plane" Service on 8081, needs mqtt.enabled): device messages to the
+# control plane, publish/watch API for it (contracts/mqtt-http.md).
 dataPlane:
+  # go: the Go MQTT forwarder, run from dataApi.image (default). python: the previous
+  # gateway from dataPlane.image below, kept as a fallback for one release (1 replica).
+  gateway: go
+  # go only: replicas split device messages through an MQTT shared subscription.
+  replicas: 1
+  # go only: MQTT_FORWARDER_* settings (docs/data-plane/mqtt-forwarder.md). Keys become
+  # upper snake case, e.g. queueSize -> MQTT_FORWARDER_QUEUE_SIZE.
+  forwarder: {}
+    # workers: 16
+    # queueSize: 4096
+    # batchSize: 32
+    # maxAttempts: 10
+    # drainTimeout: 20s
   image:
     repository: ghcr.io/meteor-edge/meteorcloud-data-plane
     tag: ""

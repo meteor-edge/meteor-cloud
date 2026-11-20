@@ -97,6 +97,7 @@
       - object_storage_provider in ['filesystem', 's3']
       - mqtt_broker in ['bundled', 'external']
       - mqtt_provider in ['mosquitto', 'emqx', 'vernemq']
+      - data_plane_gateway in ['go', 'python']
       - dataplane_bus in ['memory', 'mqtt']
       - dataplane_storage in ['postgres', 'clickhouse']
       - not (data_api_enabled | bool and dataplane_bus == 'mqtt') or (mqtt_enabled | bool)

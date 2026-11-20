@@ -63,7 +63,7 @@ The WireGuard gateway and browser SSH exist only when VPN / `SHELL_PROVIDER=ssh_
 | Plane | Deployable unit | Compose |
 | --- | --- | --- |
 | Control plane | Identity, tenancy, devices, audit, MQTT policy, ingest, operator API | `deploy/compose/control-plane.yml` |
-| Data plane | MQTT broker client, publish/watch, ingest forward | `deploy/compose/data-plane.yml` |
+| Data plane | MQTT forwarder (broker client, publish/watch, ingest forward), application data API | `deploy/compose/data-plane.yml` |
 | Device plane | `meteorcli` on the edge device | not a Compose service |
 
 Operator **console**: Vite/React in `console/` — browser → control-plane API only. See [Console](console.md).
@@ -73,7 +73,7 @@ Operator **console**: Vite/React in `console/` — browser → control-plane API
 ```text
 ┌─────────────────┐     ┌─────────────────┐     ┌──────────────────────┐
 │  Device plane   │     │   Data plane    │     │   Control plane      │
-│  (meteorcli)    │     │  (MQTT gateway) │     │  (API + Postgres)    │
+│  (meteorcli)    │     │ (MQTT forwarder)│     │  (API + Postgres)    │
 └────────┬────────┘     └────────┬────────┘     └──────────┬───────────┘
          │                       │                         │
          │  HTTPS enroll /       │                         │
@@ -115,13 +115,11 @@ PostgreSQL is the control-plane database. Vendor systems (MQTT broker, Redis, fu
 
 ## Data plane
 
-Python FastAPI process. Owns the platform MQTT session. Forwards each inbound payload to `POST {CONTROL_PLANE_URL}/internal/mqtt/ingest`. Contract: [`contracts/mqtt-http.md`](../contracts/mqtt-http.md).
-
-Keep **one** data-plane MQTT subscriber until shared subscriptions exist.
+The **MQTT forwarder** (Go, `src/data-plane/go/cmd/mqtt-forwarder`, Compose service `data-plane`) owns the platform MQTT session. It takes the device topics with an MQTT shared subscription, so replicas split the load, and forwards each payload to `POST {CONTROL_PLANE_URL}/internal/mqtt/ingest`. It acknowledges a message to the broker only after the control plane accepted it, and keeps each device's messages in order. It also serves the publish/watch API the control plane calls. Contract: [`contracts/mqtt-http.md`](../contracts/mqtt-http.md). Design and settings: [docs/data-plane/mqtt-forwarder.md](data-plane/mqtt-forwarder.md). The previous Python gateway (`src/data-plane/data_plane`) stays for one release behind a switch.
 
 ### Application data plane (Go)
 
-A second, independent service in [`src/data-plane/go/`](../src/data-plane/go/) serves applications: publish, live subscribe, history and commands over HTTPS and WebSocket, with the [Python SDK](../sdk/python/README.md) on top. It owns the `meteor/v1/...` topics; the Python process above keeps the device management topics (`devices/...`). It stores telemetry, events and inference results in ClickHouse and keeps commands in PostgreSQL (its own `dataplane` schema); the control plane database stays PostgreSQL. It pulls a policy snapshot from the control plane and never calls it per message. Overview and design decisions: [docs/data-plane](data-plane/README.md). Contract: [`contracts/data-plane-v1.md`](../contracts/data-plane-v1.md).
+A second, independent service in [`src/data-plane/go/`](../src/data-plane/go/) serves applications: publish, live subscribe, history and commands over HTTPS and WebSocket, with the [Python SDK](../sdk/python/README.md) on top. It owns the `meteor/v1/...` topics; the MQTT forwarder above keeps the device management topics (`devices/...`). It stores telemetry, events and inference results in ClickHouse and keeps commands in PostgreSQL (its own `dataplane` schema); the control plane database stays PostgreSQL. It pulls a policy snapshot from the control plane and never calls it per message. Overview and design decisions: [docs/data-plane](data-plane/README.md). Contract: [`contracts/data-plane-v1.md`](../contracts/data-plane-v1.md).
 
 The **device event path** (optional, Compose profile `nats`) uses **NATS JetStream** as internal messaging between data-plane services: `device-ingest` subscribes to the device topics (`devices/<id>/metrics|status|events`) with an MQTT shared subscription, binds each message to its device and organization (device directory from the control plane, never the payload) and publishes versioned events (`telemetry.v1.<org>.<device>`, ...); the `rule-processor` and `clickhouse-writer` read them through their own durable consumers. Devices never connect to NATS, and the control plane does not depend on it. Details: [docs/data-plane/jetstream.md](data-plane/jetstream.md).
 
