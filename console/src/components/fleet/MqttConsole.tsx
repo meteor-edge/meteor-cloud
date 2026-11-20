@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
-import { listenMqttEvents, publishMqttTest, type MqttTestEvent } from "@/api/fleet";
+import {
+  listenMqttEvents,
+  probeDeviceMqtt,
+  publishMqttTest,
+  type DevicePingResult,
+  type MqttTestEvent,
+} from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +27,9 @@ type MqttConsoleProps = {
   defaultTopic?: string;
   topicLocked?: boolean;
   canPublish: boolean;
+  /** When set with canProbe, shows Probe from device (agent mqtt-test path). */
+  deviceId?: string;
+  canProbe?: boolean;
   topicPlaceholder?: string;
 };
 
@@ -30,6 +39,8 @@ export function MqttConsole({
   defaultTopic = "",
   topicLocked = false,
   canPublish,
+  deviceId,
+  canProbe = false,
   topicPlaceholder = "devices/<device-id>/events",
 }: MqttConsoleProps) {
   const [topic, setTopic] = useState(defaultTopic);
@@ -37,6 +48,7 @@ export function MqttConsole({
   const [listening, setListening] = useState(false);
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [probeNote, setProbeNote] = useState<string | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
   const sentRef = useRef<ConsoleMessage[]>([]);
 
@@ -45,6 +57,7 @@ export function MqttConsole({
     setMessages([]);
     sentRef.current = [];
     setTopic(defaultTopic);
+    setProbeNote(null);
   }, [defaultTopic]);
 
   useEffect(() => {
@@ -66,6 +79,7 @@ export function MqttConsole({
       return;
     }
     setError(null);
+    setProbeNote(null);
     stopListening();
     setMessages([]);
     sentRef.current = [];
@@ -96,6 +110,7 @@ export function MqttConsole({
       }),
     onSuccess: (result) => {
       setError(null);
+      setProbeNote(null);
       const sent: ConsoleMessage = {
         direction: "sent",
         topic: result.topic,
@@ -109,6 +124,36 @@ export function MqttConsole({
       setError(err instanceof ApiError ? err.message : "Could not publish MQTT message."),
   });
 
+  const probeMutation = useMutation({
+    mutationFn: async (): Promise<DevicePingResult> => {
+      if (!deviceId) {
+        throw new Error("No device selected.");
+      }
+      if (!listening) {
+        startListening();
+        // Give the SSE subscription a moment before the probe lands.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return probeDeviceMqtt(token, organizationId, deviceId);
+    },
+    onSuccess: (result) => {
+      setError(null);
+      if (result.status === "completed") {
+        const ms = result.round_trip_ms != null ? ` (${result.round_trip_ms} ms)` : "";
+        setProbeNote(`Device probe completed${ms}. The status message should appear below.`);
+      } else {
+        setError(result.message || "Device probe failed.");
+        setProbeNote(null);
+      }
+    },
+    onError: (err: unknown) => {
+      setProbeNote(null);
+      setError(err instanceof ApiError ? err.message : "Could not probe MQTT from the device.");
+    },
+  });
+
+  const showProbe = Boolean(deviceId && canProbe);
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -121,6 +166,7 @@ export function MqttConsole({
             setMessages([]);
             sentRef.current = [];
             setTopic(event.target.value);
+            setProbeNote(null);
           }}
           placeholder={topicPlaceholder}
           readOnly={topicLocked}
@@ -129,7 +175,7 @@ export function MqttConsole({
       </div>
       {canPublish ? (
         <div className="space-y-2">
-          <Label htmlFor="mqtt-payload">Payload</Label>
+          <Label htmlFor="mqtt-payload">Payload (platform publish)</Label>
           <textarea
             id="mqtt-payload"
             className="min-h-24 w-full rounded-md border border-input bg-field text-foreground px-3 py-2 font-mono text-sm"
@@ -148,6 +194,15 @@ export function MqttConsole({
             Listen
           </Button>
         )}
+        {showProbe ? (
+          <Button
+            type="button"
+            onClick={() => probeMutation.mutate()}
+            disabled={!topic.trim() || probeMutation.isPending}
+          >
+            {probeMutation.isPending ? "Probing…" : "Probe from device"}
+          </Button>
+        ) : null}
         {canPublish ? (
           <Button
             type="button"
@@ -155,12 +210,15 @@ export function MqttConsole({
             onClick={() => publishMutation.mutate()}
             disabled={!topic.trim() || publishMutation.isPending}
           >
-            {publishMutation.isPending ? "Publishing…" : "Publish"}
+            {publishMutation.isPending ? "Publishing…" : "Publish as platform"}
           </Button>
         ) : null}
       </div>
       {error ? (
         <p className="text-sm font-medium text-midnight bg-ember rounded-md px-2 py-1">{error}</p>
+      ) : null}
+      {probeNote ? (
+        <p className="text-sm font-medium text-midnight bg-aurora rounded-md px-2 py-1">{probeNote}</p>
       ) : null}
       {listening ? (
         <p className="text-sm text-muted-foreground">Listening on {topic.trim()}</p>
@@ -171,7 +229,9 @@ export function MqttConsole({
         </p>
         {messages.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            No messages yet. Listen, then publish from this page or a device.
+            {showProbe
+              ? "No messages yet. Click Probe from device (or Listen, then run mqtt-test on the Pi)."
+              : "No messages yet. Listen, then publish from this page or a device."}
           </p>
         ) : (
           <ol className="mt-3 space-y-3">

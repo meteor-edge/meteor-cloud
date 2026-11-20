@@ -1282,6 +1282,35 @@ class FleetService:
         self.session.commit()
         return response
 
+    def probe_device_mqtt(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+        publisher: MqttPublisher,
+    ) -> DevicePingResponse:
+        """Ask the device to publish a status probe (browser Listen + device mqtt-test path)."""
+        membership = self._require_membership(organization_id, actor.id)
+        device = self._require_device(organization_id, device_id)
+        self._require(membership, "mqtt.test")
+        response = MqttService(self.session, settings=self.settings).send_probe(
+            organization_id=organization_id,
+            device_id=device_id,
+            publisher=publisher,
+        )
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.command.mqtt_probe",
+            resource_type="device",
+            resource_id=device_id,
+            metadata={"name": device.name},
+            outcome="failure" if response.status == "failed" else "success",
+        )
+        self.session.commit()
+        return response
+
     def require_mqtt_listener(
         self,
         *,

@@ -39,7 +39,7 @@ setups do this).
 | Device catalog | `device_type.create/update/delete`, `device_group.create/update/delete` |
 | Enrollment secrets | `registration_token.create/revoke`, `enrollment_key.create/revoke` |
 | Enrollment | `enrollment_request.submit` (device), `enrollment_request.approve/reject` (operator), `enrollment_request.claim` (device receives its credential), `device.register`, `device.reregister` |
-| Devices | `device.update` (before/after of name, type, group), `device.enable`, `device.disable`, `device.delete`, `device.credential.rotate`, `device.credential.revoke`, `device.mqtt_credential.issue`, `device.mqtt_credential.revoke`, `device.command.ping`, `mqtt.test_publish` |
+| Devices | `device.update` (before/after of name, type, group), `device.enable`, `device.disable`, `device.delete`, `device.credential.rotate`, `device.credential.revoke`, `device.mqtt_credential.issue`, `device.mqtt_credential.revoke`, `device.command.ping`, `device.command.mqtt_probe`, `mqtt.test_publish` |
 | Remote access | `connectivity.enroll` (first or new WireGuard key), `connectivity.revoke`, `connectivity.reenroll`, `connectivity.key_change_rejected`, `connectivity.host_key_mismatch`, `device.shell.start/end/denied`, `device.shell.certificate` (`meteorcloud-ssh`), `device.logs.start/end/list/denied` |
 | Software | `artifact.upload/update/delete`, `artifact.download_link.create`, `release.create/update/delete`, `deployment.create/cancel/pause/resume/retry_failed/rollback` |
 | Public apps | `endpoint.create/update/delete` |

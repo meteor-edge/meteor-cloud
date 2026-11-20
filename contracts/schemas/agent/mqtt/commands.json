@@ -50,6 +50,25 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "probe"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "command_id"
+        ],
+        "properties": {
+          "command_id": {
+            "$ref": "../common.json#/$defs/uuid"
+          }
+        }
+      }
     }
   ]
 }

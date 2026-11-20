@@ -33,8 +33,19 @@ def test_handle_ping_returns_pong() -> None:
     }
 
 
+def test_handle_probe_returns_probed_and_status_flag() -> None:
+    result = handle_command(json.dumps({"command_id": "abc", "type": "probe"}))
+    assert result == {
+        "command_id": "abc",
+        "status": "completed",
+        "result": {"message": "probed"},
+        "_publish_status_probe": True,
+    }
+
+
 def test_handle_command_requires_command_id() -> None:
     assert handle_command(json.dumps({"type": "ping"})) is None
+    assert handle_command(json.dumps({"type": "probe"})) is None
     assert handle_command("not-json") is None
 
 

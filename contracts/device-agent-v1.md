@@ -168,9 +168,13 @@ always. Only these topics; anything else is denied by the broker policy.
 - **status:** `{"status": "online", "timestamp", "agent_version", "uptime_seconds"}` after every
   connect and once more about 2 s later; last will and a clean stop publish `{"status": "offline"}`.
 - **commands:** `{"type": "ping", "command_id"}` is answered on `commands/result` with
-  `{"command_id", "status": "completed", "result": {"message": "pong"}}`. `{"type": "sync_desired",
-  "revision"}` is a hint that desired software changed; acting on it early is optional (the next cycle
-  fetches `GET /software` anyway). Unknown types and unparsable messages are ignored.
+  `{"command_id", "status": "completed", "result": {"message": "pong"}}`.
+  `{"type": "probe", "command_id"}` publishes a non-retained status probe (same path as
+  `meteorcli mqtt-test`) and answers on `commands/result` with
+  `{"command_id", "status": "completed", "result": {"message": "probed"}}`.
+  `{"type": "sync_desired", "revision"}` is a hint that desired software changed; acting on it early
+  is optional (the next cycle fetches `GET /software` anyway). Unknown types and unparsable
+  messages are ignored.
 - **metrics:** best-effort readings (`cpu_percent`, `memory_percent`, `disk_percent`, `temperature_c`,
   load, network rates, `wifi_signal_dbm`, `agent_errors`) plus flat app keys `app.<name>.<field>`.
 - **events:** `{"type", "timestamp", ...}`: app lifecycle (`app.started`, `app.exited`,

@@ -23,6 +23,7 @@ from app.mqtt.schemas import (
     MqttAuthorizeResponse,
     MqttAuthResponse,
     PingCommandPayload,
+    ProbeCommandPayload,
 )
 from app.ports.mqtt import MQTTGateway
 
@@ -195,6 +196,42 @@ class MqttService:
         device_id: uuid.UUID,
         publisher: MqttPublisher,
     ) -> DevicePingResponse:
+        return self._send_device_command(
+            organization_id=organization_id,
+            device_id=device_id,
+            publisher=publisher,
+            kind="ping",
+            payload_factory=lambda command_id: PingCommandPayload(command_id=command_id).model_dump_json(),
+            timeout_message="Timed out waiting for pong.",
+        )
+
+    def send_probe(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+        publisher: MqttPublisher,
+    ) -> DevicePingResponse:
+        """Ask the device to publish a status probe (same path as meteorcli mqtt-test)."""
+        return self._send_device_command(
+            organization_id=organization_id,
+            device_id=device_id,
+            publisher=publisher,
+            kind="probe",
+            payload_factory=lambda command_id: ProbeCommandPayload(command_id=command_id).model_dump_json(),
+            timeout_message="Timed out waiting for the device probe.",
+        )
+
+    def _send_device_command(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+        publisher: MqttPublisher,
+        kind: str,
+        payload_factory,
+        timeout_message: str,
+    ) -> DevicePingResponse:
         device = self.session.get(Device, device_id)
         if device is None or device.organization_id != organization_id:
             raise NotFoundError("device_not_found", "Device was not found.")
@@ -208,7 +245,7 @@ class MqttService:
         command = DeviceCommand(
             organization_id=organization_id,
             device_id=device_id,
-            type="ping",
+            type=kind,
             status="pending",
         )
         self.session.add(command)
@@ -221,7 +258,7 @@ class MqttService:
         self.session.refresh(command)
 
         started = time.monotonic()
-        payload = PingCommandPayload(command_id=command.id).model_dump_json()
+        payload = payload_factory(command.id)
         try:
             publisher.publish(
                 f"devices/{device_id}/commands",
@@ -230,7 +267,7 @@ class MqttService:
                 retain=False,
             )
         except Exception:
-            DEVICE_COMMANDS.labels(kind="ping", result="failed").inc()
+            DEVICE_COMMANDS.labels(kind=kind, result="failed").inc()
             self.session.refresh(command)
             if command.status not in {"completed", "failed"}:
                 command.status = "failed"
@@ -240,10 +277,10 @@ class MqttService:
             return DevicePingResponse(
                 command_id=command.id,
                 status="failed",
-                message="Could not publish ping to the MQTT broker.",
+                message=f"Could not publish {kind} to the MQTT broker.",
             )
 
-        DEVICE_COMMANDS.labels(kind="ping", result="sent").inc()
+        DEVICE_COMMANDS.labels(kind=kind, result="sent").inc()
         deadline = time.monotonic() + self.settings.mqtt_ping_timeout_seconds
         while time.monotonic() < deadline:
             self.session.expire(command)
@@ -274,7 +311,7 @@ class MqttService:
         return DevicePingResponse(
             command_id=command.id,
             status="failed",
-            message="Timed out waiting for pong.",
+            message=timeout_message,
         )
 
 

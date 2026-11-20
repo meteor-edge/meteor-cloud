@@ -220,10 +220,38 @@ func (m *Module) command(ctx context.Context, d agent.Deps, msg bus.Message) {
 		if err := d.Bus.PublishJSON(ctx, bus.CommandsResult, result, false); err != nil {
 			d.Log.Warn("could not answer ping", "err", err)
 		}
+	case "probe":
+		// Same publish path as meteorcli mqtt-test: a non-retained status message the
+		// console can Listen for, then answer on commands/result.
+		if c.CommandID == "" {
+			return
+		}
+		m.publishProbe(ctx, d, c.CommandID)
+		result := map[string]any{"command_id": c.CommandID, "status": "completed", "result": map[string]string{"message": "probed"}}
+		if err := d.Bus.PublishJSON(ctx, bus.CommandsResult, result, false); err != nil {
+			d.Log.Warn("could not answer probe", "err", err)
+		}
 	case "sync_desired":
 		// A hint only: the deploy module lists desired software on its next cycle anyway.
 		d.Signals.Publish(agent.WorkWaiting{Kind: "software"})
 	default:
 		d.Log.Debug("ignored a command of an unknown type", "type", c.Type)
+	}
+}
+
+func (m *Module) publishProbe(ctx context.Context, d agent.Deps, commandID string) {
+	status := map[string]any{
+		"status":        "online",
+		"timestamp":     bus.Timestamp(time.Now()),
+		"agent_version": d.Version,
+		"probe":         true,
+		"command_id":    commandID,
+		"message":       "mqtt-test",
+	}
+	if up, ok := d.Host.Uptime(); ok {
+		status["uptime_seconds"] = up
+	}
+	if err := d.Bus.PublishJSON(ctx, bus.Status, status, false); err != nil && ctx.Err() == nil {
+		d.Log.Warn("could not publish the MQTT probe status", "err", err)
 	}
 }

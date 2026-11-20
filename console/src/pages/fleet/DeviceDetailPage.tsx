@@ -193,11 +193,17 @@ export function DeviceDetailPage() {
   const commandsTopic = `devices/${device.id}/commands`;
   const statusTopic = `devices/${device.id}/status`;
   const metricsTopic = `devices/${device.id}/metrics`;
+  const canMqttTest = orgAccess
+    ? orgAccess.permissions.includes("mqtt.test")
+    : canManage;
   const meteorcliExamples = [
-    "meteorcli mqtt-test",
-    `meteorcli mqtt-test ${statusTopic} '{"status":"online","mac_address":"${device.mac_addresses[0] ?? ""}"}'`,
+    "# Publish a status probe (watch it with Listen above, or Probe from device)",
+    "sudo meteorcli mqtt-test",
+    `sudo meteorcli mqtt-test ${statusTopic}`,
+    "",
+    "# Print inbound commands (ping / probe) on this device",
     "meteorcli mqtt-listen",
-    `meteorcli mqtt-listen commands`,
+    "meteorcli mqtt-listen commands",
   ].join("\n");
   const tabs: TabItem<DeviceTab>[] = [
     { id: "overview", label: "Overview" },
@@ -434,6 +440,28 @@ export function DeviceDetailPage() {
         <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
           <h2 className="text-lg font-semibold">MQTT Connection</h2>
           <DeviceMqttStatus device={device} />
+          <div className="rounded-md border border-border bg-background p-3 text-sm text-muted-foreground space-y-2">
+            <p>
+              <span className="font-medium text-foreground">How to test from this page</span>
+            </p>
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>
+                <span className="font-medium text-foreground">Test Connection</span> sends an MQTT{" "}
+                <code className="text-foreground">ping</code> on{" "}
+                <code className="text-foreground">{commandsTopic}</code>; the agent answers with{" "}
+                <code className="text-foreground">pong</code>.
+              </li>
+              <li>
+                <span className="font-medium text-foreground">Probe from device</span> asks the agent
+                to publish on <code className="text-foreground">{statusTopic}</code> (same path as{" "}
+                <code className="text-foreground">meteorcli mqtt-test</code>). Click it with Listen
+                open to see the message below.
+              </li>
+              <li>
+                Or SSH to the device, run the commands under <span className="font-medium text-foreground">On the device</span>, and watch Listen here.
+              </li>
+            </ol>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Detail label="Device ID" value={device.id} />
             <Detail
@@ -448,6 +476,13 @@ export function DeviceDetailPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               On the device
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Run these on the Pi (agent must be enrolled and MQTT connected).{" "}
+              <code className="text-foreground">mqtt-test</code> needs{" "}
+              <code className="text-foreground">meteorcli-admin</code>;{" "}
+              <code className="text-foreground">mqtt-listen</code> needs{" "}
+              <code className="text-foreground">meteorcli</code>.
             </p>
             <pre className="mt-2 overflow-x-auto rounded-md bg-background p-3 text-foreground text-sm">
               {meteorcliExamples}
@@ -469,9 +504,11 @@ export function DeviceDetailPage() {
             <MqttConsole
               token={token}
               organizationId={organizationId}
+              deviceId={device.id}
               defaultTopic={statusTopic}
               topicLocked
-              canPublish={canManage}
+              canPublish={canMqttTest}
+              canProbe={canMqttTest}
             />
           ) : null}
         </div>
