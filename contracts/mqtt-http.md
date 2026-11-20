@@ -46,7 +46,18 @@ Mosquitto plugin disconnects that user's sessions. Other brokers ignore it.
 
 ### `POST /internal/mqtt/ingest`
 
-Data-plane calls this for every inbound MQTT payload. Body:
+Data-plane calls this for every inbound MQTT payload (the MQTT forwarder,
+`src/data-plane/go/cmd/mqtt-forwarder`). Delivery is at least once, so a
+message may arrive twice after a reconnect:
+
+- 2xx: done.
+- Not reachable, 401, 403, 408, 429, 502, 503, 504: retried until it succeeds.
+- 500 and other 5xx: retried up to `MQTT_FORWARDER_MAX_ATTEMPTS` (10), then dropped.
+- Other 4xx: dropped.
+
+Messages of one device arrive in the order the forwarder received them. That
+holds for one forwarder process, which is how it is deployed; with several,
+the order across them is not guaranteed. Body:
 
 ```json
 { "topic": "devices/<uuid>/status", "payload": "{...}" }
@@ -66,6 +77,10 @@ Device ingestion (`device-ingest`) reads which organization owns each enrolled, 
 ```
 
 ## Data plane (`DATA_PLANE_URL`)
+
+Served on port 8081 by the MQTT forwarder (Go). Errors are `{"detail": "..."}`:
+401 for a wrong `X-MQTT-Internal-Token`, 422 for a malformed body, 503 when the
+broker session is not up (publish waits up to 15 s for it). Success is `{"ok": true}`.
 
 ### `GET /health`
 

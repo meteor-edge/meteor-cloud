@@ -55,6 +55,10 @@ platform_source_archive: ""
 repository_url: https://github.com/meteor-edge/meteor-cloud.git
 git_ref: master
 backend_image: edge-platform-backend:0.2.0
+# MQTT gateway (the "data-plane" Compose service, needs mqtt_enabled). go: the Go MQTT
+# forwarder from data_api_image (default). python: the previous Python gateway from
+# data_plane_image, kept as a fallback for one release.
+data_plane_gateway: go
 data_plane_image: edge-platform-data-plane:0.2.0
 # Application data API (Go). Off by default; enable for SDK publish/subscribe/query/commands.
 data_api_enabled: false

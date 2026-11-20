@@ -30,4 +30,5 @@ DATAPLANE_STORAGE=memory DATAPLANE_BUS=memory DATAPLANE_POLICY_FILE=policy.json 
 | `internal/commands` | Command state machine, redelivery, timeouts |
 | `internal/api` | HTTP and WebSocket API, rate limits, MQTT login exchange |
 | `internal/mqttgw` | Ingestion of messages published directly over MQTT; dead letters |
+| `internal/mqttfwd` | `cmd/mqtt-forwarder`: device MQTT to the control plane, publish/watch API ([docs](../../../docs/data-plane/mqtt-forwarder.md)) |
 | `internal/observability` | Prometheus metrics, JSON logging |

@@ -21,6 +21,10 @@ services:
     environment:
       LOG_FORMAT: json
 
+  data-plane-python:
+    environment:
+      LOG_FORMAT: json
+
   node-exporter:
     image: prom/node-exporter:v1.8.2
     profiles: [metrics]

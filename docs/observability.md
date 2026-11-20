@@ -74,6 +74,7 @@ Counters are summed across API replicas; fleet gauges are the same on every repl
 | Data plane | `meteorcloud_dataplane_mqtt_connected` | |
 | | `meteorcloud_dataplane_mqtt_messages_received_total` | kind |
 | | `meteorcloud_dataplane_ingest_forward_total`, `meteorcloud_dataplane_publish_total` | result |
+| | `meteorcloud_dataplane_forward_queue_depth`, `meteorcloud_dataplane_forward_dropped_total`, `meteorcloud_dataplane_forward_retries_total` | (, reason) MQTT forwarder queue ([details](data-plane/mqtt-forwarder.md#metrics)) |
 
 Recording rules (`rules/recording.yml`) precompute the API request rate, 5xx rate and ratio,
 and p95 latency per `scope` (`public` = `/api`, `internal` = `/internal`). Downloads, the
