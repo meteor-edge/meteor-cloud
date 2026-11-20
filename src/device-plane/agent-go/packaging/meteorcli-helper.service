@@ -17,11 +17,10 @@ UMask=0022
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_ADMIN CAP_AUDIT_WRITE
 NoNewPrivileges=yes
 ProtectSystem=true
-# users.add creates the new user's home and ~/.ssh/authorized_keys, so /home is
-# bound in writable; /root and /run/user stay hidden. (ProtectHome=read-only with
-# ReadWritePaths=/home does not make /home writable on systemd 252.)
-ProtectHome=tmpfs
-BindPaths=/home
+# users.add creates homes under /home. ProtectHome=tmpfs (or read-only) plus a
+# BindPaths=/home remount leaves /home read-only on systemd 257, so useradd -m
+# fails. Hide only /root and /run/user with a read-only tmpfs; leave /home alone.
+TemporaryFileSystem=/root:ro /run/user:ro
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
