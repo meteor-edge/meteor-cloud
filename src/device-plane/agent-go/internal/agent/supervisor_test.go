@@ -271,3 +271,35 @@ func TestRestartDelay(t *testing.T) {
 		t.Error("reset")
 	}
 }
+
+func TestRestartBetweenRunsIsNotLost(t *testing.T) {
+	m := &fakeModule{name: "deploy", run: func(ctx context.Context, d Deps, n int32) error { <-ctx.Done(); return nil }}
+	s := fast(NewSupervisor([]Module{m}, testDeps(nil)))
+	r := &runner{mod: m, wake: make(chan struct{}, 1)}
+	s.runners["deploy"] = r
+
+	// Restart arrives while no run is active (after supervise drained wake).
+	if err := s.Restart("deploy"); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	pending := r.pending
+	r.mu.Unlock()
+	if !pending {
+		t.Fatal("request not recorded")
+	}
+
+	// The run that starts next fulfils it and clears the stale wake-up.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = s.runOnce(ctx, r, s.deps.Log) }()
+	eventually(t, "run started", func() bool { return m.runs.Load() == 1 })
+	r.mu.Lock()
+	pending = r.pending
+	r.mu.Unlock()
+	if pending || len(r.wake) != 0 {
+		t.Errorf("pending %v, wake %d after the run started", pending, len(r.wake))
+	}
+	cancel()
+	<-done
+}

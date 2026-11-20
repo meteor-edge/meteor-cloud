@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ type Report struct {
 	// Kind says which route sends it ("software", "action", ...).
 	Kind string `json:"kind"`
 	// Key, when set, means only the latest report with this Kind and Key matters.
+	// ID is a zero-padded counter: sorting ids gives the order reports were put.
 	Key     string          `json:"key"`
 	Created time.Time       `json:"created"`
 	Body    json.RawMessage `json:"body"`
@@ -44,7 +46,7 @@ type Outbox struct {
 	now   func() time.Time
 
 	mu      sync.Mutex
-	seq     uint64
+	seq     uint64 // last id handed out; ids never go down, whatever the clock does
 	dropped int
 }
 
@@ -56,7 +58,31 @@ func NewOutbox(dir string, limit int) (*Outbox, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("outbox: %w", err)
 	}
-	return &Outbox{dir: dir, limit: limit, now: time.Now}, nil
+	o := &Outbox{dir: dir, limit: limit, now: time.Now}
+	seq, err := lastSeq(dir)
+	if err != nil {
+		return nil, err
+	}
+	o.seq = seq
+	return o, nil
+}
+
+// lastSeq finds the highest id already on disk, so ids keep increasing across
+// restarts. The order of reports never depends on the wall clock.
+func lastSeq(dir string) (uint64, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("outbox: %w", err)
+	}
+	var top uint64
+	for _, e := range entries {
+		digits, _, _ := strings.Cut(e.Name(), ".")
+		digits, _, _ = strings.Cut(digits, "-")
+		if n, err := strconv.ParseUint(digits, 10, 64); err == nil && n > top {
+			top = n
+		}
+	}
+	return top, nil
 }
 
 // Put stores a report. With a non-empty key, earlier reports with the same kind
@@ -73,7 +99,7 @@ func (o *Outbox) Put(kind, key string, body any) (Report, error) {
 	now := o.now().UTC()
 	r := Report{
 		Version: reportVersion,
-		ID:      fmt.Sprintf("%020d-%06d", now.UnixNano(), o.seq%1_000_000),
+		ID:      fmt.Sprintf("%020d", o.seq),
 		Kind:    kind, Key: key, Created: now, Body: data,
 	}
 	file, err := json.Marshal(r)

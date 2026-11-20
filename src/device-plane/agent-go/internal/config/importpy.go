@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,6 +63,21 @@ func ImportPython(from string, p Paths, opt ImportOptions) (ImportReport, error)
 		now = time.Now
 	}
 	rep := ImportReport{From: from}
+
+	legacyConfig := filepath.Join(from, "config.json")
+	sameFile := samePath(legacyConfig, p.ConfigFile)
+	old, raw, err := readPythonConfig(legacyConfig, now, &rep)
+	if err != nil {
+		return rep, err
+	}
+	// Enrollment files belong to one server. Refuse to mix two servers before
+	// anything is written.
+	if !sameFile && !opt.Force {
+		if err := checkSameServer(old, p.ConfigFile); err != nil {
+			return rep, err
+		}
+	}
+
 	if err := opt.Owner.EnsureDir(p.IdentityDir, 0o700); err != nil {
 		return rep, err
 	}
@@ -69,62 +85,76 @@ func ImportPython(from string, p Paths, opt ImportOptions) (ImportReport, error)
 		return rep, err
 	}
 
-	// A finished staging journal holds newer secrets than the files beside it.
-	src := func(name string) string {
-		staged := filepath.Join(from, pythonStaging, name)
-		if fileExists(filepath.Join(from, pythonStaging, "DONE")) && fileExists(staged) {
-			return staged
-		}
-		return filepath.Join(from, name)
+	deviceOK, err := importDevice(old, p, opt, &rep)
+	if err != nil {
+		return rep, err
 	}
-
-	legacyConfig := filepath.Join(from, "config.json")
-	sameFile := samePath(legacyConfig, p.ConfigFile)
-	if err := importConfig(legacyConfig, p, sameFile, opt, now, &rep); err != nil {
+	if err := importConfig(old, raw, legacyConfig, p, sameFile, deviceOK, opt, &rep); err != nil {
 		return rep, err
 	}
 
-	type move struct{ name, src, dst string }
-	secrets := []move{
-		{"device-token", src("device-token"), p.DeviceTokenFile()},
-		{"api-key", filepath.Join(from, "api-key"), p.APIKeyFile()},
-		{"mqtt-ca.crt", src("mqtt-ca.crt"), p.MQTTCAFile()},
-		{"wireguard/private.key", filepath.Join(from, "wireguard", "private.key"), filepath.Join(p.WireGuardDir(), "private.key")},
-		{"wireguard/public.key", filepath.Join(from, "wireguard", "public.key"), filepath.Join(p.WireGuardDir(), "public.key")},
+	// A finished staging journal holds newer secrets than the files beside it.
+	finished := fileExists(filepath.Join(from, pythonStaging, "DONE"))
+	src := func(name string) (path, superseded string) {
+		staged := filepath.Join(from, pythonStaging, name)
+		plain := filepath.Join(from, name)
+		if finished && fileExists(staged) {
+			return staged, plain
+		}
+		return plain, ""
 	}
 	var done []string
+	record := func(ok bool, path, superseded string) {
+		if ok {
+			done = append(done, path)
+			if superseded != "" {
+				done = append(done, superseded) // the older plain copy goes too
+			}
+		}
+	}
+
+	type move struct{ name, src, superseded, dst string }
+	staged := func(name, dst string) move {
+		path, old := src(name)
+		return move{name, path, old, dst}
+	}
+	plain := func(name, rel, dst string) move { return move{name, filepath.Join(from, rel), "", dst} }
+	secrets := []move{
+		staged("device-token", p.DeviceTokenFile()),
+		plain("api-key", "api-key", p.APIKeyFile()),
+		staged("mqtt-ca.crt", p.MQTTCAFile()),
+		plain("wireguard/private.key", filepath.Join("wireguard", "private.key"), filepath.Join(p.WireGuardDir(), "private.key")),
+		plain("wireguard/public.key", filepath.Join("wireguard", "public.key"), filepath.Join(p.WireGuardDir(), "public.key")),
+	}
 	for _, m := range secrets {
 		ok, err := copyIfNeeded(m.src, m.dst, opt, &rep, m.name)
 		if err != nil {
 			return rep, err
 		}
-		if ok {
-			done = append(done, m.src)
-		}
+		record(ok, m.src, m.superseded)
 	}
 
 	// JSON files gain a version field; unknown keys are kept.
+	fixMQTT := func(o Object) {
+		if v, ok := o["ca_cert_path"]; ok && string(v) != "null" {
+			o["ca_cert_path"] = mustJSON(p.MQTTCAFile())
+		}
+	}
 	jsonMoves := []struct {
-		name, src, dst string
-		fix            func(Object)
+		move
+		fix func(Object)
 	}{
-		{"mqtt.json", src("mqtt.json"), p.MQTTFile(), func(o Object) {
-			if v, ok := o["ca_cert_path"]; ok && string(v) != "null" {
-				o["ca_cert_path"] = mustJSON(p.MQTTCAFile())
-			}
-		}},
-		{"claim-secret", filepath.Join(from, "claim-secret"), p.PendingClaimFile(), nil},
-		{"signing-keys.json", filepath.Join(from, "signing-keys.json"), filepath.Join(p.StateDir, "signing-keys.json"), nil},
-		{"applied-software.json", filepath.Join(from, "applied-software.json"), filepath.Join(p.StateDir, "applied-software.json"), nil},
+		{staged("mqtt.json", p.MQTTFile()), fixMQTT},
+		{plain("claim-secret", "claim-secret", p.PendingClaimFile()), nil},
+		{plain("signing-keys.json", "signing-keys.json", filepath.Join(p.StateDir, "signing-keys.json")), nil},
+		{plain("applied-software.json", "applied-software.json", filepath.Join(p.StateDir, "applied-software.json")), nil},
 	}
 	for _, m := range jsonMoves {
 		ok, err := importJSONFile(m.src, m.dst, m.fix, opt, now, &rep, m.name)
 		if err != nil {
 			return rep, err
 		}
-		if ok {
-			done = append(done, m.src)
-		}
+		record(ok, m.src, m.superseded)
 	}
 
 	// Everything is written: remove the old copies so there is one source of truth.
@@ -135,58 +165,109 @@ func ImportPython(from string, p Paths, opt ImportOptions) (ImportReport, error)
 		rel, _ := filepath.Rel(from, f)
 		rep.Removed = append(rep.Removed, rel)
 	}
-	if err := os.RemoveAll(filepath.Join(from, pythonStaging)); err != nil {
-		return rep, fmt.Errorf("import: remove staging: %w", err)
+	if err := cleanStaging(filepath.Join(from, pythonStaging), finished); err != nil {
+		return rep, err
 	}
 	_ = os.Remove(filepath.Join(from, "wireguard")) // only if empty
 	return rep, nil
 }
 
-// importConfig converts the Python config.json: settings stay, device facts move.
-func importConfig(legacy string, p Paths, sameFile bool, opt ImportOptions, now func() time.Time, rep *ImportReport) error {
-	var old struct {
-		Version                  *int   `json:"version"`
-		Domain                   string `json:"domain"`
-		APIBase                  string `json:"api_base"`
-		ServerURL                string `json:"server_url"`
-		DeviceID                 string `json:"device_id"`
-		OrganizationID           string `json:"organization_id"`
-		Name                     string `json:"name"`
-		HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds"`
+// pythonConfig is the Python agent's config.json.
+type pythonConfig struct {
+	Version                  *int   `json:"version"`
+	Domain                   string `json:"domain"`
+	APIBase                  string `json:"api_base"`
+	ServerURL                string `json:"server_url"`
+	CAFile                   string `json:"ca_file"`
+	DeviceID                 string `json:"device_id"`
+	OrganizationID           string `json:"organization_id"`
+	Name                     string `json:"name"`
+	HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds"`
+}
+
+func (c *pythonConfig) server() string {
+	if c == nil {
+		return ""
 	}
-	raw, err := ReadJSON(legacy, &old)
+	return (&Config{Domain: c.Domain, APIBase: c.APIBase, ServerURL: c.ServerURL}).Server()
+}
+
+// readPythonConfig returns nil (and no error) when there is nothing to convert:
+// no file, a damaged file (quarantined), or a file already in the new format.
+func readPythonConfig(path string, now func() time.Time, rep *ImportReport) (*pythonConfig, Object, error) {
+	var old pythonConfig
+	raw, err := ReadJSON(path, &old)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return nil
+		return nil, nil, nil
 	case errors.Is(err, ErrCorrupt):
-		dst, qerr := Quarantine(legacy, now())
+		dst, qerr := Quarantine(path, now())
 		if qerr != nil {
-			return fmt.Errorf("import: %w", qerr)
+			return nil, nil, fmt.Errorf("import: %w", qerr)
 		}
 		rep.Skipped = append(rep.Skipped, "config.json (damaged, moved to "+filepath.Base(dst)+")")
-		return nil
+		return nil, nil, nil
 	case err != nil:
-		return fmt.Errorf("import: %w", err)
+		return nil, nil, fmt.Errorf("import: %w", err)
 	}
 	if old.Version != nil {
-		return nil // already the new format
+		return nil, nil, nil
 	}
+	return &old, raw, nil
+}
 
-	if old.DeviceID != "" {
-		if fileExists(p.DeviceFile()) && !opt.Force {
-			rep.Skipped = append(rep.Skipped, "device.json (exists)")
-		} else {
-			d := &Device{
-				DeviceID: old.DeviceID, OrganizationID: old.OrganizationID,
-				Name: old.Name, HeartbeatIntervalSeconds: old.HeartbeatIntervalSeconds,
-			}
-			if err := d.Save(p.DeviceFile(), opt.Owner); err != nil {
-				return fmt.Errorf("import: %w", err)
-			}
-			rep.Imported = append(rep.Imported, "device.json")
+// checkSameServer fails when the new config already points at another server.
+func checkSameServer(old *pythonConfig, newConfig string) error {
+	src := old.server()
+	if src == "" {
+		return nil
+	}
+	cur, err := Load(newConfig)
+	if err != nil {
+		return nil // missing or damaged: nothing to conflict with
+	}
+	if dst := cur.Server(); dst != "" && dst != src {
+		return fmt.Errorf("import: %s is configured for %s but the Python install is enrolled on %s; use --force to replace", newConfig, dst, src)
+	}
+	return nil
+}
+
+// importDevice writes device.json from the Python config. It returns false when
+// an existing device.json for another device was kept, so the caller keeps the
+// Python config as the source for a --force retry.
+func importDevice(old *pythonConfig, p Paths, opt ImportOptions, rep *ImportReport) (bool, error) {
+	if old == nil || old.DeviceID == "" {
+		return true, nil
+	}
+	if cur, err := LoadDevice(p.DeviceFile()); err == nil && !opt.Force {
+		if cur.DeviceID == old.DeviceID {
+			return true, nil // already imported
 		}
+		rep.Skipped = append(rep.Skipped, "device.json (exists for device "+cur.DeviceID+")")
+		return false, nil
 	}
+	d := &Device{
+		DeviceID: old.DeviceID, OrganizationID: old.OrganizationID,
+		Name: old.Name, HeartbeatIntervalSeconds: old.HeartbeatIntervalSeconds,
+	}
+	if err := d.Save(p.DeviceFile(), opt.Owner); err != nil {
+		return false, fmt.Errorf("import: %w", err)
+	}
+	rep.Imported = append(rep.Imported, "device.json")
+	return true, nil
+}
 
+// importConfig converts the Python config.json: settings stay, device facts move
+// to device.json. In place, it waits until device.json was imported, because the
+// rewrite drops the device facts.
+func importConfig(old *pythonConfig, raw Object, legacy string, p Paths, sameFile, deviceOK bool, opt ImportOptions, rep *ImportReport) error {
+	if old == nil {
+		return nil
+	}
+	if sameFile && !deviceOK {
+		rep.Skipped = append(rep.Skipped, "config.json (kept in Python format until device.json is imported)")
+		return nil
+	}
 	if !sameFile && fileExists(p.ConfigFile) && !opt.Force {
 		rep.Skipped = append(rep.Skipped, "config.json (exists)")
 		return nil
@@ -205,11 +286,31 @@ func importConfig(legacy string, p Paths, sameFile bool, opt ImportOptions, now 
 	for _, k := range append([]string{"version"}, pythonDeviceKeys...) {
 		delete(raw, k)
 	}
-	c := &Config{Domain: old.Domain, APIBase: old.APIBase, ServerURL: old.ServerURL, extra: raw}
+	c := &Config{Domain: old.Domain, APIBase: old.APIBase, ServerURL: old.ServerURL, CAFile: old.CAFile, extra: raw}
 	if err := c.Save(p.ConfigFile, opt.Owner); err != nil {
 		return fmt.Errorf("import: %w", err)
 	}
 	rep.Imported = append(rep.Imported, "config.json")
+	return nil
+}
+
+// cleanStaging drops an unfinished journal, and a finished one once every staged
+// file was imported. A finished journal with skipped files stays for --force.
+func cleanStaging(dir string, finished bool) error {
+	if finished {
+		entries, err := os.ReadDir(dir)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("import: staging: %w", err)
+		}
+		for _, e := range entries {
+			if e.Name() != "DONE" {
+				return nil
+			}
+		}
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("import: remove staging: %w", err)
+	}
 	return nil
 }
 
@@ -224,6 +325,9 @@ func copyIfNeeded(src, dst string, opt ImportOptions, rep *ImportReport, name st
 		return false, fmt.Errorf("import %s: %w", name, err)
 	}
 	if fileExists(dst) && !opt.Force {
+		if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, data) {
+			return true, nil // already imported: the old copy may go
+		}
 		rep.Skipped = append(rep.Skipped, name+" (exists)")
 		return false, nil
 	}

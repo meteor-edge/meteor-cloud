@@ -291,3 +291,48 @@ func TestBackoff(t *testing.T) {
 		t.Errorf("default first delay %v", d)
 	}
 }
+
+func TestCapabilitiesSendArrays(t *testing.T) {
+	b, err := json.Marshal(HeartbeatRequest{Capabilities: &Capabilities{Systemd: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"actions":[]`) || !strings.Contains(string(b), `"deploy_kinds":[]`) {
+		t.Errorf("body %s", b)
+	}
+	kinds := []string{"systemd"}
+	b, _ = json.Marshal(Capabilities{DeployKinds: kinds})
+	if !strings.Contains(string(b), `"deploy_kinds":["systemd"]`) {
+		t.Errorf("body %s", b)
+	}
+}
+
+func TestEmptyBodyAndCutErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/api/v1/agent/mqtt" {
+			w.WriteHeader(http.StatusOK) // typed route, no body
+			return
+		}
+		// 401 that promises more body than it sends.
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":`)
+	}))
+	defer srv.Close()
+	c, _ := New(Options{BaseURL: srv.URL, HTTPClient: srv.Client()})
+	ctx := context.Background()
+	if err := c.Health(ctx); err != nil {
+		t.Errorf("Health with an empty body: %v", err)
+	}
+	var e *Error
+	if _, err := c.MQTTStatus(ctx, "dev_x"); !errors.As(err, &e) || e.Code != "bad_response" {
+		t.Errorf("empty typed answer: %v", err)
+	}
+	if _, err := c.MQTTCredentials(ctx, "dev_x"); !IsAuth(err) {
+		t.Errorf("cut 401 body lost the status: %v", err)
+	}
+}

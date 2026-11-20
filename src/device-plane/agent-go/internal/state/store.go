@@ -82,14 +82,26 @@ func (s *Store) Write(name string, version int, v any) error {
 		return err
 	}
 	var keep config.Object
-	if _, err := config.ReadJSON(path, &keep); err != nil {
-		keep = nil // missing or damaged: nothing worth keeping
+	_, err = config.ReadJSON(path, &keep)
+	switch {
+	case err == nil:
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, config.ErrCorrupt):
+		keep = nil // nothing worth keeping
+	default:
+		// Unreadable (permissions, I/O): do not replace what we could not read.
+		return fmt.Errorf("state %s: %w", name, err)
 	}
-	if keep == nil {
-		keep = config.Object{}
+	merged, err := config.MergeJSON(v, keep)
+	if err != nil {
+		return fmt.Errorf("state %s: %w", name, err)
 	}
-	keep["version"] = json.RawMessage(fmt.Sprint(version))
-	if err := config.WriteJSON(path, v, keep, 0o600); err != nil {
+	var out config.Object
+	if err := json.Unmarshal(merged, &out); err != nil {
+		return fmt.Errorf("state %s: %w", name, err)
+	}
+	// The version argument wins over any "version" field in v.
+	out["version"] = json.RawMessage(fmt.Sprint(version))
+	if err := config.WriteJSON(path, struct{}{}, out, 0o600); err != nil {
 		return fmt.Errorf("state %s: %w", name, err)
 	}
 	return nil

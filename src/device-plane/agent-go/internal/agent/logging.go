@@ -19,7 +19,8 @@ var sensitiveKey = regexp.MustCompile(`(?i)(token|password|passwd|psk|secret|aut
 // (src/control-plane/app/devices/tokens.py, mqtt/credentials.py, applications).
 var sensitiveText = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)[^\s"',;]+`),
-	regexp.MustCompile(`(?i)((?:token|password|passwd|psk|secret|api[_-]?key|authorization)"?\s*[:=]\s*"?)[^\s"',;&}]+`),
+	// key=value, key: 'value', "key": "value with spaces and \"escapes\"".
+	regexp.MustCompile(`(?i)((?:token|password|passwd|psk|secret|api[_-]?key|authorization)['"]?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^\s"',;&}]+)`),
 	regexp.MustCompile(`\b(?:reg|dev|key|clm|sh|mqtt|mca)_[A-Za-z0-9_\-]{20,}`),
 }
 
@@ -47,11 +48,16 @@ func NewLogger(w io.Writer, level slog.Leveler) *slog.Logger {
 			return a
 		},
 	})
-	return slog.New(redactHandler{inner})
+	return slog.New(redactHandler{inner: inner})
 }
 
 // redactHandler wraps a handler and redacts the message and every attribute.
-type redactHandler struct{ inner slog.Handler }
+// secretGroup is set once WithGroup opened a group with a sensitive name: every
+// value logged inside it is then a secret, as with an explicit slog.Group.
+type redactHandler struct {
+	inner       slog.Handler
+	secretGroup bool
+}
 
 func (h redactHandler) Enabled(ctx context.Context, l slog.Level) bool {
 	return h.inner.Enabled(ctx, l)
@@ -60,7 +66,7 @@ func (h redactHandler) Enabled(ctx context.Context, l slog.Level) bool {
 func (h redactHandler) Handle(ctx context.Context, r slog.Record) error {
 	out := slog.NewRecord(r.Time, r.Level, Redact(r.Message), r.PC)
 	r.Attrs(func(a slog.Attr) bool {
-		out.AddAttrs(redactAttr(a))
+		out.AddAttrs(redactAttr(a, h.secretGroup))
 		return true
 	})
 	return h.inner.Handle(ctx, out)
@@ -69,26 +75,32 @@ func (h redactHandler) Handle(ctx context.Context, r slog.Record) error {
 func (h redactHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	clean := make([]slog.Attr, len(attrs))
 	for i, a := range attrs {
-		clean[i] = redactAttr(a)
+		clean[i] = redactAttr(a, h.secretGroup)
 	}
-	return redactHandler{h.inner.WithAttrs(clean)}
+	return redactHandler{inner: h.inner.WithAttrs(clean), secretGroup: h.secretGroup}
 }
 
 func (h redactHandler) WithGroup(name string) slog.Handler {
-	return redactHandler{h.inner.WithGroup(name)}
+	return redactHandler{inner: h.inner.WithGroup(name), secretGroup: h.secretGroup || isSensitiveKey(name)}
 }
 
-func redactAttr(a slog.Attr) slog.Attr {
-	if sensitiveKey.MatchString(a.Key) && !strings.HasSuffix(strings.ToLower(a.Key), "_present") {
+func isSensitiveKey(key string) bool {
+	return sensitiveKey.MatchString(key) && !strings.HasSuffix(strings.ToLower(key), "_present")
+}
+
+// redactAttr redacts a; inSecret means a sits inside a group with a sensitive name.
+func redactAttr(a slog.Attr, inSecret bool) slog.Attr {
+	v := a.Value.Resolve()
+	if (inSecret || isSensitiveKey(a.Key)) && v.Kind() != slog.KindGroup {
 		return slog.String(a.Key, redacted)
 	}
-	v := a.Value.Resolve()
+	secret := inSecret || isSensitiveKey(a.Key)
 	switch v.Kind() {
 	case slog.KindGroup:
 		attrs := v.Group()
 		clean := make([]any, len(attrs))
 		for i, g := range attrs {
-			clean[i] = redactAttr(g)
+			clean[i] = redactAttr(g, secret)
 		}
 		return slog.Group(a.Key, clean...)
 	case slog.KindString:

@@ -232,11 +232,18 @@ func TestSupervisorFeedsWatchdogOnlyWhileTicking(t *testing.T) {
 		}
 		return string(buf[:k])
 	}
-	if got := read(time.Second); got != "READY=1" {
-		t.Fatalf("first message %q", got)
+	// The watchdog loop starts before READY=1 is sent, so either may come first.
+	seen := map[string]bool{}
+	for range 10 {
+		if got := read(time.Second); got != "" {
+			seen[got] = true
+		}
+		if seen["READY=1"] && seen["WATCHDOG=1"] {
+			break
+		}
 	}
-	if got := read(time.Second); got != "WATCHDOG=1" {
-		t.Fatalf("no watchdog ping: %q", got)
+	if !seen["READY=1"] || !seen["WATCHDOG=1"] {
+		t.Fatalf("startup messages %v, want READY=1 and WATCHDOG=1", seen)
 	}
 	close(stuck)
 	time.Sleep(60 * time.Millisecond)
@@ -244,5 +251,40 @@ func TestSupervisorFeedsWatchdogOnlyWhileTicking(t *testing.T) {
 	}
 	if got := read(100 * time.Millisecond); got != "" {
 		t.Errorf("watchdog still fed while stuck: %q", got)
+	}
+}
+
+func TestRedactQuotedValues(t *testing.T) {
+	tests := []struct{ in, mustNot string }{
+		{"password='correct horse'", "horse"},
+		{`"password": "correct horse battery"`, "battery"},
+		{`"psk": "with \"escaped\" quote"`, "escaped"},
+		{"token=plain next=1", "plain"},
+	}
+	for _, tt := range tests {
+		if got := Redact(tt.in); strings.Contains(got, tt.mustNot) {
+			t.Errorf("Redact(%q) = %q", tt.in, got)
+		}
+	}
+	if got := Redact("token=plain next=1"); !strings.Contains(got, "next=1") {
+		t.Errorf("redacted too much: %q", got)
+	}
+}
+
+func TestLoggerRedactsInsideSensitiveGroups(t *testing.T) {
+	var buf bytes.Buffer
+	log := NewLogger(&buf, slog.LevelInfo)
+	log.WithGroup("credentials").Info("a", "value", "hunter2")
+	log.WithGroup("credentials").With("user", "hunter3").Info("b")
+	log.Info("c", slog.Group("credentials", "value", "hunter4"))
+	log.WithGroup("mqtt").Info("d", "host", "broker")
+	out := buf.String()
+	for _, secret := range []string{"hunter2", "hunter3", "hunter4"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("log leaks %q: %s", secret, out)
+		}
+	}
+	if !strings.Contains(out, "mqtt.host=broker") {
+		t.Errorf("unrelated group redacted: %s", out)
 	}
 }

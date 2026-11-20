@@ -60,6 +60,7 @@ type runner struct {
 	mu        sync.Mutex
 	cancel    context.CancelFunc // cancels the current Run
 	requested bool               // the current Run was cancelled by Restart
+	pending   bool               // Restart came while no Run was active
 }
 
 // NewSupervisor prepares modules to run with d. Every module gets its own copy of
@@ -144,6 +145,10 @@ func (s *Supervisor) Restart(name string) error {
 	if r.cancel != nil {
 		r.requested = true
 		r.cancel()
+	} else {
+		// Between runs (backoff, parked, or about to start): the next run is the
+		// restart. runOnce consumes this when it starts.
+		r.pending = true
 	}
 	r.mu.Unlock()
 	r.poke()
@@ -234,6 +239,14 @@ func (s *Supervisor) runOnce(ctx context.Context, r *runner, log *slog.Logger) (
 	runCtx, cancel := context.WithCancel(ctx)
 	r.mu.Lock()
 	r.cancel = cancel
+	if r.pending {
+		// A Restart arrived before this run: starting it fulfils the request.
+		r.pending = false
+		select {
+		case <-r.wake:
+		default:
+		}
+	}
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()

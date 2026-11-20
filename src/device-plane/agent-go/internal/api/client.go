@@ -183,15 +183,19 @@ func (c *Client) do(ctx context.Context, method, path, bearer string, body, out 
 		return &Error{Code: "network_error", Message: redactURLError(err, c.base)}
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	if err != nil {
-		return &Error{Code: "network_error", Message: err.Error()}
-	}
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		// Keep the status even when the body was cut off: 401/403/429 still count.
 		return decodeError(resp, data)
 	}
-	if out == nil || len(bytes.TrimSpace(data)) == 0 {
+	if readErr != nil {
+		return &Error{Code: "network_error", Message: readErr.Error()}
+	}
+	if out == nil {
 		return nil
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return &Error{Code: "bad_response", Message: fmt.Sprintf("%s answered with an empty body", path)}
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		// A captive portal or proxy answered instead of MeteorCloud.

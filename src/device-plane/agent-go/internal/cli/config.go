@@ -31,6 +31,11 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if code, done := parseFlags(fl, args); done {
 		return code
 	}
+	p := env.Paths
+	if config.LooksLikePython(p.LegacyDir) {
+		fmt.Fprintln(env.Stderr, "error: this device still has a Python meteorcli layout. Run 'sudo meteorcli config import' first.")
+		return 1
+	}
 	if *show {
 		return showConfig(env)
 	}
@@ -46,11 +51,6 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 		return 2
 	}
 
-	p := env.Paths
-	if config.LooksLikePython(p.LegacyDir) {
-		fmt.Fprintln(env.Stderr, "error: this device still has a Python meteorcli layout. Run 'sudo meteorcli config import' first.")
-		return 1
-	}
 	c, err := config.Load(p.ConfigFile)
 	switch {
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, config.ErrCorrupt):
@@ -58,13 +58,16 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	case err != nil:
 		return failWrite(env, err)
 	}
+	before := c.Server()
 	changed, err := c.SetServer(*domain, *apiBase, *useHTTP)
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "error: %v\n", err)
 		return 2
 	}
 	var dropped []string
-	if changed {
+	// Credentials whose server is unknown (no or damaged config) may belong to
+	// another server: treat setting a server then like a server change.
+	if changed || (before == "" && c.Server() != "") {
 		// Remove the old server's credentials before saving the new URL: if this is
 		// interrupted, the next run still sees a server change and retries.
 		if dropped, err = config.DropEnrollment(p); err != nil {

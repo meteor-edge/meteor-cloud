@@ -163,3 +163,55 @@ func TestOutboxConcurrentPut(t *testing.T) {
 		t.Errorf("pending %d, want 20", len(all))
 	}
 }
+
+func TestOutboxOrderIgnoresClockJumps(t *testing.T) {
+	o, _ := NewOutbox(t.TempDir(), 1)
+	clock := time.Unix(2000, 0)
+	o.now = func() time.Time { return clock }
+	if _, err := o.Put("action", "", "A"); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(-time.Hour) // the wall clock moves back
+	b, err := o.Put("action", "", "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, _ := o.Pending("")
+	if len(all) != 1 || all[0].ID != b.ID {
+		t.Fatalf("pending %+v, want only B", all)
+	}
+
+	// A reopened outbox continues after the highest id on disk.
+	o2, _ := NewOutbox(o.dir, 0)
+	c, _ := o2.Put("action", "", "C")
+	if c.ID <= b.ID {
+		t.Errorf("id went down after reopening: %s <= %s", c.ID, b.ID)
+	}
+}
+
+func TestStoreWriteVersionWinsAndUnreadableFileIsKept(t *testing.T) {
+	s, _ := NewStore(t.TempDir())
+	type withVersion struct {
+		Version int    `json:"version"`
+		Name    string `json:"name"`
+	}
+	if err := s.Write("x.json", 3, withVersion{Version: 9, Name: "n"}); err != nil {
+		t.Fatal(err)
+	}
+	var got withVersion
+	if v, err := s.Read("x.json", &got); err != nil || v != 3 || got.Name != "n" {
+		t.Errorf("Read = %d, %v, %+v", v, err, got)
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any file")
+	}
+	path := filepath.Join(s.Dir(), "x.json")
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(path, 0o600)
+	if err := s.Write("x.json", 4, withVersion{Name: "new"}); err == nil {
+		t.Error("Write replaced a file it could not read")
+	}
+}

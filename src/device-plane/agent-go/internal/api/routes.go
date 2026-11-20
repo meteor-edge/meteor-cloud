@@ -90,6 +90,19 @@ type Capabilities struct {
 	Modules       map[string]ModuleHealth `json:"modules,omitempty"`
 }
 
+// MarshalJSON always sends actions and deploy_kinds as arrays (never null), as
+// the contract wants, without changing the caller's slices.
+func (c Capabilities) MarshalJSON() ([]byte, error) {
+	type plain Capabilities // same fields, no MarshalJSON method
+	if c.Actions == nil {
+		c.Actions = []string{}
+	}
+	if c.DeployKinds == nil {
+		c.DeployKinds = []string{}
+	}
+	return json.Marshal(plain(c))
+}
+
 // HeartbeatRequest is the heartbeat body: the inventory with capabilities,
 // metrics and software reports beside it.
 type HeartbeatRequest struct {

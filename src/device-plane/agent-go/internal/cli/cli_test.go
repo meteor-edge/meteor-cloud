@@ -152,6 +152,29 @@ func TestConfigErrors(t *testing.T) {
 	if r := meteorcli(t, root, nil, "config", "--domain", "x.example"); r.code != 1 || !strings.Contains(r.stderr, "config import") {
 		t.Errorf("config over a Python layout: %+v", r)
 	}
+	if r := meteorcli(t, root, nil, "config", "--show"); r.code != 1 || !strings.Contains(r.stderr, "config import") {
+		t.Errorf("config --show over a Python layout: %+v", r)
+	}
+}
+
+func TestConfigDropsEnrollmentOfUnknownServer(t *testing.T) {
+	root := t.TempDir()
+	p := config.DefaultPaths(root)
+	// A token survived an import whose config.json was damaged: its server is unknown.
+	write(t, p.DeviceTokenFile(), "dev_old")
+	r := meteorcli(t, root, nil, "config", "--domain", "new.example")
+	if r.code != 0 || !strings.Contains(r.stdout, "Cleared previous enrollment (device-token)") {
+		t.Errorf("config = %+v", r)
+	}
+	if _, err := os.Stat(p.DeviceTokenFile()); err == nil {
+		t.Error("token of an unknown server kept")
+	}
+
+	// A first configuration without enrollment files still works.
+	r = meteorcli(t, t.TempDir(), nil, "config", "--domain", "a.example")
+	if r.code != 0 || strings.Contains(r.stdout, "Cleared") {
+		t.Errorf("first config = %+v", r)
+	}
 }
 
 func TestVersionHelpAndUnknown(t *testing.T) {

@@ -36,13 +36,20 @@ atomically (temp file, fsync, rename). A file that does not parse is moved to
 
 ## Moving a device from the Python agent
 
-The Python agent kept settings and secrets together in `/etc/meteorcli`. As root:
+The Python agent kept settings and secrets together in `/etc/meteorcli`. Stop it first: the Python
+service rotates the device token and MQTT password, and a rotation between the copy and the clean-up
+would be lost. As root:
 
 ```bash
+sudo systemctl stop meteorcli           # the Python service
 sudo meteorcli config import            # reads /etc/meteorcli
 sudo meteorcli config import --from ~/.config/meteorcli --force
 meteorcli status
 ```
+
+The import refuses when the new config already points at a different server than the Python
+install (enrollment files belong to one server); `--force` replaces it. If a token is lost anyway,
+enroll again: `meteorcli config --api-key …` and request a token as on a new device.
 
 The import:
 

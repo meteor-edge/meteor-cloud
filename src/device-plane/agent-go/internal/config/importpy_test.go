@@ -143,7 +143,7 @@ func TestImportPythonFromOtherDirKeepsExisting(t *testing.T) {
 	p := DefaultPaths(t.TempDir())
 	old := filepath.Join(t.TempDir(), "home-config")
 	pythonInstall(t, old)
-	writeFile(t, p.ConfigFile, `{"version":1,"domain":"new.example"}`)
+	writeFile(t, p.ConfigFile, `{"version":1,"domain":"meteor.example"}`)
 	writeFile(t, p.DeviceTokenFile(), "already_here")
 
 	rep, err := ImportPython(old, p, ImportOptions{})
@@ -185,5 +185,110 @@ func TestImportPythonDamagedConfig(t *testing.T) {
 	}
 	if !slices.Contains(rep.Imported, "device-token") {
 		t.Errorf("imported %v", rep.Imported)
+	}
+}
+
+func TestImportPythonRefusesAnotherServer(t *testing.T) {
+	p := DefaultPaths(t.TempDir())
+	old := filepath.Join(t.TempDir(), "home-config")
+	pythonInstall(t, old)
+	writeFile(t, p.ConfigFile, `{"version":1,"domain":"other.example"}`)
+
+	if _, err := ImportPython(old, p, ImportOptions{}); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("err = %v, want a server conflict", err)
+	}
+	if _, err := os.Stat(p.DeviceTokenFile()); err == nil {
+		t.Error("enrollment files written despite the conflict")
+	}
+	if _, err := ImportPython(old, p, ImportOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := Load(p.ConfigFile); c.Server() != "https://meteor.example" {
+		t.Errorf("force kept server %q", c.Server())
+	}
+}
+
+func TestImportPythonStagingSkippedIsKept(t *testing.T) {
+	p := DefaultPaths(t.TempDir())
+	pythonInstall(t, p.LegacyDir)
+	staging := filepath.Join(p.LegacyDir, pythonStaging)
+	writeFile(t, filepath.Join(staging, "device-token"), "rotated_token")
+	writeFile(t, filepath.Join(staging, "DONE"), `{}`)
+	writeFile(t, p.DeviceTokenFile(), "already_here")
+
+	rep, err := ImportPython(p.LegacyDir, p, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(rep.Skipped, "device-token (exists)") {
+		t.Errorf("skipped %v", rep.Skipped)
+	}
+	if _, err := os.Stat(filepath.Join(staging, "device-token")); err != nil {
+		t.Fatal("skipped staged token was deleted")
+	}
+	if _, err := ImportPython(p.LegacyDir, p, ImportOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p.DeviceTokenFile()); string(b) != "rotated_token" {
+		t.Errorf("force imported %q, want the staged token", b)
+	}
+	if _, err := os.Stat(staging); err == nil {
+		t.Error("staging kept after everything was imported")
+	}
+	if LooksLikePython(p.LegacyDir) {
+		t.Error("plain token left behind")
+	}
+}
+
+func TestImportPythonInPlaceDeviceConflictKeepsPythonConfig(t *testing.T) {
+	p := DefaultPaths(t.TempDir())
+	pythonInstall(t, p.LegacyDir)
+	writeFile(t, p.DeviceFile(), `{"version":1,"device_id":"someone-else"}`)
+
+	rep, err := ImportPython(p.LegacyDir, p, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(rep.Imported, "config.json") {
+		t.Fatalf("config converted despite the device.json conflict: %+v", rep)
+	}
+	if _, err := ImportPython(p.LegacyDir, p, ImportOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := LoadDevice(p.DeviceFile())
+	if d.DeviceID != "4f1c2a8e-0000-4000-8000-000000000001" {
+		t.Errorf("device %+v", d)
+	}
+}
+
+func TestImportPythonKeepsCAFileAndAcceptsIdenticalSecrets(t *testing.T) {
+	p := DefaultPaths(t.TempDir())
+	pythonInstall(t, p.LegacyDir)
+	writeFile(t, filepath.Join(p.LegacyDir, "config.json"), `{"server_url":"https://meteor.example","ca_file":"/etc/ssl/meteor-ca.pem"}`)
+	writeFile(t, p.APIKeyFile(), "key_secret") // same as the Python copy
+
+	rep, err := ImportPython(p.LegacyDir, p, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := Load(p.ConfigFile); c.CAFile != "/etc/ssl/meteor-ca.pem" {
+		t.Errorf("ca_file %q", c.CAFile)
+	}
+	if slices.Contains(rep.Skipped, "api-key (exists)") || !slices.Contains(rep.Removed, "api-key") {
+		t.Errorf("identical api-key: %+v", rep)
+	}
+}
+
+func TestEnsureDirMakesParentsTraversable(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "var", "lib", "meteorcli", "identity")
+	if err := (Owner{}).EnsureDir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(filepath.Dir(dir)); st.Mode().Perm() != 0o755 {
+		t.Errorf("parent mode %v", st.Mode().Perm())
+	}
+	if st, _ := os.Stat(dir); st.Mode().Perm() != 0o700 {
+		t.Errorf("dir mode %v", st.Mode().Perm())
 	}
 }

@@ -181,9 +181,14 @@ func (o Owner) ConfigFile(path string) error {
 	return nil
 }
 
-// EnsureDir creates dir with perm (and its parents) and hands it to the agent user.
+// EnsureDir creates dir with perm and hands it to the agent user. Missing parents
+// are created 0755 so the agent can reach a private directory inside them
+// (MkdirAll would otherwise give every new parent the private mode too).
 func (o Owner) EnsureDir(dir string, perm fs.FileMode) error {
-	if err := os.MkdirAll(dir, perm); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(dir), err)
+	}
+	if err := os.Mkdir(dir, perm); err != nil && !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
 	if err := os.Chmod(dir, perm); err != nil {
