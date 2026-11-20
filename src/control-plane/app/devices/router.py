@@ -633,26 +633,6 @@ def ping_device(
     )
 
 
-@router.post(
-    "/devices/{device_id}/commands/mqtt-probe",
-    response_model=DevicePingResponse,
-)
-def probe_device_mqtt(
-    organization_id: uuid.UUID,
-    device_id: uuid.UUID,
-    current_user: CurrentUser,
-    service: FleetSvc,
-    publisher: Annotated[MqttPublisher, Depends(get_mqtt_publisher)],
-) -> DevicePingResponse:
-    """Ask the device to publish a status probe (same path as meteorcli mqtt-test)."""
-    return service.probe_device_mqtt(
-        actor=current_user,
-        organization_id=organization_id,
-        device_id=device_id,
-        publisher=publisher,
-    )
-
-
 @router.get("/mqtt/events")
 def stream_mqtt_events(
     organization_id: uuid.UUID,

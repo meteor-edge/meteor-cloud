@@ -166,13 +166,6 @@ beforeEach(() => {
     topic: "devices/device-1/events",
     payload: "hello from console",
   });
-  vi.mocked(fleetApi.probeDeviceMqtt).mockResolvedValue({
-    command_id: "probe-1",
-    status: "completed",
-    round_trip_ms: 40,
-    result: { message: "probed" },
-    message: null,
-  });
 });
 
 describe("Device types", () => {
@@ -692,8 +685,7 @@ describe("Device detail", () => {
     expect(screen.getAllByText("aa:bb:cc:dd:ee:ff").length).toBeGreaterThan(0);
     expect(screen.getAllByText("devices/device-1/status").length).toBeGreaterThan(0);
     expect(screen.getByText("devices/device-1/metrics")).toBeInTheDocument();
-    expect(screen.getAllByText(/meteorcli mqtt-test/).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /probe from device/i })).toBeInTheDocument();
+    expect(screen.getByText(/meteorcli mqtt-test/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /test connection/i }));
     expect(await screen.findByText(/connection test successful/i)).toBeInTheDocument();
     expect(screen.getByText(/round trip: 120 ms/i)).toBeInTheDocument();
@@ -982,7 +974,7 @@ describe("MQTT test", () => {
     expect(await screen.findByText("23.5")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^stop$/i }));
     expect(screen.getByRole("button", { name: /^listen$/i })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /publish as platform/i }));
+    await user.click(screen.getByRole("button", { name: /^publish$/i }));
     expect(await screen.findByText("Sent")).toBeInTheDocument();
   });
 });

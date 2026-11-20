@@ -86,29 +86,6 @@ func TestSessionStatusAndCommands(t *testing.T) {
 		t.Error("sync_desired did not become a WorkWaiting signal")
 	}
 
-	statusBefore := len(payloads(b, prefix+"status"))
-	b.Send(prefix+"commands", `{"type":"probe","command_id":"c-probe"}`)
-	if !b.Wait(5*time.Second, func() bool {
-		results := payloads(b, prefix+"commands/result")
-		statuses := payloads(b, prefix+"status")
-		if len(results) < 2 || len(statuses) <= statusBefore {
-			return false
-		}
-		last := results[len(results)-1]
-		return last["command_id"] == "c-probe" && last["result"].(map[string]any)["message"] == "probed"
-	}) {
-		t.Fatalf("no probe: results=%v status=%v", payloads(b, prefix+"commands/result"), payloads(b, prefix+"status"))
-	}
-	var probed map[string]any
-	for _, s := range payloads(b, prefix+"status") {
-		if s["probe"] == true && s["command_id"] == "c-probe" {
-			probed = s
-		}
-	}
-	if probed == nil || probed["status"] != "online" {
-		t.Errorf("probe status = %v", probed)
-	}
-
 	// New credentials: the session starts over with them.
 	data, _ := os.ReadFile(d.Paths.MQTTFile())
 	if err := os.WriteFile(d.Paths.MQTTFile(), []byte(strings.Replace(string(data), "mqtt_pw", "mqtt_pw2", 1)), 0o600); err != nil {

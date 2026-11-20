@@ -53,32 +53,25 @@ stores MQTT credentials in `mqtt.json` (`0600`) and `mqtt-ca.crt`. Start
 `meteorcli run` so the agent connects, publishes `online` plus a metrics snapshot,
 and answers ping.
 
-On the device detail page MQTT tab:
-
-- **Test Connection** — MQTT `ping` on `devices/{id}/commands`; agent answers `pong`.
-- **Probe from device** — asks the agent to publish a status probe (same path as
-  `meteorcli mqtt-test`). Open **Listen** on the status topic to see it.
-- **Publish as platform** — control plane publishes with the platform MQTT user
-  (not the device session).
-- **On the device** — copy-paste `mqtt-test` / `mqtt-listen` for SSH checks.
-
-The organization MQTT test page (`/organizations/{id}/mqtt`) remains a free-form
+On the device detail page: **Test Connection** (ping), latest CPU/memory/disk
+snapshot, topics, and meteorcli examples. The organization MQTT test page
+(`/organizations/{id}/mqtt`) is still available by URL for a free-form
 topic/payload console (platform credentials; any topic).
 
-To publish a status probe from the Pi (or use **Probe from device** in the console):
+To publish a status probe from the Pi:
 
 ```bash
-sudo meteorcli mqtt-test
+meteorcli mqtt-test
 ```
 
-That publishes one JSON message to `devices/{device_id}/status` over TLS through
-the agent's session. The agent must be enrolled and MQTT connected
-(`meteorcli status`). `MQTT_PUBLIC_HOST` on the server must be reachable from the
-device (not `localhost` for a Pi on the LAN). `make mqtt-certs` includes this
-machine's LAN IP in the broker certificate; restart the broker after generating
-certs so it loads the new files.
+That publishes one JSON message to `devices/{device_id}/status` over TLS.
+Register/claim must have written `~/.config/meteorcli/mqtt.json` first
+(`meteorcli status` should say `MQTT: configured`). `MQTT_PUBLIC_HOST` on the
+server must be reachable from the device (not `localhost` for a Pi on the LAN).
+`make mqtt-certs` includes this machine's LAN IP in the broker certificate;
+restart the broker after generating certs so it loads the new files.
 
-To print inbound commands (`ping`, `probe`, …):
+To print inbound commands:
 
 ```bash
 meteorcli mqtt-listen
@@ -87,14 +80,15 @@ meteorcli mqtt-listen
 That defaults to `devices/{device_id}/commands` (the only device subscribe).
 
 ```bash
-sudo meteorcli mqtt-test
-sudo meteorcli mqtt-test devices/DEVICE_ID/status
+meteorcli mqtt-test
+meteorcli mqtt-test devices/DEVICE_ID/status '{"status":"online"}'
+meteorcli mqtt-test metrics
 meteorcli mqtt-listen
 meteorcli mqtt-listen commands
 ```
 
-Wildcards and other devices' topics are rejected. Go `mqtt-test` / `mqtt-listen`
-use the agent's own broker session over `agent.sock` (agent must be running).
+Wildcards and other devices' topics are rejected. Uses a separate MQTT client
+id, so `meteorcli run` can stay connected.
 
 ## Manual mosquitto checks
 

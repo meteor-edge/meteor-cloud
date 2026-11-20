@@ -114,18 +114,6 @@ export function pingDevice(
   );
 }
 
-/** Ask the device to publish a status probe (same path as meteorcli mqtt-test). */
-export function probeDeviceMqtt(
-  token: string,
-  organizationId: string,
-  deviceId: string,
-): Promise<DevicePingResult> {
-  return apiRequest<DevicePingResult>(
-    `/api/v1/organizations/${organizationId}/devices/${deviceId}/commands/mqtt-probe`,
-    { method: "POST", token },
-  );
-}
-
 export type DevicePingResult = {
   command_id: string;
   status: string;

@@ -64,34 +64,20 @@ def next_backoff(seconds: float, *, factor: float = 2.0, max_delay: float = 30.0
 
 
 def handle_command(payload: str) -> dict | None:
-    """Return the commands/result body for a known command, or None to ignore."""
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
         return None
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) or data.get("type") != "ping":
         return None
     command_id = data.get("command_id")
-    kind = data.get("type")
-    if kind == "ping":
-        if not command_id:
-            return None
-        return {
-            "command_id": command_id,
-            "status": "completed",
-            "result": {"message": "pong"},
-        }
-    if kind == "probe":
-        # Same publish path as meteorcli mqtt-test; _on_message also sends status.
-        if not command_id:
-            return None
-        return {
-            "command_id": command_id,
-            "status": "completed",
-            "result": {"message": "probed"},
-            "_publish_status_probe": True,
-        }
-    return None
+    if not command_id:
+        return None
+    return {
+        "command_id": command_id,
+        "status": "completed",
+        "result": {"message": "pong"},
+    }
 
 
 def tls_insecure_enabled() -> bool:
@@ -312,23 +298,6 @@ class DeviceMqttSession:
         result = handle_command(payload)
         if result is None:
             return
-        if result.pop("_publish_status_probe", False):
-            probe = {
-                "status": "online",
-                "timestamp": utc_timestamp(),
-                "probe": True,
-                "command_id": result.get("command_id"),
-                "message": "mqtt-test",
-            }
-            try:
-                client.publish(
-                    self.status_topic,
-                    payload=json.dumps(probe),
-                    qos=STATUS_QOS,
-                    retain=False,
-                )
-            except Exception:
-                logger.warning("Could not publish MQTT probe status")
         client.publish(
             self.result_topic,
             payload=json.dumps(result),
