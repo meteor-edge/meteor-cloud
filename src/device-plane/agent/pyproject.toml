@@ -9,13 +9,13 @@ description = "Reference Linux agent for the Edge Platform fleet"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "paho-mqtt>=2.1.0",
+  "paho-mqtt>=2.2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.3.0",
-  "ruff>=0.9.0",
+  "pytest>=9.2.0",
+  "ruff>=0.17.5",
 ]
 
 [project.scripts]
