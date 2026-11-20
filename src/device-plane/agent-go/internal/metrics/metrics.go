@@ -117,6 +117,8 @@ type observer struct {
 	// unsent is the last metrics body that could not be published; a newer
 	// failure replaces it, so a long outage keeps one body, not a backlog.
 	unsent map[string]any
+	// deviceID is the identity that produced pending/unsent; a change clears them.
+	deviceID string
 }
 
 func newObserver(d agent.Deps) *observer {
@@ -133,6 +135,7 @@ func newObserver(d agent.Deps) *observer {
 // metrics only the latest unsent body waits: a session restarted right after
 // connecting (new credentials) must not lose the first round.
 func (o *observer) publish(ctx context.Context) {
+	o.dropBuffersIfIdentityChanged()
 	cctx, cancel := context.WithTimeout(ctx, collectTimeout)
 	body, events := o.collect(cctx)
 	cancel()
@@ -169,6 +172,22 @@ func (o *observer) publish(ctx context.Context) {
 		o.pending = o.pending[1:]
 	}
 	o.pending = nil // let the backing array go
+}
+
+// dropBuffersIfIdentityChanged discards unsent metrics and events when the
+// device id changes, so telemetry buffered under one identity is never
+// published under another.
+func (o *observer) dropBuffersIfIdentityChanged() {
+	id := ""
+	if o.d.Identity != nil {
+		id = o.d.Identity.DeviceID()
+	}
+	if o.deviceID != id {
+		if o.deviceID != "" {
+			o.pending, o.unsent = nil, nil
+		}
+		o.deviceID = id
+	}
 }
 
 // send publishes one metrics body and says whether it went out.
@@ -241,7 +260,8 @@ func (o *observer) warnings(ctx context.Context) []map[string]any {
 		if w.Cursor != "" {
 			o.cursor = w.Cursor
 		}
-		e := map[string]any{"type": "log", "message": w.Message, "priority": w.Priority, "unit": w.Unit, "source": w.Source}
+		msg := agent.Redact(w.Message)
+		e := map[string]any{"type": "log", "message": msg, "priority": w.Priority, "unit": w.Unit, "source": w.Source}
 		if w.Timestamp != nil {
 			e["timestamp"] = *w.Timestamp
 		}

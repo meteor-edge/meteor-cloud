@@ -26,7 +26,7 @@ const StatsFormat = "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}"
 const MaxContainers = 20
 
 // containerRe is a Docker container name; it cannot start with "-".
-var containerRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+var containerRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // DockerOutput is the answer of the docker.* operations. OK is false when
 // docker exited non-zero; Output may still hold useful lines (inspect prints

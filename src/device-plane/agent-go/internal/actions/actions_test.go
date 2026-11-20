@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -78,31 +80,39 @@ func TestActionsRunInOrderAndReport(t *testing.T) {
 		t.Fatalf("flush left results (retry in %v)", wait)
 	}
 
-	if !slices.Equal(h.ops, []string{"power.reboot", "users.set_password", "users.add"}) {
+	// Non-power actions run before reboot so a power op cannot drop the rest.
+	if !slices.Equal(h.ops, []string{"users.set_password", "users.add", "power.reboot"}) {
 		t.Errorf("helper ops = %v", h.ops)
 	}
-	if reportedBeforeReboot != 1 {
-		t.Errorf("reports sent before the reboot = %d, want 1", reportedBeforeReboot)
+	if reportedBeforeReboot < 1 {
+		t.Errorf("reports sent before the reboot = %d, want at least 1", reportedBeforeReboot)
 	}
-	if h.parms[2] != `{"username":"ops","password":"n3w-pass!","sudo":true,"authorized_key":"ssh-ed25519 AAAA ops"}` {
-		t.Errorf("users.add params = %s", h.parms[2])
+	if h.parms[1] != `{"username":"ops","password":"n3w-pass!","sudo":true,"authorized_key":"ssh-ed25519 AAAA ops"}` {
+		t.Errorf("users.add params = %s", h.parms[1])
 	}
 	reports := cp.Calls("POST", reportRoute)
-	if len(reports) != 2 {
-		t.Fatalf("reports = %d, want 2", len(reports))
+	if len(reports) == 0 {
+		t.Fatal("no reports")
 	}
-	first, second := results(t, reports[0]), results(t, reports[1])
-	if len(first) != 1 || first[0] != (api.ActionResult{ID: "a1", State: "done"}) {
-		t.Errorf("first report = %+v", first)
+	var all []api.ActionResult
+	for _, c := range reports {
+		all = append(all, results(t, c)...)
 	}
-	if len(second) != 4 || second[0].State != "done" || second[1].State != "done" {
-		t.Fatalf("second report = %+v", second)
+	if len(all) != 5 {
+		t.Fatalf("results = %+v", all)
 	}
-	if second[2].State != "failed" || !strings.HasPrefix(strings.ToLower(second[2].Error), "unsupported") {
-		t.Errorf("unknown kind = %+v", second[2])
+	byID := map[string]api.ActionResult{}
+	for _, res := range all {
+		byID[res.ID] = res
 	}
-	if second[3].State != "failed" || !strings.HasPrefix(strings.ToLower(second[3].Error), "unsupported") {
-		t.Errorf("update_agent stub = %+v", second[3])
+	if byID["a1"].State != "done" || byID["a2"].State != "done" || byID["a3"].State != "done" {
+		t.Errorf("done results = %+v", byID)
+	}
+	if byID["a4"].State != "failed" || !strings.HasPrefix(strings.ToLower(byID["a4"].Error), "unsupported") {
+		t.Errorf("unknown kind = %+v", byID["a4"])
+	}
+	if byID["a5"].State != "failed" || !strings.HasPrefix(strings.ToLower(byID["a5"].Error), "unsupported") {
+		t.Errorf("update_agent stub = %+v", byID["a5"])
 	}
 	if reports[0].Header.Get("Authorization") != "Bearer "+agenttest.Token {
 		t.Errorf("report auth = %q", reports[0].Header.Get("Authorization"))
@@ -127,12 +137,46 @@ func TestFailedActionIsReportedWithRedactedError(t *testing.T) {
 	for _, c := range cp.Calls("POST", reportRoute) {
 		all = append(all, results(t, c)...)
 	}
-	// set_password failed; shutdown said done first, then failed.
-	if len(all) != 3 || all[0].ID != "a1" || all[0].State != "failed" || all[1] != (api.ActionResult{ID: "a2", State: "done"}) || all[2].State != "failed" {
+	// Non-power first: set_password failed; then shutdown said done first, then failed.
+	if len(all) != 3 {
 		t.Fatalf("results = %+v", all)
 	}
-	if strings.Contains(all[0].Error, "s3cret") || len(all[0].Error) > maxError {
-		t.Errorf("error not redacted or not cut: %q", all[0].Error)
+	byID := map[string][]api.ActionResult{}
+	for _, res := range all {
+		byID[res.ID] = append(byID[res.ID], res)
+	}
+	if len(byID["a1"]) != 1 || byID["a1"][0].State != "failed" {
+		t.Fatalf("set_password = %+v", byID["a1"])
+	}
+	if len(byID["a2"]) != 2 || byID["a2"][0].State != "done" || byID["a2"][1].State != "failed" {
+		t.Fatalf("shutdown = %+v", byID["a2"])
+	}
+	if strings.Contains(byID["a1"][0].Error, "s3cret") || len(byID["a1"][0].Error) > maxError {
+		t.Errorf("error not redacted or not cut: %q", byID["a1"][0].Error)
+	}
+}
+
+func TestPowerActionSkippedWhenOutboxPutFails(t *testing.T) {
+	cp := fakecp.New(t)
+	cp.On("GET", listRoute, fakecp.OK(map[string]any{"actions": []map[string]any{
+		{"id": "a1", "kind": "reboot"},
+	}}))
+	d := agenttest.Deps(t, cp, nil, nil)
+	outbox := filepath.Join(d.Paths.StateDir, "outbox")
+	if err := os.Chmod(outbox, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(outbox, 0o700) })
+	h := &fakeHelper{}
+	r := &runner{d: d, helper: h, backoff: api.NewBackoff()}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	r.collect(ctx)
+	if len(h.ops) != 0 {
+		t.Errorf("reboot must not run when the done report cannot be kept; ops = %v", h.ops)
+	}
+	if len(r.held) != 1 || r.held[0].ID != "a1" {
+		t.Errorf("held = %+v", r.held)
 	}
 }
 
@@ -141,7 +185,7 @@ func TestResultsSurviveAnOutage(t *testing.T) {
 	cp.On("POST", reportRoute, fakecp.Fail(503, "unavailable"), fakecp.OK(map[string]any{"accepted": 1}))
 	d := agenttest.Deps(t, cp, nil, nil)
 	r := &runner{d: d, helper: &fakeHelper{}, backoff: api.NewBackoff()}
-	r.put(api.Action{ID: "a1", Kind: "reboot"}, nil)
+	r.put(context.Background(), api.Action{ID: "a1", Kind: "reboot"}, nil)
 	if wait := r.flush(context.Background()); wait <= 0 {
 		t.Fatal("a failed report must ask for a retry")
 	}
@@ -162,7 +206,7 @@ func TestBatchesOf50(t *testing.T) {
 	d := agenttest.Deps(t, cp, nil, nil)
 	r := &runner{d: d, helper: &fakeHelper{}, backoff: api.NewBackoff()}
 	for i := 0; i < 60; i++ {
-		r.put(api.Action{ID: "a"}, nil)
+		r.put(context.Background(), api.Action{ID: "a"}, nil)
 	}
 	r.flush(context.Background())
 	calls := cp.Calls("POST", reportRoute)

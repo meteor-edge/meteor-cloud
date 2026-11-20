@@ -28,6 +28,8 @@ const KindReport = "action_report"
 const (
 	actionTimeout = 2 * time.Minute
 	maxError      = 500
+	// putRetryEvery is how long put waits between outbox write attempts.
+	putRetryEvery = time.Second
 )
 
 // Module runs actions.
@@ -77,9 +79,15 @@ type runner struct {
 	d       agent.Deps
 	helper  caller
 	backoff *api.Backoff
+	// held are results that could not be written to the outbox yet (disk full).
+	// flush retries them before sending anything to the server.
+	held []api.ActionResult
 }
 
-// collect fetches the waiting actions and runs them in order.
+// collect fetches the waiting actions and runs them in order. Non-power
+// actions run first so a reboot or shutdown cannot stop the agent before the
+// rest of the same handout finishes. The server still hands each action out
+// once; passwords stay only in this list.
 func (r *runner) collect(ctx context.Context) {
 	d := r.d
 	token, err := d.Identity.Token()
@@ -97,16 +105,27 @@ func (r *runner) collect(ctx context.Context) {
 		d.Log.Warn("could not collect actions; trying again after the next heartbeat", "err", err)
 		return
 	}
+	var power, other []api.Action
 	for _, a := range list {
+		if k, ok := registry[a.Kind]; ok && k.reportFirst {
+			power = append(power, a)
+		} else {
+			other = append(other, a)
+		}
+	}
+	for _, a := range append(other, power...) {
 		k, ok := registry[a.Kind]
 		if !ok {
-			r.put(a, unsupported("Unsupported action kind: "+pyRepr(a.Kind)))
+			r.put(ctx, a, unsupported("Unsupported action kind: "+pyRepr(a.Kind)))
 			continue
 		}
 		if k.reportFirst {
 			// Tell the server first, then do it, so the answer survives the reboot.
-			// If the server cannot be told now, the outbox sends it after the boot.
-			r.put(a, nil)
+			// Require a durable outbox write before starting a power operation.
+			if err := r.put(ctx, a, nil); err != nil {
+				d.Log.Error("could not keep the done report; not starting the power action", "kind", a.Kind, "id", a.ID, "err", err)
+				continue
+			}
 			r.flush(ctx)
 		}
 		actx, cancel := context.WithTimeout(ctx, actionTimeout)
@@ -115,18 +134,19 @@ func (r *runner) collect(ctx context.Context) {
 		switch {
 		case err != nil:
 			d.Log.Error("action failed", "kind", a.Kind, "id", a.ID, "err", err)
-			r.put(a, err)
+			r.put(ctx, a, err)
 		case !k.reportFirst:
 			d.Log.Info("action done", "kind", a.Kind, "id", a.ID)
-			r.put(a, nil)
+			r.put(ctx, a, nil)
 		default:
 			d.Log.Info("action started", "kind", a.Kind, "id", a.ID)
 		}
 	}
 }
 
-// put keeps one result in the outbox.
-func (r *runner) put(a api.Action, err error) {
+// put keeps one result in the outbox. On a write failure it retains the result
+// in memory for flush to retry, and returns the persistence error.
+func (r *runner) put(ctx context.Context, a api.Action, err error) error {
 	res := api.ActionResult{ID: a.ID, State: api.ActionDone}
 	if err != nil {
 		msg := agent.Redact(err.Error())
@@ -135,9 +155,31 @@ func (r *runner) put(a api.Action, err error) {
 		}
 		res.State, res.Error = api.ActionFailed, msg
 	}
-	if _, perr := r.d.Outbox.Put(KindReport, "", res); perr != nil {
+	if perr := r.writeResult(ctx, res); perr != nil {
+		r.held = append(r.held, res)
 		r.d.Log.Error("keep an action result", "id", a.ID, "err", perr)
+		return perr
 	}
+	return nil
+}
+
+// writeResult stores one result, retrying once after a short wait when the
+// first write fails. Further retries happen from flush via held.
+func (r *runner) writeResult(ctx context.Context, res api.ActionResult) error {
+	if _, err := r.d.Outbox.Put(KindReport, "", res); err == nil {
+		return nil
+	} else if ctx.Err() != nil {
+		return err
+	}
+	t := time.NewTimer(putRetryEvery)
+	select {
+	case <-ctx.Done():
+		t.Stop()
+		return ctx.Err()
+	case <-t.C:
+	}
+	_, err := r.d.Outbox.Put(KindReport, "", res)
+	return err
 }
 
 // flush sends the results in the outbox, in batches the contract allows, and
@@ -145,6 +187,13 @@ func (r *runner) put(a api.Action, err error) {
 // again, 0 when nothing is left.
 func (r *runner) flush(ctx context.Context) time.Duration {
 	d := r.d
+	for len(r.held) > 0 {
+		if err := r.writeResult(ctx, r.held[0]); err != nil {
+			d.Log.Error("keep a held action result", "id", r.held[0].ID, "err", err)
+			return r.backoff.Next(err)
+		}
+		r.held = r.held[1:]
+	}
 	for {
 		pending, err := d.Outbox.Pending(KindReport)
 		if err != nil {

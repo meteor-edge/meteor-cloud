@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"meteorcloud/meteorcli/internal/localrpc"
@@ -30,6 +31,10 @@ var reservedUsers = map[string]bool{
 	"root": true, "daemon": true, "bin": true, "sys": true, "sync": true, "nobody": true,
 	"sshd": true, "systemd-network": true, "meteor": true,
 }
+
+// usersMu serializes users.add and users.set_password so overlapping adds cannot
+// roll back each other's account.
+var usersMu sync.Mutex
 
 // UserInfo is what the user operations need to know about an account.
 type UserInfo struct {
@@ -104,6 +109,8 @@ func auditUser(raw json.RawMessage) []any {
 // setPassword changes an existing user's password with chpasswd. The password
 // goes on stdin, never on a command line.
 func (h Host) setPassword(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
+	usersMu.Lock()
+	defer usersMu.Unlock()
 	var p SetPasswordRequest
 	if err := decode(raw, &p); err != nil {
 		return nil, err
@@ -130,10 +137,28 @@ func (h Host) chpasswd(ctx context.Context, name, password string) error {
 	return nil
 }
 
+// homePath is where useradd -m puts the home directory for name.
+func (h Host) homePath(name string) string {
+	if h.HomeDir != nil {
+		return h.HomeDir(name)
+	}
+	return filepath.Join("/home", name)
+}
+
+func (h Host) lstat(path string) (os.FileInfo, error) {
+	if h.Lstat != nil {
+		return h.Lstat(path)
+	}
+	return os.Lstat(path)
+}
+
 // addUser creates a login user with a home directory, a password, optional
 // passwordless sudo and an optional SSH key. A failure half way removes the
-// user again, so a retry starts clean.
+// user again, so a retry starts clean. The password is set last so the account
+// stays locked until setup finishes.
 func (h Host) addUser(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (_ any, err error) {
+	usersMu.Lock()
+	defer usersMu.Unlock()
 	var p AddUserRequest
 	if err := decode(raw, &p); err != nil {
 		return nil, err
@@ -148,31 +173,51 @@ func (h Host) addUser(ctx context.Context, _ localrpc.Peer, raw json.RawMessage)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := h.LookupUser(p.Username); err == nil {
+	switch _, err := h.LookupUser(p.Username); {
+	case err == nil:
 		return nil, localrpc.Errorf(localrpc.CodeFailed, "a user named %q already exists", p.Username)
+	case !errors.Is(err, errNoUser):
+		return nil, fmt.Errorf("look up user %q: %w", p.Username, err)
 	}
+	homePath := h.homePath(p.Username)
+	_, homeStatErr := h.lstat(homePath)
+	homeExisted := homeStatErr == nil
 	sudoers := filepath.Join(h.SudoersDir, "90-meteorcli-"+p.Username)
+	created, sudoersWritten := false, false
 	defer func() {
-		// useradd can fail after it created the account (exit 12: no home), so
-		// undo whenever the user exists now; it did not before.
-		if _, lerr := h.LookupUser(p.Username); err != nil && lerr == nil {
-			// Undo with a fresh context: ctx may be what failed.
-			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), userdelTimeout)
-			defer cancel()
-			_, _ = h.Run(cctx, "userdel", "-r", p.Username)
-			_ = os.Remove(sudoers)
+		if err == nil || !created {
+			return
+		}
+		// Undo with a fresh context: ctx may be what failed. Only remove a home
+		// this call created (useradd -m reuses an existing directory).
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), userdelTimeout)
+		defer cancel()
+		args := []string{p.Username}
+		if !homeExisted {
+			args = append([]string{"-r"}, args...)
+		}
+		if _, delErr := h.Run(cctx, "userdel", args...); delErr != nil {
+			err = errors.Join(err, fmt.Errorf("rollback userdel: %w", delErr))
+		}
+		if sudoersWritten {
+			if rmErr := os.Remove(sudoers); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				err = errors.Join(err, fmt.Errorf("rollback sudoers: %w", rmErr))
+			}
 		}
 	}()
 	if _, err := h.Run(ctx, "useradd", "-m", "-s", "/bin/bash", p.Username); err != nil {
+		// useradd can fail after it created the account (exit 12: no home).
+		if _, lerr := h.LookupUser(p.Username); lerr == nil {
+			created = true
+		}
 		return nil, err
 	}
-	if err := h.chpasswd(ctx, p.Username, p.Password); err != nil {
-		return nil, err
-	}
+	created = true
 	if p.Sudo {
 		if err := writeNew(sudoers, p.Username+" ALL=(ALL) NOPASSWD:ALL\n", 0o440); err != nil {
 			return nil, fmt.Errorf("sudoers: %w", err)
 		}
+		sudoersWritten = true
 	}
 	if key != "" {
 		info, err := h.LookupUser(p.Username)
@@ -182,6 +227,10 @@ func (h Host) addUser(ctx context.Context, _ localrpc.Peer, raw json.RawMessage)
 		if err := addAuthorizedKey(info, key); err != nil {
 			return nil, err
 		}
+	}
+	// Password last: the account stays locked until keys and sudoers are in place.
+	if err := h.chpasswd(ctx, p.Username, p.Password); err != nil {
+		return nil, err
 	}
 	return map[string]bool{"created": true}, nil
 }
@@ -206,19 +255,42 @@ func writeNew(path, content string, mode os.FileMode) error {
 	return f.Close()
 }
 
-// addAuthorizedKey appends key to ~/.ssh/authorized_keys of a user that was
-// just created (so nothing in the home can be a planted link).
+// addAuthorizedKey appends key under the user's home using os.Root so path
+// components cannot be replaced by symlinks that escape the home.
 func addAuthorizedKey(info UserInfo, key string) error {
 	if !filepath.IsAbs(info.Home) {
 		return fmt.Errorf("the new user's home %q is not an absolute path", info.Home)
 	}
-	dir := filepath.Join(info.Home, ".ssh")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	st, err := os.Lstat(info.Home)
+	if err != nil {
 		return fmt.Errorf("authorized_keys: %w", err)
 	}
-	path := filepath.Join(dir, "authorized_keys")
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("authorized_keys: home %q is not a real directory", info.Home)
+	}
+	root, err := os.OpenRoot(info.Home)
 	if err != nil {
+		return fmt.Errorf("authorized_keys: %w", err)
+	}
+	defer root.Close()
+	if err := root.Mkdir(".ssh", 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("authorized_keys: %w", err)
+	}
+	sshDir, err := root.Open(".ssh")
+	if err != nil {
+		return fmt.Errorf("authorized_keys: %w", err)
+	}
+	if err := sshDir.Chown(info.UID, info.GID); err != nil {
+		sshDir.Close()
+		return fmt.Errorf("authorized_keys: %w", err)
+	}
+	sshDir.Close()
+	f, err := root.OpenFile(".ssh/authorized_keys", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("authorized_keys: %w", err)
+	}
+	if err := f.Chown(info.UID, info.GID); err != nil {
+		f.Close()
 		return fmt.Errorf("authorized_keys: %w", err)
 	}
 	if _, err := f.WriteString(key + "\n"); err != nil {
@@ -227,11 +299,6 @@ func addAuthorizedKey(info UserInfo, key string) error {
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("authorized_keys: %w", err)
-	}
-	for _, p := range []string{dir, path} {
-		if err := os.Lchown(p, info.UID, info.GID); err != nil {
-			return fmt.Errorf("authorized_keys: %w", err)
-		}
 	}
 	return nil
 }

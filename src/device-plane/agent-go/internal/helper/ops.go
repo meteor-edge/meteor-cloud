@@ -37,6 +37,10 @@ type Host struct {
 	RunInput func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
 	// LookupUser finds an account; it fails with errNoUser for an unknown one.
 	LookupUser func(name string) (UserInfo, error)
+	// HomeDir is where useradd -m puts name's home; nil means /home/<name>.
+	HomeDir func(name string) string
+	// Lstat is like os.Lstat; nil means os.Lstat. Tests use it for home probes.
+	Lstat func(path string) (os.FileInfo, error)
 	// UnitDir is where systemd.install_unit writes units.
 	UnitDir string
 	// SudoersDir is where users.add writes a sudo rule.

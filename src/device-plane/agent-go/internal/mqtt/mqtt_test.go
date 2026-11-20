@@ -48,6 +48,10 @@ func TestSessionStatusAndCommands(t *testing.T) {
 			t.Errorf("Run: %v", err)
 		}
 	}()
+	t.Cleanup(func() {
+		cancel()
+		wg.Wait()
+	})
 
 	// online right after connect, and once more shortly after.
 	if !b.Wait(5*time.Second, func() bool { return len(payloads(b, prefix+"status")) >= 2 }) {

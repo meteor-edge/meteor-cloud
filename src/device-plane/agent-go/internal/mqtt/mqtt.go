@@ -82,10 +82,19 @@ func (m *Module) Run(ctx context.Context, d agent.Deps) error {
 	apply := func() {
 		s, ok := settings(d)
 		if cur != nil && ok && s == cur.settings {
-			return
+			select {
+			case <-cur.done:
+				// Session finished (e.g. unreadble CA at start); restart below.
+			default:
+				return
+			}
 		}
 		if cur != nil {
-			d.Log.Info("MQTT settings changed; reconnecting")
+			select {
+			case <-cur.done:
+			default:
+				d.Log.Info("MQTT settings changed; reconnecting")
+			}
 		}
 		cur.stop()
 		cur = nil
@@ -111,6 +120,10 @@ func (m *Module) Run(ctx context.Context, d agent.Deps) error {
 	apply()
 	for {
 		d.Health.Tick(name)
+		var sessionDone <-chan struct{}
+		if cur != nil {
+			sessionDone = cur.done
+		}
 		select {
 		case <-ctx.Done():
 			return nil
@@ -118,6 +131,8 @@ func (m *Module) Run(ctx context.Context, d agent.Deps) error {
 			changes.Take()
 			apply()
 		case <-tick.C:
+			apply()
+		case <-sessionDone:
 			apply()
 		case msg := <-commands:
 			m.command(ctx, d, msg)

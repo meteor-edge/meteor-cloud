@@ -54,6 +54,7 @@ func newUserHost(t *testing.T) (*userHost, Host) {
 			}
 			return UserInfo{}, errNoUser
 		},
+		HomeDir:    func(name string) string { return filepath.Join(u.home, name) },
 		SudoersDir: t.TempDir(),
 	}
 	return u, h
@@ -136,13 +137,59 @@ func TestAddUserRollsBack(t *testing.T) {
 	}
 	last := u.calls[len(u.calls)-1]
 	if !slices.Equal(last, []string{"userdel", "-r", "ops"}) {
-		t.Errorf("last call = %v, want userdel", last)
+		t.Errorf("last call = %v, want userdel -r", last)
 	}
 	if _, ok := u.users["ops"]; ok {
 		t.Error("the half-made user is still there")
 	}
 	if _, err := os.Stat(filepath.Join(h.SudoersDir, "90-meteorcli-ops")); !os.IsNotExist(err) {
 		t.Error("sudoers rule left behind")
+	}
+}
+
+func TestAddUserPreservesExistingHomeOnRollback(t *testing.T) {
+	u, h := newUserHost(t)
+	home := filepath.Join(u.home, "ops")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(home, "keep-me")
+	if err := os.WriteFile(marker, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	u.failOn = "chpasswd"
+	if _, err := call(t, h, "users.add", AddUserRequest{Username: "ops", Password: "s3cret-pass"}); err == nil {
+		t.Fatal("add must fail when chpasswd fails")
+	}
+	last := u.calls[len(u.calls)-1]
+	if !slices.Equal(last, []string{"userdel", "ops"}) {
+		t.Errorf("last call = %v, want userdel without -r", last)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("pre-existing home must stay: %v", err)
+	}
+}
+
+func TestAddUserLookupErrorStopsCreation(t *testing.T) {
+	_, h := newUserHost(t)
+	h.LookupUser = func(string) (UserInfo, error) { return UserInfo{}, errors.New("nss down") }
+	if _, err := call(t, h, "users.add", AddUserRequest{Username: "ops", Password: "s3cret-pass"}); err == nil {
+		t.Fatal("add must fail when lookup fails unexpectedly")
+	}
+}
+
+func TestAddUserDoesNotRemoveExistingSudoersOnRollback(t *testing.T) {
+	u, h := newUserHost(t)
+	path := filepath.Join(h.SudoersDir, "90-meteorcli-ops")
+	if err := os.WriteFile(path, []byte("ops ALL=(ALL) NOPASSWD:ALL\n"), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	u.failOn = "chpasswd"
+	if _, err := call(t, h, "users.add", AddUserRequest{Username: "ops", Password: "s3cret-pass", Sudo: true}); err == nil {
+		t.Fatal("add must fail")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("existing sudoers must stay: %v", err)
 	}
 }
 

@@ -190,3 +190,35 @@ func TestEventsWaitWhileDisconnected(t *testing.T) {
 		t.Error("the newest unsent metrics body must replace the older one")
 	}
 }
+
+func TestJournalWarningsAreRedacted(t *testing.T) {
+	d := agenttest.Deps(t, fakecp.New(t), nil, nil)
+	f := &fakeHelper{journal: []helper.Warning{{Cursor: "c1", Message: "auth password=s3cret-pass failed"}}}
+	o := newObserver(d)
+	o.helper, o.apps = f, newApps(f)
+	_, events := o.collect(context.Background())
+	if len(events) != 1 {
+		t.Fatalf("events = %v", events)
+	}
+	msg, _ := events[0]["message"].(string)
+	if strings.Contains(msg, "s3cret") || !strings.Contains(msg, "[redacted]") {
+		t.Errorf("message = %q", msg)
+	}
+}
+
+func TestBuffersDropOnIdentityChange(t *testing.T) {
+	d := agenttest.Deps(t, fakecp.New(t), nil, nil)
+	f := &fakeHelper{journal: []helper.Warning{{Cursor: "c1", Message: "disk almost full"}}}
+	o := newObserver(d)
+	o.helper, o.apps = f, newApps(f)
+	o.publish(context.Background())
+	if o.unsent == nil || len(o.pending) == 0 {
+		t.Fatal("expected buffers while disconnected")
+	}
+	o.deviceID = "old-device"
+	// Identity still reports d-1 from the test fixture: treat as a change.
+	o.dropBuffersIfIdentityChanged()
+	if o.unsent != nil || len(o.pending) != 0 {
+		t.Errorf("buffers after identity change: pending=%d unsent=%v", len(o.pending), o.unsent != nil)
+	}
+}
