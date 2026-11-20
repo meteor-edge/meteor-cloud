@@ -50,8 +50,18 @@ def test_heartbeat_mqtt(contract, agent, device, broker) -> None:
             observer.wait_for(lambda m: m.topic.endswith("/status") and m.payload.get("status") == "online")
             observer.wait_for(lambda m: m.topic.endswith("/metrics"))
             observer.publish("commands", {"type": "sync_desired", "revision": 3})
-            observer.publish("commands", {"type": "ping", "command_id": ping_id})
-            observer.wait_for(lambda m: m.topic.endswith("/commands/result") and m.payload.get("command_id") == ping_id)
+            # Sent again until answered, as a server does: an agent that connects as soon as it is
+            # enrolled reconnects once with the rotated credentials, and a command sent in that gap
+            # is lost (clean session). Repeats are identical, so the transcript keeps one.
+            for attempt in range(8):
+                observer.publish("commands", {"type": "ping", "command_id": ping_id})
+                try:
+                    observer.wait_for(lambda m: m.topic.endswith("/commands/result")
+                                      and m.payload.get("command_id") == ping_id, timeout=3.0)
+                    break
+                except AssertionError:
+                    if attempt == 7:
+                        raise
         if beat == 2:
             observer.wait_for(lambda m: m.topic.endswith("/events") and m.payload.get("type") == "app.started")
             observer.wait_for(lambda m: m.topic.endswith("/events") and m.payload.get("type") == "log")
