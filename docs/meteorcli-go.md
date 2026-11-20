@@ -206,9 +206,10 @@ number of matching lines. `grep` searches every line in full (ignoring ASCII cas
 than 16 KiB is returned cut, ending in `…[truncated N bytes]`.
 
 Passwords and SSH keys are never in an audit line (`users.*` log the user name and `sudo` only)
-and never on a command line. The helper unit hides `/root` and `/run/user` (`ProtectHome=tmpfs`)
-and binds `/home` back in writable, because `users.add` creates the home directory
-(`ProtectHome=read-only` with `ReadWritePaths=/home` does not make `/home` writable on systemd 252).
+and never on a command line. The helper unit hides `/root` and `/run/user` with
+`TemporaryFileSystem=…:ro` and leaves `/home` alone, because `users.add` creates homes there.
+(`ProtectHome=tmpfs` with `BindPaths=/home` remounts `/home` read-only on systemd 257;
+`ProtectHome=read-only` with `ReadWritePaths=/home` fails the same way on systemd 252.)
 
 Docker and file logs, `systemd.control` and Wi-Fi follow the Python helpers in later pull
 requests.
@@ -224,7 +225,8 @@ requests.
   `ProtectSystem=strict`, `SystemCallFilter=@system-service`, `MemoryMax=128M`, `Restart=always`.
   `systemd-analyze security` exposure 1.6.
 - `meteorcli-helper.service`: root with a limited capability set, `NoNewPrivileges`, `PrivateTmp`,
-  `ProtectKernelModules`, `ProtectHome=read-only` and a system call filter. Exposure 3.0.
+  `ProtectKernelModules`, `TemporaryFileSystem=/root:ro /run/user:ro` and a system call filter.
+  Exposure about 2.9 on systemd 257.
 - `/run/meteorcli` comes from tmpfiles.d instead of `RuntimeDirectory=`: systemd would delete it,
   with `helper.sock`, whenever the agent stops, and would give it to `meteor:meteor`, locking the
   `meteorcli` group out. The agent has `SupplementaryGroups=meteorcli` so it can give `agent.sock` to
