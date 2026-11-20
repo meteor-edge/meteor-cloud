@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"meteorcloud/meteorcli/internal/api"
+	"meteorcloud/meteorcli/internal/bus"
 	"meteorcloud/meteorcli/internal/identity"
 	"meteorcloud/meteorcli/internal/localrpc"
 )
@@ -43,6 +44,8 @@ var socketPolicy = map[string]access{
 	"enroll.request": adminAccess,
 	"enroll.claim":   adminAccess,
 	"config.reload":  adminAccess,
+	"mqtt.listen":    readAccess,
+	"mqtt.test":      adminAccess,
 }
 
 // StatusReply answers `meteorcli status`. It says whether secrets exist, never
@@ -62,6 +65,7 @@ type StatusReply struct {
 	OrganizationID   string                      `json:"organization_id"`
 	Name             string                      `json:"name"`
 	HeartbeatSeconds int                         `json:"heartbeat_seconds"`
+	MQTTConnection   *bus.State                  `json:"mqtt_connection,omitempty"`
 	Modules          map[string]api.ModuleHealth `json:"modules"`
 }
 
@@ -183,6 +187,11 @@ func (m *SocketModule) handlers(d Deps) map[string]localrpc.Handler {
 	for name, handler := range m.enrollHandlers() {
 		h[name] = handler
 	}
+	if d.Bus != nil {
+		for name, handler := range mqttHandlers(d) {
+			h[name] = handler
+		}
+	}
 	return h
 }
 
@@ -205,7 +214,20 @@ func status(d Deps) StatusReply {
 		Name:             st.Name,
 		HeartbeatSeconds: st.HeartbeatSeconds,
 		Modules:          d.Health.Snapshot(),
+		MQTTConnection:   mqttState(d),
 	}
+}
+
+// mqttState is the connection for status; nil when the device has no MQTT.
+func mqttState(d Deps) *bus.State {
+	if d.Bus == nil {
+		return nil
+	}
+	if _, ok := d.Identity.MQTT(); !ok {
+		return nil
+	}
+	s := d.Bus.State()
+	return &s
 }
 
 func exists(path string) bool {

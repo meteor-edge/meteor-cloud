@@ -13,11 +13,14 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 UMask=0022
 
 # Root, but only with what the operations need (units in /etc/systemd/system,
-# users, WireGuard and Wi-Fi later).
+# users and passwords, the docker CLI; WireGuard and Wi-Fi later).
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_ADMIN CAP_AUDIT_WRITE
 NoNewPrivileges=yes
 ProtectSystem=true
-ProtectHome=read-only
+# users.add creates homes under /home. ProtectHome=tmpfs (or read-only) plus a
+# BindPaths=/home remount leaves /home read-only on systemd 257, so useradd -m
+# fails. Hide only /root and /run/user with a read-only tmpfs; leave /home alone.
+TemporaryFileSystem=/root:ro /run/user:ro
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

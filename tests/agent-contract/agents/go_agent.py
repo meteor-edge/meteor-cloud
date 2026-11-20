@@ -13,9 +13,13 @@ Differences from the Python adapter, all on the device side of the contract:
   honours ``Retry-After``, so ``enroll`` takes about 25 s.
 - ``run`` lets the running agent beat and counts heartbeats at the fake control plane.
 - Host tools are fake programs on PATH (``docker`` answers ``compose version``; ``wg``,
-  ``wg-quick`` and ``sshd`` exist); the agent touches nothing else on the host yet.
-- Features: background enrollment (approval with no command, across restarts) and the server's
-  heartbeat interval. MQTT, actions, Wi-Fi, WireGuard and deploys come in later pull requests.
+  ``wg-quick`` and ``sshd`` exist).
+- Privileged work goes through the root helper's socket (``run/meteorcli/helper.sock``), as on a
+  device. Here a fake helper (:class:`FakeHelper`) answers it: reboot, users, the Docker observer's
+  commands and journal warnings go to the SimulatedDevice, with the same docker arguments the real
+  helper uses. Metrics are published every second (``METEORCLI_METRICS_INTERVAL=1``).
+- Features: background enrollment (approval with no command, across restarts), the server's
+  heartbeat interval, MQTT and actions. Wi-Fi, WireGuard and deploys come in later pull requests.
 """
 
 from __future__ import annotations
@@ -24,8 +28,10 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -44,6 +50,14 @@ FAKE_TOOLS = {
     "wg-quick": "#!/bin/sh\nexit 0\n",
     "sshd": "#!/bin/sh\nexit 0\n",
 }
+
+# The real helper's docker commands (internal/helper/docker.go).
+INSPECT_TEMPLATE = (
+    "{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|"
+    "{{.RestartCount}}|{{.State.StartedAt}}|{{if .State.Health}}{{.State.Health.Status}}|"
+    "{{range .State.Health.Log}}{{.Start.UnixNano}},{{.End.UnixNano}};{{end}}{{end}}"
+)
+STATS_FORMAT = "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}"
 
 _binary: Path | None = None
 
@@ -66,12 +80,78 @@ def binary() -> Path:
     return _binary
 
 
+class FakeHelper:
+    """The root helper's socket protocol (one JSON request line, one JSON answer), with the
+    host work done by the SimulatedDevice instead of the machine."""
+
+    def __init__(self, path: Path, device: SimulatedDevice) -> None:
+        self.device = device
+        self.calls: list[str] = []
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._sock.bind(str(path))
+        self._sock.listen(16)
+        self._thread = threading.Thread(target=self._serve, name="fake-helper", daemon=True)
+        self._thread.start()
+
+    def close(self) -> None:
+        self._sock.close()
+
+    def _serve(self) -> None:
+        while True:
+            try:
+                conn, _ = self._sock.accept()
+            except OSError:
+                return
+            with conn:
+                try:
+                    line = conn.makefile("rb").readline()
+                    request = json.loads(line)
+                    answer = self._answer(request["method"], request.get("params") or {})
+                except Exception as error:  # noqa: BLE001 - answer every request, as the real helper
+                    answer = {"ok": False, "error": {"code": "failed", "message": str(error)}}
+                conn.sendall(json.dumps(answer).encode() + b"\n")
+
+    def _docker(self, args: list[str]) -> dict:
+        done = self.device.docker(args)
+        return {"output": done.stdout or "", "ok": done.returncode == 0}
+
+    def _answer(self, method: str, params: dict) -> dict:
+        self.calls.append(method)
+        device = self.device
+        if method == "power.reboot":
+            device.reboot()
+            result: dict = {"started": True}
+        elif method == "power.shutdown":
+            device.shutdown()
+            result = {"started": True}
+        elif method == "users.set_password":
+            device.set_password(params["username"], params["password"])
+            result = {"changed": True}
+        elif method == "users.add":
+            device.add_user(params["username"], params["password"], sudo=params.get("sudo") is True,
+                            authorized_key=params.get("authorized_key") or None)
+            result = {"created": True}
+        elif method == "docker.ps":
+            result = self._docker(["docker", "ps", "-a", "--format", "{{.Names}}"])
+        elif method == "docker.inspect":
+            result = self._docker(["docker", "inspect", "-f", INSPECT_TEMPLATE, *params["names"]])
+        elif method == "docker.stats":
+            result = self._docker(["docker", "stats", "--no-stream", "--format", STATS_FORMAT])
+        elif method == "logs.warnings":
+            out = device.journal_helper(["warnings"]).stdout
+            result = {"entries": [json.loads(line) for line in out.splitlines() if line.strip()]}
+        else:
+            return {"ok": False, "error": {"code": "unknown_method", "message": f"unknown method {method!r}"}}
+        return {"ok": True, "result": result}
+
+
 class GoAgent:
     name = "go"
-    features = frozenset({"background_enrollment", "server_heartbeat_interval"})
+    features = frozenset({"background_enrollment", "server_heartbeat_interval", "mqtt", "actions"})
 
     def __init__(self, workdir: Path, device: SimulatedDevice, plane: FakeControlPlane) -> None:
-        self.device = device  # unused until host work moves to the Go agent
+        self.device = device
         self.plane = plane
         self.bin = binary()
         # Unix socket paths are limited to 108 bytes; pytest's tmp_path can be longer.
@@ -81,11 +161,15 @@ class GoAgent:
         for name, script in FAKE_TOOLS.items():
             (tools / name).write_text(script, encoding="utf-8")
             (tools / name).chmod(0o755)
-        self.env = {**os.environ, "PATH": f"{tools}{os.pathsep}{os.environ.get('PATH', '')}", "NO_COLOR": "1"}
+        self.env = {
+            **os.environ, "PATH": f"{tools}{os.pathsep}{os.environ.get('PATH', '')}", "NO_COLOR": "1",
+            "METEORCLI_METRICS_INTERVAL": "1",
+        }
         for key in ("METEORCLI_TOKEN", "METEORCLI_API_KEY", "METEOR_BOOT_DIR"):
             self.env.pop(key, None)
         self.log = workdir / "agent.log"
         self._proc: subprocess.Popen[bytes] | None = None
+        self.helper = FakeHelper(self.root / "run" / "meteorcli" / "helper.sock", device)
         try:
             self.start()
         except BaseException:
@@ -128,6 +212,7 @@ class GoAgent:
 
     def close(self) -> None:
         self.stop()
+        self.helper.close()
         shutil.rmtree(self.root, ignore_errors=True)
 
     # ------------------------------------------------------------------ commands

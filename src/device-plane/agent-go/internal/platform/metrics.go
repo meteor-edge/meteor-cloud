@@ -147,3 +147,59 @@ func (h *Host) TemperatureC() (float64, bool) {
 }
 
 func clampPercent(v float64) float64 { return max(0, min(100, v)) }
+
+// skipInterfaces are virtual interfaces left out of the network counters
+// (the Python observer's list).
+var skipInterfaces = []string{"lo", "docker", "veth", "br-", "virbr", "wg"}
+
+// NetworkBytes returns bytes received and sent over the physical interfaces
+// since boot, from /proc/net/dev.
+func (h *Host) NetworkBytes() (rx, tx uint64, ok bool) {
+	lines := strings.Split(h.readText("/proc/net/dev"), "\n")
+	if len(lines) < 3 {
+		return 0, 0, false
+	}
+lines:
+	for _, line := range lines[2:] {
+		name, rest, found := strings.Cut(line, ":")
+		name = strings.TrimSpace(name)
+		fields := strings.Fields(rest)
+		if !found || name == "" || len(fields) < 9 {
+			continue
+		}
+		for _, skip := range skipInterfaces {
+			if strings.HasPrefix(name, skip) {
+				continue lines
+			}
+		}
+		r, err1 := strconv.ParseUint(fields[0], 10, 64)
+		t, err2 := strconv.ParseUint(fields[8], 10, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		rx, tx, ok = rx+r, tx+t, true
+	}
+	return rx, tx, ok
+}
+
+// WifiSignalDBm returns the signal level of the first wireless interface in
+// dBm, from /proc/net/wireless. Drivers that report a 0..100 quality instead
+// of dBm give no reading.
+func (h *Host) WifiSignalDBm() (float64, bool) {
+	lines := strings.Split(h.readText("/proc/net/wireless"), "\n")
+	if len(lines) < 3 {
+		return 0, false
+	}
+	for _, line := range lines[2:] {
+		_, rest, _ := strings.Cut(line, ":")
+		fields := strings.Fields(rest)
+		if len(fields) < 3 {
+			continue
+		}
+		level, err := strconv.ParseFloat(strings.TrimSuffix(fields[2], "."), 64)
+		if err == nil && level >= -120 && level < 0 {
+			return level, true
+		}
+	}
+	return 0, false
+}

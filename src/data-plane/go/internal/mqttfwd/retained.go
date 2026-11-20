@@ -25,13 +25,19 @@ var (
 // control plane caught up with devices that changed state while it was away.
 // A plain subscription to devices/+/status does that here; it is removed once
 // the retained messages have arrived. Live status messages that arrive in that
-// window come twice (shared and plain): two copies of one last-value update,
-// one after the other.
+// window come on both; the plain copy is dropped when the broker supports
+// subscription identifiers (overlap.go), else they come twice: two copies of
+// one last-value update, one after the other.
 func (s *Session) replayRetained(ctx context.Context, cm *autopaho.ConnectionManager, gen uint64) {
 	start := time.Now()
 	s.lastRetained.Store(start.UnixNano())
 	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	_, err := cm.Subscribe(sctx, &paho.Subscribe{Subscriptions: []paho.SubscribeOptions{{Topic: retainedTopic, QoS: 1}}})
+	sub := &paho.Subscribe{Subscriptions: []paho.SubscribeOptions{{Topic: retainedTopic, QoS: 1}}}
+	if s.subIDs.Load() {
+		id := replaySubID
+		sub.Properties = &paho.SubscribeProperties{SubscriptionIdentifier: &id}
+	}
+	_, err := cm.Subscribe(sctx, sub)
 	cancel()
 	if err != nil {
 		s.log.Warn("retained device status not replayed", "error", err.Error())

@@ -48,6 +48,8 @@ type Session struct {
 	connGen atomic.Uint64
 	// lastRetained is when the last retained message arrived (Unix ns).
 	lastRetained atomic.Int64
+	// subIDs is whether the broker supports subscription identifiers (CONNACK).
+	subIDs atomic.Bool
 }
 
 // NewSession prepares a session; call Run.
@@ -151,6 +153,15 @@ func (s *Session) tlsConfig(u *url.URL) (*tls.Config, error) {
 // onPublish queues a received message. It runs on paho's router goroutine.
 func (s *Session) onPublish(pr paho.PublishReceived) (bool, error) {
 	pub := pr.Packet
+	if s.watchDuplicate(pub) {
+		if pub.QoS > 0 {
+			if err := pr.Client.Ack(pub); err != nil {
+				s.log.Debug("MQTT acknowledgement failed", "error", err.Error())
+			}
+		}
+		s.metrics.WatchDuplicatesDropped.Inc()
+		return true, nil
+	}
 	if pub.Retain {
 		s.lastRetained.Store(time.Now().UnixNano())
 	}
@@ -168,6 +179,23 @@ func (s *Session) onPublish(pr paho.PublishReceived) (bool, error) {
 		s.log.Warn("QoS 0 device message dropped; forward queue full", "topic", pub.Topic)
 	}
 	return true, nil
+}
+
+// watchDuplicate reports whether pub is a plain subscription's copy of a live
+// device message, which the shared subscription delivers as well: a watch's
+// copy of a device topic, or the retained replay's copy of a live status (see
+// overlap.go).
+func (s *Session) watchDuplicate(pub *paho.Publish) bool {
+	if !s.dedupWatches() || pub.Properties == nil || pub.Properties.SubscriptionIdentifier == nil {
+		return false
+	}
+	switch *pub.Properties.SubscriptionIdentifier {
+	case watchSubID:
+		return !pub.Retain && matchesDefault(pub.Topic)
+	case replaySubID:
+		return !pub.Retain
+	}
+	return false
 }
 
 // onConnectionUp subscribes after every (re)connect and only then marks the
@@ -206,8 +234,14 @@ func (s *Session) subscribeAll(ctx context.Context, cm *autopaho.ConnectionManag
 	defer s.opMu.Unlock()
 	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if _, err := cm.Subscribe(sctx, &paho.Subscribe{Subscriptions: s.subscriptions()}); err != nil {
+	if _, err := cm.Subscribe(sctx, s.deviceSubscribe()); err != nil {
 		return err
+	}
+	if topics := s.watchTopics(); len(topics) > 0 {
+		// A separate SUBSCRIBE: the subscription identifier is per packet.
+		if _, err := cm.Subscribe(sctx, s.watchSubscribe(topics)); err != nil {
+			return err
+		}
 	}
 	s.setUp(true)
 	return nil
@@ -265,7 +299,10 @@ func (s *Session) Run(ctx context.Context, drain func(time.Duration)) error {
 			c.Properties.ReceiveMaximum = &inflight
 			return c, nil
 		},
-		OnConnectionUp: func(cm *autopaho.ConnectionManager, _ *paho.Connack) { s.onConnectionUp(connCtx, cm) },
+		OnConnectionUp: func(cm *autopaho.ConnectionManager, ca *paho.Connack) {
+			s.subIDs.Store(ca != nil && ca.Properties != nil && ca.Properties.SubIDAvailable)
+			s.onConnectionUp(connCtx, cm)
+		},
 		OnConnectError: func(err error) {
 			s.setUp(false)
 			s.log.Warn("MQTT platform client connect failed", "error", err.Error())

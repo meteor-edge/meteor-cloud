@@ -4,7 +4,7 @@ Checks that a device agent speaks [contracts/device-agent-v1.md](../../contracts
 exactly: every HTTP request and answer, every MQTT message, the new headers and capabilities.
 It runs the Python `meteorcli` and the Go `meteorcli` (`src/device-plane/agent-go`), which must
 produce the same recordings. Scenarios need features (`@pytest.mark.requires`); an adapter without
-one skips the scenario (the Go agent lacks MQTT, actions, Wi-Fi, WireGuard and deploys for now).
+one skips the scenario (the Go agent lacks Wi-Fi, WireGuard and deploys for now).
 
 ```bash
 make agent-contract-test          # verify, then replay
@@ -26,7 +26,11 @@ make agent-contract-test          # verify, then replay
   process in a scratch `--root`, and runs the real CLI against it; it waits in real time (the
   `enroll` scenario takes about 25 s because of the 10 s poll floor and `Retry-After: 15`). The Go
   agent keeps working once enrolled, so scenarios pass `finish(routes=...)` to keep only their own
-  exchanges in the transcript; every exchange is still checked against the contract.
+  exchanges in the transcript (the recording is compared on the same routes); every exchange is
+  still checked against the contract. Its root helper is a fake on `run/meteorcli/helper.sock` that
+  speaks the helper's socket protocol and hands reboot, users, the observer's docker commands and
+  journal warnings to the simulated device; metrics go out every second
+  (`METEORCLI_METRICS_INTERVAL=1`).
 - **Recordings** (`recordings/<scenario>.json`): the normalized transcript of each scenario. Ids,
   secrets, timestamps and host readings are placeholders (`<uuid:1>`, `<device_token>`,
   `<inventory>`), so they double as readable examples of the contract.

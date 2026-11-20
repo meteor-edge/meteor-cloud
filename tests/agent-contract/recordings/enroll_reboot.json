@@ -85,15 +85,35 @@
             "docker_compose": true,
             "wireguard": true,
             "ssh": true,
-            "actions": [],
+            "actions": [
+              "reboot",
+              "shutdown",
+              "set_password",
+              "add_user"
+            ],
             "deploy_kinds": [],
             "modules": {
+              "actions": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
               "heartbeat": {
                 "state": "running",
                 "restarts": 0,
                 "since": "<timestamp>"
               },
               "identity": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "metrics": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "mqtt": {
                 "state": "running",
                 "restarts": 0,
                 "since": "<timestamp>"

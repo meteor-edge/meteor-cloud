@@ -151,6 +151,12 @@ class Contract:
             self._replies.setdefault(key, deque()).append(exchange["response"])
         self.plane.responder = self._replay_answer
 
+    def device_id(self, scripted: str) -> str:
+        """The id the device will get from register: the scripted one, or in a replay the value
+        the recording's ``<uuid:1>`` (the register answer's device_id) is replayed as. Known before
+        register, so an observer can subscribe before an agent that publishes at once."""
+        return self.materializer.text("<uuid:1>") if self.replaying else scripted
+
     def use_broker_literals(self, broker: Broker) -> None:
         """Broker address and CA: placeholders in recordings, real values in replies."""
         if self.replaying:
@@ -203,9 +209,10 @@ class Contract:
         self, observer: Observer | None = None, retained: dict[str, Any] | None = None,
         routes: Iterable[tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
-        """Check and record the transcript. ``routes`` limits it to those (method, path) pairs,
-        for an agent that keeps working in the background (the Go agent beats as soon as it is
-        enrolled); every exchange is still checked against the contract."""
+        """Check and record the transcript. ``routes`` limits it, and the recording it is compared
+        with, to those (method, path) pairs, for an agent that keeps working in the background (the
+        Go agent beats as soon as it is enrolled); every exchange is still checked against the
+        contract."""
         problems = list(self.plane.violations)
         exchanges = self.plane.exchanges
         if routes is not None:
@@ -229,6 +236,10 @@ class Contract:
             golden = transcript.load(self.scenario)
         except FileNotFoundError:
             pytest.fail(f"no recording for {self.scenario}; run with AGENT_CONTRACT_MODE=record")
+        if routes is not None:
+            # A recording made with every route (the Python agent) is compared on the same routes.
+            golden = {**golden, "http": [e for e in golden["http"]
+                                         if (e["request"]["method"], e["request"]["path"]) in wanted]}
         if golden != result:
             diff = difflib.unified_diff(
                 json.dumps(golden, indent=2).splitlines(), json.dumps(result, indent=2).splitlines(),

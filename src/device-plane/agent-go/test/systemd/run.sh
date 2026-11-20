@@ -117,6 +117,26 @@ expect 0 '"installed":"demo-app.service"' "meteor installs a unit through the he
 	as meteor helper call systemd.install_unit '{"name":"demo-app.service","content":"[Unit]\nDescription=demo\n[Service]\nExecStart=/bin/sleep infinity\n[Install]\nWantedBy=multi-user.target\n"}'
 expect 0 "active" "the installed unit runs" -- ctr systemctl is-active demo-app.service
 
+# Users (the console's add_user and set_password actions), under the helper's sandbox.
+key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK ops'
+expect 0 '"created":true' "meteor adds a user with sudo and an SSH key through the helper" -- \
+	as meteor helper call users.add "{\"username\":\"ops\",\"password\":\"Fakepass-123\",\"sudo\":true,\"authorized_key\":\"$key\"}"
+expect 0 "/home/ops" "the new user has a home directory" -- ctr getent passwd ops
+expect 0 "ops ops" "authorized_keys belongs to the new user" -- ctr stat -c '%U %G' /home/ops/.ssh/authorized_keys
+expect 0 "$key" "authorized_keys holds the key" -- ctr cat /home/ops/.ssh/authorized_keys
+expect 0 "ops ALL=(ALL) NOPASSWD:ALL" "the sudo rule is written" -- ctr cat /etc/sudoers.d/90-meteorcli-ops
+before="$(ctr getent shadow ops | cut -d: -f2)"
+expect 0 '"changed":true' "meteor changes the user's password through the helper" -- \
+	as meteor helper call users.set_password '{"username":"ops","password":"Otherpass-456"}'
+after="$(ctr getent shadow ops | cut -d: -f2)"
+if [[ -n $after && $after != "$before" && $after == '$'* ]]; then pass "the password hash changed"; else fail "the password hash did not change"; fi
+expect 1 "cannot be changed from the console" "the helper refuses to change root's password" -- \
+	as meteor helper call users.set_password '{"username":"root","password":"Otherpass-456"}'
+expect 1 "already exists" "the helper refuses to add an existing user" -- \
+	as meteor helper call users.add '{"username":"alice","password":"Fakepass-123"}'
+expect 0 '"entries"' "meteor reads journal warnings through the helper" -- as meteor helper call logs.warnings
+expect 0 "" "no user password in any journal" -- ctr sh -c '! journalctl --no-pager | grep -qE "Fakepass|Otherpass"'
+
 # Audit lines in the journal, without secrets.
 expect 0 "method=module.restart uid=$(ctr id -u alice)" "agent journal names who restarted a module" -- ctr journalctl -u meteorcli.service --no-pager
 expect 0 "outcome=permission_denied" "helper journal records refused callers" -- ctr journalctl -u meteorcli-helper.service --no-pager

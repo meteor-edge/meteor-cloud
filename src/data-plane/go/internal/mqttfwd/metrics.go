@@ -23,6 +23,9 @@ type Metrics struct {
 	Retries       prometheus.Counter
 	BatchSize     prometheus.Histogram
 	ForwardDelay  prometheus.Histogram
+	// WatchDuplicatesDropped counts watch copies of device topics that were
+	// dropped because the shared subscription delivers them (overlap.go).
+	WatchDuplicatesDropped prometheus.Counter
 
 	// queued backs meteorcloud_dataplane_forward_queue_depth. It is read at
 	// scrape time, so concurrent updates can never publish a stale value.
@@ -55,11 +58,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help: "Messages a shard took from its queue at once", Buckets: []float64{1, 2, 4, 8, 16, 32, 64, 128}}),
 		ForwardDelay: prometheus.NewHistogram(prometheus.HistogramOpts{Name: "meteorcloud_dataplane_forward_delay_seconds",
 			Help: "From MQTT receive to control-plane acceptance", Buckets: prometheus.ExponentialBuckets(0.001, 2, 16)}),
+		WatchDuplicatesDropped: prometheus.NewCounter(prometheus.CounterOpts{Name: "meteorcloud_dataplane_watch_duplicates_dropped_total",
+			Help: "Console watch copies of device messages dropped (the device subscription delivers them)"}),
 	}
 	depth := prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "meteorcloud_dataplane_forward_queue_depth",
 		Help: "Device messages waiting to be forwarded"}, func() float64 { return float64(m.queued.Load()) })
 	reg.MustRegister(m.MQTTConnected, m.MessagesReceived, m.IngestForward, m.Publish, m.HTTPRequests, m.HTTPDuration,
-		depth, m.QueueCapacity, m.Dropped, m.Retries, m.BatchSize, m.ForwardDelay)
+		depth, m.QueueCapacity, m.Dropped, m.Retries, m.BatchSize, m.ForwardDelay, m.WatchDuplicatesDropped)
 	return m
 }
 

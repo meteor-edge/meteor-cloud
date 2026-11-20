@@ -288,3 +288,30 @@ func TestSystemHostReadsThisMachine(t *testing.T) {
 		t.Error("no board")
 	}
 }
+
+func TestNetworkBytesAndWifiSignal(t *testing.T) {
+	h := fakeHost(t, map[string]string{
+		"/proc/net/dev": "Inter-|   Receive |  Transmit\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets\n" +
+			"    lo: 100 1 0 0 0 0 0 0 100 1 0 0 0 0 0 0\n" +
+			"  eth0: 1000 10 0 0 0 0 0 0 500 5 0 0 0 0 0 0\n" +
+			" wlan0: 24 1 0 0 0 0 0 0 6 1 0 0 0 0 0 0\n" +
+			"docker0: 9999 1 0 0 0 0 0 0 9999 1 0 0 0 0 0 0\n" +
+			"  bad: x\n",
+		"/proc/net/wireless": "Inter-| sta-|   Quality        |   Discarded packets\n face | tus | link level noise |  nwid  crypt\n" +
+			" wlan0: 0000   54.  -56.  -256        0      0\n",
+	})
+	rx, tx, ok := h.NetworkBytes()
+	if !ok || rx != 1024 || tx != 506 {
+		t.Errorf("NetworkBytes = %d, %d, %v; want 1024, 506 (lo and docker0 skipped)", rx, tx, ok)
+	}
+	if dbm, ok := h.WifiSignalDBm(); !ok || dbm != -56 {
+		t.Errorf("WifiSignalDBm = %v, %v", dbm, ok)
+	}
+	quality := fakeHost(t, map[string]string{"/proc/net/wireless": "h\nh\n wlan0: 0000 54. 60. 0 0 0\n"})
+	if _, ok := quality.WifiSignalDBm(); ok {
+		t.Error("a 0..100 quality level is not dBm")
+	}
+	if _, _, ok := fakeHost(t, nil).NetworkBytes(); ok {
+		t.Error("no /proc/net/dev must give no reading")
+	}
+}

@@ -57,6 +57,8 @@ var commands = []command{
 	{name: "claim", summary: "Report (or --wait for) the approval of a pending enrollment request.", run: runClaim},
 	{name: "config", summary: "Store the server domain and API key, or import a Python install.", run: runConfig},
 	{name: "helper", summary: "Run the root helper (meteorcli-helper.service), or 'helper call' one operation.", run: runHelper},
+	{name: "mqtt-listen", summary: "Print the MQTT commands this device receives (default: devices/{id}/commands).", run: runMQTTListen},
+	{name: "mqtt-test", summary: "Publish one MQTT test message through the agent (default: devices/{id}/status).", run: runMQTTTest},
 	{name: "module", summary: "Restart a module of the running agent ('module restart <name>').", run: runModule},
 	{name: "register", summary: "Enroll this device with a one-time registration token.", run: runRegister},
 	{name: "request-token", aliases: []string{"request"}, summary: "Ask an administrator to approve this device (the agent waits for it).", run: runRequest},
