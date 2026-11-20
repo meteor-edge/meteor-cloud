@@ -71,18 +71,29 @@ expect 1 "permission denied" "bob (no group) is refused module restart" -- as bo
 expect 1 "add you to the meteorcli group" "erin (only meteorcli-admin) is told to join meteorcli too" -- as erin status
 expect 0 "Agent:          running" "root runs status" -- ctr meteorcli status
 
-# carol holds her 4 connection slots with requests she never sends (each lasts
-# up to the 5 s read deadline); she is refused more, alice and root still get in.
+# carol keeps her 4 connection slots full with requests she never sends (the
+# server drops each after its 5 s read deadline; she reconnects). Once she is
+# refused a fifth, alice and root must still get in.
 for _ in 1 2 3 4; do
-	docker exec -d "$name" setpriv --reuid=carol --regid=carol --init-groups sh -c 'sleep 4 | nc -U /run/meteorcli/agent.sock'
+	docker exec -d "$name" setpriv --reuid=carol --regid=carol --init-groups timeout 30 sh -c \
+		'while :; do sleep 6 | timeout 6 nc -U /run/meteorcli/agent.sock; done'
 done
-sleep 0.5
-expect 1 "status: no answer" "carol cannot open a fifth connection" -- as carol status
+carol_refused() {
+	for _ in $(seq 50); do
+		local out
+		out="$(as carol status 2>&1 || true)"
+		[[ $out == *"too many connections"* ]] && return 0
+		sleep 0.2
+	done
+	return 1
+}
+if carol_refused; then pass "carol cannot open a fifth connection"; else fail "carol was never refused a fifth connection"; fi
+expect 0 "Agent:          running" "root runs status while carol holds her slots" -- ctr meteorcli status
 expect 0 "Agent:          running" "alice runs status while carol holds her slots" -- as alice status
 expect 0 "Module socket restarted." "alice runs module restart while carol holds her slots" -- as alice module restart socket
-sleep 1
-expect 0 "Agent:          running" "root runs status while carol holds her slots" -- ctr meteorcli status
-sleep 4
+# The restart dropped carol's connections; once she holds them again, root still gets in.
+if carol_refused; then pass "carol holds her slots again after the restart"; else fail "carol never held her slots again"; fi
+expect 0 "Agent:          running" "root runs status while carol holds her slots again" -- ctr meteorcli status
 
 # Helper: only uid meteor.
 expect 0 '"lines"' "meteor reads the journal through the helper" -- \

@@ -23,6 +23,7 @@ const (
 	CodeBadRequest    = "bad_request"
 	CodeFailed        = "failed"
 	CodeUnavailable   = "unavailable" // the socket is missing or nobody listens
+	CodeBusy          = "busy"        // the server closed the connection unanswered (at its limit)
 )
 
 // Limits that keep a local caller from exhausting the server's memory.
@@ -178,6 +179,11 @@ loop:
 				c.Close()
 				continue
 			}
+			// Deadlines are set here, not in the handler, so the shutdown below
+			// (same goroutine) always comes after them and is never overwritten.
+			now := time.Now()
+			_ = c.SetReadDeadline(now.Add(readTimeout))
+			_ = c.SetWriteDeadline(now.Add(readTimeout + s.timeout() + 10*time.Second))
 			inFlight++
 			perUser[peer.UID]++
 			open[c] = true
@@ -227,8 +233,6 @@ func (s *Server) admit(p Peer, inFlight, fromPeer int) string {
 func (s *Server) handle(ctx context.Context, c *net.UnixConn, peer Peer) {
 	defer c.Close()
 	start := time.Now()
-	_ = c.SetReadDeadline(start.Add(readTimeout))
-	_ = c.SetWriteDeadline(start.Add(readTimeout + s.timeout() + 10*time.Second))
 
 	req, err := s.read(c)
 	if err != nil {

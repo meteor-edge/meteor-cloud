@@ -39,10 +39,16 @@ func Call(ctx context.Context, path, method string, params, out any) error {
 		}
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		if closedEarly(err) {
+			return busy(method)
+		}
 		return fmt.Errorf("%s: send: %w", method, err)
 	}
 	var resp Response
 	if err := json.NewDecoder(io.LimitReader(conn, 16<<20)).Decode(&resp); err != nil {
+		if closedEarly(err) {
+			return busy(method)
+		}
 		return fmt.Errorf("%s: no answer: %w", method, err)
 	}
 	if !resp.OK {
@@ -65,4 +71,15 @@ func callTimeout(ctx context.Context) time.Duration {
 		return time.Until(d)
 	}
 	return 60 * time.Second
+}
+
+// closedEarly reports an error from a server that closed the connection without
+// answering, which it does when it is at its connection limit.
+func closedEarly(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET)
+}
+
+func busy(method string) error {
+	return Errorf(CodeBusy, "%s: the server closed the connection without answering (too many connections; try again)", method)
 }

@@ -221,8 +221,8 @@ func TestConnectionLimitAndAuditFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond)
-	if err := Call(context.Background(), path, "install", params, nil); err == nil {
-		t.Error("second connection served past MaxConns")
+	if err := Call(context.Background(), path, "install", params, nil); CodeOf(err) != CodeBusy {
+		t.Errorf("second connection past MaxConns: err = %v, want busy", err)
 	}
 	idle.Close()
 	deadline := time.Now().Add(5 * time.Second)
@@ -265,8 +265,8 @@ func TestPerUserLimitKeepsRoomForOthers(t *testing.T) {
 		defer c.Close()
 	}
 	time.Sleep(50 * time.Millisecond)
-	if err := Call(context.Background(), path, "status", nil, nil); err == nil {
-		t.Error("third connection from one user was served")
+	if err := Call(context.Background(), path, "status", nil, nil); CodeOf(err) != CodeBusy {
+		t.Errorf("third connection from one user: err = %v, want busy", err)
 	}
 	if !strings.Contains(logs.String(), "too many connections from this user") {
 		t.Errorf("log:\n%s", logs.String())
@@ -297,6 +297,16 @@ func TestAdmit(t *testing.T) {
 }
 
 func TestShutdownDoesNotWaitForIdleClients(t *testing.T) {
+	// Cancel right after connecting, many times, so shutdown lands at every point
+	// of a connection's start (before and after its handler began).
+	for range 30 {
+		shutdownWithIdleClient(t, 0)
+	}
+	shutdownWithIdleClient(t, 50*time.Millisecond)
+}
+
+func shutdownWithIdleClient(t *testing.T, wait time.Duration) {
+	t.Helper()
 	path, l := listen(t)
 	s := &Server{Log: slog.New(slog.DiscardHandler), Authorize: func(Peer, string) error { return nil }}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -307,7 +317,7 @@ func TestShutdownDoesNotWaitForIdleClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(wait)
 	start := time.Now()
 	cancel()
 	<-done
