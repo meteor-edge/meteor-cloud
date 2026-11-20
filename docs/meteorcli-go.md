@@ -38,6 +38,45 @@ atomically (temp file, fsync, rename). A file that does not parse is moved to
 
 `METEORCLI_ROOT=/some/dir` (or `--root`) moves every path under a prefix, for tests and development.
 
+## Installing on a device
+
+Every merge to master that touches the Go agent publishes the **`meteorcli-go-edge`** prerelease
+(workflow `meteorcli (Go) edge build`). It holds the binaries, the packaging files, one installer
+per board and `SHA256SUMS`. It is never marked "latest", so `releases/latest/download/` keeps
+serving the Python agent to existing devices. Each board has its own install URL. Raspberry Pi is
+the first one (Pi OS or Debian with systemd, 32- or 64-bit; the installer picks the arm64 or ARMv6
+binary for the CPU):
+
+```bash
+# Enroll right away with a registration token
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge/install-rpi.sh \
+  | sudo bash -s -- --domain meteor.example.com --token reg_XXXX --name lobby-cam
+# Or by approval: the agent submits a request by itself, then approve it in the console
+curl -fsSL …/install-rpi.sh | sudo bash -s -- --domain meteor.example.com --api-key key_XXXX
+# A device running the Python agent: identity imported, no new enrollment
+curl -fsSL …/install-rpi.sh | sudo bash
+```
+
+The installer:
+- checks the board and CPU (`--force` installs on another board)
+- downloads and verifies against `SHA256SUMS`
+- installs `/usr/local/bin/meteorcli`, the units, sysusers.d and tmpfiles.d files
+- adds `$SUDO_USER` (or `--user`) to `meteorcli` and `meteorcli-admin`
+- if the Python agent is installed: stops its service, runs `meteorcli config import` and leaves `/opt/meteorcli` for a rollback
+- applies `--domain`/`--api-base`/`--api-key`, starts the agent and runs `register` when given a token
+
+Running it again upgrades in place. To roll back to Python, run the Python `install-meteorcli.sh`.
+
+To try a pull request before it is merged:
+1. Download the `meteorcli-go-<sha>` artifact from the CI run's Summary page and unzip it on the device.
+2. Run `sudo bash install-rpi.sh --base-url file://$PWD`.
+
+`make agent-go-dist` builds the same files locally. You can serve them with
+`python3 -m http.server` and point `--base-url` at your laptop.
+
+Not in the Go agent yet: MQTT (metrics, status, commands), deploys, actions, Wi-Fi, WireGuard. An
+installed device shows online with its inventory and nothing more, so use a spare device.
+
 ## Moving a device from the Python agent
 
 The Python agent kept settings and secrets together in `/etc/meteorcli`. Stop it first: the Python
@@ -280,12 +319,19 @@ make agent-go-build    # static linux arm64, arm v6, amd64 binaries in src/devic
 ```
 
 CI (`Agent (Go meteorcli)`) also runs staticcheck, govulncheck, a coverage floor of 70% on the core
-packages, the `systemd-analyze security` gate, and the systemd container test, and fails when a
-binary is over 15 MB.
+packages, the `systemd-analyze security` gate, the systemd and installer container tests, fails when a
+binary is over 15 MB, and uploads the release files as a run artifact.
 
 ```bash
 make agent-go-systemd-test   # Docker, --privileged: Debian 12 with systemd as PID 1
+make agent-go-install-test   # the same container, checking install-rpi.sh end to end
 ```
+
+The install test refuses a board that is not a Pi. It then:
+- takes over a fake Python install (service stopped, identity imported, the device online with the imported token, `pi` running `status` without sudo, `/opt/meteorcli` kept)
+- runs the installer again as an upgrade
+- installs on a fresh device with `--token` and checks it is online right away
+- checks that no secret reaches the journal
 
 The container test installs the units, sysusers and tmpfiles files, creates test users, and checks:
 a `meteorcli-admin` user runs `status` and `module restart` without sudo, a `meteorcli` user may run
