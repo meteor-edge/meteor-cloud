@@ -2,7 +2,6 @@ package mqttfwd
 
 import (
 	"context"
-	"slices"
 	"time"
 
 	"github.com/eclipse/paho.golang/autopaho"
@@ -24,12 +23,12 @@ func (s *Session) Watch(ctx context.Context, topic string) error {
 	s.watches[topic]++
 	first := s.watches[topic] == 1
 	s.mu.Unlock()
-	if !first || slices.Contains(DefaultTopics, topic) || !up {
-		return nil // not connected: subscribeAll picks it up on connect
+	if !first || s.skipWatch(topic) || !up {
+		return nil // covered by the device topics, or not connected: subscribeAll picks it up
 	}
 	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if _, err := cm.Subscribe(sctx, &paho.Subscribe{Subscriptions: []paho.SubscribeOptions{{Topic: topic, QoS: 1}}}); err != nil {
+	if _, err := cm.Subscribe(sctx, s.watchSubscribe([]string{topic})); err != nil {
 		// Same as the Python service: logged, not returned; a reconnect retries it.
 		s.log.Warn("MQTT platform subscribe request failed", "topic", topic, "error", err.Error())
 	}
@@ -53,7 +52,7 @@ func (s *Session) Unwatch(ctx context.Context, topic string) error {
 		s.watches[topic]--
 	}
 	s.mu.Unlock()
-	if !last || slices.Contains(DefaultTopics, topic) || !up {
+	if !last || s.skipWatch(topic) || !up {
 		return nil
 	}
 	uctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -64,25 +63,49 @@ func (s *Session) Unwatch(ctx context.Context, topic string) error {
 	return nil
 }
 
-// subscriptions is everything to subscribe to after (re)connecting.
-func (s *Session) subscriptions() []paho.SubscribeOptions {
+// deviceSubscribe is the subscription to the device topics.
+func (s *Session) deviceSubscribe() *paho.Subscribe {
 	var subs []paho.SubscribeOptions
 	for _, t := range s.sharedTopics() {
 		subs = append(subs, paho.SubscribeOptions{Topic: t, QoS: 1})
 	}
-	for _, t := range s.watchTopics() {
-		subs = append(subs, paho.SubscribeOptions{Topic: t, QoS: 1})
-	}
-	return subs
+	return &paho.Subscribe{Subscriptions: subs}
 }
 
-// watchTopics are the watched filters that need their own subscription.
+// watchSubscribe subscribes to watched filters, marked with watchSubID when
+// overlapping copies can be told apart (see overlap.go).
+func (s *Session) watchSubscribe(topics []string) *paho.Subscribe {
+	sub := &paho.Subscribe{}
+	for _, t := range topics {
+		sub.Subscriptions = append(sub.Subscriptions, paho.SubscribeOptions{Topic: t, QoS: 1})
+	}
+	if s.dedupWatches() {
+		id := watchSubID
+		sub.Properties = &paho.SubscribeProperties{SubscriptionIdentifier: &id}
+	}
+	return sub
+}
+
+// skipWatch reports whether a watched filter needs no subscription of its own:
+// the device topics cover it and its copies could not be told apart.
+func (s *Session) skipWatch(topic string) bool {
+	return coveredByDefault(topic) && !s.dedupWatches()
+}
+
+// dedupWatches reports whether watch copies of device topics can be dropped:
+// the broker supports subscription identifiers and device topics are shared.
+func (s *Session) dedupWatches() bool {
+	return s.cfg.SharedGroup != "" && s.subIDs.Load()
+}
+
+// watchTopics are the watched filters that need their own subscription (those
+// the device topics do not already cover).
 func (s *Session) watchTopics() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []string
 	for t := range s.watches {
-		if !slices.Contains(DefaultTopics, t) {
+		if !s.skipWatch(t) {
 			out = append(out, t)
 		}
 	}

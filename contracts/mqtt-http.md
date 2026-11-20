@@ -103,3 +103,12 @@ broker session is not up (publish waits up to 15 s for it). Success is `{"ok": t
 ```json
 { "topic": "devices/+/events" }
 ```
+
+A watch that overlaps the device topics the forwarder already takes
+(`devices/+/status`, `/metrics`, `/events`, `/commands/result`) does not
+ingest those messages a second time. When the broker supports MQTT 5
+subscription identifiers (Mosquitto, EMQX), a watch's copy of a live device
+message is dropped, and the retained status a new watch receives is still
+ingested once. Without them, a fully covered watch (`devices/<id>/status`)
+gets no subscription of its own, and a partly overlapping one
+(`devices/<id>/#`) may still bring duplicates of the overlapping part.
