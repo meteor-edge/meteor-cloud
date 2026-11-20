@@ -74,9 +74,14 @@ expect 0 "Agent:          running" "root runs status" -- ctr meteorcli status
 # carol keeps her 4 connection slots full with requests she never sends (the
 # server drops each after its 5 s read deadline; she reconnects). Once she is
 # refused a fifth, alice and root must still get in.
-for _ in 1 2 3 4; do
-	docker exec -d "$name" setpriv --reuid=carol --regid=carol --init-groups timeout 30 sh -c \
-		'while :; do sleep 6 | timeout 6 nc -U /run/meteorcli/agent.sock; done'
+# Attached execs backgrounded on the host (output kept for diagnosis), killed by
+# cleanup at the latest.
+holders=()
+for i in 1 2 3 4; do
+	docker exec "$name" setpriv --reuid=carol --regid=carol --init-groups timeout 30 sh -c \
+		'while :; do sleep 6 | timeout 6 nc -U /run/meteorcli/agent.sock; echo "nc exited $?"; done' \
+		>"$ctx/holder-$i.log" 2>&1 &
+	holders+=($!)
 done
 carol_refused() {
 	for _ in $(seq 50); do
@@ -85,6 +90,8 @@ carol_refused() {
 		[[ $out == *"too many connections"* ]] && return 0
 		sleep 0.2
 	done
+	echo "    last carol status: $(head -1 <<<"$out")"
+	for f in "$ctx"/holder-*.log; do echo "    $(basename "$f"): $(sort "$f" | uniq -c | head -3 | tr '\n' ' ')"; done
 	return 1
 }
 if carol_refused; then pass "carol cannot open a fifth connection"; else fail "carol was never refused a fifth connection"; fi
@@ -94,6 +101,7 @@ expect 0 "Module socket restarted." "alice runs module restart while carol holds
 # The restart dropped carol's connections; once she holds them again, root still gets in.
 if carol_refused; then pass "carol holds her slots again after the restart"; else fail "carol never held her slots again"; fi
 expect 0 "Agent:          running" "root runs status while carol holds her slots again" -- ctr meteorcli status
+kill "${holders[@]}" 2>/dev/null || true
 
 # Helper: only uid meteor.
 expect 0 '"lines"' "meteor reads the journal through the helper" -- \
