@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/heartbeat (request)",
+  "description": "Authorization: Bearer <device token>. Inventory, capabilities and software reports. A progress-only heartbeat may carry just software_report.",
+  "allOf": [
+    {
+      "$ref": "../common.json#/$defs/inventory"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "metrics": {
+      "type": "object"
+    },
+    "capabilities": {
+      "$ref": "../common.json#/$defs/capabilities"
+    },
+    "software_report": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.json#/$defs/software_report_item"
+      }
+    }
+  }
+}

@@ -19,6 +19,22 @@ from typing import Any
 
 # Sent on artifact downloads: this agent can follow a redirect to object storage.
 REDIRECT_HEADER = "X-Meteorcli-Redirect"
+# Sent on every API call (contracts/device-agent-v1.md): the contract version this agent speaks.
+PROTOCOL_HEADER = "X-Meteor-Agent-Protocol"
+PROTOCOL_VERSION = "1"
+
+
+def user_agent() -> str:
+    """``meteorcli/<version>``: lets the server tell agent versions apart in logs and metrics."""
+    try:
+        from meteorcli import __version__
+    except ImportError:
+        return "meteorcli/0.0.0"
+    return f"meteorcli/{__version__}"
+
+
+def _agent_headers() -> dict[str, str]:
+    return {"User-Agent": user_agent(), PROTOCOL_HEADER: PROTOCOL_VERSION}
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 
 
@@ -65,7 +81,7 @@ class EdgeClient:
         bearer: str | None = None,
     ) -> dict[str, Any]:
         url = f"{self.server_url}{path}"
-        headers = {"Accept": "application/json"}
+        headers = {"Accept": "application/json", **_agent_headers()}
         data = None
         if body is not None:
             data = json.dumps(body).encode("utf-8")
@@ -245,7 +261,12 @@ class EdgeClient:
         does not match. Partial files are removed on failure.
         """
         url = f"{self.server_url}/api/v1/agent/artifacts/{artifact_id}/download"
-        headers = {"Authorization": f"Bearer {device_token}", "Accept": "*/*", REDIRECT_HEADER: "1"}
+        headers = {
+            "Authorization": f"Bearer {device_token}",
+            "Accept": "*/*",
+            REDIRECT_HEADER: "1",
+            **_agent_headers(),
+        }
         request = urllib.request.Request(url, headers=headers, method="GET")
         destination.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = destination.with_suffix(destination.suffix + ".partial")

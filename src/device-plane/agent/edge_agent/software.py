@@ -36,6 +36,9 @@ def manifest_verifier(
 
 logger = logging.getLogger("edge_agent")
 
+# Release kinds this agent can apply; reported in heartbeat capabilities["deploy_kinds"].
+SUPPORTED_KINDS = ("systemd", "docker", "docker_compose")
+
 
 def artifact_cache_path(artifacts_dir: Path, artifact_id: str) -> Path:
     return artifacts_dir / artifact_id
@@ -626,7 +629,7 @@ def reconcile_software(
         if not workload_key:
             continue
 
-        if kind not in {"systemd", "docker", "docker_compose"}:
+        if kind not in SUPPORTED_KINDS:
             reports.append(_failed(workload_key, f"Unsupported release kind: {kind!r}"))
             continue
 

@@ -1,0 +1,4 @@
+# Test-only (not shipped). jsonschema and its dependencies are MIT; see docs/licensing.md.
+pytest>=8.3.0
+jsonschema>=4.23.0
+paho-mqtt>=2.1.0

@@ -21,7 +21,17 @@ from edge_agent.observer import DeviceObserver
 
 logger = logging.getLogger("edge_agent")
 
-AGENT_VERSION = "0.3.0"
+
+def _installed_version() -> str:
+    """The meteorcli version, the same value heartbeats send as agent_version."""
+    try:
+        from meteorcli import __version__
+    except ImportError:
+        return "0.0.0"
+    return str(__version__)
+
+
+AGENT_VERSION = _installed_version()
 COMMANDS_QOS = 1
 STATUS_QOS = 1
 METRICS_INTERVAL_SECONDS = 60.0

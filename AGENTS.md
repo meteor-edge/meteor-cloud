@@ -55,7 +55,7 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 - Preserve existing HTTP/MQTT compatibility unless a breaking change is explicitly requested.
 - Add or update tests for behavior changes.
 - When install, config, contracts, or operator workflows change, update the matching page under `docs/` ([docs/README.md](docs/README.md)).
-- Run the relevant tests (`make test`, or `make backend-test` / `data-plane-test` / `data-api-test` / `sdk-test` / `agent-test` / `console-test` / `make check-plane-imports`). Report exactly what ran and what did not.
+- Run the relevant tests (`make test`, or `make backend-test` / `data-plane-test` / `data-api-test` / `sdk-test` / `agent-test` / `agent-contract-test` / `console-test` / `make check-plane-imports`). Report exactly what ran and what did not.
 - Do not claim tests, deploys, or installs succeeded unless they actually ran and passed.
 
 ## Cursor Cloud

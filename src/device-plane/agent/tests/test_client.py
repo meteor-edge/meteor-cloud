@@ -141,3 +141,27 @@ def test_answer_that_is_not_json_is_a_retryable_error(monkeypatch) -> None:
             EdgeClient("http://localhost:8000").heartbeat(device_token="dev_x", payload={})
         assert raised.value.status == 0  # retried like a network failure, never treated as "revoked"
         assert raised.value.code == "bad_response"
+
+
+def test_every_request_names_the_agent_and_protocol(monkeypatch) -> None:
+    """contracts/device-agent-v1.md: User-Agent meteorcli/<version> and X-Meteor-Agent-Protocol: 1."""
+    from meteorcli import __version__
+
+    client = EdgeClient("http://localhost:8000")
+    seen = {}
+
+    class FakeResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(request, timeout):  # noqa: ARG001
+        seen.update({k.lower(): v for k, v in request.header_items()})
+        return FakeResponse(b"{}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client.heartbeat(device_token="dev_x", payload={})
+    assert seen["user-agent"] == f"meteorcli/{__version__}"
+    assert seen["x-meteor-agent-protocol"] == "1"

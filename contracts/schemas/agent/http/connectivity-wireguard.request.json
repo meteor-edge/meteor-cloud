@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/connectivity/wireguard (request)",
+  "description": "Register this device's WireGuard public key (the private key never leaves the device) and its SSH facts.",
+  "type": "object",
+  "required": [
+    "public_key"
+  ],
+  "properties": {
+    "public_key": {
+      "type": "string",
+      "minLength": 40,
+      "maxLength": 64
+    },
+    "ssh_user": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ssh_host_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ssh_ca_public_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The SSH CA this device already trusts, if any."
+    }
+  }
+}

@@ -18,7 +18,7 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 1. The control plane remains Python.
 2. Data-plane and device-plane implementations may use other languages later. No language migration is in progress.
 3. Planes must not import one another’s private Python packages (`app`, `data_plane`, `edge_agent`, `meteorcli`).
-4. Cross-plane traffic uses documented HTTP/MQTT contracts ([`contracts/mqtt-http.md`](../contracts/mqtt-http.md), control-plane `/internal/*`).
+4. Cross-plane traffic uses documented HTTP/MQTT contracts ([`contracts/mqtt-http.md`](../contracts/mqtt-http.md), control-plane `/internal/*`). The device agent speaks [`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md), checked by JSON Schemas on both sides.
 5. PostgreSQL is the control-plane database. Other stores stay behind existing ports.
 6. Deployment infrastructure stays under `deploy/` and `infrastructure/`, not domain modules.
 7. VPN is an optional deploy capability (Compose + Ansible). It is not a reason to split the repo.
