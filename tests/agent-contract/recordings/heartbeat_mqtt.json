@@ -1,0 +1,420 @@
+{
+  "scenario": "heartbeat_mqtt",
+  "contract": "contracts/device-agent-v1.md",
+  "http": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/register",
+        "headers": {
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "token": "<registration_token>",
+          "serial_number": "<inventory>",
+          "mac_addresses": "<inventory>",
+          "hostname": "<inventory>",
+          "os_name": "<inventory>",
+          "os_version": "<inventory>",
+          "kernel_version": "<inventory>",
+          "architecture": "<inventory>",
+          "hardware_model": "<inventory>",
+          "cpu_model": "<inventory>",
+          "cpu_cores": "<inventory>",
+          "memory_mb": "<inventory>",
+          "local_ip": "<inventory>",
+          "agent_version": "<inventory>"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "device_id": "<uuid:1>",
+          "device_token": "<device_token>",
+          "organization_id": "<uuid:2>",
+          "name": "contract-device",
+          "heartbeat_interval_seconds": 60,
+          "mqtt": {
+            "host": "<mqtt_host>",
+            "port": "<mqtt_port>",
+            "username": "device_<uuid:3>",
+            "password": "<mqtt_password>",
+            "tls": true,
+            "ca_cert": "<pem>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/connectivity/wireguard",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "public_key": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+          "ssh_user": "pi",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK root@device"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {},
+        "body": {
+          "error": {
+            "code": "connectivity_disabled",
+            "message": "Device connectivity is disabled for this deployment."
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/agent/mqtt",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "enabled": true,
+          "config_version": "mqtt-v2"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/mqtt/credentials",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "host": "<mqtt_host>",
+          "port": "<mqtt_port>",
+          "username": "device_<uuid:3>",
+          "password": "<rotated_mqtt_password>",
+          "tls": true,
+          "ca_cert": "<pem>",
+          "config_version": "mqtt-v2"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/agent/software",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": []
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/heartbeat",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "serial_number": "<inventory>",
+          "mac_addresses": "<inventory>",
+          "hostname": "<inventory>",
+          "os_name": "<inventory>",
+          "os_version": "<inventory>",
+          "kernel_version": "<inventory>",
+          "architecture": "<inventory>",
+          "hardware_model": "<inventory>",
+          "cpu_model": "<inventory>",
+          "cpu_cores": "<inventory>",
+          "memory_mb": "<inventory>",
+          "local_ip": "<inventory>",
+          "agent_version": "<inventory>",
+          "capabilities": {
+            "systemd": true,
+            "docker": true,
+            "docker_compose": true,
+            "wireguard": true,
+            "ssh": true,
+            "actions": [
+              "reboot",
+              "shutdown",
+              "set_password",
+              "add_user",
+              "update_agent"
+            ],
+            "deploy_kinds": [
+              "systemd",
+              "docker",
+              "docker_compose"
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "device_id": "<uuid:1>",
+          "status": "online",
+          "heartbeat_interval_seconds": 60,
+          "server_time": "<timestamp>",
+          "desired_software": [],
+          "wifi_pending": false,
+          "actions_pending": false
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/network/wifi/report",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "results": [],
+          "status": {
+            "supported": true,
+            "connected_ssid": "office",
+            "signal_percent": 72,
+            "interface": "wlan0",
+            "wired_connected": false,
+            "saved_networks": [
+              {
+                "ssid": "office",
+                "managed": false
+              }
+            ],
+            "uplink_type": "wifi",
+            "uplink_interface": "wlan0"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "accepted": 0
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/agent/mqtt",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "enabled": true,
+          "config_version": "mqtt-v2"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/agent/software",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": []
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/heartbeat",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "serial_number": "<inventory>",
+          "mac_addresses": "<inventory>",
+          "hostname": "<inventory>",
+          "os_name": "<inventory>",
+          "os_version": "<inventory>",
+          "kernel_version": "<inventory>",
+          "architecture": "<inventory>",
+          "hardware_model": "<inventory>",
+          "cpu_model": "<inventory>",
+          "cpu_cores": "<inventory>",
+          "memory_mb": "<inventory>",
+          "local_ip": "<inventory>",
+          "agent_version": "<inventory>",
+          "capabilities": {
+            "systemd": true,
+            "docker": true,
+            "docker_compose": true,
+            "wireguard": true,
+            "ssh": true,
+            "actions": [
+              "reboot",
+              "shutdown",
+              "set_password",
+              "add_user",
+              "update_agent"
+            ],
+            "deploy_kinds": [
+              "systemd",
+              "docker",
+              "docker_compose"
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "device_id": "<uuid:1>",
+          "status": "online",
+          "heartbeat_interval_seconds": 60,
+          "server_time": "<timestamp>",
+          "desired_software": [],
+          "wifi_pending": false,
+          "actions_pending": false
+        }
+      }
+    }
+  ],
+  "mqtt": [
+    {
+      "topic": "devices/<uuid:1>/metrics",
+      "qos": 1,
+      "payload": {
+        "timestamp": "<timestamp>",
+        "<host readings>": true,
+        "app.demo-app.cpu": 1.5,
+        "app.demo-app.mem": 10485760,
+        "app.demo-app.restarts": 0,
+        "app.demo-app.up": 1
+      }
+    },
+    {
+      "topic": "devices/<uuid:1>/metrics",
+      "qos": 1,
+      "payload": {
+        "timestamp": "<timestamp>",
+        "<host readings>": true
+      }
+    },
+    {
+      "topic": "devices/<uuid:1>/status",
+      "qos": 1,
+      "payload": {
+        "status": "online",
+        "timestamp": "<timestamp>",
+        "agent_version": "<version>",
+        "uptime_seconds": "<number>"
+      }
+    },
+    {
+      "topic": "devices/<uuid:1>/events",
+      "qos": 1,
+      "payload": {
+        "timestamp": "<timestamp>",
+        "type": "app.started",
+        "app": "demo-app"
+      }
+    },
+    {
+      "topic": "devices/<uuid:1>/commands/result",
+      "qos": 1,
+      "payload": {
+        "command_id": "<uuid:4>",
+        "status": "completed",
+        "result": {
+          "message": "pong"
+        }
+      }
+    },
+    {
+      "topic": "devices/<uuid:1>/commands",
+      "qos": 1,
+      "payload": {
+        "type": "ping",
+        "command_id": "<uuid:4>"
+      }
+    },
+    {
+      "topic": "devices/<uuid:1>/events",
+      "qos": 1,
+      "payload": {
+        "timestamp": "<timestamp>",
+        "type": "log",
+        "message": "Under-voltage detected",
+        "priority": 4,
+        "unit": "kernel",
+        "source": "journal"
+      }
+    },
+    {
+      "topic": "devices/<uuid:1>/commands",
+      "qos": 1,
+      "payload": {
+        "type": "sync_desired",
+        "revision": 3
+      }
+    },
+    {
+      "topic": "devices/<uuid:1>/status",
+      "qos": 1,
+      "payload": {
+        "status": "offline"
+      }
+    }
+  ],
+  "retained": {
+    "status": {
+      "status": "offline"
+    }
+  }
+}

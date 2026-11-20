@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/network/wifi/report (request)",
+  "description": "Results of the changes the agent collected, and its current Wi-Fi. Never contains a password.",
+  "type": "object",
+  "properties": {
+    "status": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean",
+              "default": false
+            },
+            "unsupported_reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 255
+            },
+            "connected_ssid": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "signal_percent": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "interface": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 32
+            },
+            "wired_connected": {
+              "type": "boolean",
+              "default": false
+            },
+            "saved_networks": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "required": [
+                  "ssid"
+                ],
+                "properties": {
+                  "ssid": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "managed": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            },
+            "uplink_type": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 16,
+              "description": "wifi, ethernet, cellular ...; a value the server does not know is stored as 'other'."
+            },
+            "uplink_interface": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 32
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "results": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "state"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "../common.json#/$defs/uuid"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "removed",
+              "rolled_back",
+              "failed"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          }
+        }
+      }
+    }
+  }
+}

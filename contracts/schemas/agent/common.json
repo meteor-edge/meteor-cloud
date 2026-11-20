@@ -1,0 +1,418 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Shared definitions for the device agent contract v1",
+  "description": "Referenced by http/*.json and mqtt/*.json. See contracts/device-agent-v1.md.",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339, UTC."
+    },
+    "error": {
+      "description": "Every non-2xx JSON answer. Agents branch on error.code, never on message.",
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "inventory": {
+      "description": "Hardware and OS facts. Sent on register, enroll/request and every heartbeat. Every field may be null or absent.",
+      "type": "object",
+      "properties": {
+        "serial_number": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "mac_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hostname": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "os_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "os_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "kernel_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "architecture": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "hardware_model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "cpu_model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "cpu_cores": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "memory_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "local_ip": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64,
+          "description": "Private LAN address. Absent: the server uses the request's source address when it is private."
+        },
+        "agent_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 32,
+          "description": "Installed agent version, X.Y.Z."
+        }
+      }
+    },
+    "mqtt_connect": {
+      "type": "object",
+      "required": [
+        "host",
+        "port",
+        "username",
+        "password"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Broker host. A loopback value means: use the API host."
+        },
+        "port": {
+          "type": "integer"
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string",
+          "description": "Secret. Never logged."
+        },
+        "tls": {
+          "type": "boolean",
+          "default": true,
+          "description": "Agents refuse a config with tls false."
+        },
+        "ca_cert": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "PEM of the broker CA, when it is not a public CA."
+        }
+      }
+    },
+    "connectivity_status": {
+      "type": "string",
+      "enum": [
+        "online",
+        "offline",
+        "never_seen"
+      ]
+    },
+    "deploy_kind": {
+      "type": "string",
+      "enum": [
+        "systemd",
+        "docker",
+        "docker_compose"
+      ],
+      "description": "Release kinds the server hands out today. A new kind is an additive change; an agent that does not know it reports the workload failed with an error that starts with 'Unsupported'."
+    },
+    "action_kind": {
+      "type": "string",
+      "enum": [
+        "reboot",
+        "shutdown",
+        "set_password",
+        "add_user",
+        "update_agent"
+      ],
+      "description": "One-off action kinds the server hands out today. A new kind is an additive change; an agent that does not know it reports the action failed with an error that starts with 'Unsupported'."
+    },
+    "desired_software_item": {
+      "description": "What the agent should install for one workload.",
+      "type": "object",
+      "required": [
+        "workload_key",
+        "kind",
+        "release_id",
+        "release_name",
+        "release_version",
+        "artifact_id",
+        "revision",
+        "spec"
+      ],
+      "properties": {
+        "workload_key": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/deploy_kind"
+        },
+        "release_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "release_name": {
+          "type": "string"
+        },
+        "release_version": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "spec": {
+          "type": "object",
+          "description": "Kind-specific settings (image, ports, env, unit_name, health_check ...)."
+        },
+        "artifact_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Organization signing key that signed this item."
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Ed25519 over 'meteorcloud-desired-v1\\n' + canonical JSON, base64url. See docs/fleet/signed-updates.md."
+        }
+      }
+    },
+    "software_report_item": {
+      "description": "What the agent reports for one workload.",
+      "type": "object",
+      "required": [
+        "workload_key"
+      ],
+      "properties": {
+        "workload_key": {
+          "type": "string"
+        },
+        "installed_release_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installed_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "health": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "healthy",
+            "unhealthy"
+          ],
+          "default": "unknown"
+        },
+        "sync_status": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "in_sync",
+            "pending",
+            "updating",
+            "failed",
+            "cancelled",
+            "rolled_back",
+            null
+          ]
+        },
+        "progress_percent": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2000
+        }
+      }
+    },
+    "module_health": {
+      "description": "Health of one agent module (Go agent). 'parked' means the crash-loop breaker stopped it.",
+      "type": "object",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "running",
+            "starting",
+            "waiting",
+            "failed",
+            "parked",
+            "stopped"
+          ]
+        },
+        "restarts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "since": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "capabilities": {
+      "description": "Booleans: the runtime or tool is present on this device. The server stores the object as sent; unknown keys are kept.",
+      "type": "object",
+      "properties": {
+        "systemd": {
+          "type": "boolean"
+        },
+        "docker": {
+          "type": "boolean"
+        },
+        "docker_compose": {
+          "type": "boolean"
+        },
+        "wireguard": {
+          "type": "boolean"
+        },
+        "ssh": {
+          "type": "boolean"
+        },
+        "actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "Action kinds this agent can run. Added in v1 (additive)."
+        },
+        "deploy_kinds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "Release kinds this agent's code can apply. Whether the runtime is installed is the boolean of the same name. Added in v1 (additive)."
+        },
+        "modules": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/module_health"
+          },
+          "description": "Module name to health. Optional; the Python agent has no modules."
+        }
+      }
+    }
+  }
+}

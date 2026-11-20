@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GET /api/v1/agent/actions (200)",
+  "description": "Actions waiting for this device. Each is handed out once. May hold a password: never log the body.",
+  "type": "object",
+  "required": [
+    "actions"
+  ],
+  "properties": {
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "../common.json#/$defs/uuid"
+          },
+          "kind": {
+            "$ref": "../common.json#/$defs/action_kind"
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sudo": {
+            "type": "boolean",
+            "default": false
+          },
+          "authorized_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "from_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

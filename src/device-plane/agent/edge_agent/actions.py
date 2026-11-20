@@ -39,6 +39,10 @@ __all__ = [
 ]
 
 
+# Action kinds this agent runs; reported in heartbeat capabilities["actions"].
+SUPPORTED_ACTIONS = ("reboot", "shutdown", "set_password", "add_user", "update_agent")
+
+
 def _result(action_id: object, state: str, error: str | None = None) -> dict[str, Any]:
     row: dict[str, Any] = {"id": action_id, "state": state}
     if error:
@@ -120,7 +124,7 @@ class ActionSync:
                 return None
         except HostActionError as error:
             return _result(action_id, "failed", str(error))
-        return _result(action_id, "failed", f"Unknown action kind: {kind!r}")
+        return _result(action_id, "failed", f"Unsupported action kind: {kind!r}")
 
     def _report(self, results: list[dict[str, Any]]) -> None:
         if not results:

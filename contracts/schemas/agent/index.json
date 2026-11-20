@@ -1,0 +1,198 @@
+{
+  "description": "Machine-readable map of the device agent contract v1: which schema checks which message. Read by tests/agent-contract and the control-plane tests.",
+  "protocol": 1,
+  "error": "common.json#/$defs/error",
+  "http": [
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/register",
+      "auth": "none (token in body)",
+      "request": "http/register.request.json",
+      "responses": {
+        "201": "http/register.response.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/enroll/check",
+      "auth": "api_key",
+      "request": "http/enroll-check.request.json",
+      "responses": {
+        "200": "http/enroll-check.response.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/enroll/check",
+      "auth": "api_key",
+      "request": null,
+      "responses": {
+        "200": "http/enroll-check.response.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/enroll/request",
+      "auth": "api_key",
+      "request": "http/enroll-request.request.json",
+      "responses": {
+        "201": "http/enroll-request.response.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/enroll/poll",
+      "auth": "none (claim secret in body)",
+      "request": "http/enroll-poll.request.json",
+      "responses": {
+        "200": "http/enroll-poll.response.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/heartbeat",
+      "auth": "device",
+      "request": "http/heartbeat.request.json",
+      "responses": {
+        "200": "http/heartbeat.response.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/mqtt",
+      "auth": "device",
+      "request": null,
+      "responses": {
+        "200": "http/mqtt.response.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/mqtt/credentials",
+      "auth": "device",
+      "request": "http/mqtt-credentials.request.json",
+      "responses": {
+        "200": "http/mqtt-credentials.response.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/software",
+      "auth": "device",
+      "request": null,
+      "responses": {
+        "200": "http/software.response.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/signing-keys",
+      "auth": "device",
+      "request": null,
+      "responses": {
+        "200": "http/signing-keys.response.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/artifacts/{artifact_id}/download",
+      "auth": "device",
+      "request": null,
+      "responses": {
+        "200": null,
+        "302": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/connectivity/wireguard",
+      "auth": "device",
+      "request": "http/connectivity-wireguard.request.json",
+      "responses": {
+        "200": "http/connectivity-wireguard.response.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/network/wifi",
+      "auth": "device",
+      "request": null,
+      "responses": {
+        "200": "http/network-wifi.response.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/network/wifi/report",
+      "auth": "device",
+      "request": "http/network-wifi-report.request.json",
+      "responses": {
+        "200": "http/network-wifi-report.response.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/actions",
+      "auth": "device",
+      "request": null,
+      "responses": {
+        "200": "http/actions.response.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/actions/report",
+      "auth": "device",
+      "request": "http/actions-report.request.json",
+      "responses": {
+        "200": "http/actions-report.response.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/applications/credentials",
+      "auth": "device",
+      "request": "http/applications-credentials.request.json",
+      "responses": {
+        "201": "http/applications-credentials.response.json"
+      }
+    }
+  ],
+  "mqtt": [
+    {
+      "topic": "devices/{device_id}/commands",
+      "direction": "server_to_device",
+      "qos": 1,
+      "retain": false,
+      "schema": "mqtt/commands.json"
+    },
+    {
+      "topic": "devices/{device_id}/commands/result",
+      "direction": "device_to_server",
+      "qos": 1,
+      "retain": false,
+      "schema": "mqtt/commands-result.json"
+    },
+    {
+      "topic": "devices/{device_id}/status",
+      "direction": "device_to_server",
+      "qos": 1,
+      "retain": true,
+      "schema": "mqtt/status.json"
+    },
+    {
+      "topic": "devices/{device_id}/metrics",
+      "direction": "device_to_server",
+      "qos": 1,
+      "retain": false,
+      "schema": "mqtt/metrics.json"
+    },
+    {
+      "topic": "devices/{device_id}/events",
+      "direction": "device_to_server",
+      "qos": 1,
+      "retain": false,
+      "schema": "mqtt/events.json"
+    }
+  ]
+}
