@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/localrpc"
 )
 
 // Env is what a command may touch. Tests fill it with fakes.
@@ -28,6 +29,15 @@ type Env struct {
 	Owner config.Owner
 	// ServiceState returns meteorcli.service's state ("active", "not installed", ...).
 	ServiceState func(ctx context.Context) string
+	// Groups answers group membership for the agent socket; nil means the system database.
+	Groups localrpc.Groups
+}
+
+func (e *Env) groups() localrpc.Groups {
+	if e.Groups != nil {
+		return e.Groups
+	}
+	return localrpc.SystemGroups{}
 }
 
 // command is one entry of the command table.
@@ -42,6 +52,8 @@ type command struct {
 var commands = []command{
 	{name: "agent", aliases: []string{"run"}, summary: "Run the always-on device agent (meteorcli.service runs this).", run: runAgent},
 	{name: "config", summary: "Store the server domain and API key, or import a Python install.", run: runConfig},
+	{name: "helper", summary: "Run the root helper (meteorcli-helper.service), or 'helper call' one operation.", run: runHelper},
+	{name: "module", summary: "Restart a module of the running agent ('module restart <name>').", run: runModule},
 	{name: "status", summary: "Show this device's configuration and enrollment (never secrets).", run: runStatus},
 }
 

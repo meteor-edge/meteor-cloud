@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"meteorcloud/meteorcli/internal/agent"
 	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/localrpc"
 )
 
 // Answers of presence; the CLI only stats secret files, it never reads them.
@@ -34,6 +37,27 @@ func runStatus(ctx context.Context, env *Env, args []string) int {
 	}
 	p := env.Paths
 	out := env.Stdout
+
+	// The running agent knows best and can read what this user may not.
+	var reply agent.StatusReply
+	err := localrpc.Call(ctx, p.AgentSocket(), "status", nil, &reply)
+	switch localrpc.CodeOf(err) {
+	case "":
+		if err == nil {
+			return printAgentStatus(ctx, env, reply)
+		}
+		fmt.Fprintf(env.Stderr, "error: agent: %v\n", err)
+		return 1
+	case localrpc.CodeDenied:
+		fmt.Fprintf(env.Stderr, "error: %s\n", deniedMessage(err))
+		return 1
+	case localrpc.CodeUnavailable:
+		// Not running: read the files, as far as this user may.
+	default:
+		fmt.Fprintf(env.Stderr, "error: agent: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(out, "Agent:          not running (details read from files)")
 
 	// The Python config.json sits where the new one goes; look for it first.
 	if config.LooksLikePython(p.LegacyDir) {
@@ -78,6 +102,57 @@ func runStatus(ctx context.Context, env *Env, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// printAgentStatus prints the agent's answer with the same lines as the Python CLI.
+func printAgentStatus(ctx context.Context, env *Env, r agent.StatusReply) int {
+	out := env.Stdout
+	yes := func(b bool, y, n string) string {
+		if b {
+			return y
+		}
+		return n
+	}
+	fmt.Fprintf(out, "Agent:          running %s (%s)\n", r.Version, strings.ReplaceAll(r.State, "_", " "))
+	fmt.Fprintf(out, "Domain:         %s\n", orDash(r.Domain))
+	fmt.Fprintf(out, "API base:       %s\n", orDash(r.Server))
+	fmt.Fprintf(out, "API key:        %s\n", yes(r.APIKey, present, missing))
+	fmt.Fprintf(out, "Device ID:      %s\n", orDash(r.DeviceID))
+	fmt.Fprintf(out, "Organization:   %s\n", orDash(r.OrganizationID))
+	fmt.Fprintf(out, "Name:           %s\n", orDash(r.Name))
+	fmt.Fprintf(out, "Heartbeat:      every %ds\n", r.HeartbeatSeconds)
+	fmt.Fprintf(out, "Credential:     %s\n", yes(r.Credential, present, missing))
+	fmt.Fprintf(out, "Service:        %s is %s\n", serviceUnit, env.ServiceState(ctx))
+	fmt.Fprintf(out, "MQTT:           %s\n", yes(r.MQTT, "configured", "not configured"))
+	fmt.Fprintf(out, "WireGuard:      %s\n", yes(r.WireGuard, "key pair present", "not set up"))
+	if r.PendingClaim {
+		fmt.Fprintln(out, "Pending claim:  waiting for an operator to approve this device")
+	}
+	names := make([]string, 0, len(r.Modules))
+	for name := range r.Modules {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		h := r.Modules[name]
+		line := fmt.Sprintf("Module %-8s %s, %d restarts", name+":", h.State, h.Restarts)
+		if h.LastError != nil {
+			line += ", last error: " + *h.LastError
+		}
+		fmt.Fprintln(out, line)
+	}
+	if r.State != agent.StateEnrolled {
+		return 1
+	}
+	return 0
+}
+
+// deniedMessage explains a refused socket call. agent.sock belongs to the
+// meteorcli group, so an administrator needs both groups.
+func deniedMessage(err error) string {
+	return fmt.Sprintf("%v\nAsk an administrator to add you to the %s group to read status and logs,\n"+
+		"and also to the %s group to manage the device; then log in again.",
+		err, agent.GroupRead, agent.GroupAdmin)
 }
 
 // presence says whether a file exists without opening it.

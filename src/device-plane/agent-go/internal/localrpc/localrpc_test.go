@@ -1,0 +1,327 @@
+package localrpc
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// listen opens a socket in a short temp dir (sun_path is limited to 108 bytes).
+func listen(t *testing.T) (string, *net.UnixListener) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "rpc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	path := filepath.Join(dir, "s.sock")
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path, l
+}
+
+func serve(t *testing.T, s *Server) string {
+	t.Helper()
+	path, l := listen(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, l) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Serve: %v", err)
+		}
+	})
+	return path
+}
+
+func TestCallAuthorizeAndErrors(t *testing.T) {
+	logs := &syncBuffer{}
+	var seen Peer
+	s := &Server{
+		Log: slog.New(slog.NewTextHandler(logs, nil)),
+		Authorize: func(p Peer, method string) error {
+			seen = p
+			if method == "secret" {
+				return errors.New("needs meteorcli-admin")
+			}
+			return nil
+		},
+		Handlers: map[string]Handler{
+			"echo": {Run: func(ctx context.Context, p Peer, params json.RawMessage) (any, error) {
+				var in struct{ Name string }
+				if err := json.Unmarshal(params, &in); err != nil {
+					return nil, Errorf(CodeBadRequest, "bad params")
+				}
+				return map[string]any{"hello": in.Name, "uid": p.UID}, nil
+			}},
+			"secret": {Run: func(context.Context, Peer, json.RawMessage) (any, error) { return "x", nil }},
+			"boom":   {Run: func(context.Context, Peer, json.RawMessage) (any, error) { return nil, errors.New("disk full") }},
+			"slow": {Timeout: 20 * time.Millisecond, Run: func(ctx context.Context, _ Peer, _ json.RawMessage) (any, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}},
+		},
+	}
+	path := serve(t, s)
+	ctx := context.Background()
+
+	var out struct {
+		Hello string
+		UID   uint32
+	}
+	if err := Call(ctx, path, "echo", map[string]string{"name": "pi"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Hello != "pi" || out.UID != uint32(os.Getuid()) || seen.PID != int32(os.Getpid()) {
+		t.Errorf("out %+v, peer %+v", out, seen)
+	}
+
+	tests := map[string]string{"secret": CodeDenied, "nope": CodeUnknownMethod, "boom": CodeFailed, "slow": CodeFailed}
+	for method, code := range tests {
+		if err := Call(ctx, path, method, nil, nil); CodeOf(err) != code {
+			t.Errorf("%s: err = %v, want %s", method, err, code)
+		}
+	}
+	if err := Call(ctx, path, "echo", "not an object", nil); CodeOf(err) != CodeBadRequest {
+		t.Errorf("bad params: %v", err)
+	}
+	for _, want := range []string{"method=echo", "uid=", "outcome=permission_denied", "outcome=unknown_method"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("audit log lacks %q:\n%s", want, logs.String())
+		}
+	}
+}
+
+func TestBadRequestBody(t *testing.T) {
+	s := &Server{Log: slog.New(slog.DiscardHandler), Authorize: func(Peer, string) error { return nil }, MaxRequest: 64}
+	path := serve(t, s)
+	for _, body := range []string{"not json\n", `{"params":{}}` + "\n", `{"method":"x","params":"` + strings.Repeat("a", 100) + `"}`} {
+		c, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = c.Write([]byte(body))
+		var resp Response
+		_ = json.NewDecoder(c).Decode(&resp)
+		c.Close()
+		if resp.OK || resp.Error == nil || resp.Error.Code != CodeBadRequest {
+			t.Errorf("%q: %+v", body, resp)
+		}
+	}
+}
+
+func TestIdleServerReturns(t *testing.T) {
+	_, l := listen(t)
+	s := &Server{Log: slog.New(slog.DiscardHandler), Authorize: func(Peer, string) error { return nil }, Idle: 30 * time.Millisecond}
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(context.Background(), l) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle server did not return")
+	}
+}
+
+func TestCallUnavailableAndDenied(t *testing.T) {
+	dir := t.TempDir()
+	if err := Call(context.Background(), filepath.Join(dir, "missing.sock"), "x", nil, nil); CodeOf(err) != CodeUnavailable {
+		t.Errorf("missing socket: %v", err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root opens any socket")
+	}
+	path, l := listen(t)
+	defer l.Close()
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if err := Call(context.Background(), path, "x", nil, nil); CodeOf(err) != CodeDenied {
+		t.Errorf("socket without permission: %v", err)
+	}
+}
+
+func TestSystemGroups(t *testing.T) {
+	g := SystemGroups{}
+	if g.Member(uint32(os.Getuid()), uint32(os.Getgid()), "no-such-group-meteorcli") {
+		t.Error("member of a group that does not exist")
+	}
+	if _, ok := LookupUID("no-such-user-meteorcli"); ok {
+		t.Error("found a missing user")
+	}
+	if _, ok := LookupGID("no-such-group-meteorcli"); ok {
+		t.Error("found a missing group")
+	}
+	if uid, ok := LookupUID("root"); !ok || uid != 0 {
+		t.Errorf("root uid %d %v", uid, ok)
+	}
+	if !g.Member(0, 0, "root") {
+		t.Error("root is not in its primary group")
+	}
+}
+
+func TestConnectionLimitAndAuditFields(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root is exempt from the connection limits")
+	}
+	logs := &syncBuffer{}
+	s := &Server{
+		Log:        slog.New(slog.NewTextHandler(logs, nil)),
+		Authorize:  func(Peer, string) error { return nil },
+		MaxConns:   1,
+		MaxPerUser: 5,
+		Handlers: map[string]Handler{
+			"install": {
+				Run: func(context.Context, Peer, json.RawMessage) (any, error) { return "ok", nil },
+				Audit: func(raw json.RawMessage) []any {
+					var p struct{ Name string }
+					_ = json.Unmarshal(raw, &p)
+					return []any{"name", p.Name}
+				},
+			},
+		},
+	}
+	path := serve(t, s)
+	params := map[string]string{"name": "demo.service", "content": "Environment=DB=postgres://u:hunter2@db"}
+
+	// A client that never sends holds the only slot; the next one is closed.
+	idle, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := Call(context.Background(), path, "install", params, nil); CodeOf(err) != CodeBusy {
+		t.Errorf("second connection past MaxConns: err = %v, want busy", err)
+	}
+	idle.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for Call(context.Background(), path, "install", params, nil) != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("slot never freed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The audit line follows the answer.
+	for !strings.Contains(logs.String(), "method=install") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "connection refused: too many connections") || !strings.Contains(out, "name=demo.service") {
+		t.Errorf("log:\n%s", out)
+	}
+	if strings.Contains(out, "hunter2") || strings.Contains(out, "content") {
+		t.Errorf("audit line carries params:\n%s", out)
+	}
+}
+
+func TestPerUserLimitKeepsRoomForOthers(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root is exempt from the connection limits")
+	}
+	logs := &syncBuffer{}
+	s := &Server{
+		Log: slog.New(slog.NewTextHandler(logs, nil)), Authorize: func(Peer, string) error { return nil },
+		MaxConns: 10, MaxPerUser: 2,
+		Handlers: map[string]Handler{"status": {Run: func(context.Context, Peer, json.RawMessage) (any, error) { return "ok", nil }}},
+	}
+	path := serve(t, s)
+	// This user holds its two slots with requests it never finishes.
+	for range 2 {
+		c, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := Call(context.Background(), path, "status", nil, nil); CodeOf(err) != CodeBusy {
+		t.Errorf("third connection from one user: err = %v, want busy", err)
+	}
+	if !strings.Contains(logs.String(), "too many connections from this user") {
+		t.Errorf("log:\n%s", logs.String())
+	}
+}
+
+func TestAdmit(t *testing.T) {
+	s := &Server{MaxConns: 4, MaxPerUser: 2}
+	tests := []struct {
+		uid              uint32
+		inFlight, fromMe int
+		refused          bool
+	}{
+		{1000, 0, 0, false},
+		{1000, 1, 1, false},
+		{1000, 2, 2, true},  // this user has its share
+		{1001, 2, 0, false}, // another user still gets in
+		{1001, 4, 0, true},  // the server is full
+		{0, 4, 4, false},    // root uses the reserve, no per-user cap
+		{0, 4 + rootReserve, 0, true},
+	}
+	for _, tt := range tests {
+		why := s.admit(Peer{UID: tt.uid}, tt.inFlight, tt.fromMe)
+		if (why != "") != tt.refused {
+			t.Errorf("uid %d inFlight %d fromMe %d: %q", tt.uid, tt.inFlight, tt.fromMe, why)
+		}
+	}
+}
+
+func TestShutdownDoesNotWaitForIdleClients(t *testing.T) {
+	// Cancel right after connecting, many times, so shutdown lands at every point
+	// of a connection's start (before and after its handler began).
+	for range 30 {
+		shutdownWithIdleClient(t, 0)
+	}
+	shutdownWithIdleClient(t, 50*time.Millisecond)
+}
+
+func shutdownWithIdleClient(t *testing.T, wait time.Duration) {
+	t.Helper()
+	path, l := listen(t)
+	s := &Server{Log: slog.New(slog.DiscardHandler), Authorize: func(Peer, string) error { return nil }}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, l) }()
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	time.Sleep(wait)
+	start := time.Now()
+	cancel()
+	<-done
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("shutdown waited %v for a client that sent nothing", d)
+	}
+}

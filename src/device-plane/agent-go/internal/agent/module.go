@@ -11,6 +11,7 @@ import (
 
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/state"
 )
 
@@ -30,8 +31,10 @@ type Module interface {
 
 // Deps is everything a module may use. Modules never call each other: they share
 // only what is here, talk through Signals, and leave reports in the Outbox.
-// Identity, Bus and Helper are added with their packages.
+// Identity and Bus are added with their packages.
 type Deps struct {
+	// Version is this agent's version (status, User-Agent).
+	Version string
 	// Paths says where files live.
 	Paths config.Paths
 	// Config is the operator's settings, read at start. nil until configured.
@@ -44,6 +47,8 @@ type Deps struct {
 	Outbox *state.Outbox
 	// Signals tells other modules that something happened.
 	Signals *Signals
+	// Helper does privileged work (root) from an allowlist.
+	Helper *helper.Client
 	// Health is where a module reports progress (Tick) and state.
 	Health *Health
 	// Log already carries module=<name>.

@@ -240,10 +240,12 @@ func importDevice(old *pythonConfig, p Paths, opt ImportOptions, rep *ImportRepo
 		return true, nil
 	}
 	if cur, err := LoadDevice(p.DeviceFile()); err == nil && !opt.Force {
-		if cur.DeviceID == old.DeviceID {
+		if cur.DeviceID == old.DeviceID && cur.OrganizationID == old.OrganizationID &&
+			cur.Name == old.Name && cur.HeartbeatIntervalSeconds == old.HeartbeatIntervalSeconds {
 			return true, nil // already imported
 		}
-		rep.Skipped = append(rep.Skipped, "device.json (exists for device "+cur.DeviceID+")")
+		// Any difference keeps the Python config as the source for a --force retry.
+		rep.Skipped = append(rep.Skipped, "device.json (exists with other values for device "+cur.DeviceID+")")
 		return false, nil
 	}
 	d := &Device{
