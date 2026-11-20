@@ -4,7 +4,8 @@ The device agent is being rewritten in Go in [`src/device-plane/agent-go/`](../s
 It speaks exactly the same contract as the Python agent
 ([`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md)); the control plane, console and
 data plane do not change. Until it is complete, devices keep installing the Python `meteorcli`
-([meteorcli](meteorcli.md)). Nothing installs the Go binary yet.
+([meteorcli](meteorcli.md)); test devices can install the Go build (see
+[Installing on a device](#installing-on-a-device)).
 
 ## What exists today
 
@@ -16,11 +17,12 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | API client: health, enrollment, register, heartbeat, MQTT settings | Done (the other routes come with their modules) |
 | CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `helper`, `--version`, `agent` (alias `run`) | Done |
 | Agent socket with a group policy per command; root helper (`power.*`, `logs.read`, `systemd.install_unit`) | Done |
-| systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done (nothing installs them yet) |
+| systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done |
+| Board installer (`install-rpi.sh`), CI artifact, `meteorcli-go-edge` prerelease | Done (Raspberry Pi) |
 | Identity: register, request-token and claim run by the agent, background approval polling, credential storage, MQTT credential refresh, 401 handling | Done |
-| Heartbeat module; telemetry (inventory, metrics); platform adapters (Raspberry Pi, Jetson, generic Linux) | Done (metrics are published by the MQTT bus, next) |
-| Modules: MQTT bus, actions, deploy, network, update | Next pull requests |
-| Updater, installer | Next pull requests |
+| Heartbeat module; telemetry (inventory, metrics); platform adapters (Raspberry Pi, Jetson, generic Linux) | Done (inventory goes with the heartbeat; metrics wait for the MQTT bus) |
+| MQTT bus: credentials are fetched and stored, but there is no broker connection yet (no metrics, status or commands) | Next pull request |
+| Modules: actions, deploy, network (Wi-Fi, WireGuard), update | Later pull requests |
 
 ## Files
 
