@@ -146,10 +146,13 @@ func (s *Source) SetHeartbeat(seconds int) error {
 	if seconds <= 0 || s.device == nil || s.device.HeartbeatIntervalSeconds == seconds {
 		return nil
 	}
-	s.device.HeartbeatIntervalSeconds = seconds
-	if err := s.device.Save(s.files.p.DeviceFile(), config.Owner{}); err != nil {
+	// Change a copy: if the write fails, the next answer tries again.
+	dev := *s.device
+	dev.HeartbeatIntervalSeconds = seconds
+	if err := dev.Save(s.files.p.DeviceFile(), config.Owner{}); err != nil {
 		return fmt.Errorf("identity: heartbeat interval: %w", err)
 	}
+	s.device = &dev
 	return nil
 }
 
@@ -243,6 +246,7 @@ type change struct {
 	identity   bool // a new or different device token
 	pending    bool // a pending request appeared or changed
 	unenrolled bool // the identity files are gone
+	retry      bool // an interrupted commit could not be finished: load again later
 }
 
 // Load reads config.json and the identity directory, finishing an interrupted
@@ -258,12 +262,21 @@ func (s *Source) load() (change, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var errs []error
-	if err := s.files.finishStaging(); err != nil {
-		errs = append(errs, err)
-	}
 	cfg, err := config.Load(s.files.p.ConfigFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		errs = append(errs, err)
+	}
+	if err := s.finishStagingLocked(); err != nil {
+		// The live files may be half moved (a new token beside the old
+		// device.json): keep what is in memory and try again later.
+		var c change
+		c.server = s.cfg.Server() != cfg.Server() || caFile(s.cfg) != caFile(cfg)
+		c.retry = true
+		s.cfg = cfg
+		if c.server {
+			s.notifyLocked()
+		}
+		return c, errors.Join(append(errs, err)...)
 	}
 	dev, err := s.files.loadDevice()
 	errs = append(errs, err)
@@ -296,8 +309,22 @@ func (s *Source) load() (change, error) {
 		newPending = pending.RequestID
 	}
 	c.pending = newPending != "" && newPending != oldPending
-	if c != (change{}) {
-		s.notifyLocked()
+	if newPending != oldPending {
+		s.checked = time.Time{} // a check of the old request says nothing about the new one
+	}
+	if c != (change{}) || newPending != oldPending {
+		s.notifyLocked() // also wakes Claim when the request file was removed
 	}
 	return c, errors.Join(errs...)
+}
+
+// finishStagingLocked finishes or drops an interrupted commit under the
+// identity lock, so `meteorcli config` cannot drop the files halfway.
+func (s *Source) finishStagingLocked() error {
+	unlock, err := config.LockIdentity(s.files.p)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.files.finishStaging()
 }

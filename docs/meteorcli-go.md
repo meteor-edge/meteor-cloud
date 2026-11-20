@@ -81,10 +81,10 @@ The modules that own them recreate them.
 | `meteorcli config import [--from DIR] [--force]` | New | See above. |
 | `meteorcli config meteorenv` | Python service did it at start | Applies a first-boot `meteorenv` file; `meteorcli.service` runs it as root before the agent. See [Enrollment](#enrollment). |
 | `meteorcli status` | Yes, same lines | Asks the running agent over `agent.sock` (adds an `Agent:` line, the pending request id, and one line per module). When the agent is not running it reads the files and checks secrets by `stat` only. Never shows secrets. Exits 1 until enrolled. |
-| `meteorcli register [--token T \| --token-file F] [--name N]` | Yes, without `--server` | The agent registers. `$METEORCLI_TOKEN` works too; `--token-file` is removed after success. Uses the configured server. Needs `meteorcli-admin`. |
+| `meteorcli register [--token T \| --token-file F] [--name N]` | Yes, without `--server` | The agent registers. `$METEORCLI_TOKEN` works too; `--token-file` is removed after success; the two flags cannot be combined. Uses the configured server. Needs `meteorcli-admin`. |
 | `meteorcli request-token [--api-key K] [--name N] [--wait S] [--new]` (alias `request`) | Mostly | The agent submits the request and keeps polling in the background, also after a reboot. `--wait` also waits here. Exit codes: 0, 2 (not set up / already pending / already enrolled), 3 (key refused), 75 with a `retry-after: N` line (try later), 1. Needs `meteorcli-admin`. |
 | `meteorcli claim [--wait S]` | Mostly | Reports the pending request (exit 0 enrolled, 2 still pending, 1 ended); the agent collects the approval by itself, so this is optional. Needs `meteorcli-admin`. |
-| `meteorcli test` | Yes | The agent checks `/api/v1/health` and the saved API key. |
+| `meteorcli test` | Yes | The agent checks `/api/v1/health` and the saved API key. Only a 401/403 reports the key as rejected; other failures are errors. |
 | `meteorcli module restart NAME` | New | Restarts (or unparks) one module of the running agent. Needs `meteorcli-admin`. |
 | `meteorcli helper` | Service entry point | The root helper behind `meteorcli-helper.socket`. |
 | `meteorcli helper call OP [JSON]` | New | Sends one request to the helper; only the meteor user is served. For debugging and tests. |
@@ -184,7 +184,9 @@ and `claim` are requests to the running agent, which does the HTTP calls and sto
 So a `meteorcli-admin` user enrolls a device without sudo, and the device is online within a few
 seconds (the container test measures it).
 
-1. **Server.** Root runs `meteorcli config --domain …` (or `--api-base`). The agent picks the change
+1. **Server.** Root runs `meteorcli config --domain …` (or `--api-base`). If the agent cannot use
+   the new settings (an unreadable pinned CA, say) it sends no requests at all, neither to the new
+   nor to the old server, and retries until they are fixed. The agent picks the change
    up at once (`config.reload` over the socket, and an inotify watch on `/etc/meteorcli` and the
    identity directory, with a one-minute rescan when inotify is not available).
 2. **Register** with a one-time token, or **request** approval with an enrollment API key. The key is
@@ -196,7 +198,13 @@ seconds (the container test measures it).
    `status`/`claim` say why.
 4. **Enrolled.** The identity is written through a staging directory with a `DONE` marker, then
    moved into place with `device.json` last (an interrupted write is finished or dropped at the next
-   start). The pending claim, the API key and old signing keys are deleted. The `Enrolled` signal
+   start; while it cannot be finished the agent keeps the identity it has in memory and retries).
+   The agent stores an identity only under a `flock` on the identity directory, after checking that
+   `config.json` still names the server that issued it (and, for an approval, that the request is
+   still the pending one). `meteorcli config` holds the same lock while it drops one server's files
+   and saves the next server, so a credential is never stored next to another server's URL. If the
+   identity cannot be written, a collected approval is kept in memory and stored on a later try (the
+   server hands the token out once). The pending claim, the API key and old signing keys are deleted. The `Enrolled` signal
    starts the other modules: modules other than `socket` and `identity` wait until the device is
    enrolled (they show as `waiting`).
 5. **Credentials.** A heartbeat answered with 401/403 marks the token rejected: modules stop using it
@@ -211,7 +219,9 @@ seconds (the container test measures it).
 `METEOR_API_BASE`, `METEOR_API_KEY` and `METEOR_NAME`; saves them like `meteorcli config`; and
 deletes the file. A device that is already enrolled ignores the file. When the agent starts with a
 saved API key, a server, and neither an identity nor a pending request, it submits a request by
-itself (retrying every minute while the network is down, stopping if the key is refused). Wi-Fi,
+itself (retrying every minute while the network is down). If the server refuses the key, the agent
+records a hash of it in `identity/auto-request.json` and does not send it again at later starts; a
+new key, or an explicit `meteorcli request-token`, still works. Wi-Fi,
 user and SSH settings in the same file stay with the image's first-boot scripts.
 
 ### Heartbeat and telemetry
@@ -236,8 +246,8 @@ metrics from it; the MQTT bus publishes the metrics in the next pull request.
   request (or its approval) instead of submitting another.
 - Approval is collected by the agent in the background, also across reboots; `claim` is optional.
 - The API key is deleted once the device is enrolled (Python kept it). Enrolling again needs a key.
-- The automatic request (meteorenv) runs when the agent starts and is not repeated after a
-  rejection (Python retried at every start until enrolled).
+- The automatic request (meteorenv) runs when the agent starts and is not repeated after the
+  server refuses the key, also across restarts (Python retried at every start until enrolled).
 - A 401/403 pauses the token and re-checks it with backoff; Python exited the service.
 - The heartbeat follows the server's `heartbeat_interval_seconds` (Python kept its own interval).
 - The agent runs unprivileged, so a root-only DMI serial (`product_serial`) may be missing from

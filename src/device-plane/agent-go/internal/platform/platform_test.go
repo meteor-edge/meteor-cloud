@@ -31,7 +31,7 @@ func fakeHost(t *testing.T, files map[string]string) *Host {
 		LookPath: func(string) (string, error) { return "", errors.New("not found") },
 		Run:      func(context.Context, string, ...string) bool { return false },
 		IPv4:     func(string) []net.IP { return nil },
-		Statfs:   func(string) (uint64, uint64, bool) { return 0, 0, false },
+		Statfs:   func(string) (uint64, uint64, uint64, bool) { return 0, 0, 0, false },
 	}
 }
 
@@ -101,6 +101,38 @@ func TestRaspberryPiInventory(t *testing.T) {
 	}
 	if temp, ok := h.TemperatureC(); !ok || temp != 51.234 {
 		t.Errorf("temperature = %v %v (cpu-thermal zone first)", temp, ok)
+	}
+}
+
+func TestOSReleaseQuoting(t *testing.T) {
+	tests := map[string][2]string{
+		"NAME='Acme Linux'\nVERSION_ID='1.0'\n":           {"Acme Linux", "1.0"},
+		"NAME=\"Say \\\"hi\\\" \\$HOME\"\nVERSION_ID=2\n": {`Say "hi" $HOME`, "2"},
+		"NAME=Plain\\ Name\nVERSION=\"3 (x)\"\n":          {"Plain Name", "3 (x)"},
+	}
+	for content, want := range tests {
+		h := fakeHost(t, map[string]string{"/etc/os-release": content})
+		if name, version := h.OSRelease(); name != want[0] || version != want[1] {
+			t.Errorf("%q: got %q %q, want %q", content, name, version, want)
+		}
+	}
+}
+
+// Guest time is already in user/nice and must not count twice; an iowait that
+// went down makes the sample invalid instead of wrapping around.
+func TestCPUCounters(t *testing.T) {
+	h := fakeHost(t, map[string]string{"/proc/stat": "cpu  50 0 0 50 0 0 0 0 50 0\n"})
+	if total, idle, ok := h.cpuTimes(); !ok || total != 100 || idle != 50 {
+		t.Errorf("cpu times = %d %d %v, want 100 50", total, idle, ok)
+	}
+	stat := filepath.Join(h.Root, "proc/stat")
+	_ = os.WriteFile(stat, []byte("cpu  100 0 0 700 100 0 0 0 0 0\n"), 0o644)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		_ = os.WriteFile(stat, []byte("cpu  110 0 0 700 90 0 0 0 0 0\n"), 0o644)
+	}()
+	if _, ok := h.CPUPercent(context.Background(), 100*time.Millisecond); ok {
+		t.Error("a sample with a falling iowait was used")
 	}
 }
 
@@ -174,11 +206,11 @@ func TestMetricsReadings(t *testing.T) {
 		"/proc/stat":                            "cpu  100 0 100 700 100 0 0 0 0 0\ncpu0 1 2 3 4\n",
 		"/sys/class/thermal/thermal_zone0/temp": "47500\n",
 	})
-	h.Statfs = func(string) (uint64, uint64, bool) { return 1000, 250, true }
+	h.Statfs = func(string) (uint64, uint64, uint64, bool) { return 1000, 250, 200, true }
 	if used, total, ok := h.Memory(); !ok || used != 750*1024 || total != 1000*1024 {
 		t.Errorf("memory = %d %d %v", used, total, ok)
 	}
-	if used, total, ok := h.Disk("/"); !ok || used != 750 || total != 1000 {
+	if used, total, ok := h.Disk("/"); !ok || used != 750 || total != 1000 { // free 250, available 200
 		t.Errorf("disk = %d %d %v", used, total, ok)
 	}
 	if load, ok := h.LoadAverage(); !ok || load != [3]float64{0.52, 0.48, 0.40} {
@@ -247,7 +279,7 @@ func TestSystemHostReadsThisMachine(t *testing.T) {
 	if release, machine := h.Uname(); release == "" || machine == "" {
 		t.Errorf("uname = %q %q", release, machine)
 	}
-	if total, _, ok := h.Statfs("/"); !ok || total == 0 {
+	if total, _, _, ok := h.Statfs("/"); !ok || total == 0 {
 		t.Error("statfs / failed")
 	}
 	_ = h.IPv4("lo")

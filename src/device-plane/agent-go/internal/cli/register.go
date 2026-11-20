@@ -26,8 +26,12 @@ func runRegister(ctx context.Context, env *Env, args []string) int {
 	if code, done := parseFlags(fl, args); done {
 		return code
 	}
+	if *token != "" && *tokenFile != "" {
+		fmt.Fprintln(env.Stderr, "error: use either --token or --token-file, not both.")
+		return 2
+	}
 	value := strings.TrimSpace(*token)
-	if value == "" && *tokenFile != "" {
+	if *tokenFile != "" {
 		data, err := os.ReadFile(*tokenFile)
 		if errors.Is(err, fs.ErrNotExist) {
 			fmt.Fprintf(env.Stderr, "error: token file not found: %s\n", *tokenFile)

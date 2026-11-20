@@ -35,9 +35,10 @@ type Host struct {
 	Run func(ctx context.Context, name string, args ...string) bool
 	// IPv4 returns the IPv4 addresses of a network interface.
 	IPv4 func(iface string) []net.IP
-	// Statfs returns the size and the space available to normal users of the
-	// filesystem holding path, in bytes.
-	Statfs func(path string) (total, avail uint64, ok bool)
+	// Statfs returns the size, the free space, and the space available to
+	// normal users (free minus the root reserve) of the filesystem holding
+	// path, in bytes.
+	Statfs func(path string) (total, free, avail uint64, ok bool)
 
 	board *Board
 }
@@ -161,14 +162,14 @@ func interfaceIPv4(name string) []net.IP {
 	return out
 }
 
-func statfs(path string) (total, avail uint64, ok bool) {
+func statfs(path string) (total, free, avail uint64, ok bool) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	bsize := uint64(st.Frsize)
 	if bsize == 0 {
 		bsize = uint64(st.Bsize)
 	}
-	return st.Blocks * bsize, st.Bavail * bsize, true
+	return st.Blocks * bsize, st.Bfree * bsize, st.Bavail * bsize, true
 }

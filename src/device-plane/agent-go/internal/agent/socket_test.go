@@ -31,6 +31,9 @@ func (f fakeGroups) Member(uid, _ uint32, group string) bool {
 
 func TestSocketPolicy(t *testing.T) {
 	m := NewSocketModule(nil, fakeGroups{1000: {GroupAdmin}, 1001: {GroupRead}, 1002: {"docker"}}, nil)
+	// Not the test process's uid: the agent's own user is always allowed, and CI
+	// runs as uid 1001, which this table uses for a read-only member.
+	m.OwnUID = 4242
 	tests := []struct {
 		uid    uint32
 		method string

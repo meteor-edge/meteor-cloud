@@ -20,15 +20,18 @@ type ClaimResult struct {
 }
 
 // Claim waits up to wait for the pending request to be approved. The
-// background poller does the polling (never faster than MinPoll); Claim only
-// asks it to poll as soon as allowed and waits for at least one answer.
+// background poller does the polling (never faster than MinPoll, never before
+// the server's Retry-After); Claim only asks it to poll as soon as allowed and
+// waits for one answer, at most ClaimGrace past the deadline.
 func (s *Service) Claim(ctx context.Context, wait time.Duration) (ClaimResult, error) {
 	s.defaults()
 	start := time.Now()
-	deadline := start.Add(wait)
 	s.mu.Lock()
-	if s.Source.snapshot().pending != nil {
+	if s.Source.snapshot().pending != nil && s.approved == nil {
 		allowed := s.lastPoll.Add(s.MinPoll)
+		if allowed.Before(s.backoffUntil) {
+			allowed = s.backoffUntil
+		}
 		if allowed.Before(start) {
 			allowed = start
 		}
@@ -38,6 +41,7 @@ func (s *Service) Claim(ctx context.Context, wait time.Duration) (ClaimResult, e
 	s.poke()
 	timer := time.NewTimer(max(wait, 0))
 	defer timer.Stop()
+	pastDeadline, graceOver := false, false
 	for {
 		changed := s.Source.Changed()
 		st := s.Source.Status()
@@ -50,14 +54,21 @@ func (s *Service) Claim(ctx context.Context, wait time.Duration) (ClaimResult, e
 			}}, nil
 		case st.PendingRequestID == "":
 			return ClaimResult{}, errorf(CodeNoPending, "no pending enrollment request; run 'meteorcli request-token' first")
-		case !st.PendingChecked.Before(start) && !time.Now().Before(deadline):
+		case graceOver, !st.PendingChecked.Before(start) && pastDeadline:
 			return ClaimResult{Status: PollPending, RequestID: st.PendingRequestID}, nil
 		}
 		select {
 		case <-ctx.Done():
 			return ClaimResult{Status: PollPending, RequestID: st.PendingRequestID}, nil
 		case <-changed:
-		case <-timer.C: // the deadline passed; wait for the first answer if none came yet
+		case <-timer.C:
+			if pastDeadline {
+				graceOver = true
+			} else {
+				// The deadline passed; wait a little for the first answer if none came yet.
+				pastDeadline = true
+				timer.Reset(s.ClaimGrace)
+			}
 		}
 	}
 }
@@ -91,9 +102,14 @@ type TestResult struct {
 // Test checks that the server answers and that the saved API key is valid,
 // without creating an enrollment request.
 func (s *Service) Test(ctx context.Context) (TestResult, error) {
-	sn := s.Source.snapshot()
-	if sn.server == "" {
-		return TestResult{}, errNotConfigured()
+	s.defaults()
+	// Under s.mu no reload can switch the client to another server between
+	// reading the key and sending it.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sn, err := s.target()
+	if err != nil {
+		return TestResult{Server: sn.server}, err
 	}
 	r := TestResult{Server: sn.server, APIKey: "missing"}
 	if err := s.API.Health(ctx); err != nil {
@@ -107,9 +123,13 @@ func (s *Service) Test(ctx context.Context) (TestResult, error) {
 		return r, nil
 	}
 	c, err := s.API.EnrollCheck(ctx, sn.apiKey)
-	if err != nil {
+	switch {
+	case api.IsAuth(err):
 		r.APIKey, r.APIKeyError = "rejected", fromAPI("API key", err).Message
 		return r, nil
+	case err != nil:
+		// The check did not say whether the key is valid.
+		return r, fromAPI("checking the API key", err)
 	}
 	r.APIKey = "ok"
 	r.OrganizationID, r.OrganizationName, r.KeyName, r.KeyPrefix = c.OrganizationID, c.OrganizationName, c.KeyName, c.KeyPrefix

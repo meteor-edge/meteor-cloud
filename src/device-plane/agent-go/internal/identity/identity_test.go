@@ -154,7 +154,7 @@ func TestRegisterStoresIdentityAndProvesHardwareOnReRegister(t *testing.T) {
 	if data, _ := os.ReadFile(r.p.MQTTCAFile()); string(data) != ca {
 		t.Errorf("CA file %q", data)
 	}
-	for _, gone := range []string{r.p.APIKeyFile(), filepath.Join(r.p.StateDir, "signing-keys.json"), filepath.Join(r.p.IdentityDir, stagingDir)} {
+	for _, gone := range []string{r.p.APIKeyFile(), filepath.Join(r.p.StateDir, "signing-keys.json"), r.p.StagingDir()} {
 		if _, err := os.Stat(gone); err == nil {
 			t.Errorf("%s still exists", gone)
 		}
@@ -235,11 +235,21 @@ func TestRequestTokenFlow(t *testing.T) {
 	if st := r.svc.Source.Status(); st.State != StatePending || st.PendingRequestID != "r-1" {
 		t.Errorf("status %+v", st)
 	}
-	// Pending: refuse a second request without --new.
+	// Pending and not due for a poll yet: refused without asking the server.
+	if _, err := r.svc.RequestToken(ctx, RequestOptions{}); codeOf(err) != CodeAlreadyPending {
+		t.Errorf("request before the poll is due: %v", err)
+	}
+	if n := len(r.cp.Calls("POST", routePoll)); n != 0 {
+		t.Errorf("polled %d times before the poll interval", n)
+	}
+	due := func() { r.svc.nextPoll = time.Time{} } // no Run here: skip the 10 s poll interval
+	// Due, still pending: refuse a second request without --new.
+	due()
 	if _, err := r.svc.RequestToken(ctx, RequestOptions{}); codeOf(err) != CodeAlreadyPending {
 		t.Errorf("second request: %v", err)
 	}
 	// The stored request expired: a new one is submitted with the stored name.
+	due()
 	res, err = r.svc.RequestToken(ctx, RequestOptions{})
 	if err != nil || res.RequestID != "r-2" || res.Previous != PollExpired {
 		t.Fatalf("after expiry: %+v %v", res, err)
@@ -248,6 +258,7 @@ func TestRequestTokenFlow(t *testing.T) {
 		t.Errorf("resubmitted name %v", got)
 	}
 	// Approved meanwhile: request-token reports the identity instead of submitting.
+	due()
 	res, err = r.svc.RequestToken(ctx, RequestOptions{})
 	if err != nil || res.Status != PollApproved || res.Enrollment == nil || res.Enrollment.DeviceID != "d-9" {
 		t.Fatalf("approved: %+v %v", res, err)
@@ -434,7 +445,12 @@ func TestAuthFailedPausesTheTokenUntilTheServerTakesItAgain(t *testing.T) {
 	if st := r.svc.Source.Status(); st.State != StateRejected {
 		t.Errorf("state %s", st.State)
 	}
-	eventually(t, "token accepted again", func() bool { _, err := r.svc.Source.Token(); return err == nil })
+	// The token is usable a moment before the Enrolled event runs: wait for both.
+	eventually(t, "token accepted again and Enrolled sent", func() bool {
+		_, err := r.svc.Source.Token()
+		return err == nil && r.events.enrolled.Load() >= before+1
+	})
+	time.Sleep(20 * time.Millisecond)
 	if r.events.enrolled.Load() != before+1 {
 		t.Errorf("Enrolled events %d, want %d", r.events.enrolled.Load(), before+1)
 	}
@@ -495,7 +511,7 @@ func TestFilesWrittenByOthersArePickedUp(t *testing.T) {
 
 func TestStagingRecovery(t *testing.T) {
 	p := config.DefaultPaths(t.TempDir())
-	staging := filepath.Join(p.IdentityDir, stagingDir)
+	staging := p.StagingDir()
 	if err := os.MkdirAll(staging, 0o700); err != nil {
 		t.Fatal(err)
 	}

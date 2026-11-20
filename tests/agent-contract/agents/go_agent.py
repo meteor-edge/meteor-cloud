@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 
 from harness.device import SimulatedDevice
+from harness.fake_cp import FakeControlPlane
 
 SOURCE = Path(__file__).resolve().parents[3] / "src" / "device-plane" / "agent-go"
 VERSION = "0.0.0"
@@ -69,7 +70,7 @@ class GoAgent:
     name = "go"
     features = frozenset({"background_enrollment", "server_heartbeat_interval"})
 
-    def __init__(self, workdir: Path, device: SimulatedDevice, plane) -> None:
+    def __init__(self, workdir: Path, device: SimulatedDevice, plane: FakeControlPlane) -> None:
         self.device = device  # unused until host work moves to the Go agent
         self.plane = plane
         self.bin = binary()
@@ -85,7 +86,12 @@ class GoAgent:
             self.env.pop(key, None)
         self.log = workdir / "agent.log"
         self._proc: subprocess.Popen[bytes] | None = None
-        self.start()
+        try:
+            self.start()
+        except BaseException:
+            # The fixture never gets the adapter, so it cannot close() it.
+            self.close()
+            raise
 
     # ---------------------------------------------------------------- the agent
     @property
@@ -100,7 +106,9 @@ class GoAgent:
         deadline = time.monotonic() + 10
         while not self.socket.exists():
             if self._proc.poll() is not None or time.monotonic() > deadline:
-                pytest.fail(f"the Go agent did not start:\n{self.log.read_text(errors='replace')}")
+                log = self.log.read_text(errors="replace")
+                self.stop()
+                pytest.fail(f"the Go agent did not start:\n{log}")
             time.sleep(0.02)
 
     def stop(self) -> int:
@@ -117,11 +125,6 @@ class GoAgent:
                 proc.wait()
                 pytest.fail("the Go agent did not stop within 15 s of SIGTERM")
         return proc.returncode
-
-    def restart(self) -> None:
-        """A reboot, as far as the agent can tell: stop, then start from the files on disk."""
-        self.stop()
-        self.start()
 
     def close(self) -> None:
         self.stop()

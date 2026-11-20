@@ -28,7 +28,7 @@ func host(t *testing.T, files map[string]string) *platform.Host {
 		LookPath: func(string) (string, error) { return "", errors.New("not found") },
 		Run:      func(context.Context, string, ...string) bool { return false },
 		IPv4:     func(string) []net.IP { return nil },
-		Statfs:   func(string) (uint64, uint64, bool) { return 0, 0, false },
+		Statfs:   func(string) (uint64, uint64, uint64, bool) { return 0, 0, 0, false },
 	}
 }
 
@@ -64,11 +64,11 @@ func TestMetrics(t *testing.T) {
 		"/proc/loadavg": "0.123 0.456 0.789 1/1 1\n",
 		"/proc/uptime":  "61.9 1\n",
 	})
-	h.Statfs = func(string) (uint64, uint64, bool) { return 3000, 1000, true }
+	h.Statfs = func(string) (uint64, uint64, uint64, bool) { return 3000, 1000, 900, true }
 	m := Metrics(context.Background(), h)
 	want := map[string]any{
 		"memory_percent": 66.7, "memory_used_bytes": uint64(667 * 1024), "memory_total_bytes": uint64(1000 * 1024),
-		"disk_percent": 66.7, "disk_used_bytes": uint64(2000), "disk_total_bytes": uint64(3000),
+		"disk_percent": 66.7, "disk_used_bytes": uint64(2000), "disk_total_bytes": uint64(3000), // free 1000
 		"load_1m": 0.12, "load_5m": 0.46, "load_15m": 0.79, "uptime_seconds": 61, "temperature_c": nil,
 	}
 	for k, v := range want {

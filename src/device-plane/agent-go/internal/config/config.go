@@ -160,6 +160,10 @@ func (d *Device) Save(path string, owner Owner) error {
 // the names it removed. Python did the same in drop_stale_enrollment.
 func DropEnrollment(p Paths) ([]string, error) {
 	var removed []string
+	// A finished but not yet moved identity belongs to the old server as well.
+	if err := os.RemoveAll(p.StagingDir()); err != nil {
+		return removed, fmt.Errorf("drop enrollment: %w", err)
+	}
 	for _, f := range p.EnrollmentFiles() {
 		err := os.Remove(f)
 		switch {

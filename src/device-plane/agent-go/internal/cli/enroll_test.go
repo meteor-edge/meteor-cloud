@@ -244,3 +244,16 @@ func TestMeteorenvAppliedBeforeStart(t *testing.T) {
 		t.Errorf("no file = %+v", r)
 	}
 }
+
+func TestRegisterRefusesTokenAndTokenFile(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "tok")
+	write(t, file, "reg_file")
+	r := meteorcli(t, root, nil, "register", "--token", "reg_flag", "--token-file", file)
+	if r.code != 2 || !strings.Contains(r.stderr, "not both") {
+		t.Errorf("both flags = %+v", r)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Error("the token file was touched")
+	}
+}

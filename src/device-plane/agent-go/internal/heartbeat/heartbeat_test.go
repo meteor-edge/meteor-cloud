@@ -73,7 +73,7 @@ func deps(t *testing.T, cp *fakecp.Server, enrolled bool) agent.Deps {
 			},
 			Run:    func(context.Context, string, ...string) bool { return false },
 			IPv4:   func(string) []net.IP { return nil },
-			Statfs: func(string) (uint64, uint64, bool) { return 0, 0, false },
+			Statfs: func(string) (uint64, uint64, uint64, bool) { return 0, 0, 0, false },
 		},
 	}
 }

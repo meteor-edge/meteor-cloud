@@ -3,16 +3,44 @@ package identity
 // The Source's writes and the snapshot with secrets: only Service uses them.
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"time"
 
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/config"
 )
 
-// commit stores a new identity and makes it current.
-func (s *Source) commit(e api.Enrollment) error {
+// errStale means the enrollment answer belongs to a server or request that
+// was replaced meanwhile (`meteorcli config` switched servers): it is dropped.
+var errStale = errors.New("identity: the server or the enrollment request changed meanwhile; the answer was discarded")
+
+// commit stores a new identity from server and makes it current. claimID,
+// when set, is the pending request the identity answers. Under the identity
+// lock it checks that config.json still names server and that the request is
+// still the one on disk, so a credential is only ever stored for the server
+// that issued it.
+func (s *Source) commit(e api.Enrollment, server, claimID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := os.MkdirAll(s.files.p.IdentityDir, 0o700); err != nil {
+		return fmt.Errorf("identity: %w", err)
+	}
+	unlock, err := config.LockIdentity(s.files.p)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg, err := config.Load(s.files.p.ConfigFile)
+	if err != nil || cfg.Server() != server || server == "" {
+		return errStale
+	}
+	if claimID != "" {
+		if c, _ := s.files.loadPending(); c == nil || c.RequestID != claimID {
+			return errStale
+		}
+	}
 	if err := s.files.commit(e); err != nil {
 		return err
 	}
@@ -54,12 +82,30 @@ func (s *Source) dropPending(o *Outcome) error {
 	return nil
 }
 
-// markChecked records that the pending request was just polled.
-func (s *Source) markChecked(at time.Time) {
+// markChecked records that request was just polled. A check of a request
+// that was replaced or ended meanwhile is ignored.
+func (s *Source) markChecked(requestID string, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.pending == nil || s.pending.RequestID != requestID {
+		return
+	}
 	s.checked = at
 	s.notifyLocked()
+}
+
+// autoRefused and markAutoRefused remember, across restarts, that the server
+// refused key for the request the agent makes by itself.
+func (s *Source) autoRefused(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.files.autoRefused(key)
+}
+
+func (s *Source) markAutoRefused(key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.files.markAutoRefused(key)
 }
 
 // saveAPIKey stores an enrollment API key given on the command line.

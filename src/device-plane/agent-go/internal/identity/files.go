@@ -1,6 +1,8 @@
 package identity
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,13 +20,10 @@ const fileVersion = 1
 
 // Staging: the device token, MQTT settings and device.json of a new identity
 // must land together, or a crash could pair a new token with an old device id.
-// They are written into stagingDir with a doneFile marker, then moved into
+// They are written into Paths.StagingDir with a doneFile marker, then moved into
 // place. On start an unfinished staging directory is dropped and a finished one
 // is moved into place (the Python agent's .device-secrets-staging did the same).
-const (
-	stagingDir = ".staging"
-	doneFile   = "DONE"
-)
+const doneFile = "DONE"
 
 // MQTT is the broker connection stored in identity/mqtt.json. Password is a
 // secret. The JSON keys are the Python agent's, so imported files work as is.
@@ -188,21 +187,49 @@ func (f files) writeMQTT(dir string, c api.MQTTConnect, configVersion *string, k
 	return nil
 }
 
+// autoRequest is identity/auto-request.json: the SHA-256 of an API key the
+// server refused for the automatic request (never the key itself).
+type autoRequest struct {
+	Version          int    `json:"version"`
+	RefusedKeySHA256 string `json:"refused_key_sha256"`
+}
+
+func keyHash(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
+}
+
+// autoRefused reports whether the server refused key for the automatic request.
+func (f files) autoRefused(key string) bool {
+	var a autoRequest
+	_, ok, _ := f.readJSON(f.p.AutoRequestFile(), &a)
+	return ok && key != "" && a.RefusedKeySHA256 == keyHash(key)
+}
+
+func (f files) markAutoRefused(key string) error {
+	a := autoRequest{Version: fileVersion, RefusedKeySHA256: keyHash(key)}
+	if err := config.WriteJSON(f.p.AutoRequestFile(), a, nil, 0o600); err != nil {
+		return fmt.Errorf("identity: %w", err)
+	}
+	return nil
+}
+
 // usableMQTT reports whether the server's connect info can be stored: the
 // Python agent ignored settings without a password or with TLS turned off.
 func usableMQTT(c *api.MQTTConnect) bool {
 	return c != nil && c.Password != "" && (c.TLS == nil || *c.TLS)
 }
 
-// commit stores a new identity atomically (see stagingDir) and removes what
+// commit stores a new identity atomically (see Paths.StagingDir) and removes what
 // enrollment used up: the pending claim and the API key. Signing-key pins
 // belong to the old organization, so they go too, as in the Python agent.
 func (f files) commit(e api.Enrollment) error {
-	dir := f.p.IdentityDir
-	staging := filepath.Join(dir, stagingDir)
-	if err := os.RemoveAll(staging); err != nil {
-		return fmt.Errorf("identity: %w", err)
+	// A finished stage of an earlier commit is moved into place first: deleting
+	// it could leave a moved token next to an old device.json for good.
+	if err := f.finishStaging(); err != nil {
+		return err
 	}
+	staging := f.p.StagingDir()
 	if err := os.MkdirAll(staging, 0o700); err != nil {
 		return fmt.Errorf("identity: %w", err)
 	}
@@ -232,7 +259,7 @@ func (f files) commit(e api.Enrollment) error {
 // finishStaging moves a finished staging directory into place, or drops an
 // unfinished one. It is safe to run again after a crash halfway through.
 func (f files) finishStaging() error {
-	staging := filepath.Join(f.p.IdentityDir, stagingDir)
+	staging := f.p.StagingDir()
 	if _, err := os.Stat(filepath.Join(staging, doneFile)); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			if err := os.RemoveAll(staging); err != nil {
@@ -249,7 +276,7 @@ func (f files) finishStaging() error {
 			return fmt.Errorf("identity: %w", err)
 		}
 	}
-	if err := f.remove(f.p.PendingClaimFile(), f.p.APIKeyFile(), filepath.Join(f.p.StateDir, "signing-keys.json")); err != nil {
+	if err := f.remove(f.p.PendingClaimFile(), f.p.APIKeyFile(), f.p.AutoRequestFile(), filepath.Join(f.p.StateDir, "signing-keys.json")); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(staging); err != nil {

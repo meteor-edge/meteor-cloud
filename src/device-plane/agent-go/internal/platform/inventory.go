@@ -16,10 +16,31 @@ func (h *Host) OSRelease() (name, version string) {
 		if !ok {
 			continue
 		}
-		values[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"`)
+		values[strings.TrimSpace(k)] = osReleaseValue(strings.TrimSpace(v))
 	}
 	return firstNonEmpty(values["NAME"], values["PRETTY_NAME"], values["ID"]),
 		firstNonEmpty(values["VERSION_ID"], values["VERSION"])
+}
+
+// osReleaseValue decodes one os-release value: unquoted, or in single or
+// double quotes. A backslash escapes $ " ` \ in double quotes and any
+// character in an unquoted value. The file is never executed.
+func osReleaseValue(v string) string {
+	if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+		return v[1 : len(v)-1]
+	}
+	quoted := len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"'
+	if quoted {
+		v = v[1 : len(v)-1]
+	}
+	var b strings.Builder
+	for i := 0; i < len(v); i++ {
+		if v[i] == '\\' && i+1 < len(v) && (!quoted || strings.IndexByte("$\"`\\", v[i+1]) >= 0) {
+			i++
+		}
+		b.WriteByte(v[i])
+	}
+	return b.String()
 }
 
 // placeholders are firmware values that identify nothing.

@@ -201,8 +201,8 @@ else
 	fail "no enrollment request after a meteorenv start"
 fi
 expect 0 "" "meteorenv.txt is removed" -- ctr test ! -e /boot/firmware/meteorenv.txt
-ctr touch /var/lib/fakeserver/approve
 start="$(now_ms)"
+ctr touch /var/lib/fakeserver/approve
 if beat="$(wait_for "POST /api/v1/agent/heartbeat auth=yes" "$start" 20)"; then
 	pass "approved in the console: online with no command ($((beat - start)) ms)"
 else

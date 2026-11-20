@@ -112,20 +112,27 @@ def test_enroll_reboot(contract, agent) -> None:
         "request_id": str(uuid.uuid4()), "claim_secret": contract.secret("claim_secret"), "status": "pending",
         "poll_interval_seconds": 10, "expires_at": None,
     }))
-    contract.script("POST", "/api/v1/agent/enroll/poll", Reply(200, {
-        "status": "approved", "poll_interval_seconds": 10, "device_id": device_id,
-        "device_token": contract.secret("device_token"), "organization_id": ORG_ID,
-        "name": "contract-device", "heartbeat_interval_seconds": 60, "mqtt": None,
-    }))
+    # Still pending while the first agent runs (it polls 10 s after the request at the earliest).
+    contract.script("POST", "/api/v1/agent/enroll/poll", Reply(200, {"status": "pending", "poll_interval_seconds": 10}))
     contract.script("POST", "/api/v1/agent/heartbeat", heartbeat(device_id))
     contract.script("GET", "/api/v1/agent/mqtt", Reply(200, {"enabled": False, "config_version": None}))
 
     assert agent.configure(contract.plane.url, contract.secret("api_key")) == 0
     assert agent.request_token() == 0
-    agent.restart()
-    restarted_at = time.monotonic()
+    assert agent.stop() == 0
+    # Off and not enrolled: then the operator approves.
+    assert agent.device_id is None and not contract.plane.calls(*HEARTBEAT)
+    assert not contract.plane.calls("POST", "/api/v1/agent/enroll/poll"), "polled before the restart"
+    contract.script("POST", "/api/v1/agent/enroll/poll", Reply(200, {
+        "status": "approved", "poll_interval_seconds": 10, "device_id": device_id,
+        "device_token": contract.secret("device_token"), "organization_id": ORG_ID,
+        "name": "contract-device", "heartbeat_interval_seconds": 60, "mqtt": None,
+    }))
+    started_at = time.monotonic()
+    agent.start()
     assert agent.run(heartbeats=1) == 0
 
     assert agent.device_id is not None  # the recording supplies the id in replay mode
-    assert contract.plane.calls(*HEARTBEAT)[0].at - restarted_at < 5.0, "not online within 5 s of the restart"
+    first = contract.plane.calls(*HEARTBEAT)[0]
+    assert started_at <= first.at < started_at + 5.0, "not online within 5 s of the restart"
     contract.finish(routes=[("POST", "/api/v1/agent/enroll/request"), ("POST", "/api/v1/agent/enroll/poll"), HEARTBEAT])

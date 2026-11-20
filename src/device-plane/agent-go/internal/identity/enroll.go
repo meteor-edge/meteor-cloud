@@ -35,11 +35,13 @@ const (
 	CodeRequestEnded    = "request_ended"
 )
 
-// Error is a failed enrollment step. RetryAfter is the server's Retry-After.
+// Error is a failed enrollment step. RetryAfter is the server's Retry-After;
+// Status the HTTP status when the server answered (0 otherwise).
 type Error struct {
 	Code       string
 	Message    string
 	RetryAfter time.Duration
+	Status     int
 }
 
 func (e *Error) Error() string { return e.Message }
@@ -54,7 +56,7 @@ func fromAPI(what string, err error) *Error {
 	if !errors.As(err, &e) {
 		return errorf(CodeServerError, "%s: %v", what, err)
 	}
-	out := &Error{Code: CodeServerError, Message: fmt.Sprintf("%s: %s", what, e.Message), RetryAfter: e.RetryAfter}
+	out := &Error{Code: CodeServerError, Message: fmt.Sprintf("%s: %s", what, e.Message), RetryAfter: e.RetryAfter, Status: e.Status}
 	switch {
 	case e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden:
 		out.Code = CodeKeyRejected
@@ -80,24 +82,29 @@ func (s *Service) Register(ctx context.Context, token, name string) (Enrollment,
 	s.defaults()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sn := s.Source.snapshot()
-	if sn.server == "" {
-		return Enrollment{}, errNotConfigured()
+	sn, err := s.target()
+	if err != nil {
+		return Enrollment{}, err
 	}
 	e, err := s.API.Register(ctx, token, s.Inventory(), name, sn.token)
 	if err != nil {
 		return Enrollment{}, fromAPI("registration failed", err)
 	}
-	return s.enrolled(*e, "registered")
+	return s.enrolled(*e, "registered", "")
 }
 
-// enrolled stores a new identity, tells the agent, and returns its summary.
-// The caller holds s.mu.
-func (s *Service) enrolled(e api.Enrollment, how string) (Enrollment, error) {
+// enrolled stores a new identity from the server the client talks to, tells
+// the agent, and returns its summary. claimID is the request it answers, if
+// any. The caller holds s.mu.
+func (s *Service) enrolled(e api.Enrollment, how, claimID string) (Enrollment, error) {
 	if e.DeviceID == "" || e.DeviceToken == "" {
 		return Enrollment{}, errorf(CodeServerError, "the server answered without a device id or token")
 	}
-	if err := s.Source.commit(e); err != nil {
+	if err := s.Source.commit(e, s.applied, claimID); err != nil {
+		if errors.Is(err, errStale) {
+			s.reloadDue = true
+			return Enrollment{}, errorf(CodeServerError, "%v", err)
+		}
 		return Enrollment{}, err
 	}
 	s.autoAsk = false
@@ -140,25 +147,33 @@ func (s *Service) RequestToken(ctx context.Context, o RequestOptions) (RequestRe
 	s.defaults()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if o.APIKey != "" {
-		if err := s.Source.saveAPIKey(o.APIKey); err != nil {
-			return RequestResult{}, err
-		}
+	sn, err := s.target()
+	if err != nil {
+		return RequestResult{}, err
 	}
-	sn := s.Source.snapshot()
-	if sn.server == "" {
-		return RequestResult{}, errNotConfigured()
-	}
-	if sn.apiKey == "" {
-		return RequestResult{}, errorf(CodeNoAPIKey, "an API key is required (use --api-key, $METEORCLI_API_KEY, or 'meteorcli config --api-key')")
-	}
+	// Refuse before storing anything: a refused command must not replace the saved key.
 	if sn.enrolled && !o.New {
 		st := s.Source.Status()
 		return RequestResult{}, errorf(CodeAlreadyEnrolled,
 			"this device is already enrolled as %s (%s); use --new to enroll it again", st.Name, st.DeviceID)
 	}
+	if o.APIKey != "" {
+		if err := s.Source.saveAPIKey(o.APIKey); err != nil {
+			return RequestResult{}, err
+		}
+		sn.apiKey = o.APIKey
+	}
+	if sn.apiKey == "" {
+		return RequestResult{}, errorf(CodeNoAPIKey, "an API key is required (use --api-key, $METEORCLI_API_KEY, or 'meteorcli config --api-key')")
+	}
 	var previous string
 	if sn.pending != nil && !o.New {
+		// Asking again must not poll faster than the schedule or the server allows.
+		if s.approved != nil || time.Now().Before(s.nextPoll) {
+			return RequestResult{}, errorf(CodeAlreadyPending,
+				"enrollment request %s is already waiting for approval; the agent connects as soon as it is approved. "+
+					"Use --new to submit a different request", sn.pending.RequestID)
+		}
 		switch got := s.pollOnce(ctx); got {
 		case PollApproved:
 			st := s.Source.Status()
@@ -217,6 +232,9 @@ func (s *Service) autoSubmit(ctx context.Context, sn snapshot) {
 	var e *Error
 	if errors.As(err, &e) && e.Code == CodeKeyRejected {
 		s.autoAsk = false
+		if err := s.Source.markAutoRefused(sn.apiKey); err != nil {
+			s.Log.Error("remember the refused API key", "err", err)
+		}
 		s.Log.Error("the saved API key was refused; run 'meteorcli config --api-key key_…' and 'meteorcli request-token'", "err", err)
 		return
 	}
@@ -243,7 +261,9 @@ func (s *Service) pollOnce(ctx context.Context) string {
 	now := time.Now()
 	s.lastPoll = now
 	r, err := s.API.EnrollPoll(ctx, claim.RequestID, claim.ClaimSecret)
-	s.Source.markChecked(now)
+	// Claim waits for this; it runs after the answer was acted on (an approval
+	// stored, a request dropped), so Claim sees the result, not a stale state.
+	defer s.Source.markChecked(claim.RequestID, now)
 	if err != nil {
 		switch status := api.StatusOf(err); {
 		case status == 401 || status == 403 || status == 404:
@@ -258,6 +278,7 @@ func (s *Service) pollOnce(ctx context.Context) string {
 				wait = max(s.MinPoll, e.RetryAfter)
 			}
 			s.nextPoll = now.Add(wait)
+			s.backoffUntil = s.nextPoll
 			s.Log.Info("the server asked to poll more slowly", "retry_in", wait)
 		default:
 			s.nextPoll = now.Add(s.RetryWait)
@@ -265,26 +286,27 @@ func (s *Service) pollOnce(ctx context.Context) string {
 		}
 		return PollFailed
 	}
+	s.backoffUntil = time.Time{}
 	switch r.Status {
 	case PollPending:
 		s.nextPoll = now.Add(s.pollInterval(r.PollIntervalSeconds))
 		return PollPending
 	case PollApproved:
 		if r.DeviceToken != "" {
-			if _, err := s.enrolled(r.Enrollment, "approved"); err != nil {
-				s.nextPoll = now.Add(s.RetryWait)
-				s.Log.Error("store the approved identity", "err", err)
-				return PollFailed
+			s.approved = &approval{enrollment: r.Enrollment, claimID: claim.RequestID}
+			if s.retryApproved() {
+				return PollApproved
 			}
-			return PollApproved
+			return PollFailed
 		}
-		// The token is handed out once; someone else collected it.
+		// The token is handed out once and someone else collected it. An identity
+		// already installed (request-token --new) is not this approval: keep it.
+		reason := "approved, but the device credential was already collected; submit a new request"
 		if s.Source.Enrolled() {
-			s.drop(claim, PollApproved, "")
-			return PollApproved
+			reason = "approved, but the new device credential was already collected; the current identity is kept"
 		}
-		s.Log.Error("approved, but the device credential was already collected; submit a new request")
-		s.drop(claim, PollRejected, "approved, but the device credential was already collected")
+		s.Log.Error(reason, "request_id", claim.RequestID)
+		s.drop(claim, PollRejected, reason)
 		return PollRejected
 	case PollRejected:
 		reason := "no reason given"
@@ -322,17 +344,46 @@ func (s *Service) resubmit(ctx context.Context) {
 	switch {
 	case err == nil:
 		s.Log.Info("enrollment request expired; submitted a new one", "old_request_id", old.RequestID)
-	case errors.As(err, &e) && (e.Code == CodeKeyRejected || api.StatusOf(err) == 404):
+	case errors.As(err, &e) && (e.Code == CodeKeyRejected || e.Status == http.StatusNotFound):
 		s.Log.Error("enrollment request expired and the API key was refused", "err", err)
 		s.drop(old, PollExpired, err.Error())
 	default:
-		s.nextPoll = time.Now().Add(s.RetryWait)
-		s.Log.Warn("enrollment request expired; submitting a new one failed, will retry", "err", err)
+		wait := s.RetryWait
+		if errors.As(err, &e) {
+			wait = max(wait, e.RetryAfter)
+		}
+		s.nextPoll = time.Now().Add(wait)
+		s.Log.Warn("enrollment request expired; submitting a new one failed, will retry", "err", err, "retry_in", wait)
 	}
 }
 
+// retryApproved stores the identity of a collected approval. When storing
+// fails it is kept and tried again after RetryWait (the server will not hand
+// the token out again); an approval for a server or request that was
+// replaced is discarded. It reports success. The caller holds s.mu.
+func (s *Service) retryApproved() bool {
+	a := s.approved
+	_, err := s.enrolled(a.enrollment, "approved", a.claimID)
+	var e *Error
+	switch {
+	case err == nil:
+		s.approved = nil
+		return true
+	case errors.As(err, &e) && e.Code == CodeServerError:
+		s.approved = nil
+		s.Log.Warn("approval discarded", "err", err)
+	default:
+		s.nextPoll = time.Now().Add(s.RetryWait)
+		s.Log.Error("store the approved identity; trying again", "err", err, "retry_in", s.RetryWait)
+	}
+	return false
+}
+
+// drop ends the pending request. If its file cannot be removed the request is
+// left for later instead of being polled again at every wake.
 func (s *Service) drop(claim *PendingClaim, status, reason string) {
 	if err := s.Source.dropPending(&Outcome{RequestID: claim.RequestID, Status: status, Reason: reason}); err != nil {
-		s.Log.Error("remove pending request", "err", err)
+		s.nextPoll = time.Now().Add(s.RetryWait)
+		s.Log.Error("remove pending request", "err", err, "retry_in", s.RetryWait)
 	}
 }

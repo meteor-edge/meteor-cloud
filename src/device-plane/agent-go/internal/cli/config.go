@@ -93,6 +93,13 @@ type badValue struct{ error }
 // not nil, changes more fields before the file is saved.
 func saveConfig(env *Env, domain, apiBase string, useHTTP bool, key string, edit func(*config.Config)) (*config.Config, []string, error) {
 	p := env.Paths
+	// Held until the new server is saved: the agent cannot store an identity
+	// from the old server in between (see config.LockIdentity).
+	unlock, err := config.LockIdentity(p)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer unlock()
 	c, err := config.Load(p.ConfigFile)
 	switch {
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, config.ErrCorrupt):

@@ -10,6 +10,8 @@ import (
 )
 
 // cpuTimes returns the total and idle (idle + iowait) jiffies from /proc/stat.
+// Only the first eight counters count: guest and guest_nice are already part
+// of user and nice.
 func (h *Host) cpuTimes() (total, idle uint64, ok bool) {
 	for _, line := range strings.Split(h.readText("/proc/stat"), "\n") {
 		fields := strings.Fields(line)
@@ -25,7 +27,7 @@ func (h *Host) cpuTimes() (total, idle uint64, ok bool) {
 		if len(values) < 4 {
 			return 0, 0, false
 		}
-		for _, v := range values {
+		for _, v := range values[:min(len(values), 8)] {
 			total += v
 		}
 		idle = values[3]
@@ -52,7 +54,8 @@ func (h *Host) CPUPercent(ctx context.Context, sample time.Duration) (float64, b
 	case <-timer.C:
 	}
 	t2, i2, ok := h.cpuTimes()
-	if !ok || t2 <= t1 {
+	// iowait may go down between samples; such a sample is skipped.
+	if !ok || t2 <= t1 || i2 < i1 || i2-i1 > t2-t1 {
 		return 0, false
 	}
 	busy := 1 - float64(i2-i1)/float64(t2-t1)
@@ -72,17 +75,15 @@ func (h *Host) Memory() (used, total uint64, ok bool) {
 	return (totalKB - availKB) * 1024, totalKB * 1024, true
 }
 
-// Disk returns used and total bytes of the filesystem holding path, as df
-// counts them for normal users.
+// Disk returns used and total bytes of the filesystem holding path. Used is
+// total minus free blocks, as df counts it (the root reserve is not "used").
 func (h *Host) Disk(path string) (used, total uint64, ok bool) {
-	total, avail, ok := h.Statfs(path)
+	total, free, _, ok := h.Statfs(path)
 	if !ok || total == 0 {
 		return 0, 0, false
 	}
-	if avail > total {
-		avail = total
-	}
-	return total - avail, total, true
+	free = min(free, total)
+	return total - free, total, true
 }
 
 // LoadAverage returns the 1, 5 and 15 minute load averages.

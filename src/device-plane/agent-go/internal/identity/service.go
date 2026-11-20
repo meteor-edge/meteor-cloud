@@ -21,6 +21,9 @@ const (
 	DefaultAuthRetryMax = 15 * time.Minute
 	// DefaultTick is how often Run reports progress while idle.
 	DefaultTick = 30 * time.Second
+	// DefaultClaimGrace bounds how long Claim waits past its deadline for the
+	// first answer of a poll (a zero wait means "one check").
+	DefaultClaimGrace = 45 * time.Second
 )
 
 // Events tells the rest of the agent what identity did. Each may be nil.
@@ -46,19 +49,33 @@ type Service struct {
 	Log       *slog.Logger
 	Events    Events
 
-	MinPoll, RetryWait, AuthRetryMin, AuthRetryMax, Tick time.Duration
+	MinPoll, RetryWait, AuthRetryMin, AuthRetryMax, Tick, ClaimGrace time.Duration
 
-	mu        sync.Mutex // one enrollment change at a time; guards the schedule below
-	nextPoll  time.Time
-	lastPoll  time.Time
-	autoAsk   bool // submit a request by itself (API key saved before start)
-	nextAsk   time.Time
-	authWait  time.Duration
-	nextAuth  time.Time
-	nextMQTT  time.Time
-	wake      chan struct{}
-	wakeOnce  sync.Once
-	reloadDue bool
+	mu           sync.Mutex // one enrollment change at a time; guards the fields below
+	nextPoll     time.Time
+	lastPoll     time.Time
+	backoffUntil time.Time // the server's Retry-After for polls; Claim never polls earlier
+	approved     *approval // an approval whose identity could not be stored yet
+	autoAsk      bool      // submit a request by itself (API key saved before start)
+	nextAsk      time.Time
+	authWait     time.Duration
+	nextAuth     time.Time
+	nextMQTT     time.Time
+	wake         chan struct{}
+	wakeOnce     sync.Once
+	reloadDue    bool
+	// applied is the server the API client talks to; serverErr why the
+	// configured one could not be used (then the client has no server at all).
+	applied   string
+	serverOK  bool
+	serverErr error
+}
+
+// approval is a collected approval kept until its identity is stored: the
+// server hands the device token out once. It holds a secret; never log it.
+type approval struct {
+	enrollment api.Enrollment
+	claimID    string
 }
 
 func (s *Service) defaults() {
@@ -78,6 +95,9 @@ func (s *Service) defaults() {
 		}
 		if s.Tick <= 0 {
 			s.Tick = DefaultTick
+		}
+		if s.ClaimGrace <= 0 {
+			s.ClaimGrace = DefaultClaimGrace
 		}
 		if s.Inventory == nil {
 			s.Inventory = func() api.Inventory { return api.Inventory{} }
@@ -106,7 +126,8 @@ func (s *Service) Run(ctx context.Context) error {
 	s.nextPoll, s.nextMQTT = now, now
 	// An API key saved before the agent started (the imager, a meteorenv file,
 	// `config --api-key` before install) means: ask to be enrolled by itself.
-	s.autoAsk = !sn.enrolled && sn.pending == nil && sn.apiKey != "" && sn.server != ""
+	// A key the server already refused for this is not sent again at every start.
+	s.autoAsk = !sn.enrolled && sn.pending == nil && sn.apiKey != "" && sn.server != "" && !s.Source.autoRefused(sn.apiKey)
 	s.nextAsk = now
 	s.mu.Unlock()
 
@@ -170,6 +191,11 @@ func (s *Service) step(ctx context.Context) time.Time {
 	next := now.Add(s.Tick)
 	sn := s.Source.snapshot()
 	switch {
+	case s.approved != nil:
+		if !now.Before(s.nextPoll) {
+			s.retryApproved()
+		}
+		next = earliest(next, s.nextPoll)
 	case sn.pending != nil:
 		if !now.Before(s.nextPoll) {
 			if s.pollOnce(ctx) == PollExpired {
@@ -210,15 +236,12 @@ func (s *Service) reload() {
 	if err != nil {
 		s.Log.Error("identity files", "err", err)
 	}
+	if c.retry {
+		s.reloadDue = true
+	}
 	sn := s.Source.snapshot()
-	if c.server {
-		if err := s.API.SetServer(sn.server, sn.caFile); err != nil {
-			s.Log.Error("server settings unusable", "err", err)
-		}
-		s.Log.Info("server settings loaded", "server", sn.server)
-		if s.Events.ConfigChanged != nil {
-			s.Events.ConfigChanged()
-		}
+	if c.server || !s.serverOK {
+		s.applyServer(sn, c.server)
 	}
 	if c.pending {
 		s.nextPoll = time.Now()
@@ -233,6 +256,43 @@ func (s *Service) reload() {
 	if c.unenrolled {
 		s.Log.Warn("identity files removed; waiting to be enrolled again")
 	}
+}
+
+// applyServer points the API client at the configured server. When that
+// fails (an unreadable pinned CA, say) the client gets no server at all, so no
+// request can reach the previous one, and it is tried again at the next step.
+// The caller holds s.mu.
+func (s *Service) applyServer(sn snapshot, changed bool) {
+	if err := s.API.SetServer(sn.server, sn.caFile); err != nil {
+		_ = s.API.SetServer("", "")
+		if changed || s.serverErr == nil || s.serverErr.Error() != err.Error() {
+			s.Log.Error("server settings unusable; no requests are sent until they are fixed", "server", sn.server, "err", err)
+		}
+		s.applied, s.serverOK, s.serverErr = "", false, err
+		s.reloadDue = true
+		return
+	}
+	recovered := s.serverErr != nil
+	s.applied, s.serverOK, s.serverErr = sn.server, true, nil
+	if changed || recovered {
+		s.Log.Info("server settings loaded", "server", sn.server)
+		if s.Events.ConfigChanged != nil {
+			s.Events.ConfigChanged()
+		}
+	}
+}
+
+// target returns the identity when the API client talks to its server, the
+// only case in which a credential may be sent. The caller holds s.mu.
+func (s *Service) target() (snapshot, error) {
+	sn := s.Source.snapshot()
+	switch {
+	case sn.server == "":
+		return sn, errNotConfigured()
+	case !s.serverOK || s.applied != sn.server:
+		return sn, errorf(CodeNotConfigured, "the server settings cannot be used: %v", s.serverErr)
+	}
+	return sn, nil
 }
 
 // Reload rereads config.json and the identity files now (`meteorcli config`
@@ -297,17 +357,18 @@ func (s *Service) syncMQTT(ctx context.Context, sn snapshot) {
 		}
 		return
 	}
-	turnedOn := s.Source.setMQTTOff(false)
 	wanted := ""
 	if st.ConfigVersion != nil {
 		wanted = *st.ConfigVersion
 	}
 	if wanted == "" || wanted == sn.mqttVersion {
-		if turnedOn {
+		if s.Source.setMQTTOff(false) {
 			s.rotated()
 		}
 		return
 	}
+	// New credentials: MQTT stays as it is (off, or the old ones) until they are
+	// stored; saveMQTT turns it on.
 	creds, err := s.API.MQTTCredentials(ctx, sn.token)
 	switch {
 	case api.IsAuth(err):
