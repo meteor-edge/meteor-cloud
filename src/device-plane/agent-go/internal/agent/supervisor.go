@@ -44,9 +44,16 @@ type Supervisor struct {
 	// MaxTickAge is how old a critical module's last Tick may be before the
 	// watchdog stops pinging systemd.
 	MaxTickAge time.Duration
+	// Enrolled, when set, holds back the modules given to NewSupervisor until
+	// it returns true or an Enrolled signal arrives (they show as waiting).
+	// Modules added with Add (socket, identity) start at once: the device must
+	// be manageable and enrollable before it has an identity.
+	Enrolled func() bool
 
 	modules []Module
+	core    map[Module]bool
 	deps    Deps
+	gate    chan struct{} // closed once the device is enrolled
 
 	mu      sync.Mutex
 	runners map[string]*runner
@@ -54,8 +61,9 @@ type Supervisor struct {
 
 // runner is the supervisor's bookkeeping for one module.
 type runner struct {
-	mod  Module
-	wake chan struct{} // unpark, or end a backoff early
+	mod   Module
+	gated bool          // waits for enrollment before the first run
+	wake  chan struct{} // unpark, or end a backoff early
 
 	mu        sync.Mutex
 	cancel    context.CancelFunc // cancels the current Run
@@ -70,13 +78,16 @@ func NewSupervisor(modules []Module, d Deps) *Supervisor {
 		BackoffMin: DefaultBackoffMin, BackoffMax: DefaultBackoffMax, HealthyAfter: DefaultHealthyAfter,
 		BreakerLimit: DefaultBreakerLimit, BreakerWindow: DefaultBreakerWindow, ParkFor: DefaultParkFor,
 		MaxTickAge: DefaultMaxTickAge,
-		modules:    modules, deps: d, runners: map[string]*runner{},
+		modules:    modules, deps: d, runners: map[string]*runner{}, core: map[Module]bool{},
 	}
 }
 
-// Add registers a module that needs the supervisor itself (the socket module).
-// Call it before Run.
-func (s *Supervisor) Add(m Module) { s.modules = append(s.modules, m) }
+// Add registers a core module that starts without waiting for enrollment (the
+// socket and identity modules). Call it before Run.
+func (s *Supervisor) Add(m Module) {
+	s.modules = append(s.modules, m)
+	s.core[m] = true
+}
 
 // Run starts all modules and blocks until ctx is cancelled and every module has
 // returned. It tells systemd READY=1 once the modules are started.
@@ -86,6 +97,13 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 	sub := s.deps.Signals.Subscribe(Is(ConfigChanged{}))
 	defer sub.Close()
+	// Subscribe before asking Enrolled, so an enrollment in between is not missed.
+	enrolled := s.deps.Signals.Subscribe(Is(Enrolled{}))
+	defer enrolled.Close()
+	s.gate = make(chan struct{})
+	if s.Enrolled == nil || s.Enrolled() {
+		close(s.gate)
+	}
 
 	s.mu.Lock()
 	for _, m := range s.modules {
@@ -94,7 +112,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			s.mu.Unlock()
 			return fmt.Errorf("supervisor: module %q registered twice", name)
 		}
-		r := &runner{mod: m, wake: make(chan struct{}, 1)}
+		r := &runner{mod: m, gated: !s.core[m], wake: make(chan struct{}, 1)}
 		s.runners[name] = r
 		s.deps.Health.register(name, m.Critical())
 		s.deps.Health.Set(name, StateStarting, nil)
@@ -132,6 +150,14 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		case <-sub.C():
 			sub.Take()
 			s.wakeAll()
+		case <-enrolled.C():
+			enrolled.Take()
+			select {
+			case <-s.gate:
+			default:
+				log.Info("device enrolled; starting all modules")
+				close(s.gate) // only this goroutine closes it
+			}
 		}
 	}
 }
@@ -183,6 +209,10 @@ func (s *Supervisor) supervise(ctx context.Context, r *runner) {
 	breaker := Breaker{Limit: s.BreakerLimit, Window: s.BreakerWindow}
 	delay := restartDelay{min: s.BackoffMin, max: s.BackoffMax}
 
+	if r.gated && !s.waitForEnrollment(ctx, name) {
+		health.Set(name, StateStopped, nil)
+		return
+	}
 	for {
 		// A poke from before this run (a config change while running) means nothing now.
 		select {
@@ -234,6 +264,24 @@ func (s *Supervisor) supervise(ctx context.Context, r *runner) {
 			return
 		}
 		health.Set(name, StateStarting, nil)
+	}
+}
+
+// waitForEnrollment holds a feature module back until the device is enrolled.
+// It returns false when ctx ended first.
+func (s *Supervisor) waitForEnrollment(ctx context.Context, name string) bool {
+	select {
+	case <-s.gate:
+		return true
+	default:
+	}
+	s.deps.Health.Set(name, StateWaiting, nil)
+	select {
+	case <-ctx.Done():
+		return false
+	case <-s.gate:
+		s.deps.Health.Set(name, StateStarting, nil)
+		return true
 	}
 }
 

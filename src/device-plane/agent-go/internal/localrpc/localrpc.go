@@ -59,6 +59,9 @@ type Response struct {
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// RetryAfter is how many seconds the caller should wait before trying
+	// again, when the work failed because a server asked to slow down.
+	RetryAfter int `json:"retry_after,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -183,7 +186,7 @@ loop:
 			// (same goroutine) always comes after them and is never overwritten.
 			now := time.Now()
 			_ = c.SetReadDeadline(now.Add(readTimeout))
-			_ = c.SetWriteDeadline(now.Add(readTimeout + s.timeout() + 10*time.Second))
+			_ = c.SetWriteDeadline(now.Add(readTimeout + s.longestTimeout() + 10*time.Second))
 			inFlight++
 			perUser[peer.UID]++
 			open[c] = true
@@ -311,6 +314,16 @@ func (s *Server) maxPerUser() int {
 		return s.MaxPerUser
 	}
 	return DefaultMaxPerUser
+}
+
+// longestTimeout is the longest any handler may run. The connection's write
+// deadline is set before the method is known, so it must allow the longest.
+func (s *Server) longestTimeout() time.Duration {
+	longest := s.timeout()
+	for _, h := range s.Handlers {
+		longest = max(longest, h.Timeout)
+	}
+	return longest
 }
 
 func (s *Server) timeout() time.Duration {

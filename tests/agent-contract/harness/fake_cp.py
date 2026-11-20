@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -54,6 +55,7 @@ Handler = Callable[[Request], Reply]
 class Exchange:
     request: Request
     reply: Reply
+    at: float = field(default_factory=time.monotonic)  # arrival, for timing checks (not recorded)
 
 
 class FakeControlPlane:
@@ -168,10 +170,10 @@ class FakeControlPlane:
         return _Handler
 
 
-def recorded_http(plane: FakeControlPlane, normalizer: Any) -> list[dict[str, Any]]:
+def recorded_http(exchanges: list[Exchange], normalizer: Any) -> list[dict[str, Any]]:
     """The exchanges in order, normalized for a recording."""
     out = []
-    for exchange in plane.exchanges:
+    for exchange in exchanges:
         req, reply = exchange.request, exchange.reply
         inventory = req.path in {
             "/api/v1/agent/register", "/api/v1/agent/enroll/request", "/api/v1/agent/heartbeat",

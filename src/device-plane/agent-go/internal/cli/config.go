@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/localrpc"
 )
 
 // Environment variables the Python CLI read; kept so scripts keep working.
@@ -22,7 +23,10 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if len(args) > 0 && args[0] == "import" {
 		return runConfigImport(env, args[1:])
 	}
-	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--show] | import")
+	if len(args) > 0 && args[0] == "meteorenv" {
+		return runConfigMeteorenv(ctx, env, args[1:])
+	}
+	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--show] | import | meteorenv")
 	domain := fl.String("domain", "", "Server host or IP (meteorxx.com or 192.168.0.107:8000; or $"+envDomain+").")
 	apiBase := fl.String("api-base", "", "Override the derived API origin (http:// is allowed for local testing).")
 	useHTTP := fl.Bool("http", false, "Use HTTP instead of HTTPS (for local testing).")
@@ -51,36 +55,14 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 		return 2
 	}
 
-	c, err := config.Load(p.ConfigFile)
-	switch {
-	case errors.Is(err, fs.ErrNotExist), errors.Is(err, config.ErrCorrupt):
-		c = &config.Config{}
-	case err != nil:
-		return failWrite(env, err)
-	}
-	before := c.Server()
-	changed, err := c.SetServer(*domain, *apiBase, *useHTTP)
+	c, dropped, err := saveConfig(env, *domain, *apiBase, *useHTTP, key, nil)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "error: %v\n", err)
-		return 2
-	}
-	var dropped []string
-	// Credentials whose server is unknown (no or damaged config) may belong to
-	// another server: treat setting a server then like a server change.
-	if changed || (before == "" && c.Server() != "") {
-		// Remove the old server's credentials before saving the new URL: if this is
-		// interrupted, the next run still sees a server change and retries.
-		if dropped, err = config.DropEnrollment(p); err != nil {
-			return failWrite(env, err)
+		var bad badValue
+		if errors.As(err, &bad) {
+			fmt.Fprintf(env.Stderr, "error: %v\n", err)
+			return 2
 		}
-	}
-	if err := c.Save(p.ConfigFile, env.Owner); err != nil {
 		return failWrite(env, err)
-	}
-	if key != "" {
-		if err := writeSecret(env, p.APIKeyFile(), key); err != nil {
-			return failWrite(env, err)
-		}
 	}
 
 	server := c.Server()
@@ -99,7 +81,75 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if len(dropped) > 0 {
 		fmt.Fprintf(env.Stdout, "Cleared previous enrollment (%s); enroll again on this server.\n", strings.Join(dropped, ", "))
 	}
+	reloadAgent(ctx, env)
 	return 0
+}
+
+// badValue is a setting that cannot be used (exit 2, not a write failure).
+type badValue struct{ error }
+
+// saveConfig applies a server and API key the way `meteorcli config` does:
+// changing the server removes the old server's credentials first. edit, when
+// not nil, changes more fields before the file is saved.
+func saveConfig(env *Env, domain, apiBase string, useHTTP bool, key string, edit func(*config.Config)) (*config.Config, []string, error) {
+	p := env.Paths
+	// Held until the new server is saved: the agent cannot store an identity
+	// from the old server in between (see config.LockIdentity).
+	unlock, err := config.LockIdentity(p)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer unlock()
+	c, err := config.Load(p.ConfigFile)
+	switch {
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, config.ErrCorrupt):
+		c = &config.Config{}
+	case err != nil:
+		return nil, nil, err
+	}
+	before := c.Server()
+	changed, err := c.SetServer(domain, apiBase, useHTTP)
+	if err != nil {
+		return nil, nil, badValue{err}
+	}
+	var dropped []string
+	// Credentials whose server is unknown (no or damaged config) may belong to
+	// another server: treat setting a server then like a server change.
+	if changed || (before == "" && c.Server() != "") {
+		// Remove the old server's credentials before saving the new URL: if this is
+		// interrupted, the next run still sees a server change and retries.
+		if dropped, err = config.DropEnrollment(p); err != nil {
+			return nil, nil, err
+		}
+	}
+	if edit != nil {
+		edit(c)
+	}
+	if err := c.Save(p.ConfigFile, env.Owner); err != nil {
+		return nil, nil, err
+	}
+	if key != "" {
+		if err := writeSecret(env, p.APIKeyFile(), key); err != nil {
+			return nil, nil, err
+		}
+	}
+	return c, dropped, nil
+}
+
+// reloadAgent asks a running agent to pick up new settings at once. The agent
+// also notices the change by itself; a stopped agent reads them when it starts.
+func reloadAgent(ctx context.Context, env *Env) {
+	var res struct {
+		State string `json:"state"`
+	}
+	err := localrpc.Call(ctx, env.Paths.AgentSocket(), "config.reload", nil, &res)
+	switch {
+	case err == nil:
+		fmt.Fprintf(env.Stdout, "The running agent picked up the new settings (%s).\n", strings.ReplaceAll(res.State, "_", " "))
+	case localrpc.CodeOf(err) == localrpc.CodeUnavailable:
+	default:
+		fmt.Fprintf(env.Stderr, "note: could not tell the agent (%v); it notices the change by itself.\n", err)
+	}
 }
 
 // writeSecret stores a secret in the identity directory (meteor, 0600).

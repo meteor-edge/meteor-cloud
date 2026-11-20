@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/identity"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -65,7 +67,7 @@ func testDeps(w io.Writer) Deps {
 	if w == nil {
 		w = io.Discard
 	}
-	return Deps{Signals: NewSignals(), Health: NewHealth(), Log: NewLogger(w, slog.LevelDebug)}
+	return Deps{Signals: NewSignals(), Health: NewHealth(), Log: NewLogger(w, slog.LevelDebug), Identity: identity.NewSource(config.Paths{})}
 }
 
 // fast shortens every supervisor delay so the tests run in milliseconds.
@@ -302,4 +304,37 @@ func TestRestartBetweenRunsIsNotLost(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// Feature modules wait for enrollment; core modules (Add) start at once, and
+// the Enrolled signal releases the rest without a restart of the agent.
+func TestFeatureModulesWaitForEnrollment(t *testing.T) {
+	d := testDeps(nil)
+	var feature, core atomic.Int64
+	s := fast(NewSupervisor([]Module{ticker("feature", &feature)}, d))
+	s.Add(ticker("core", &core))
+	var enrolled atomic.Bool
+	s.Enrolled = enrolled.Load
+	defer start(t, s)()
+
+	eventually(t, "core running", func() bool { return core.Load() > 0 })
+	eventually(t, "feature waiting", func() bool { h, _ := d.Health.Get("feature"); return h.State == string(StateWaiting) })
+	if feature.Load() != 0 {
+		t.Fatal("feature module ran before enrollment")
+	}
+	if !d.Health.Alive(time.Minute) {
+		t.Error("a waiting module must not make the agent unhealthy")
+	}
+	enrolled.Store(true)
+	d.Signals.Publish(Enrolled{})
+	eventually(t, "feature running", func() bool { return feature.Load() > 0 })
+}
+
+func TestEnrolledAtStartOpensTheGate(t *testing.T) {
+	d := testDeps(nil)
+	var feature atomic.Int64
+	s := fast(NewSupervisor([]Module{ticker("feature", &feature)}, d))
+	s.Enrolled = func() bool { return true }
+	defer start(t, s)()
+	eventually(t, "feature running", func() bool { return feature.Load() > 0 })
 }

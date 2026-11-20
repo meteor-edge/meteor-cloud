@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -323,5 +324,37 @@ func shutdownWithIdleClient(t *testing.T, wait time.Duration) {
 	<-done
 	if d := time.Since(start); d > time.Second {
 		t.Errorf("shutdown waited %v for a client that sent nothing", d)
+	}
+}
+
+// A handler allowed to run longer than the server default (enroll.claim waits
+// up to 30 min) must still be able to answer, and its RetryAfter must arrive.
+func TestLongHandlerTimeoutAndRetryAfter(t *testing.T) {
+	s := &Server{
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Authorize: func(Peer, string) error { return nil },
+		Timeout:   time.Millisecond,
+		Handlers: map[string]Handler{
+			"wait": {Timeout: time.Hour, Run: func(context.Context, Peer, json.RawMessage) (any, error) {
+				time.Sleep(20 * time.Millisecond)
+				return "done", nil
+			}},
+			"busy": {Run: func(context.Context, Peer, json.RawMessage) (any, error) {
+				return nil, &Error{Code: "retry_later", Message: "busy", RetryAfter: 42}
+			}},
+		},
+	}
+	if got := s.longestTimeout(); got != time.Hour {
+		t.Errorf("longestTimeout = %s", got)
+	}
+	path := serve(t, s)
+	var out string
+	if err := Call(context.Background(), path, "wait", nil, &out); err != nil || out != "done" {
+		t.Errorf("wait = %q, %v", out, err)
+	}
+	err := Call(context.Background(), path, "busy", nil, nil)
+	var e *Error
+	if !errors.As(err, &e) || e.RetryAfter != 42 || e.Code != "retry_later" {
+		t.Errorf("busy = %#v", err)
 	}
 }

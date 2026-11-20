@@ -32,6 +32,9 @@ type Config struct {
 	ServerURL string `json:"server_url"`
 	// CAFile is an optional PEM file trusted in addition to the system CAs.
 	CAFile string `json:"ca_file"`
+	// EnrollName is the device name to ask for when the agent submits an
+	// enrollment request by itself (from a meteorenv file at first boot).
+	EnrollName string `json:"enroll_name"`
 
 	extra Object
 }
@@ -157,6 +160,10 @@ func (d *Device) Save(path string, owner Owner) error {
 // the names it removed. Python did the same in drop_stale_enrollment.
 func DropEnrollment(p Paths) ([]string, error) {
 	var removed []string
+	// A finished but not yet moved identity belongs to the old server as well.
+	if err := os.RemoveAll(p.StagingDir()); err != nil {
+		return removed, fmt.Errorf("drop enrollment: %w", err)
+	}
 	for _, f := range p.EnrollmentFiles() {
 		err := os.Remove(f)
 		switch {

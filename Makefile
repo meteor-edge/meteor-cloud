@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-systemd-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-dist agent-go-systemd-test agent-go-install-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
 # Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
@@ -232,17 +232,27 @@ console-test: ## Run console tests
 agent-test: ## Run reference agent tests
 	cd $(AGENT_DIR) && python -m pytest -q
 
-agent-go-test: ## Go meteorcli: gofmt, vet, go test -race (src/device-plane/agent-go)
-	cd src/device-plane/agent-go && test -z "$$(gofmt -l .)" && go vet ./... && go test -race -cover ./...
+# The race detector needs 48-bit virtual addresses: Raspberry Pi kernels (39-bit)
+# and 32-bit ARM cannot run it. There: make agent-go-test GO_RACE=
+GO_RACE ?= -race
+agent-go-test: ## Go meteorcli: gofmt, vet, go test -race (src/device-plane/agent-go; on a Pi: GO_RACE=)
+	cd src/device-plane/agent-go && test -z "$$(gofmt -l .)" && go vet ./... && go test $(GO_RACE) -cover ./...
 
 agent-go-build: ## Go meteorcli: static binaries for linux arm64, arm v6, amd64 into src/device-plane/agent-go/bin
 	cd src/device-plane/agent-go && ./scripts/build.sh bin
 
+agent-go-dist: ## Go meteorcli: release files (binaries, packaging, install-rpi.sh, SHA256SUMS) into src/device-plane/agent-go/dist
+	cd src/device-plane/agent-go && ./scripts/dist.sh dist 0.0.0-dev
+
+agent-go-install-test: ## Go meteorcli: board installer end to end under systemd in a container (Docker, --privileged)
+	cd src/device-plane/agent-go && ./test/install/run.sh
+
 agent-go-systemd-test: ## Go meteorcli: units, sockets and group policy under systemd in a container (Docker, --privileged)
 	cd src/device-plane/agent-go && ./test/systemd/run.sh
 
-agent-contract-test: ## Device agent contract suite (Python meteorcli vs contracts/device-agent-v1.md; needs Docker for Mosquitto)
+agent-contract-test: ## Device agent contract suite (Python and Go meteorcli vs contracts/device-agent-v1.md; needs Docker for Mosquitto, Go)
 	cd tests/agent-contract && python -m pytest -q && AGENT_CONTRACT_MODE=replay python -m pytest -q
+	cd tests/agent-contract && AGENT_CONTRACT_AGENT=go python -m pytest -q -rs && AGENT_CONTRACT_AGENT=go AGENT_CONTRACT_MODE=replay python -m pytest -q
 
 agent-dist: ## Pack meteorcli (agent + runtime) into dist/ for a GitHub Release
 	./scripts/agent-dist.sh

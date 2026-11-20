@@ -137,13 +137,14 @@ func (h *Health) Names() []string {
 }
 
 // Alive reports whether every running critical module ticked within maxAge.
-// The watchdog pings systemd only while this is true.
+// The watchdog pings systemd only while this is true. A module that waits (for
+// enrollment, for example) has no loop to tick, so it does not count.
 func (h *Health) Alive(maxAge time.Duration) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
 	for _, e := range h.m {
-		if e.critical && (e.state == StateRunning || e.state == StateWaiting) && now.Sub(e.lastTick) > maxAge {
+		if e.critical && e.state == StateRunning && now.Sub(e.lastTick) > maxAge {
 			return false
 		}
 	}

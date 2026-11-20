@@ -72,6 +72,14 @@ func (p Paths) APIKeyFile() string { return filepath.Join(p.IdentityDir, "api-ke
 // PendingClaimFile holds the request id and claim secret of an enrollment awaiting approval.
 func (p Paths) PendingClaimFile() string { return filepath.Join(p.IdentityDir, "pending-claim.json") }
 
+// StagingDir is where the agent assembles a new identity before moving it into
+// place (a finished one has a DONE file). It belongs to the server too.
+func (p Paths) StagingDir() string { return filepath.Join(p.IdentityDir, ".staging") }
+
+// AutoRequestFile records that the server refused the saved API key for the
+// request the agent makes by itself, so it is not sent again at every start.
+func (p Paths) AutoRequestFile() string { return filepath.Join(p.IdentityDir, "auto-request.json") }
+
 // WireGuardDir holds the WireGuard key pair. The private key never leaves the device.
 func (p Paths) WireGuardDir() string { return filepath.Join(p.IdentityDir, "wireguard") }
 
@@ -80,5 +88,6 @@ func (p Paths) WireGuardDir() string { return filepath.Join(p.IdentityDir, "wire
 func (p Paths) EnrollmentFiles() []string {
 	return []string{
 		p.DeviceTokenFile(), p.MQTTFile(), p.MQTTCAFile(), p.PendingClaimFile(), p.APIKeyFile(), p.DeviceFile(),
+		p.AutoRequestFile(),
 	}
 }

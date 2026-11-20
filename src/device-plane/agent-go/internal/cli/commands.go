@@ -31,6 +31,9 @@ type Env struct {
 	ServiceState func(ctx context.Context) string
 	// Groups answers group membership for the agent socket; nil means the system database.
 	Groups localrpc.Groups
+	// AgentUID, when set, replaces the agent's own uid in the socket policy
+	// (tests of the group policy run the agent and the CLI as one user).
+	AgentUID *uint32
 }
 
 func (e *Env) groups() localrpc.Groups {
@@ -51,10 +54,14 @@ type command struct {
 // commands lists every subcommand. Add a command: one file and one line here.
 var commands = []command{
 	{name: "agent", aliases: []string{"run"}, summary: "Run the always-on device agent (meteorcli.service runs this).", run: runAgent},
+	{name: "claim", summary: "Report (or --wait for) the approval of a pending enrollment request.", run: runClaim},
 	{name: "config", summary: "Store the server domain and API key, or import a Python install.", run: runConfig},
 	{name: "helper", summary: "Run the root helper (meteorcli-helper.service), or 'helper call' one operation.", run: runHelper},
 	{name: "module", summary: "Restart a module of the running agent ('module restart <name>').", run: runModule},
+	{name: "register", summary: "Enroll this device with a one-time registration token.", run: runRegister},
+	{name: "request-token", aliases: []string{"request"}, summary: "Ask an administrator to approve this device (the agent waits for it).", run: runRequest},
 	{name: "status", summary: "Show this device's configuration and enrollment (never secrets).", run: runStatus},
+	{name: "test", summary: "Check that the server answers and the API key is valid.", run: runTest},
 }
 
 // Main runs the command line and returns the exit code.
@@ -118,7 +125,7 @@ func usage(w io.Writer) {
 		fmt.Fprintf(w, "  %-16s %s\n", name, c.summary)
 	}
 	fmt.Fprintln(w, "\nFlags:\n  -V, --version    Print the version and exit.")
-	fmt.Fprintln(w, "\nExamples:\n  meteorcli config --domain meteorxx.com --api-key key_XXXX\n  meteorcli config import\n  meteorcli status")
+	fmt.Fprintln(w, "\nExamples:\n  sudo meteorcli config --domain meteorxx.com --api-key key_XXXX\n  meteorcli request-token\n  meteorcli register --token reg_XXXX\n  meteorcli status")
 }
 
 // newFlags returns a flag set for a subcommand that prints its own usage.

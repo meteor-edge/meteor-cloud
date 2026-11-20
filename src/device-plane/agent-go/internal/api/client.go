@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,21 +46,26 @@ type Options struct {
 	HTTPClient *http.Client
 }
 
-// Client calls the agent API. It is safe for concurrent use.
+// ErrNoServer is returned by every call while no server is configured.
+var ErrNoServer = &Error{Code: "no_server", Message: "no server configured; run 'sudo meteorcli config --domain <host>'"}
+
+// Client calls the agent API. It is safe for concurrent use. The server can be
+// changed while the agent runs (SetServer), so every module keeps one *Client.
 type Client struct {
-	base      string
 	userAgent string
 	timeout   time.Duration
-	http      *http.Client
+
+	mu   sync.RWMutex
+	base string
+	http *http.Client
+	// fixed is the caller's HTTPClient (tests): SetServer keeps it.
+	fixed *http.Client
 }
 
 // New builds a Client with TLS 1.2+, the system CAs plus the optional pinned CA,
-// and redirects turned off so a bearer token never follows one.
+// and redirects turned off so a bearer token never follows one. An empty
+// BaseURL gives a client that answers ErrNoServer until SetServer is called.
 func New(o Options) (*Client, error) {
-	base := strings.TrimRight(strings.TrimSpace(o.BaseURL), "/")
-	if !strings.HasPrefix(base, "https://") && !strings.HasPrefix(base, "http://") {
-		return nil, fmt.Errorf("api: base URL %q must start with https:// or http://", o.BaseURL)
-	}
 	version := o.Version
 	if version == "" {
 		version = "0.0.0"
@@ -68,11 +74,25 @@ func New(o Options) (*Client, error) {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	hc := o.HTTPClient
-	if hc == nil {
-		tlsConfig, err := tlsConfig(o.CAFile)
+	c := &Client{userAgent: "meteorcli/" + version, timeout: timeout, fixed: o.HTTPClient}
+	if err := c.SetServer(o.BaseURL, o.CAFile); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// SetServer points the client at another origin and pinned CA ("" for none).
+// An empty base unsets the server. Calls in flight finish against the old one.
+func (c *Client) SetServer(baseURL, caFile string) error {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base != "" && !strings.HasPrefix(base, "https://") && !strings.HasPrefix(base, "http://") {
+		return fmt.Errorf("api: base URL %q must start with https:// or http://", baseURL)
+	}
+	hc := c.fixed
+	if hc == nil && base != "" {
+		tlsConfig, err := tlsConfig(caFile)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.TLSClientConfig = tlsConfig
@@ -83,7 +103,21 @@ func New(o Options) (*Client, error) {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		}
 	}
-	return &Client{base: base, userAgent: "meteorcli/" + version, timeout: timeout, http: hc}, nil
+	c.mu.Lock()
+	old := c.http
+	c.base, c.http = base, hc
+	c.mu.Unlock()
+	if old != nil && old != hc && old != c.fixed {
+		old.CloseIdleConnections()
+	}
+	return nil
+}
+
+// target returns the current origin and HTTP client together.
+func (c *Client) target() (string, *http.Client) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.base, c.http
 }
 
 func tlsConfig(caFile string) (*tls.Config, error) {
@@ -103,8 +137,11 @@ func tlsConfig(caFile string) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}, nil
 }
 
-// BaseURL is the origin this client talks to.
-func (c *Client) BaseURL() string { return c.base }
+// BaseURL is the origin this client talks to ("" when no server is configured).
+func (c *Client) BaseURL() string {
+	base, _ := c.target()
+	return base
+}
 
 // UserAgent is the User-Agent header this client sends.
 func (c *Client) UserAgent() string { return c.userAgent }
@@ -153,6 +190,10 @@ func StatusOf(err error) int {
 
 // do sends one JSON request and decodes a JSON answer into out (when not nil).
 func (c *Client) do(ctx context.Context, method, path, bearer string, body, out any) error {
+	base, hc := c.target()
+	if base == "" {
+		return ErrNoServer
+	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -164,7 +205,7 @@ func (c *Client) do(ctx context.Context, method, path, bearer string, body, out 
 		}
 		reader = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, base+path, reader)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", method, path, err)
 	}
@@ -178,9 +219,9 @@ func (c *Client) do(ctx context.Context, method, path, bearer string, body, out 
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
-		return &Error{Code: "network_error", Message: redactURLError(err, c.base)}
+		return &Error{Code: "network_error", Message: redactURLError(err, base)}
 	}
 	defer resp.Body.Close()
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
