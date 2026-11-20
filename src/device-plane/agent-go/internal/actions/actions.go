@@ -84,10 +84,10 @@ type runner struct {
 	held []api.ActionResult
 }
 
-// collect fetches the waiting actions and runs them in order. Non-power
-// actions run first so a reboot or shutdown cannot stop the agent before the
-// rest of the same handout finishes. The server still hands each action out
-// once; passwords stay only in this list.
+// collect fetches the waiting actions and runs them in the order the server
+// gave, as the Python agent does: the contract suite records that order (a
+// reboot first is reported on its own before it runs). The server hands each
+// action out once; passwords stay only in this list.
 func (r *runner) collect(ctx context.Context) {
 	d := r.d
 	token, err := d.Identity.Token()
@@ -105,15 +105,7 @@ func (r *runner) collect(ctx context.Context) {
 		d.Log.Warn("could not collect actions; trying again after the next heartbeat", "err", err)
 		return
 	}
-	var power, other []api.Action
 	for _, a := range list {
-		if k, ok := registry[a.Kind]; ok && k.reportFirst {
-			power = append(power, a)
-		} else {
-			other = append(other, a)
-		}
-	}
-	for _, a := range append(other, power...) {
 		k, ok := registry[a.Kind]
 		if !ok {
 			r.put(ctx, a, unsupported("Unsupported action kind: "+pyRepr(a.Kind)))
