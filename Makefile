@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-systemd-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-dist agent-go-systemd-test agent-go-install-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
 # Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
@@ -237,6 +237,12 @@ agent-go-test: ## Go meteorcli: gofmt, vet, go test -race (src/device-plane/agen
 
 agent-go-build: ## Go meteorcli: static binaries for linux arm64, arm v6, amd64 into src/device-plane/agent-go/bin
 	cd src/device-plane/agent-go && ./scripts/build.sh bin
+
+agent-go-dist: ## Go meteorcli: release files (binaries, packaging, install-rpi.sh, SHA256SUMS) into src/device-plane/agent-go/dist
+	cd src/device-plane/agent-go && ./scripts/dist.sh dist 0.0.0-dev
+
+agent-go-install-test: ## Go meteorcli: board installer end to end under systemd in a container (Docker, --privileged)
+	cd src/device-plane/agent-go && ./test/install/run.sh
 
 agent-go-systemd-test: ## Go meteorcli: units, sockets and group policy under systemd in a container (Docker, --privileged)
 	cd src/device-plane/agent-go && ./test/systemd/run.sh

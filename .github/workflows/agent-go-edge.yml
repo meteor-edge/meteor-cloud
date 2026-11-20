@@ -1,0 +1,75 @@
+# Publish the Go meteorcli from master as the moving "meteorcli-go-edge"
+# prerelease, so a device can install the newest build with one line:
+#
+#   curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge/install-rpi.sh | sudo bash
+#
+# It is a prerelease and never "latest": releases/latest/download/ keeps
+# serving the Python meteorcli (agent-v*) to existing devices.
+name: meteorcli (Go) edge build
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - src/device-plane/agent-go/**
+      - .github/workflows/agent-go-edge.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-go-edge
+  cancel-in-progress: true
+
+env:
+  TAG: meteorcli-go-edge
+
+jobs:
+  publish:
+    name: Build, test and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: src/device-plane/agent-go
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
+      - name: Test
+        run: go test -race ./...
+      - name: Release files
+        run: ./scripts/dist.sh "$RUNNER_TEMP/dist" "0.0.0-edge.${GITHUB_RUN_NUMBER}+${GITHUB_SHA::7}"
+      - name: Installer under systemd
+        run: ./test/install/run.sh
+      - name: Publish the meteorcli-go-edge prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          notes="Newest Go meteorcli from master ($GITHUB_SHA). For testing; replaced at every merge.
+
+          Raspberry Pi (Pi OS / Debian with systemd, 32- or 64-bit):
+          \`\`\`bash
+          curl -fsSL https://github.com/$REPO/releases/download/$TAG/install-rpi.sh | sudo bash -s -- --domain <server> --token <registration token>
+          \`\`\`
+          Takes over a Python meteorcli install (identity kept). See docs/meteorcli-go.md."
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            # Move the tag to this commit, then replace the files.
+            gh api -X PATCH "repos/$REPO/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release edit "$TAG" -R "$REPO" --prerelease --latest=false --notes "$notes"
+            # SHA256SUMS last: an install during the upload fails its checksum instead of mixing builds.
+            find "$RUNNER_TEMP/dist" -type f ! -name SHA256SUMS -print0 | xargs -0 gh release upload "$TAG" -R "$REPO" --clobber
+            gh release upload "$TAG" -R "$REPO" --clobber "$RUNNER_TEMP/dist/SHA256SUMS"
+          else
+            gh release create "$TAG" -R "$REPO" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "meteorcli (Go) edge" --notes "$notes" "$RUNNER_TEMP"/dist/*
+          fi
+          echo "Install URL: https://github.com/$REPO/releases/download/$TAG/install-rpi.sh" >> "$GITHUB_STEP_SUMMARY"

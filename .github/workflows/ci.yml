@@ -239,8 +239,17 @@ jobs:
           go test -race -cover ./... | tee "$RUNNER_TEMP/cover.txt"
       - name: Coverage at least 70% on core packages
         run: ./scripts/check-coverage.sh "$RUNNER_TEMP/cover.txt" 70 agent api config state identity deploy update helper
-      - name: Cross-build (linux arm64, arm v6, amd64; static, under 15 MB)
-        run: ./scripts/build.sh "$RUNNER_TEMP/bin" 0.0.0-ci
+      - name: Release files (static binaries for linux arm64, arm v6, amd64 under 15 MB; board installers)
+        run: ./scripts/dist.sh "$RUNNER_TEMP/dist" "0.0.0-ci.${GITHUB_SHA::7}"
+      # Download from the run's Summary page to try a PR on a device:
+      #   sudo bash install-rpi.sh --base-url file:///path/to/unzipped/dir
+      - name: Upload release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: meteorcli-go-${{ github.sha }}
+          path: ${{ runner.temp }}/dist
+          retention-days: 14
+          if-no-files-found: error
       # Exposure is scored 0-10; --threshold takes it times ten and fails only above
       # it, so 19 rejects 2.0 and 59 rejects 6.0.
       - name: Unit hardening (systemd-analyze security; agent < 2.0, helper < 6.0)
@@ -250,6 +259,8 @@ jobs:
           systemd-analyze security --offline=true --threshold=59 meteorcli-helper.service
       - name: Socket and helper permissions under systemd (Debian 12 container)
         run: ./test/systemd/run.sh
+      - name: Board installer under systemd (Python takeover, upgrade, --token)
+        run: ./test/install/run.sh
 
   agent-contract:
     name: Agent contract (Python and Go meteorcli)
