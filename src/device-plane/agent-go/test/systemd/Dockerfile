@@ -3,12 +3,12 @@
 FROM debian:12.8-slim
 ENV container=docker DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
- && apt-get install -y --no-install-recommends systemd systemd-sysv dbus netcat-openbsd \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv dbus \
  && rm -rf /var/lib/apt/lists/* \
  && systemctl mask getty.target console-getty.service systemd-logind.service \
       systemd-firstboot.service systemd-remount-fs.service
 
-COPY meteorcli /usr/local/bin/meteorcli
+COPY meteorcli holdconn /usr/local/bin/
 COPY packaging/meteorcli.service packaging/meteorcli-helper.service packaging/meteorcli-helper.socket /etc/systemd/system/
 COPY packaging/sysusers.d/meteorcli.conf /usr/lib/sysusers.d/meteorcli.conf
 COPY packaging/tmpfiles.d/meteorcli.conf /usr/lib/tmpfiles.d/meteorcli.conf

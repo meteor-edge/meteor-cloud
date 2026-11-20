@@ -21,6 +21,7 @@ arm64 | aarch64) arch=arm64 ;;
 esac
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=systemd-test" \
 	-o "$ctx/meteorcli" ./cmd/meteorcli
+CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$ctx/holdconn" ./test/systemd/holdconn
 cp -r packaging test/systemd/Dockerfile "$ctx/"
 docker build -q --platform "linux/$arch" -t meteorcli-systemd-test "$ctx" >/dev/null
 docker run -d --platform "linux/$arch" --name "$name" --privileged --cgroupns=private \
@@ -78,9 +79,8 @@ expect 0 "Agent:          running" "root runs status" -- ctr meteorcli status
 # cleanup at the latest.
 holders=()
 for i in 1 2 3 4; do
-	docker exec "$name" setpriv --reuid=carol --regid=carol --init-groups timeout 30 sh -c \
-		'while :; do sleep 6 | timeout 6 nc -U /run/meteorcli/agent.sock; echo "nc exited $?"; done' \
-		>"$ctx/holder-$i.log" 2>&1 &
+	docker exec "$name" setpriv --reuid=carol --regid=carol --init-groups \
+		/usr/local/bin/holdconn /run/meteorcli/agent.sock 30 >"$ctx/holder-$i.log" 2>&1 &
 	holders+=($!)
 done
 carol_refused() {
