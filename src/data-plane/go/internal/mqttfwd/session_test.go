@@ -93,10 +93,21 @@ type forwarder struct {
 
 func startForwarder(t *testing.T, broker, cpURL string) *forwarder {
 	t.Helper()
-	cfg := Config{BrokerURL: broker, ClientID: fmt.Sprintf("fwd-test-%d", time.Now().UnixNano()), SharedGroup: "fwd-test",
+	// A group of its own: forwarders of earlier tests keep their sessions (and
+	// group membership) after they stop, as they do in production.
+	return startForwarderAs(t, broker, cpURL, fmt.Sprintf("fwd-test-%d", time.Now().UnixNano()))
+}
+
+func startForwarderAs(t *testing.T, broker, cpURL, id string) *forwarder {
+	t.Helper()
+	cfg := Config{BrokerURL: broker, ClientID: id, SharedGroup: id,
 		Workers: 16, QueueSize: 1024, BatchSize: 32, MaxAttempts: 10, SessionExpiry: time.Minute, DrainTimeout: 10 * time.Second}
 	m := NewMetrics(prometheus.NewRegistry())
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var w io.Writer = io.Discard
+	if os.Getenv("MQTTFWD_TEST_LOG") != "" {
+		w = os.Stderr
+	}
+	log := slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	workCtx, stopWork := context.WithCancel(context.Background())
 	pipe := NewPipeline(cfg.Workers, cfg.QueueSize, cfg.BatchSize, cfg.MaxAttempts,
 		NewIngestClient(cpURL, "tok", cfg.Workers, 5*time.Second), m, log)
@@ -156,30 +167,28 @@ func TestBrokerBurstLosesNothing(t *testing.T) {
 
 	rate, seconds, devices := envInt("MQTTFWD_BURST_RATE", 1000), envInt("MQTTFWD_BURST_SECONDS", 5), 100
 	total := rate * seconds
-	// Publish in 10 ms ticks; QoS 1 publishes run in parallel so the device side keeps the rate.
+	// One publisher per device sends that device's messages in sequence (each
+	// waits for its PUBACK), so the broker sees them in order; message n is due
+	// at start + n/rate, which paces the total to rate at any positive rate.
 	var wg sync.WaitGroup
 	var failed atomic.Int64
 	start := time.Now()
-	tick := time.NewTicker(10 * time.Millisecond)
-	perTick := rate / 100
-	sent := 0
-	for sent < total {
-		<-tick.C
-		for i := 0; i < perTick && sent < total; i, sent = i+1, sent+1 {
-			n := sent
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				topic := fmt.Sprintf("devices/dev%03d/metrics", n%devices)
+	for d := range devices {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			topic := fmt.Sprintf("devices/dev%03d/metrics", d)
+			for n := d; n < total; n += devices {
+				time.Sleep(time.Until(start.Add(time.Duration(n) * time.Second / time.Duration(rate))))
 				pctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				if _, err := pub.Publish(pctx, &paho.Publish{Topic: topic, QoS: 1, Payload: []byte(strconv.Itoa(n))}); err != nil {
+				_, err := pub.Publish(pctx, &paho.Publish{Topic: topic, QoS: 1, Payload: []byte(strconv.Itoa(n))})
+				cancel()
+				if err != nil {
 					failed.Add(1)
 				}
-			}()
-		}
+			}
+		}()
 	}
-	tick.Stop()
 	wg.Wait()
 	pubDur := time.Since(start)
 	if failed.Load() > 0 {
@@ -252,4 +261,88 @@ func TestBrokerWatchAndPublish(t *testing.T) {
 	if v := testutil.ToFloat64(fwd.metrics.MQTTConnected); v != 1 {
 		t.Fatalf("mqtt_connected = %v", v)
 	}
+}
+
+func TestBrokerReplaysRetainedStatus(t *testing.T) {
+	broker := brokerURL(t)
+	cp := &controlPlane{got: map[string][]string{}}
+	srv := httptest.NewServer(cp)
+	defer srv.Close()
+	// A device went offline (retained) before the forwarder started.
+	pub := devicePublisher(t, broker)
+	topic := fmt.Sprintf("devices/retained-%d/status", time.Now().UnixNano())
+	if _, err := pub.Publish(context.Background(), &paho.Publish{Topic: topic, QoS: 1, Retain: true, Payload: []byte(`{"online":false}`)}); err != nil {
+		t.Fatal(err)
+	}
+	defer pub.Publish(context.Background(), &paho.Publish{Topic: topic, QoS: 1, Retain: true}) // clear it
+
+	fwd := startForwarder(t, broker, srv.URL)
+	defer fwd.stop()
+	waitFor(t, func() bool { return cp.count(topic) == 1 })
+	// Once the replay window closes, a live status reaches the control plane once.
+	waitFor(t, func() bool {
+		return time.Since(time.Unix(0, fwd.sess.lastRetained.Load())) > retainedQuiet+500*time.Millisecond
+	})
+	if _, err := pub.Publish(context.Background(), &paho.Publish{Topic: topic, QoS: 1, Payload: []byte(`{"online":true}`)}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for cp.count(topic) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := cp.count(topic); n != 2 {
+		cp.mu.Lock()
+		defer cp.mu.Unlock()
+		t.Fatalf("status forwarded %d times, want 2 (retained once, live once): %q", n, cp.got[topic])
+	}
+}
+
+func TestBrokerConcurrentWatchUnwatchEndsConsistent(t *testing.T) {
+	broker := brokerURL(t)
+	cp := &controlPlane{got: map[string][]string{}}
+	srv := httptest.NewServer(cp)
+	defer srv.Close()
+	fwd := startForwarder(t, broker, srv.URL)
+	defer fwd.stop()
+	ctx := context.Background()
+
+	// Many watch/unwatch pairs at once, plus one watch that stays.
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fwd.sess.Watch(ctx, "lab/race")
+			fwd.sess.Unwatch(ctx, "lab/race")
+		}()
+	}
+	fwd.sess.Watch(ctx, "lab/race")
+	wg.Wait()
+	if err := fwd.sess.Publish(ctx, "lab/race", "x", 1, false); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return cp.count("lab/race") == 1 }) // the remaining watch is subscribed
+}
+
+func TestBrokerKeepsBacklogAcrossRestart(t *testing.T) {
+	broker := brokerURL(t)
+	cp := &controlPlane{got: map[string][]string{}}
+	srv := httptest.NewServer(cp)
+	defer srv.Close()
+	id := fmt.Sprintf("fwd-restart-%d", time.Now().UnixNano())
+	first := startForwarderAs(t, broker, srv.URL, id)
+	first.stop()
+
+	// Published while no forwarder runs: the stopped session keeps them.
+	pub := devicePublisher(t, broker)
+	const n = 200
+	for i := range n {
+		if _, err := pub.Publish(context.Background(), &paho.Publish{Topic: "devices/restart/metrics", QoS: 1, Payload: []byte(strconv.Itoa(i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := startForwarderAs(t, broker, srv.URL, id) // same client ID
+	defer second.stop()
+	waitFor(t, func() bool { return cp.count("devices/restart/metrics") == n })
 }

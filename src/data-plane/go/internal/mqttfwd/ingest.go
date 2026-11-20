@@ -69,8 +69,9 @@ func (c *IngestClient) Forward(ctx context.Context, topic string, payload []byte
 	return nil
 }
 
-// decodeUTF8 matches Python's payload.decode("utf-8", errors="replace"): every
-// byte that is not part of valid UTF-8 becomes U+FFFD.
+// decodeUTF8 matches Python's payload.decode("utf-8", errors="replace"): each
+// maximal invalid subpart (a lead byte plus the continuation bytes that could
+// still have completed it, Unicode 3.9 table 3-7) becomes one U+FFFD.
 func decodeUTF8(p []byte) string {
 	if utf8.Valid(p) {
 		return string(p)
@@ -79,10 +80,44 @@ func decodeUTF8(p []byte) string {
 	b.Grow(len(p) + 8)
 	for len(p) > 0 {
 		r, size := utf8.DecodeRune(p)
-		b.WriteRune(r) // RuneError (U+FFFD) for an invalid byte, size 1
+		if r == utf8.RuneError && size == 1 {
+			size = invalidSubpart(p)
+		}
+		b.WriteRune(r)
 		p = p[size:]
 	}
 	return b.String()
+}
+
+// invalidSubpart is the length of the ill-formed sequence at the start of p:
+// its lead byte and the continuation bytes that were still allowed after it.
+func invalidSubpart(p []byte) int {
+	need, lo, hi := 0, byte(0x80), byte(0xBF) // continuation bytes after the lead; range of the first one
+	switch b := p[0]; {
+	case b >= 0xC2 && b <= 0xDF:
+		need = 1
+	case b == 0xE0:
+		need, lo = 2, 0xA0
+	case b == 0xED:
+		need, hi = 2, 0x9F
+	case b >= 0xE1 && b <= 0xEF:
+		need = 2
+	case b == 0xF0:
+		need, lo = 3, 0x90
+	case b == 0xF4:
+		need, hi = 3, 0x8F
+	case b >= 0xF1 && b <= 0xF3:
+		need = 3
+	}
+	n := 1
+	for i := 0; i < need && n < len(p); i++ {
+		if c := p[n]; c < lo || c > hi {
+			break
+		}
+		n++
+		lo, hi = 0x80, 0xBF
+	}
+	return n
 }
 
 // resultLabel is the "result" label of meteorcloud_dataplane_ingest_forward_total.

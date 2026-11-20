@@ -10,16 +10,16 @@ It is one binary in the data API image (`meteorcloud/data-api`, `ghcr.io/meteor-
 ## How a message travels
 
 ```text
-device ──QoS 1──► broker ──$share/meteorcloud-mqtt-forwarder/devices/+/...──► forwarder replica
+device ──QoS 1──► broker ──$share/meteorcloud-mqtt-forwarder/devices/+/...──► forwarder
                                                                              │
                      shard = hash(device id) ─► bounded queue ─► worker ─────┤ POST /internal/mqtt/ingest
                                                                              │ (2xx) ─► MQTT PUBACK
 ```
 
-1. **Shared subscription.** Every replica joins the group `MQTT_FORWARDER_SHARED_GROUP`; the broker gives each message to one of them. Add replicas for throughput or availability.
-2. **Per-device order.** A message goes to the shard of its device (`devices/<id>/...`). One worker drains each shard in order, so a device's `status` changes (online, offline) are applied in the order they arrived, while different devices are forwarded in parallel.
+1. **Shared subscription.** The forwarder subscribes in the group `MQTT_FORWARDER_SHARED_GROUP`. Run **one** forwarder (see [One forwarder](#one-forwarder)).
+2. **Per-device order.** A message goes to the shard of its device (`devices/<id>/...`). One worker drains each shard in order, so a device's `status` changes (online, offline) are applied in the order they arrived, while different devices are forwarded in parallel. This holds inside one forwarder process.
 3. **Small batches.** A worker takes up to `MQTT_FORWARDER_BATCH_SIZE` queued messages at once and sends them one after another over a kept-alive connection. (The ingest endpoint takes one message per request.)
-4. **Acknowledged after the control plane.** The MQTT acknowledgement goes to the broker only after the control plane answered 2xx, or the message was given up on. Until then the broker counts it as in flight.
+4. **Acknowledged when done.** The MQTT acknowledgement goes to the broker only after the control plane answered 2xx, or the forwarder deliberately gave up on the message (see Failures). Until then the broker counts it as in flight.
 5. **Backpressure, not loss.** `MQTT_FORWARDER_QUEUE_SIZE` is both the in-memory bound and the MQTT Receive Maximum. When the control plane is slow, the queue fills, the broker stops sending, and new messages wait in the broker. Device publishes are still acknowledged by the broker. Size the broker queue for the backlog you want to survive (Mosquitto `max_queued_messages`, see below).
 
 ### Failures
@@ -35,9 +35,26 @@ Dropped messages are logged (topic only, never the payload) and counted in `mete
 
 Delivery is **at least once**. After a forwarder crash or a broker reconnect, messages that were not acknowledged come back from the broker and may reach the control plane twice. Status and metrics are last-value updates; command results are matched by command ID.
 
-### Shutdown
+### Shutdown and restart
 
-On SIGTERM the forwarder leaves the shared group (the broker sends new messages to other replicas), forwards what is queued for up to `MQTT_FORWARDER_DRAIN_TIMEOUT`, then disconnects. Anything left is not acknowledged and the broker sends it again. Compose gives it `stop_grace_period: 30s`, Helm `terminationGracePeriodSeconds: 40`.
+On SIGTERM the forwarder forwards what it already received for up to `MQTT_FORWARDER_DRAIN_TIMEOUT`, then disconnects **without leaving the shared group**. The broker keeps its session (`MQTT_FORWARDER_SESSION_EXPIRY`, 5 min): the subscriptions, the messages not yet acknowledged, and those devices publish while it restarts. The next forwarder with the same `MQTT_FORWARDER_CLIENT_ID` gets them all. Leaving the group would make the broker discard them. (The Python gateway used a clean session and lost what was published while it restarted.) Compose gives it `stop_grace_period: 30s`, Helm `terminationGracePeriodSeconds: 40`.
+
+A forwarder that stays down longer than the session expiry loses the messages its session held.
+
+### Retained device status
+
+MQTT 5 sends no retained messages on a shared subscription, but the agent publishes its status (and its last will) retained, and the Python gateway received every device's retained status on connect. So after each connect the forwarder also subscribes plainly to `devices/+/status`, forwards the retained messages, and removes that subscription once none arrived for 2 s (at most 60 s). A live status published in that window reaches the control plane twice, one copy right after the other.
+
+## One forwarder
+
+Run one forwarder per installation, and do not overlap an old and a new one during an upgrade. Compose replaces the container (stop, then start), Helm uses one replica with `strategy: Recreate`, and the default client ID is fixed (`meteorcloud-mqtt-forwarder`), so a restart resumes the same broker session.
+
+Why not several:
+
+- **Order.** The broker spreads a shared group's messages over its members message by message. Two forwarders can each hold one of a device's messages; if one retries, the later message can reach the control plane first, and the control plane keeps the stale status. Order across forwarders would need device-affine routing or a control plane that rejects older status. Neither exists yet.
+- **Orphaned sessions.** The broker keeps dispatching shared messages to a member's session while it is offline. A forwarder that goes away for good (a scale-down, or a new client ID) keeps collecting its share until the session expires, then those messages are lost.
+
+The shared subscription still matters with one forwarder: it is what lets a future version spread the load once those two points are solved.
 
 ## Settings
 
@@ -61,8 +78,8 @@ New settings:
 | Variable | Default | |
 | --- | --- | --- |
 | `MQTT_FORWARDER_BROKER_URL` | `mqtts://HOST:PORT` | Overrides host and port (`mqtt://` for a plain listener) |
-| `MQTT_FORWARDER_CLIENT_ID` | `meteorcloud-mqtt-forwarder-<hostname>` | Stable per replica, so the broker session survives a restart |
-| `MQTT_FORWARDER_SHARED_GROUP` | `meteorcloud-mqtt-forwarder` | Empty: plain subscription (one replica only) |
+| `MQTT_FORWARDER_CLIENT_ID` | `meteorcloud-mqtt-forwarder` | Keep it the same across restarts, so the forwarder resumes its broker session |
+| `MQTT_FORWARDER_SHARED_GROUP` | `meteorcloud-mqtt-forwarder` | Set to an empty value for a plain subscription |
 | `MQTT_FORWARDER_WORKERS` | `16` | Shards, and parallel requests to the control plane |
 | `MQTT_FORWARDER_QUEUE_SIZE` | `4096` | Messages held in memory; also the MQTT Receive Maximum (max 65535) |
 | `MQTT_FORWARDER_BATCH_SIZE` | `32` | Messages a worker takes at once |
@@ -71,7 +88,7 @@ New settings:
 | `MQTT_FORWARDER_SESSION_EXPIRY` | `5m` | Broker keeps the session (and unacknowledged messages) this long |
 | `MQTT_FORWARDER_DRAIN_TIMEOUT` | `20s` | Shutdown wait for queued messages |
 
-Helm: `dataPlane.forwarder` (keys in camel case, e.g. `queueSize: 8192`) and `dataPlane.replicas`.
+Helm: `dataPlane.forwarder` (keys in camel case, e.g. `queueSize: 8192`).
 
 ### Broker queue
 
@@ -100,7 +117,7 @@ A queue that stays near capacity with `forward_retries_total` rising means the c
 
 ## Watched topics
 
-`POST /v1/subscriptions` (the console's live MQTT view) subscribes the replica that received it to the topic filter, outside the shared group, and forwards those messages too. Calls are reference-counted per topic, as before. With several replicas, the matching unwatch may land on another replica and the subscription stays until that replica restarts. The only cost is duplicate messages to the control plane. Keep `dataPlane.replicas: 1` if that matters to you.
+`POST /v1/subscriptions` (the console's live MQTT view) subscribes the forwarder to the topic filter, outside the shared group, and forwards those messages too. Calls are reference-counted per topic, as before, and subscription changes are serialized so the broker always ends up with exactly the watched topics. Watches are process state: they are removed on shutdown, and the control plane opens them again with its next live view.
 
 ## Fallback to the Python gateway (one release)
 

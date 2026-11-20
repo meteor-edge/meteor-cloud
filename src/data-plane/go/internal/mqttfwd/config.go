@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"meteorcloud/dataplane/internal/natsjs"
@@ -46,8 +48,11 @@ type Config struct {
 	// BrokerURL overrides host and port (mqtt:// or mqtts://). Empty means
 	// mqtts://BrokerHost:BrokerPort, which is what the Python service always used.
 	BrokerURL string
-	// ClientID must be stable per replica so the broker keeps its session (and
-	// the messages not yet acknowledged) across a restart.
+	// ClientID must stay the same across restarts: the broker keeps the
+	// session under it (subscriptions, unacknowledged messages, and messages
+	// published while the forwarder restarts) and keeps dispatching shared
+	// messages to it while it is offline. A new ID on every start would leave
+	// the old session collecting its share until it expires, and lose it.
 	ClientID string
 	// SharedGroup spreads device messages over replicas ($share/<group>/...).
 	// Empty means a plain subscription: run one replica only.
@@ -77,7 +82,7 @@ type Config struct {
 }
 
 // LoadConfig reads the configuration from the environment.
-func LoadConfig(host string) (Config, error) {
+func LoadConfig() (Config, error) {
 	e := &natsjs.Env{}
 	c := Config{
 		ControlPlaneURL: e.String("CONTROL_PLANE_URL", "http://127.0.0.1:8000"),
@@ -95,8 +100,8 @@ func LoadConfig(host string) (Config, error) {
 		LogLevel:        e.String("LOG_LEVEL", "info"),
 
 		BrokerURL:     e.String("MQTT_FORWARDER_BROKER_URL", ""),
-		ClientID:      e.String("MQTT_FORWARDER_CLIENT_ID", "meteorcloud-mqtt-forwarder-"+host),
-		SharedGroup:   e.String("MQTT_FORWARDER_SHARED_GROUP", "meteorcloud-mqtt-forwarder"),
+		ClientID:      e.String("MQTT_FORWARDER_CLIENT_ID", "meteorcloud-mqtt-forwarder"),
+		SharedGroup:   sharedGroup(),
 		Workers:       e.Int("MQTT_FORWARDER_WORKERS", 16),
 		QueueSize:     e.Int("MQTT_FORWARDER_QUEUE_SIZE", 4096),
 		BatchSize:     e.Int("MQTT_FORWARDER_BATCH_SIZE", 32),
@@ -133,19 +138,32 @@ func (c Config) validate() error {
 		return errors.New("MQTT_FORWARDER_MAX_ATTEMPTS must be at least 1")
 	case c.IngestTimeout <= 0:
 		return errors.New("MQTT_FORWARDER_INGEST_TIMEOUT must be positive")
+	case c.SessionExpiry < 0 || c.SessionExpiry > 24*time.Hour:
+		return errors.New("MQTT_FORWARDER_SESSION_EXPIRY must be between 0 and 24h")
 	}
 	return nil
 }
 
-// boolEnv reads a pydantic-style boolean, so values that worked for the Python
-// service (true/false, 1/0, yes/no, on/off) keep working.
+// sharedGroup reads MQTT_FORWARDER_SHARED_GROUP. Unset means the default
+// group; set to an empty value means a plain subscription.
+func sharedGroup() string {
+	if v, ok := os.LookupEnv("MQTT_FORWARDER_SHARED_GROUP"); ok {
+		return strings.TrimSpace(v)
+	}
+	return "meteorcloud-mqtt-forwarder"
+}
+
+// boolEnv reads a boolean the way pydantic does (case-insensitive 1/0,
+// true/false, t/f, yes/no, y/n, on/off), so values that worked for the Python
+// service keep working.
 func boolEnv(e *natsjs.Env, key string, def bool) bool {
-	switch v := e.String(key, ""); v {
+	v := e.String(key, "")
+	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "":
 		return def
-	case "1", "true", "True", "TRUE", "yes", "Yes", "YES", "on", "On", "ON":
+	case "1", "true", "t", "yes", "y", "on":
 		return true
-	case "0", "false", "False", "FALSE", "no", "No", "NO", "off", "Off", "OFF":
+	case "0", "false", "f", "no", "n", "off":
 		return false
 	default:
 		if e.Err == nil {

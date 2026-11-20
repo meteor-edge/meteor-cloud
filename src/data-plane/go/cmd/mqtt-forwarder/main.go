@@ -31,8 +31,7 @@ func main() {
 }
 
 func run() error {
-	host, _ := os.Hostname()
-	cfg, err := mqttfwd.LoadConfig(host)
+	cfg, err := mqttfwd.LoadConfig()
 	if err != nil {
 		return err
 	}

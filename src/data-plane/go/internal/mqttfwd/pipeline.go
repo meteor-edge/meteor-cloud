@@ -39,7 +39,6 @@ type Pipeline struct {
 	log         *slog.Logger
 
 	busy    atomic.Int64
-	depth   atomic.Int64
 	wg      sync.WaitGroup
 	stopped chan struct{} // closed when the workers stop, so Offer never blocks forever
 
@@ -82,7 +81,7 @@ func (p *Pipeline) Start(ctx context.Context) {
 func (p *Pipeline) Wait() { p.wg.Wait() }
 
 // Idle reports whether nothing is queued or being forwarded.
-func (p *Pipeline) Idle() bool { return p.depth.Load() == 0 && p.busy.Load() == 0 }
+func (p *Pipeline) Idle() bool { return p.metrics.queued.Load() == 0 && p.busy.Load() == 0 }
 
 // Offer queues m on its device's shard. With wait it blocks until there is
 // room (QoS 1/2: the broker's Receive Maximum keeps that short) or the
@@ -96,7 +95,7 @@ func (p *Pipeline) Offer(m Message, wait bool) bool {
 	default:
 	}
 	// Count first, so Idle never sees a queued message as nothing to do.
-	p.metrics.QueueDepth.Set(float64(p.depth.Add(1)))
+	p.metrics.queued.Add(1)
 	if wait {
 		select {
 		case ch <- m:
@@ -111,7 +110,7 @@ func (p *Pipeline) Offer(m Message, wait bool) bool {
 			p.metrics.Dropped.WithLabelValues("queue_full").Inc()
 		}
 	}
-	p.metrics.QueueDepth.Set(float64(p.depth.Add(-1)))
+	p.metrics.queued.Add(-1)
 	return false
 }
 
@@ -151,7 +150,7 @@ func (p *Pipeline) work(ctx context.Context, ch chan Message) {
 			}
 		}
 		p.busy.Add(1)
-		p.metrics.QueueDepth.Set(float64(p.depth.Add(-int64(len(batch)))))
+		p.metrics.queued.Add(-int64(len(batch)))
 		p.metrics.BatchSize.Observe(float64(len(batch)))
 		for _, m := range batch {
 			if !p.deliver(ctx, m) {

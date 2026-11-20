@@ -115,7 +115,7 @@ PostgreSQL is the control-plane database. Vendor systems (MQTT broker, Redis, fu
 
 ## Data plane
 
-The **MQTT forwarder** (Go, `src/data-plane/go/cmd/mqtt-forwarder`, Compose service `data-plane`) owns the platform MQTT session. It takes the device topics with an MQTT shared subscription, so replicas split the load, and forwards each payload to `POST {CONTROL_PLANE_URL}/internal/mqtt/ingest`. It acknowledges a message to the broker only after the control plane accepted it, and keeps each device's messages in order. It also serves the publish/watch API the control plane calls. Contract: [`contracts/mqtt-http.md`](../contracts/mqtt-http.md). Design and settings: [docs/data-plane/mqtt-forwarder.md](data-plane/mqtt-forwarder.md). The previous Python gateway (`src/data-plane/data_plane`) stays for one release behind a switch.
+The **MQTT forwarder** (Go, `src/data-plane/go/cmd/mqtt-forwarder`, Compose service `data-plane`) owns the platform MQTT session. It takes the device topics with an MQTT shared subscription and forwards each payload to `POST {CONTROL_PLANE_URL}/internal/mqtt/ingest`. It acknowledges a message to the broker only once it is done with it: the control plane accepted it, or the forwarder deliberately dropped it (a 4xx, or a 5xx after its retries). Each device's messages stay in order. One forwarder runs per installation; it resumes its broker session after a restart. It also serves the publish/watch API the control plane calls. Contract: [`contracts/mqtt-http.md`](../contracts/mqtt-http.md). Design and settings: [docs/data-plane/mqtt-forwarder.md](data-plane/mqtt-forwarder.md). The previous Python gateway (`src/data-plane/data_plane`) stays for one release behind a switch.
 
 ### Application data plane (Go)
 

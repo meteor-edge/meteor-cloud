@@ -64,6 +64,15 @@ func TestDecodeUTF8(t *testing.T) {
 		{[]byte("héllo"), "héllo"},
 		{[]byte{'a', 0xff, 'b'}, "a�b"},
 		{[]byte{0xff, 0xfe}, "��"},
+		// Expected values are what Python 3.13 bytes.decode("utf-8", "replace") returns.
+		{[]byte{0xe2, 0x82}, "\uFFFD"},
+		{[]byte{0xe2, 0x82, 'x'}, "\uFFFDx"},
+		{[]byte{0xf0, 0x9f, 0x98}, "\uFFFD"},
+		{[]byte{0xf1, 0x80, 0x80}, "\uFFFD"},
+		{[]byte{0xed, 0xa0, 0x80}, "\uFFFD\uFFFD\uFFFD"},
+		{[]byte{0xe0, 0x80, 0x80}, "\uFFFD\uFFFD\uFFFD"},
+		{[]byte{0xf4, 0x90, 0x80, 0x80}, "\uFFFD\uFFFD\uFFFD\uFFFD"},
+		{[]byte{0xc0, 0xaf}, "\uFFFD\uFFFD"},
 		{nil, ""},
 	} {
 		if got := decodeUTF8(tc.in); got != tc.want {

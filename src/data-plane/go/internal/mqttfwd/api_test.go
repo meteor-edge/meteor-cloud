@@ -73,6 +73,9 @@ func TestAPI(t *testing.T) {
 		{"publish bad qos", "POST", "/v1/publish", `{"topic":"a","payload":"b","qos":3}`, true, 422, ""},
 		{"publish missing payload", "POST", "/v1/publish", `{"topic":"a"}`, true, 422, ""},
 		{"publish not json", "POST", "/v1/publish", `nope`, true, 422, ""},
+		{"publish trailing data", "POST", "/v1/publish", `{"topic":"a","payload":"b"} {"x":1}`, true, 422, ""},
+		{"publish wrong type", "POST", "/v1/publish", `{"topic":"a","payload":1}`, true, 422, ""},
+		{"unclean path redirects", "POST", "/nonce/../v1/publish", `{}`, true, 307, ""},
 		{"watch", "POST", "/v1/subscriptions", `{"topic":"lab/temp"}`, true, 200, `{"ok":true}`},
 		{"unwatch", "POST", "/v1/subscriptions/unwatch", `{"topic":"lab/temp"}`, true, 200, `{"ok":true}`},
 		{"watch needs token", "POST", "/v1/subscriptions", `{"topic":"x"}`, false, 401, ""},
@@ -98,6 +101,9 @@ func TestAPI(t *testing.T) {
 	}
 	if v := testutil.ToFloat64(a.Metrics.HTTPRequests.WithLabelValues("POST", "/v1/publish", "200")); v != 2 {
 		t.Fatalf("http_requests_total publish 200 = %v", v)
+	}
+	if v := testutil.ToFloat64(a.Metrics.HTTPRequests.WithLabelValues("POST", "/v1/publish", "307")); v != 1 {
+		t.Fatalf("redirect must be labelled with the route, got %v", v)
 	}
 	if v := testutil.ToFloat64(a.Metrics.HTTPRequests.WithLabelValues("GET", "<unmatched>", "405")); v != 1 {
 		t.Fatalf("unmatched = %v", v)

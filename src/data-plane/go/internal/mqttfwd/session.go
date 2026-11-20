@@ -7,10 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
-	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eclipse/paho.golang/autopaho"
@@ -31,11 +32,22 @@ type Session struct {
 	metrics *Metrics
 	log     *slog.Logger
 
+	// opMu serializes every change to the broker's subscriptions (Watch,
+	// Unwatch, and the subscribe after a connect), so the broker always ends up
+	// with exactly the topics in watches.
+	opMu sync.Mutex
+
 	mu      sync.Mutex
 	cm      *autopaho.ConnectionManager
 	ready   chan struct{} // closed while connected and subscribed; replaced on disconnect
 	up      bool
 	watches map[string]int
+
+	// connGen changes whenever a connection ends, so work started for one
+	// connection (subscribe retries, retained replay) stops with it.
+	connGen atomic.Uint64
+	// lastRetained is when the last retained message arrived (Unix ns).
+	lastRetained atomic.Int64
 }
 
 // NewSession prepares a session; call Run.
@@ -63,6 +75,9 @@ func (s *Session) Ready() bool {
 }
 
 func (s *Session) setUp(up bool) {
+	if !up {
+		s.connGen.Add(1)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if up == s.up {
@@ -114,73 +129,6 @@ func (s *Session) Publish(ctx context.Context, topic, payload string, qos byte, 
 	return nil
 }
 
-// Watch adds a reference to an extra topic filter (the console's live MQTT
-// view) and subscribes on the first one. Messages on it are forwarded like the
-// device topics. The subscription belongs to this replica only.
-func (s *Session) Watch(ctx context.Context, topic string) error {
-	s.mu.Lock()
-	cm, up := s.cm, s.up
-	if cm == nil {
-		s.mu.Unlock()
-		return ErrNotRunning
-	}
-	s.watches[topic]++
-	first := s.watches[topic] == 1
-	s.mu.Unlock()
-	if !first || slices.Contains(DefaultTopics, topic) || !up {
-		return nil // not connected: subscribed in OnConnectionUp
-	}
-	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if _, err := cm.Subscribe(sctx, &paho.Subscribe{Subscriptions: []paho.SubscribeOptions{{Topic: topic, QoS: 1}}}); err != nil {
-		// Same as the Python service: logged, not returned; a reconnect retries it.
-		s.log.Warn("MQTT platform subscribe request failed", "topic", topic, "error", err.Error())
-	}
-	return nil
-}
-
-// Unwatch drops a reference and unsubscribes on the last one.
-func (s *Session) Unwatch(ctx context.Context, topic string) error {
-	s.mu.Lock()
-	cm, up := s.cm, s.up
-	if cm == nil {
-		s.mu.Unlock()
-		return ErrNotRunning
-	}
-	last := s.watches[topic] <= 1
-	if last {
-		delete(s.watches, topic)
-	} else {
-		s.watches[topic]--
-	}
-	s.mu.Unlock()
-	if !last || slices.Contains(DefaultTopics, topic) || !up {
-		return nil
-	}
-	uctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if _, err := cm.Unsubscribe(uctx, &paho.Unsubscribe{Topics: []string{topic}}); err != nil {
-		s.log.Warn("MQTT platform unsubscribe failed", "topic", topic, "error", err.Error())
-	}
-	return nil
-}
-
-// subscriptions is everything to subscribe to after (re)connecting.
-func (s *Session) subscriptions() []paho.SubscribeOptions {
-	var subs []paho.SubscribeOptions
-	for _, t := range s.sharedTopics() {
-		subs = append(subs, paho.SubscribeOptions{Topic: t, QoS: 1})
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for t := range s.watches {
-		if !slices.Contains(DefaultTopics, t) {
-			subs = append(subs, paho.SubscribeOptions{Topic: t, QoS: 1})
-		}
-	}
-	return subs
-}
-
 func (s *Session) tlsConfig(u *url.URL) (*tls.Config, error) {
 	if u.Scheme != "mqtts" && u.Scheme != "tls" && u.Scheme != "ssl" {
 		return nil, nil
@@ -203,6 +151,9 @@ func (s *Session) tlsConfig(u *url.URL) (*tls.Config, error) {
 // onPublish queues a received message. It runs on paho's router goroutine.
 func (s *Session) onPublish(pr paho.PublishReceived) (bool, error) {
 	pub := pr.Packet
+	if pub.Retain {
+		s.lastRetained.Store(time.Now().UnixNano())
+	}
 	s.metrics.MessagesReceived.WithLabelValues(messageKind(pub.Topic)).Inc()
 	m := Message{Topic: pub.Topic, Payload: pub.Payload, Received: time.Now()}
 	if pub.QoS > 0 {
@@ -219,10 +170,57 @@ func (s *Session) onPublish(pr paho.PublishReceived) (bool, error) {
 	return true, nil
 }
 
-// Run connects (retrying in the background) until ctx ends, then unsubscribes,
-// lets the pipeline finish what is queued (up to DrainTimeout, via drain) and
-// disconnects. Messages not forwarded by then stay unacknowledged and the
-// broker sends them again, to this replica after a restart or to another one.
+// onConnectionUp subscribes after every (re)connect and only then marks the
+// session ready. It returns when subscribed, or when this connection or the
+// session ends: paho cannot reconnect while this callback runs.
+func (s *Session) onConnectionUp(connCtx context.Context, cm *autopaho.ConnectionManager) {
+	gen := s.connGen.Load()
+	for attempt := 1; ; attempt++ {
+		err := s.subscribeAll(connCtx, cm)
+		if err == nil {
+			break
+		}
+		if connCtx.Err() != nil || s.connGen.Load() != gen {
+			return
+		}
+		s.log.Error("MQTT subscribe failed; retrying", "attempt", attempt, "error", err.Error())
+		select {
+		case <-connCtx.Done():
+			return
+		case <-time.After(min(time.Duration(attempt)*time.Second, 15*time.Second)):
+		}
+		if s.connGen.Load() != gen {
+			return // connection lost while waiting; the next connect starts over
+		}
+	}
+	s.log.Info("MQTT platform client connected", "topics", s.sharedTopics())
+	if s.cfg.SharedGroup != "" {
+		go s.replayRetained(connCtx, cm, gen) // ends with the connection
+	}
+}
+
+// subscribeAll subscribes to the device topics and the watched topics, and
+// marks the session ready, without a Watch or Unwatch in between.
+func (s *Session) subscribeAll(ctx context.Context, cm *autopaho.ConnectionManager) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, err := cm.Subscribe(sctx, &paho.Subscribe{Subscriptions: s.subscriptions()}); err != nil {
+		return err
+	}
+	s.setUp(true)
+	return nil
+}
+
+// Run connects (retrying in the background) until ctx ends, lets the pipeline
+// finish what is queued (up to DrainTimeout, via drain), and disconnects.
+//
+// It does not leave the shared group: the broker keeps this client's session
+// (SessionExpiry), with the subscriptions, the messages not yet acknowledged
+// and those published while it restarts, and hands them over when the same
+// client ID connects again. Leaving the group would make the broker discard
+// them when this is the only member.
 func (s *Session) Run(ctx context.Context, drain func(time.Duration)) error {
 	u, err := url.Parse(s.cfg.BrokerURL)
 	if err != nil || u.Host == "" {
@@ -237,8 +235,15 @@ func (s *Session) Run(ctx context.Context, drain func(time.Duration)) error {
 	} else if u.Scheme == "mqtt" {
 		u.Scheme = "tcp"
 	}
-	expiry := uint32(s.cfg.SessionExpiry / time.Second)
+	if s.cfg.QueueSize < 1 || s.cfg.QueueSize > math.MaxUint16 {
+		return fmt.Errorf("queue size %d is outside 1..%d", s.cfg.QueueSize, math.MaxUint16)
+	}
 	inflight := uint16(s.cfg.QueueSize)
+	expirySeconds := int64(s.cfg.SessionExpiry / time.Second)
+	if expirySeconds < 0 || expirySeconds > math.MaxUint32 {
+		return fmt.Errorf("session expiry %v is outside 0..%ds", s.cfg.SessionExpiry, uint32(math.MaxUint32))
+	}
+	expiry := uint32(expirySeconds)
 	connCtx, stopConn := context.WithCancel(context.Background())
 	defer stopConn()
 	cm, err := autopaho.NewConnection(connCtx, autopaho.ClientConfig{
@@ -260,27 +265,7 @@ func (s *Session) Run(ctx context.Context, drain func(time.Duration)) error {
 			c.Properties.ReceiveMaximum = &inflight
 			return c, nil
 		},
-		OnConnectionUp: func(cm *autopaho.ConnectionManager, _ *paho.Connack) {
-			// Retry until subscribed: one failed Subscribe with the connection
-			// still up would never call OnConnectionUp again.
-			for attempt := 1; ; attempt++ {
-				subs := s.subscriptions()
-				sctx, cancel := context.WithTimeout(connCtx, 10*time.Second)
-				_, err := cm.Subscribe(sctx, &paho.Subscribe{Subscriptions: subs})
-				cancel()
-				if err == nil {
-					break
-				}
-				s.log.Error("MQTT subscribe failed; retrying", "attempt", attempt, "error", err.Error())
-				select {
-				case <-connCtx.Done():
-					return
-				case <-time.After(min(time.Duration(attempt)*time.Second, 15*time.Second)):
-				}
-			}
-			s.setUp(true)
-			s.log.Info("MQTT platform client connected", "topics", s.sharedTopics())
-		},
+		OnConnectionUp: func(cm *autopaho.ConnectionManager, _ *paho.Connack) { s.onConnectionUp(connCtx, cm) },
 		OnConnectError: func(err error) {
 			s.setUp(false)
 			s.log.Warn("MQTT platform client connect failed", "error", err.Error())
@@ -307,18 +292,10 @@ func (s *Session) Run(ctx context.Context, drain func(time.Duration)) error {
 	s.mu.Unlock()
 
 	<-ctx.Done()
-	s.log.Info("stopping: no new device messages, forwarding the queued ones")
-	s.setUp(false)
-	uctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	topics := s.sharedTopics()
-	for _, sub := range s.subscriptions()[len(topics):] {
-		topics = append(topics, sub.Topic) // watches too, or the kept session would hold them
-	}
-	if _, err := cm.Unsubscribe(uctx, &paho.Unsubscribe{Topics: topics}); err != nil {
-		s.log.Debug("MQTT unsubscribe failed", "error", err.Error())
-	}
-	cancel()
+	s.log.Info("stopping: forwarding the queued messages; the broker keeps the rest for this client ID")
+	s.dropWatches(cm)
 	drain(s.cfg.DrainTimeout)
+	s.setUp(false)
 	dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := cm.Disconnect(dctx); err != nil {

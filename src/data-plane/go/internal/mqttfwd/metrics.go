@@ -2,6 +2,7 @@ package mqttfwd
 
 import (
 	"strings"
+	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -17,12 +18,15 @@ type Metrics struct {
 	HTTPRequests     *prometheus.CounterVec // method, path, status
 	HTTPDuration     *prometheus.HistogramVec
 
-	QueueDepth    prometheus.Gauge
 	QueueCapacity prometheus.Gauge
 	Dropped       *prometheus.CounterVec // reason: queue_full|rejected|retries_exhausted
 	Retries       prometheus.Counter
 	BatchSize     prometheus.Histogram
 	ForwardDelay  prometheus.Histogram
+
+	// queued backs meteorcloud_dataplane_forward_queue_depth. It is read at
+	// scrape time, so concurrent updates can never publish a stale value.
+	queued atomic.Int64
 }
 
 // NewMetrics registers the forwarder metrics on reg.
@@ -41,8 +45,6 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		HTTPDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "http_request_duration_seconds",
 			Help: "HTTP request duration in seconds"}, []string{"method", "path"}),
 
-		QueueDepth: prometheus.NewGauge(prometheus.GaugeOpts{Name: "meteorcloud_dataplane_forward_queue_depth",
-			Help: "Device messages waiting to be forwarded"}),
 		QueueCapacity: prometheus.NewGauge(prometheus.GaugeOpts{Name: "meteorcloud_dataplane_forward_queue_capacity",
 			Help: "Most device messages held before the broker is slowed down"}),
 		Dropped: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "meteorcloud_dataplane_forward_dropped_total",
@@ -54,8 +56,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		ForwardDelay: prometheus.NewHistogram(prometheus.HistogramOpts{Name: "meteorcloud_dataplane_forward_delay_seconds",
 			Help: "From MQTT receive to control-plane acceptance", Buckets: prometheus.ExponentialBuckets(0.001, 2, 16)}),
 	}
+	depth := prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "meteorcloud_dataplane_forward_queue_depth",
+		Help: "Device messages waiting to be forwarded"}, func() float64 { return float64(m.queued.Load()) })
 	reg.MustRegister(m.MQTTConnected, m.MessagesReceived, m.IngestForward, m.Publish, m.HTTPRequests, m.HTTPDuration,
-		m.QueueDepth, m.QueueCapacity, m.Dropped, m.Retries, m.BatchSize, m.ForwardDelay)
+		depth, m.QueueCapacity, m.Dropped, m.Retries, m.BatchSize, m.ForwardDelay)
 	return m
 }
 

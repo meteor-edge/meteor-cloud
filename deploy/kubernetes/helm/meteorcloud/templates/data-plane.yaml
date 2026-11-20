@@ -15,18 +15,14 @@ metadata:
   labels:
     {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "data-plane") | nindent 4 }}
 spec:
-  {{- if $go }}
-  # Replicas share the device topics through an MQTT shared subscription.
-  replicas: {{ .Values.dataPlane.replicas }}
-  strategy:
-    type: RollingUpdate
-    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
-  {{- else }}
-  # One MQTT subscriber; a second replica would process every message twice.
+  # One forwarder at a time, and never two during a rollout (Recreate):
+  # per-device order holds inside one process only, and the Go forwarder
+  # resumes its broker session (fixed client ID) with the messages that
+  # arrived while it restarted. The Python gateway processes every message
+  # once per replica, so it needs one too.
   replicas: 1
   strategy:
     type: Recreate
-  {{- end }}
   selector:
     matchLabels:
       {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "data-plane") | nindent 6 }}

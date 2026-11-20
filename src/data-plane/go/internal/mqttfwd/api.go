@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -127,11 +129,18 @@ func (a *API) subscription(op func(Broker) func(context.Context, string) error) 
 	}
 }
 
-// decode reads a JSON object body. Like FastAPI, a malformed body is a 422
-// before the token is checked.
+// decode reads a body that must be exactly one JSON object. Like FastAPI, a
+// malformed body is a 422 before the token is checked.
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v); err != nil {
-		writeDetail(w, http.StatusUnprocessableEntity, "request body must be a JSON object: "+err.Error())
+	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	err := dec.Decode(v)
+	if err == nil {
+		if _, extra := dec.Token(); extra != io.EOF {
+			err = errors.New("unexpected data after the JSON object")
+		}
+	}
+	if err != nil {
+		writeDetail(w, http.StatusUnprocessableEntity, "request body must be one JSON object: "+err.Error())
 		return false
 	}
 	return true
@@ -167,7 +176,10 @@ func (a *API) instrument(mux *http.ServeMux) http.Handler {
 		}
 		path := "<unmatched>"
 		if _, pattern := mux.Handler(r); pattern != "" {
-			path = r.URL.Path // patterns here have no wildcards, so the path is the route
+			// The registered route ("POST /v1/publish" -> "/v1/publish"), never the
+			// request path: a redirect to the clean path also matches a pattern, and
+			// a request-chosen label would grow the metric without bound.
+			_, path, _ = strings.Cut(pattern, " ")
 		}
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
