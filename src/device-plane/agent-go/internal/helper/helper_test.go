@@ -170,6 +170,17 @@ func TestMatcher(t *testing.T) {
 	if got := m.lines(); len(got) != 1 || got[0] != "Ärger zzz" {
 		t.Errorf("got %q", got)
 	}
+
+	// Like the Python helper (bytes.lower()), case folding is ASCII only; a
+	// non-ASCII needle matches its exact text, even split inside a character.
+	m = newMatcher("Ärger", 5)
+	line := []byte("x ärger no\nx ÄRGER yes\n")
+	cut := bytes.Index(line, []byte("ÄRGER")) + 1 // inside the two bytes of Ä
+	_, _ = m.Write(line[:cut])
+	_, _ = m.Write(line[cut:])
+	if got := m.lines(); len(got) != 1 || got[0] != "x ÄRGER yes" {
+		t.Errorf("non-ASCII needle: %q", got)
+	}
 }
 
 func TestAuditFieldsHoldNoContent(t *testing.T) {
