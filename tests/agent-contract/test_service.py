@@ -14,6 +14,18 @@ from harness.fake_cp import Reply
 from harness.script import accepted, heartbeat, now, register_and_basics, ssh_key
 
 ARTIFACT = b"docker save tarball of demo/app:1.0 (simulated)\n"
+REGISTER = ("POST", "/api/v1/agent/register")
+
+
+def background_routes(agent, *routes: tuple[str, str]) -> list[tuple[str, str]] | None:
+    """Routes to keep in the transcript of an agent that works in the background (the Go agent).
+
+    Its modules run side by side on their own timers, so the order across routes, how often it
+    rechecks the MQTT config, and its heartbeat bodies (``capabilities.modules``, the kinds it
+    implements so far) are not those of the Python agent's single loop. The transcript keeps the
+    routes whose exchanges are fixed; every exchange is still checked against the contract.
+    """
+    return list(routes) if "background_enrollment" in agent.features else None
 
 
 @pytest.mark.requires("mqtt")
@@ -26,8 +38,11 @@ def test_heartbeat_mqtt(contract, agent, device, broker) -> None:
                     Reply(200, {**connect, "password": contract.secret("rotated_mqtt_password"), "config_version": "mqtt-v2"}))
     device.journal.append({"message": "Under-voltage detected", "priority": 4, "unit": "kernel",
                            "source": "journal", "cursor": "c1", "timestamp": now()})
+    # Subscribe first: an agent that works in the background publishes from the moment it is
+    # enrolled (its first metrics, before any app is seen, are part of the recording).
+    observer = Observer(broker, contract.device_id(device_id))
     assert agent.register(contract.plane.url, contract.secret("registration_token")) == 0
-    observer = Observer(broker, agent.device_id or device_id)
+    assert agent.device_id in (None, observer.device_id)
     ping_id = str(uuid.uuid4())
 
     def between(beat: int) -> None:
@@ -46,7 +61,8 @@ def test_heartbeat_mqtt(contract, agent, device, broker) -> None:
     retained = observer.retained("status")
     observer.stop()
     assert retained == {"status": "offline"}
-    contract.finish(observer, retained={"status": retained})
+    contract.finish(observer, retained={"status": retained},
+                    routes=background_routes(agent, REGISTER, ("POST", "/api/v1/agent/mqtt/credentials")))
 
 
 @pytest.mark.requires("actions")
@@ -72,7 +88,8 @@ def test_actions(contract, agent, device) -> None:
     assert [r["state"] for r in reports[0].request.body["results"]] == ["done"]
     unknown = reports[1].request.body["results"][-1]
     assert unknown["state"] == "failed" and unknown["error"].lower().startswith("unsupported")
-    contract.finish()
+    contract.finish(routes=background_routes(
+        agent, REGISTER, ("GET", "/api/v1/agent/actions"), ("POST", "/api/v1/agent/actions/report")))
 
 
 @pytest.mark.requires("wifi")

@@ -22,6 +22,7 @@ RUN systemd-sysusers \
  && useradd -m -G meteorcli carol \
  && useradd -m bob \
  && useradd -m -G meteor,meteorcli dave \
+ && install -d -m 0750 /etc/sudoers.d \
  && systemd-tmpfiles --create /usr/lib/tmpfiles.d/meteorcli.conf \
  && systemctl enable meteorcli.service meteorcli-helper.socket
 

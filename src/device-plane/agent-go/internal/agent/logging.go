@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync/atomic"
 )
 
 // redacted replaces every secret in logs.
@@ -36,9 +37,21 @@ func Redact(s string) string {
 	return s
 }
 
+// ErrorCounter counts the agent's ERROR log lines, for the agent_errors metric
+// (the Python agent counted its ERROR records the same way).
+type ErrorCounter struct{ n atomic.Int64 }
+
+// Take returns the count since the last Take and starts again.
+func (c *ErrorCounter) Take() int64 { return c.n.Swap(0) }
+
 // NewLogger returns the agent's logger: text lines (journald adds the time) with
 // every secret redacted, whatever the caller passes.
 func NewLogger(w io.Writer, level slog.Leveler) *slog.Logger {
+	return NewCountingLogger(w, level, nil)
+}
+
+// NewCountingLogger is NewLogger that also counts ERROR lines in errs (may be nil).
+func NewCountingLogger(w io.Writer, level slog.Leveler, errs *ErrorCounter) *slog.Logger {
 	inner := slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level: level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -48,7 +61,7 @@ func NewLogger(w io.Writer, level slog.Leveler) *slog.Logger {
 			return a
 		},
 	})
-	return slog.New(redactHandler{inner: inner})
+	return slog.New(redactHandler{inner: inner, errs: errs})
 }
 
 // redactHandler wraps a handler and redacts the message and every attribute.
@@ -57,6 +70,7 @@ func NewLogger(w io.Writer, level slog.Leveler) *slog.Logger {
 type redactHandler struct {
 	inner       slog.Handler
 	secretGroup bool
+	errs        *ErrorCounter
 }
 
 func (h redactHandler) Enabled(ctx context.Context, l slog.Level) bool {
@@ -64,6 +78,9 @@ func (h redactHandler) Enabled(ctx context.Context, l slog.Level) bool {
 }
 
 func (h redactHandler) Handle(ctx context.Context, r slog.Record) error {
+	if h.errs != nil && r.Level >= slog.LevelError {
+		h.errs.n.Add(1)
+	}
 	out := slog.NewRecord(r.Time, r.Level, Redact(r.Message), r.PC)
 	r.Attrs(func(a slog.Attr) bool {
 		out.AddAttrs(redactAttr(a, h.secretGroup))
@@ -77,11 +94,11 @@ func (h redactHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	for i, a := range attrs {
 		clean[i] = redactAttr(a, h.secretGroup)
 	}
-	return redactHandler{inner: h.inner.WithAttrs(clean), secretGroup: h.secretGroup}
+	return redactHandler{inner: h.inner.WithAttrs(clean), secretGroup: h.secretGroup, errs: h.errs}
 }
 
 func (h redactHandler) WithGroup(name string) slog.Handler {
-	return redactHandler{inner: h.inner.WithGroup(name), secretGroup: h.secretGroup || isSensitiveKey(name)}
+	return redactHandler{inner: h.inner.WithGroup(name), secretGroup: h.secretGroup || isSensitiveKey(name), errs: h.errs}
 }
 
 func isSensitiveKey(key string) bool {

@@ -33,13 +33,22 @@ type Host struct {
 	Run func(ctx context.Context, name string, args ...string) ([]byte, error)
 	// Stream executes a tool like Run but writes its stdout to w as it comes.
 	Stream func(ctx context.Context, w io.Writer, name string, args ...string) error
+	// RunInput is Run with stdin (secrets such as passwords go here, never in args).
+	RunInput func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
+	// LookupUser finds an account; it fails with errNoUser for an unknown one.
+	LookupUser func(name string) (UserInfo, error)
 	// UnitDir is where systemd.install_unit writes units.
 	UnitDir string
+	// SudoersDir is where users.add writes a sudo rule.
+	SudoersDir string
 }
 
 // SystemHost runs real tools from safePath and writes to /etc/systemd/system.
 func SystemHost() Host {
-	return Host{Run: runTool, Stream: streamTool, UnitDir: "/etc/systemd/system"}
+	return Host{
+		Run: runTool, Stream: streamTool, RunInput: runToolInput, LookupUser: lookupUser,
+		UnitDir: "/etc/systemd/system", SudoersDir: "/etc/sudoers.d",
+	}
 }
 
 // lookTool finds name in safePath only, never in the helper's own PATH.
@@ -73,6 +82,17 @@ func runTool(ctx context.Context, name string, args ...string) ([]byte, error) {
 	}
 	out := &capped{max: maxOutput}
 	cmd.Stdout, cmd.Stderr = out, out
+	err = finish(ctx, cmd.Run(), name, args, out.String())
+	return out.Bytes(), err
+}
+
+func runToolInput(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	cmd, err := command(ctx, name, args)
+	if err != nil {
+		return nil, err
+	}
+	out := &capped{max: maxOutput}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = bytes.NewReader(stdin), out, out
 	err = finish(ctx, cmd.Run(), name, args, out.String())
 	return out.Bytes(), err
 }
@@ -118,6 +138,12 @@ func Ops(h Host) map[string]localrpc.Handler {
 		"power.shutdown":       {Timeout: 30 * time.Second, Run: h.powerShutdown},
 		"logs.read":            {Timeout: 30 * time.Second, Run: h.logsRead, Audit: auditLogs},
 		"systemd.install_unit": {Timeout: 2 * time.Minute, Run: h.installUnit, Audit: auditInstallUnit},
+		"users.add":            {Timeout: time.Minute, Run: h.addUser, Audit: auditUser},
+		"users.set_password":   {Timeout: 30 * time.Second, Run: h.setPassword, Audit: auditUser},
+		"docker.ps":            {Timeout: 30 * time.Second, Run: h.dockerPS},
+		"docker.inspect":       {Timeout: 30 * time.Second, Run: h.dockerInspect},
+		"docker.stats":         {Timeout: 30 * time.Second, Run: h.dockerStats},
+		"logs.warnings":        {Timeout: 30 * time.Second, Run: h.logsWarnings},
 	}
 }
 

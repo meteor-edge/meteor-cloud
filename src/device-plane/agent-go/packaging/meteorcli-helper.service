@@ -13,11 +13,15 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 UMask=0022
 
 # Root, but only with what the operations need (units in /etc/systemd/system,
-# users, WireGuard and Wi-Fi later).
+# users and passwords, the docker CLI; WireGuard and Wi-Fi later).
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_ADMIN CAP_AUDIT_WRITE
 NoNewPrivileges=yes
 ProtectSystem=true
-ProtectHome=read-only
+# users.add creates the new user's home and ~/.ssh/authorized_keys, so /home is
+# bound in writable; /root and /run/user stay hidden. (ProtectHome=read-only with
+# ReadWritePaths=/home does not make /home writable on systemd 252.)
+ProtectHome=tmpfs
+BindPaths=/home
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

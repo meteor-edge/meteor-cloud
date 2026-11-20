@@ -7,8 +7,11 @@
 package modules
 
 import (
+	"meteorcloud/meteorcli/internal/actions"
 	"meteorcloud/meteorcli/internal/agent"
 	"meteorcloud/meteorcli/internal/heartbeat"
+	"meteorcloud/meteorcli/internal/metrics"
+	"meteorcloud/meteorcli/internal/mqtt"
 )
 
 // All returns a fresh instance of every feature module, in no particular
@@ -16,7 +19,10 @@ import (
 // modules (socket, identity) are not listed: they run before enrollment.
 func All() []agent.Module {
 	return []agent.Module{
-		// Actions and deploy kinds come from their registries in later pull requests.
-		&heartbeat.Module{},
+		// Deploy kinds come from their registry in a later pull request.
+		&heartbeat.Module{Actions: actions.Kinds()},
+		&mqtt.Module{},
+		&metrics.Module{},
+		&actions.Module{},
 	}
 }

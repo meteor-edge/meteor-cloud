@@ -124,6 +124,16 @@ func printAgentStatus(ctx context.Context, env *Env, r agent.StatusReply) int {
 	fmt.Fprintf(out, "Credential:     %s\n", yes(r.Credential, present, missing))
 	fmt.Fprintf(out, "Service:        %s is %s\n", serviceUnit, env.ServiceState(ctx))
 	fmt.Fprintf(out, "MQTT:           %s\n", yes(r.MQTT, "configured", "not configured"))
+	if c := r.MQTTConnection; c != nil {
+		switch {
+		case c.Connected:
+			fmt.Fprintf(out, "MQTT broker:    connected to %s\n", c.Broker)
+		case c.LastError != "":
+			fmt.Fprintf(out, "MQTT broker:    not connected (%s)\n", c.LastError)
+		default:
+			fmt.Fprintln(out, "MQTT broker:    connecting")
+		}
+	}
 	fmt.Fprintf(out, "WireGuard:      %s\n", yes(r.WireGuard, "key pair present", "not set up"))
 	if r.PendingClaim {
 		fmt.Fprintf(out, "Pending claim:  request %s is waiting for an operator to approve this device\n", orDash(r.PendingRequestID))

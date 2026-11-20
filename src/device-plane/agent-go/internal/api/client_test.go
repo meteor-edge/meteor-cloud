@@ -75,6 +75,13 @@ func call(ctx context.Context, c *Client, ex exchange) (bool, error) {
 		_, err = c.MQTTStatus(ctx, "dev_x")
 	case "POST /api/v1/agent/mqtt/credentials":
 		_, err = c.MQTTCredentials(ctx, "dev_x")
+	case "GET /api/v1/agent/actions":
+		_, err = c.Actions(ctx, "dev_x")
+	case "POST /api/v1/agent/actions/report":
+		var results []ActionResult
+		b, _ := json.Marshal(body["results"])
+		_ = json.Unmarshal(b, &results)
+		_, err = c.ReportActions(ctx, "dev_x", results)
 	default:
 		return false, nil
 	}
@@ -151,6 +158,7 @@ func TestReplayPythonRecordings(t *testing.T) {
 		"GET /api/v1/health", "POST /api/v1/agent/enroll/check", "POST /api/v1/agent/enroll/request",
 		"POST /api/v1/agent/enroll/poll", "POST /api/v1/agent/register", "POST /api/v1/agent/heartbeat",
 		"GET /api/v1/agent/mqtt", "POST /api/v1/agent/mqtt/credentials",
+		"GET /api/v1/agent/actions", "POST /api/v1/agent/actions/report",
 	} {
 		if !covered[route] {
 			t.Errorf("no recording exercised %s", route)

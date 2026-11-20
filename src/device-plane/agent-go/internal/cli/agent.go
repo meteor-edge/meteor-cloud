@@ -10,6 +10,7 @@ import (
 
 	"meteorcloud/meteorcli/internal/agent"
 	"meteorcloud/meteorcli/internal/api"
+	"meteorcloud/meteorcli/internal/bus"
 	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/identity"
@@ -33,7 +34,8 @@ func runAgent(ctx context.Context, env *Env, args []string) int {
 	if *debug {
 		level = slog.LevelDebug
 	}
-	log := agent.NewLogger(env.Stderr, level)
+	errs := &agent.ErrorCounter{}
+	log := agent.NewCountingLogger(env.Stderr, level, errs)
 	core := log.With("module", "agent")
 	p := env.Paths
 
@@ -89,6 +91,7 @@ func runAgent(ctx context.Context, env *Env, args []string) int {
 	deps := agent.Deps{
 		Version: env.Version, Paths: p, Config: c, API: client, Identity: source, Host: host,
 		State: store, Outbox: outbox, Signals: signals, Health: health, Log: log,
+		Bus: bus.NewRouter(log.With("module", "bus")), Errors: errs,
 		Helper: helper.NewClient(p.HelperSocket()),
 	}
 	sup := agent.NewSupervisor(modules.All(), deps)

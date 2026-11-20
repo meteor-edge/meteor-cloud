@@ -33,6 +33,12 @@ func (g groupsOf) Member(uid, _ uint32, group string) bool {
 // paths are limited to 108 bytes) with the test user in groups.
 func runningAgent(t *testing.T, groups groupsOf) string {
 	t.Helper()
+	return runningAgentWith(t, groups, nil)
+}
+
+// runningAgentWith is runningAgent with extra files (path under the root -> content).
+func runningAgentWith(t *testing.T, groups groupsOf, extra map[string]string) string {
+	t.Helper()
 	root, err := os.MkdirTemp("", "cli")
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +48,9 @@ func runningAgent(t *testing.T, groups groupsOf) string {
 	write(t, filepath.Join(root, "etc", "meteorcli", "config.json"), `{"version":1,"domain":"meteor.example","api_base":"http://127.0.0.1:9"}`)
 	write(t, filepath.Join(root, "var", "lib", "meteorcli", "identity", "device.json"), `{"version":1,"device_id":"d-1","name":"edge"}`)
 	write(t, filepath.Join(root, "var", "lib", "meteorcli", "identity", "device-token"), "dev_secret")
+	for name, content := range extra {
+		write(t, filepath.Join(root, name), content)
+	}
 
 	var logs bytes.Buffer
 	notMe := uint32(os.Getuid()) + 1 // the policy must decide, not the same-uid rule

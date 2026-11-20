@@ -10,6 +10,7 @@ import (
 	"log/slog"
 
 	"meteorcloud/meteorcli/internal/api"
+	"meteorcloud/meteorcli/internal/bus"
 	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/identity"
@@ -33,7 +34,6 @@ type Module interface {
 
 // Deps is everything a module may use. Modules never call each other: they share
 // only what is here, talk through Signals, and leave reports in the Outbox.
-// Bus is added with its package.
 type Deps struct {
 	// Version is this agent's version (status, User-Agent).
 	Version string
@@ -49,6 +49,11 @@ type Deps struct {
 	// Identity is the device token and MQTT credentials. Report a 401/403
 	// with Identity.AuthFailed; never act on it yourself.
 	Identity *identity.Source
+	// Bus is the MQTT session: publish on devices/{id}/..., read commands. The
+	// mqtt module runs the connection; Publish fails while it is down.
+	Bus *bus.Router
+	// Errors counts the agent's ERROR log lines (the agent_errors metric).
+	Errors *ErrorCounter
 	// Host reads facts about this machine (inventory, metrics, tools).
 	Host *platform.Host
 	// State keeps small versioned files across restarts.

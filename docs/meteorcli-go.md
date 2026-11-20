@@ -14,15 +14,16 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | Core: modules, supervisor, crash-loop breaker, health, signals, systemd notify and watchdog, log redaction | Done |
 | Config: new file layout, import of a Python install | Done |
 | State: versioned state files, persistent outbox | Done |
-| API client: health, enrollment, register, heartbeat, MQTT settings | Done (the other routes come with their modules) |
-| CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `helper`, `--version`, `agent` (alias `run`) | Done |
-| Agent socket with a group policy per command; root helper (`power.*`, `logs.read`, `systemd.install_unit`) | Done |
+| API client: health, enrollment, register, heartbeat, MQTT settings, actions | Done (the other routes come with their modules) |
+| CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `mqtt-test`, `mqtt-listen`, `helper`, `--version`, `agent` (alias `run`) | Done |
+| Agent socket with a group policy per command; root helper (`power.*`, `logs.read`, `logs.warnings`, `systemd.install_unit`, `users.*`, `docker.ps/inspect/stats`) | Done |
 | systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done |
 | Board installer (`install-rpi.sh`), CI artifact, `meteorcli-go-edge` prerelease | Done (Raspberry Pi) |
 | Identity: register, request-token and claim run by the agent, background approval polling, credential storage, MQTT credential refresh, 401 handling | Done |
-| Heartbeat module; telemetry (inventory, metrics); platform adapters (Raspberry Pi, Jetson, generic Linux) | Done (inventory goes with the heartbeat; metrics wait for the MQTT bus) |
-| MQTT bus: credentials are fetched and stored, but there is no broker connection yet (no metrics, status or commands) | Next pull request |
-| Modules: actions, deploy, network (Wi-Fi, WireGuard), update | Later pull requests |
+| Heartbeat module; telemetry (inventory, metrics); platform adapters (Raspberry Pi, Jetson, generic Linux) | Done |
+| MQTT: `bus` (one session, TLS with the stored CA, reconnect with backoff), `mqtt` module (status, ping, `sync_desired`), `metrics` module (60 s metrics, app and journal events) | Done |
+| Actions: `reboot`, `shutdown`, `set_password`, `add_user` through the helper; `update_agent` reported unsupported | Done (the updater comes later) |
+| Modules: deploy, network (Wi-Fi, WireGuard), update | Later pull requests |
 
 ## Files
 
@@ -76,8 +77,9 @@ To try a pull request before it is merged:
 `make agent-go-dist` builds the same files locally. You can serve them with
 `python3 -m http.server` and point `--base-url` at your laptop.
 
-Not in the Go agent yet: MQTT (metrics, status, commands), deploys, actions, Wi-Fi, WireGuard. An
-installed device shows online with its inventory and nothing more, so use a spare device.
+Not in the Go agent yet: deploys, Wi-Fi, WireGuard and `update_agent`. An installed device is
+online with its inventory, MQTT status, metrics and events, and runs reboot, shutdown and user
+actions from the console; use a spare device.
 
 ## Moving a device from the Python agent
 
@@ -127,6 +129,8 @@ The modules that own them recreate them.
 | `meteorcli claim [--wait S]` | Mostly | Reports the pending request (exit 0 enrolled, 2 still pending, 1 ended); the agent collects the approval by itself, so this is optional. Needs `meteorcli-admin`. |
 | `meteorcli test` | Yes | The agent checks `/api/v1/health` and the saved API key. Only a 401/403 reports the key as rejected; other failures are errors. |
 | `meteorcli module restart NAME` | New | Restarts (or unparks) one module of the running agent. Needs `meteorcli-admin`. |
+| `meteorcli mqtt-test [TOPIC] [MESSAGE]` | Yes, same arguments | The agent publishes through its own session (client id `device-<id>`), not retained; default a small JSON object on `status`. Fails with the last connection error while the agent is not connected. Needs `meteorcli-admin` (it speaks as the device). |
+| `meteorcli mqtt-listen [TOPIC] [--timeout S]` | Yes, same arguments | Prints `<topic> <payload>` for each command the agent's session receives (only `commands` is subscribed). Needs `meteorcli`. |
 | `meteorcli helper` | Service entry point | The root helper behind `meteorcli-helper.socket`. |
 | `meteorcli helper call OP [JSON]` | New | Sends one request to the helper; only the meteor user is served. For debugging and tests. |
 | `meteorcli -V`, `--version` | Yes | |
@@ -148,7 +152,8 @@ policy per command (`socketPolicy` in `internal/agent/socket.go`):
 | root | everything |
 
 Today the socket serves `status`, `test`, `register`, `enroll.request`, `enroll.claim`,
-`config.reload` and `module restart`; the other commands arrive with their modules. The agent's own
+`config.reload`, `module restart`, `mqtt.test` (admin) and `mqtt.listen` (read); the other
+commands arrive with their modules. The agent's own
 user (`meteor`) is always allowed, like root. `agent.sock` belongs to the `meteorcli` group, so an
 administrator is in **both** groups:
 
@@ -185,6 +190,10 @@ a minute without requests.
 | `power.reboot`, `power.shutdown` | none | `systemctl --no-block reboot` / `poweroff` (answers first) |
 | `logs.read` | `source` (`journal` or `systemd`), `unit`, `lines` (1-10000, default 200), `since` (`15m`, `1h`, `7d`), `grep` (up to 200 printable characters) | `journalctl` with fixed options; returns `lines` |
 | `systemd.install_unit` | `name` (`^[a-z0-9][a-z0-9._-]{0,62}$`, ending `.service`, never `meteorcli*`), `content` (needs `[Service]`, at most 256 KiB), `no_start` | Atomic write to `/etc/systemd/system`, `daemon-reload`, `enable`, `restart` |
+| `users.set_password` | `username` (`^[a-z_][a-z0-9_-]{0,31}$`, not `root`, `meteor` or another system account), `password` (8-128 characters, no control characters) | `chpasswd` with the password on stdin; the user must exist |
+| `users.add` | `username`, `password` (as above), `sudo`, `authorized_key` (one SSH public key line) | `useradd -m -s /bin/bash`, `chpasswd`, optional `/etc/sudoers.d/90-meteorcli-<user>` (0440, `NOPASSWD:ALL`) and `~/.ssh/authorized_keys`; a failure half way removes the user again |
+| `docker.ps`, `docker.inspect`, `docker.stats` | `inspect`: `names` (1-20 container names) | The Python observer's fixed `docker ps -a`, `docker inspect -f <template>` and `docker stats --no-stream` commands; returns their output, which the agent parses |
+| `logs.warnings` | `after_cursor` (optional journal cursor) | `journalctl --priority=warning --output=json`, at most 200 entries (the last 10 minutes without a cursor); returns message (cut to 1000 characters), priority, unit, source, time and cursor |
 
 **Trust boundary.** `systemd.install_unit` checks the unit's name and shape, not what `ExecStart`
 runs, so whoever controls the `meteor` user can run commands as root through it (as with Docker on a
@@ -196,7 +205,12 @@ helper's environment. `logs.read` streams `journalctl` output into a buffer of t
 number of matching lines. `grep` searches every line in full (ignoring ASCII case); a line longer
 than 16 KiB is returned cut, ending in `…[truncated N bytes]`.
 
-Docker and file logs, `systemd.control`, users and Wi-Fi follow the Python helpers in later pull
+Passwords and SSH keys are never in an audit line (`users.*` log the user name and `sudo` only)
+and never on a command line. The helper unit hides `/root` and `/run/user` (`ProtectHome=tmpfs`)
+and binds `/home` back in writable, because `users.add` creates the home directory
+(`ProtectHome=read-only` with `ReadWritePaths=/home` does not make `/home` writable on systemd 252).
+
+Docker and file logs, `systemd.control` and Wi-Fi follow the Python helpers in later pull
 requests.
 
 ### Packaging
@@ -279,6 +293,43 @@ Jetson, generic Linux), `/etc/os-release`, `/proc` and `/sys` readers, thermal z
 checks (`docker compose version` with a 10 s timeout). `internal/telemetry` builds the inventory and
 metrics from it; the MQTT bus publishes the metrics in the next pull request.
 
+### MQTT
+
+The `bus` package holds the device's one MQTT session (paho.golang, MQTT 5): client id
+`device-<id>`, the username and password from `identity/mqtt.json`, TLS 1.2+ trusting only the
+broker CA from enrollment (the system CAs when the server sent none; verification is never
+skipped), keep-alive 60 s, a clean session, and the last will `{"status":"offline"}` (retained) on
+`devices/<id>/status`. A broker address of `localhost` is replaced by the API's host, like the
+Python agent. Modules publish through the router (QoS 1, only the contract's topics); while the
+session is down a publish fails at once and nothing is queued, so a long outage cannot fill the
+memory. The session reconnects by itself after 1 s, doubling to 30 s, with jitter; the heartbeat
+does not depend on it.
+
+- **`mqtt` module** (critical): runs the session from the identity's MQTT settings and starts over
+  when they change (`CredentialsRotated`, `ConfigChanged`) or MQTT is turned off. After each connect
+  it publishes `online` (retained, with `agent_version` and `uptime_seconds`) and again 2 s later.
+  `ping` is answered on `commands/result`; `sync_desired` becomes a `WorkWaiting{software}` signal;
+  anything else is ignored. A clean stop publishes `offline` and disconnects.
+- **`metrics` module**: once connected and then every 60 s, the readings of `telemetry.Metrics`
+  plus network rates, Wi-Fi signal, `agent_errors` (ERROR log lines since the last round) and the
+  `app.<name>.<field>` keys of up to 20 Docker containers, then the events seen since the last
+  round: app lifecycle (`app.started`, `app.exited`, `app.restarted`, `app.oom_killed`,
+  `app.healthy`, `app.unhealthy`, `app.crash_loop`, `app.removed`) and journal warnings (`log`).
+  Docker and the journal are read through the helper; the first look at the containers is the
+  baseline. While disconnected the latest metrics body and up to 500 events wait in memory for
+  the next round. `METEORCLI_METRICS_INTERVAL` (seconds) changes the interval for tests and development.
+- `meteorcli status` shows the connection (`MQTT broker: connected to host:8883`, or the last error).
+
+### Actions
+
+When the heartbeat answer says `actions_pending`, the `actions` module collects the actions
+(`GET /actions`, the only time a password travels) and runs them in order through the helper.
+`reboot` and `shutdown` are reported `done` before they run. The other results are reported
+together afterwards; an unknown kind, and `update_agent` for now, are reported `failed` with an
+error that starts with `Unsupported`. Every result waits in the outbox (`state/outbox`, kind
+`action_report`) until the server accepted it, so a result survives a network outage and the
+reboot itself; reports are retried with backoff, at most 50 per request.
+
 ### Differences from the Python agent
 
 - The agent, not the CLI, does enrollment; the CLI needs `meteorcli-admin`, not root.
@@ -293,7 +344,19 @@ metrics from it; the MQTT bus publishes the metrics in the next pull request.
 - The heartbeat follows the server's `heartbeat_interval_seconds` (Python kept its own interval).
 - The agent runs unprivileged, so a root-only DMI serial (`product_serial`) may be missing from
   the inventory; the CPU or device tree serial, or a readable `board_serial`, is used instead.
-- `capabilities.actions` and `deploy_kinds` stay empty until those modules exist.
+- `capabilities.actions` lists `reboot`, `shutdown`, `set_password`, `add_user`; `update_agent`
+  is left out until the Go updater exists (an `update_agent` action is reported `failed:
+  Unsupported...`). `deploy_kinds` stays empty until the deploy module exists.
+- MQTT 5 instead of 3.1.1 (same topics, QoS, retain, will and client id; Mosquitto and EMQX speak
+  both). `METEORCLI_MQTT_TLS_INSECURE` is gone: TLS is always verified.
+- `mqtt-test` and `mqtt-listen` use the agent's session over `agent.sock` instead of a second
+  connection with the broker password, so they need the agent running (and no sudo).
+- Action results are kept in the outbox until the server accepts them. If the `done` of a reboot
+  cannot be sent, the device still reboots and sends it afterwards (Python skipped the reboot and
+  lost the action). The second publish of `online` is skipped when it cannot be sent, as before.
+- While disconnected only the latest unsent metrics body is kept and sent on reconnect (Python's
+  client queued every message and sent a burst). Events (app changes, journal warnings) wait in
+  memory, at most 500, and go out after the metrics once connected.
 
 ## How the core works
 
@@ -340,12 +403,14 @@ a `meteorcli-admin` user runs `status` and `module restart` without sudo, a `met
 `status` but not `module restart`, a user in neither group is refused, the helper refuses every uid
 except `meteor` (also root, and a user in the `meteor` group), `logs.read` and
 `systemd.install_unit` work for `meteor`, the audit lines are in the journal, and no token is
-logged. Then it enrolls against a small fake server (`test/systemd/fakeserver`): root changes the
+logged; `users.add` creates a user with a home directory, a sudo rule and an SSH key,
+`users.set_password` changes the hash in `/etc/shadow`, root's password is refused, `logs.warnings`
+answers, and no user password reaches the journal. Then it enrolls against a small fake server (`test/systemd/fakeserver`): root changes the
 server (the old identity is dropped), `alice` (`meteorcli-admin`) runs `register` without sudo and
 the first heartbeat must arrive within 5 s; `alice` runs `request-token`, the request is approved
 while the agent is stopped, the container restarts, and the device must come online with no
 command; a `meteorenv.txt` on `/boot/firmware` is applied at start, removed, and the agent asks for
-approval by itself. Today's binaries are about 6.7 MB.
+approval by itself. Today's binaries are about 7.1-7.5 MB (arm64, armv6, amd64; stripped).
 
 The API client tests replay the Python agent's recorded exchanges in
 [`tests/agent-contract/recordings/`](../tests/agent-contract/recordings/): same routes, headers,
@@ -354,6 +419,8 @@ body keys, and the answers decode. The contract suite also drives the Go agent
 Python agent's `register` and `enroll` transcripts exactly, plus the Go-only `heartbeat` and
 `enroll_reboot` scenarios. Scenarios for modules that do not exist yet are skipped.
 
-No third-party Go modules yet: the module uses the standard library only. staticcheck (MIT) and
-govulncheck (BSD-3-Clause) run in CI and are not shipped; neither is the test-only `debian:12.8-slim`
-image ([licensing](licensing.md)).
+One third-party Go module: `github.com/eclipse/paho.golang` v0.22.0 (EPL-2.0 or EDL-1.0, used
+under EDL-1.0; the same version the data plane uses). Only its `paho` and `packets` packages are
+linked; `autopaho` is not used because it would pull in `gorilla/websocket` and `golang.org/x/net`.
+staticcheck (MIT) and govulncheck (BSD-3-Clause) run in CI and are not shipped; neither is the
+test-only `debian:12.8-slim` image ([licensing](licensing.md)).
