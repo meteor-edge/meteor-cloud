@@ -12,7 +12,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -26,8 +25,15 @@ const (
 	CodeUnavailable   = "unavailable" // the socket is missing or nobody listens
 )
 
-// DefaultMaxRequest bounds a request (a systemd unit file is the largest today).
-const DefaultMaxRequest = 512 << 10
+// Limits that keep a local caller from exhausting the server's memory.
+const (
+	// DefaultMaxRequest bounds a request (a systemd unit file is the largest today).
+	DefaultMaxRequest = 512 << 10
+	// DefaultMaxConns bounds connections served at once; more are closed at once.
+	DefaultMaxConns = 16
+	// readTimeout bounds sending the request, so a slow client frees its slot.
+	readTimeout = 5 * time.Second
+)
 
 // Request is what a client sends.
 type Request struct {
@@ -76,6 +82,9 @@ type Handler struct {
 	Run func(ctx context.Context, p Peer, params json.RawMessage) (any, error)
 	// Timeout bounds Run; zero means Server.Timeout.
 	Timeout time.Duration
+	// Audit returns the few params worth logging (a unit name, a module name).
+	// The audit line never carries raw params: they can hold secrets.
+	Audit func(params json.RawMessage) []any
 }
 
 // Server answers requests on a Unix listener.
@@ -91,6 +100,8 @@ type Server struct {
 	Timeout time.Duration
 	// MaxRequest bounds a request; zero means DefaultMaxRequest.
 	MaxRequest int64
+	// MaxConns bounds connections served at once; zero means DefaultMaxConns.
+	MaxConns int
 	// Idle, when set, makes Serve return after this long without a connection
 	// (socket-activated services exit and systemd starts them again on demand).
 	Idle time.Duration
@@ -143,6 +154,11 @@ loop:
 			result = fmt.Errorf("accept: %w", err)
 			break loop
 		case c := <-conns:
+			if inFlight >= s.maxConns() {
+				s.Log.Warn("too many connections; closing one", "limit", s.maxConns())
+				c.Close()
+				continue
+			}
 			inFlight++
 			idle = nil
 			go func() { // owned: Serve waits for it below
@@ -166,7 +182,8 @@ loop:
 func (s *Server) handle(ctx context.Context, c *net.UnixConn) {
 	defer c.Close()
 	start := time.Now()
-	_ = c.SetDeadline(start.Add(s.timeout() + 10*time.Second))
+	_ = c.SetReadDeadline(start.Add(readTimeout))
+	_ = c.SetWriteDeadline(start.Add(readTimeout + s.timeout() + 10*time.Second))
 
 	peer, err := PeerOf(c)
 	if err != nil {
@@ -191,8 +208,8 @@ func (s *Server) handle(ctx context.Context, c *net.UnixConn) {
 	}
 	attrs := []any{"method", req.Method, "uid", peer.UID, "pid", peer.PID, "outcome", outcome,
 		"duration", time.Since(start).Round(time.Millisecond)}
-	if len(req.Params) > 0 {
-		attrs = append(attrs, "params", truncate(string(req.Params), 300))
+	if h, ok := s.Handlers[req.Method]; ok && h.Audit != nil {
+		attrs = append(attrs, h.Audit(req.Params)...)
 	}
 	if err != nil {
 		attrs = append(attrs, "err", err)
@@ -236,6 +253,13 @@ func (s *Server) read(c *net.UnixConn) (Request, error) {
 		return req, errors.New("request has no method")
 	}
 	return req, nil
+}
+
+func (s *Server) maxConns() int {
+	if s.MaxConns > 0 {
+		return s.MaxConns
+	}
+	return DefaultMaxConns
 }
 
 func (s *Server) timeout() time.Duration {
@@ -337,12 +361,4 @@ func callTimeout(ctx context.Context) time.Duration {
 		return time.Until(d)
 	}
 	return 60 * time.Second
-}
-
-func truncate(s string, n int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }

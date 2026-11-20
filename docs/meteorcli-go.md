@@ -106,8 +106,10 @@ Today the socket serves `status` and `module restart`; the other commands arrive
 sudo usermod -aG meteorcli,meteorcli-admin alice   # then log in again
 ```
 
-Every request is logged to the journal with the caller's uid and pid, the method and the outcome.
-Answers never contain secrets (status says `present`/`missing`).
+Every request is logged to the journal with the caller's uid and pid, the method, the outcome and
+a few named fields (a module or unit name); raw request parameters are never logged. Answers never
+contain secrets (status says `present`/`missing`). The socket serves at most 16 connections at once
+and gives a client 5 seconds to send its request.
 
 ### Root helper
 
@@ -123,6 +125,15 @@ a minute without requests.
 | `power.reboot`, `power.shutdown` | none | `systemctl --no-block reboot` / `poweroff` (answers first) |
 | `logs.read` | `source` (`journal` or `systemd`), `unit`, `lines` (1-10000, default 200), `since` (`15m`, `1h`, `7d`), `grep` (up to 200 printable characters) | `journalctl` with fixed options; returns `lines` |
 | `systemd.install_unit` | `name` (`^[a-z0-9][a-z0-9._-]{0,62}$`, ending `.service`, never `meteorcli*`), `content` (needs `[Service]`, at most 256 KiB), `no_start` | Atomic write to `/etc/systemd/system`, `daemon-reload`, `enable`, `restart` |
+
+**Trust boundary.** `systemd.install_unit` checks the unit's name and shape, not what `ExecStart`
+runs, so whoever controls the `meteor` user can run commands as root through it (as with Docker on a
+device). The `meteor` account is unprivileged, not confined: protect it like root. The agent only
+installs units from releases it verified.
+
+Tools (`systemctl`, `journalctl`) are looked up only in a fixed root-owned `PATH`, never in the
+helper's environment. `logs.read` streams `journalctl` output into a buffer of the requested
+number of matching lines, and cuts single lines at 16 KiB.
 
 Docker and file logs, `systemd.control`, users and Wi-Fi follow the Python helpers in later pull
 requests.

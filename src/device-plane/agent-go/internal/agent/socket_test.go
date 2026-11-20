@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -113,13 +115,44 @@ func TestSocketStatusAndModuleRestart(t *testing.T) {
 		t.Errorf("no params: %v", err)
 	}
 
-	// Restarting the socket module itself answers first, then serves again.
+	// Restarting the socket module itself answers first, then serves on a new socket.
+	before := SocketID(p.AgentSocket())
 	if err := localrpc.Call(ctx, p.AgentSocket(), "module.restart", ModuleRestartParams{Name: "socket"}, nil); err != nil {
 		t.Fatalf("restart socket: %v", err)
 	}
-	eventually(t, "socket back", func() bool {
-		return localrpc.Call(ctx, p.AgentSocket(), "status", nil, &reply) == nil
+	eventually(t, "new socket serves", func() bool {
+		id := SocketID(p.AgentSocket())
+		return id != "" && id != before && localrpc.Call(ctx, p.AgentSocket(), "status", nil, &reply) == nil
 	})
+}
+
+func TestRemoveStaleSocket(t *testing.T) {
+	p := agentRoot(t)
+	path := p.AgentSocket()
+	if err := removeStaleSocket(path); err != nil {
+		t.Errorf("missing path: %v", err)
+	}
+	// A live socket (another agent) is left alone.
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStaleSocket(path); err == nil || !strings.Contains(err.Error(), "another process") {
+		t.Errorf("live socket: %v", err)
+	}
+	// A socket nobody serves any more (a crashed agent) is removed.
+	l.SetUnlinkOnClose(false)
+	l.Close()
+	if err := removeStaleSocket(path); err != nil || exists(path) {
+		t.Errorf("stale socket: %v, exists %v", err, exists(path))
+	}
+	// Anything else is refused.
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStaleSocket(path); err == nil || !exists(path) {
+		t.Errorf("regular file: %v", err)
+	}
 }
 
 func TestSocketRefusesOutsideGroups(t *testing.T) {

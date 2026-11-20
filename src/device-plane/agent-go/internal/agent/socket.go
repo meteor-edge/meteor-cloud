@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"meteorcloud/meteorcli/internal/api"
@@ -143,7 +144,11 @@ func (m *SocketModule) handlers(d Deps) map[string]localrpc.Handler {
 		"status": {Run: func(context.Context, localrpc.Peer, json.RawMessage) (any, error) {
 			return status(d), nil
 		}},
-		"module.restart": {Run: func(_ context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
+		"module.restart": {Audit: func(raw json.RawMessage) []any {
+			var p ModuleRestartParams
+			_ = json.Unmarshal(raw, &p)
+			return []any{"name", p.Name}
+		}, Run: func(_ context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
 			var p ModuleRestartParams
 			if err := json.Unmarshal(raw, &p); err != nil || p.Name == "" {
 				return nil, localrpc.Errorf(localrpc.CodeBadRequest, "params must be {\"name\": \"<module>\"}")
@@ -189,6 +194,30 @@ func status(d Deps) StatusReply {
 	return r
 }
 
+// removeStaleSocket removes a socket left by a crashed agent. It refuses when
+// something still answers on it (another agent with the same paths) or when the
+// path is not a socket.
+func removeStaleSocket(path string) error {
+	st, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("socket: %w", err)
+	}
+	if st.Mode()&fs.ModeSocket == 0 {
+		return fmt.Errorf("socket: %s exists and is not a socket", path)
+	}
+	if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
+		c.Close()
+		return fmt.Errorf("socket: another process serves %s; is a second agent running?", path)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("socket: remove stale %s: %w", path, err)
+	}
+	return nil
+}
+
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -197,8 +226,8 @@ func exists(path string) bool {
 // listenAgentSocket replaces a stale socket and makes the new one
 // meteor:meteorcli 0660, so only the groups can connect.
 func listenAgentSocket(path string) (*net.UnixListener, error) {
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("socket: remove stale %s: %w", path, err)
+	if err := removeStaleSocket(path); err != nil {
+		return nil, err
 	}
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
@@ -218,4 +247,18 @@ func listenAgentSocket(path string) (*net.UnixListener, error) {
 		}
 	}
 	return l, nil
+}
+
+// SocketID identifies the socket file at path ("" when there is none): inode and
+// change time, since a new socket often gets the inode of the one just removed.
+// Tests use it to see that a restarted socket module listens on a new socket.
+func SocketID(path string) string {
+	st, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+		return fmt.Sprintf("%d-%d.%09d", sys.Ino, sys.Ctim.Sec, sys.Ctim.Nsec)
+	}
+	return st.ModTime().String()
 }

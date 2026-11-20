@@ -58,6 +58,13 @@ func (r *InstallUnitRequest) validate() error {
 	return nil
 }
 
+// auditInstallUnit logs the unit name; the content may hold secrets.
+func auditInstallUnit(raw json.RawMessage) []any {
+	var r InstallUnitRequest
+	_ = json.Unmarshal(raw, &r)
+	return []any{"unit", r.Name, "no_start", r.NoStart}
+}
+
 func (h Host) installUnit(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
 	var req InstallUnitRequest
 	if err := decode(raw, &req); err != nil {

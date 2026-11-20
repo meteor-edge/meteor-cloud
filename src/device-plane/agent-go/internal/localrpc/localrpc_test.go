@@ -190,3 +190,53 @@ func TestSystemGroups(t *testing.T) {
 		t.Error("root is not in its primary group")
 	}
 }
+
+func TestConnectionLimitAndAuditFields(t *testing.T) {
+	logs := &syncBuffer{}
+	s := &Server{
+		Log:       slog.New(slog.NewTextHandler(logs, nil)),
+		Authorize: func(Peer, string) error { return nil },
+		MaxConns:  1,
+		Handlers: map[string]Handler{
+			"install": {
+				Run: func(context.Context, Peer, json.RawMessage) (any, error) { return "ok", nil },
+				Audit: func(raw json.RawMessage) []any {
+					var p struct{ Name string }
+					_ = json.Unmarshal(raw, &p)
+					return []any{"name", p.Name}
+				},
+			},
+		},
+	}
+	path := serve(t, s)
+	params := map[string]string{"name": "demo.service", "content": "Environment=DB=postgres://u:hunter2@db"}
+
+	// A client that never sends holds the only slot; the next one is closed.
+	idle, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := Call(context.Background(), path, "install", params, nil); err == nil {
+		t.Error("second connection served past MaxConns")
+	}
+	idle.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for Call(context.Background(), path, "install", params, nil) != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("slot never freed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The audit line follows the answer.
+	for !strings.Contains(logs.String(), "method=install") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "too many connections") || !strings.Contains(out, "name=demo.service") {
+		t.Errorf("log:\n%s", out)
+	}
+	if strings.Contains(out, "hunter2") || strings.Contains(out, "content") {
+		t.Errorf("audit line carries params:\n%s", out)
+	}
+}

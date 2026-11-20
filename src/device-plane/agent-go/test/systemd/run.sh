@@ -12,11 +12,18 @@ cleanup() {
 }
 [[ -n "${KEEP:-}" ]] || trap cleanup EXIT
 
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=systemd-test" \
+# Build for the Docker host's own platform (amd64 in CI, arm64 on an ARM machine).
+arch="$(docker version --format '{{.Server.Arch}}')"
+case "$arch" in
+amd64 | x86_64) arch=amd64 ;;
+arm64 | aarch64) arch=arm64 ;;
+*) echo "unsupported Docker platform: $arch" >&2; exit 1 ;;
+esac
+CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=systemd-test" \
 	-o "$ctx/meteorcli" ./cmd/meteorcli
 cp -r packaging test/systemd/Dockerfile "$ctx/"
-docker build -q -t meteorcli-systemd-test "$ctx" >/dev/null
-docker run -d --name "$name" --privileged --cgroupns=private \
+docker build -q --platform "linux/$arch" -t meteorcli-systemd-test "$ctx" >/dev/null
+docker run -d --platform "linux/$arch" --name "$name" --privileged --cgroupns=private \
 	--tmpfs /run --tmpfs /run/lock --tmpfs /tmp meteorcli-systemd-test >/dev/null
 
 ctr() { docker exec "$name" "$@"; }
@@ -83,8 +90,8 @@ expect 0 "outcome=permission_denied" "helper journal records refused callers" --
 expect 0 "" "no token in any journal" -- ctr sh -c '! journalctl --no-pager | grep -q faketoken'
 
 # Hardening as systemd sees it on the running units.
-expect 0 "" "agent exposure under 2.0" -- ctr systemd-analyze security --threshold=20 meteorcli.service
-expect 0 "" "helper exposure under 6.0" -- ctr systemd-analyze security --threshold=60 meteorcli-helper.service
+expect 0 "" "agent exposure under 2.0" -- ctr systemd-analyze security --threshold=19 meteorcli.service
+expect 0 "" "helper exposure under 6.0" -- ctr systemd-analyze security --threshold=59 meteorcli-helper.service
 
 if [[ $failures -gt 0 ]]; then
 	echo "--- meteorcli journal"; ctr journalctl -u meteorcli.service -u meteorcli-helper.service --no-pager | tail -40

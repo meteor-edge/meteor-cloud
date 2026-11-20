@@ -42,7 +42,7 @@ func runHelper(ctx context.Context, env *Env, args []string) int {
 	var l *net.UnixListener
 	var err error
 	if *listen != "" {
-		l, err = net.ListenUnix("unix", &net.UnixAddr{Name: *listen, Net: "unix"})
+		l, err = listenHelper(*listen)
 	} else {
 		l, err = helper.ListenerFromSystemd()
 		srv.Idle = helper.DefaultIdle // socket-activated: systemd restarts us on demand
@@ -79,4 +79,26 @@ func runHelperCall(ctx context.Context, env *Env, args []string) int {
 	}
 	fmt.Fprintln(env.Stdout, string(out))
 	return 0
+}
+
+// listenHelper makes a development socket like meteorcli-helper.socket does:
+// root:meteor 0660, so the meteor user can connect (the uid check still applies).
+func listenHelper(path string) (*net.UnixListener, error) {
+	gid, ok := localrpc.LookupGID(helperUser)
+	if !ok {
+		return nil, fmt.Errorf("group %s does not exist", helperUser)
+	}
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chown(path, 0, gid); err != nil {
+		l.Close()
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o660); err != nil {
+		l.Close()
+		return nil, err
+	}
+	return l, nil
 }

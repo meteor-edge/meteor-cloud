@@ -1,7 +1,6 @@
 package helper
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -101,34 +100,84 @@ func (h Host) logsRead(ctx context.Context, _ localrpc.Peer, raw json.RawMessage
 	if err := req.validate(); err != nil {
 		return nil, err
 	}
-	out, err := h.Run(ctx, "journalctl", req.journalArgs()...)
-	if err != nil {
+	m := newMatcher(req.Grep, req.Lines)
+	if err := h.Stream(ctx, m, "journalctl", req.journalArgs()...); err != nil {
 		return nil, err
 	}
-	return LogsReply{Lines: lastMatching(out, req.Grep, req.Lines)}, nil
+	return LogsReply{Lines: m.lines()}, nil
 }
 
-// lastMatching returns the last n lines that contain needle (any line when empty).
-func lastMatching(out []byte, needle string, n int) []string {
-	needle = strings.ToLower(needle)
-	var keep []string
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	for sc.Scan() {
-		line := sc.Text()
-		if needle != "" && !strings.Contains(strings.ToLower(line), needle) {
-			continue
+// auditLogs names what was read, not what was searched for.
+func auditLogs(raw json.RawMessage) []any {
+	var r LogsRequest
+	_ = json.Unmarshal(raw, &r)
+	return []any{"source", r.Source, "unit", r.Unit, "lines", r.Lines}
+}
+
+// maxLineBytes cuts very long journal lines; the rest of the line is dropped.
+const maxLineBytes = 16 << 10
+
+// matcher keeps the last n lines that contain needle (any line when empty) while
+// journalctl writes into it, so memory stays near n lines whatever the output size.
+type matcher struct {
+	needle  string
+	n       int
+	keep    []string
+	partial []byte
+	cut     bool // the current line passed maxLineBytes
+}
+
+func newMatcher(needle string, n int) *matcher {
+	return &matcher{needle: strings.ToLower(needle), n: n}
+}
+
+// Write implements io.Writer.
+func (m *matcher) Write(p []byte) (int, error) {
+	total := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		chunk := p
+		if i >= 0 {
+			chunk = p[:i]
 		}
-		keep = append(keep, line)
-		if len(keep) > 2*n {
-			keep = append(keep[:0], keep[len(keep)-n:]...)
+		if !m.cut {
+			room := maxLineBytes - len(m.partial)
+			if len(chunk) > room {
+				chunk, m.cut = chunk[:room], true
+			}
+			m.partial = append(m.partial, chunk...)
 		}
+		if i < 0 {
+			break
+		}
+		m.line(string(m.partial))
+		m.partial, m.cut = m.partial[:0], false
+		p = p[i+1:]
 	}
-	if len(keep) > n {
-		keep = keep[len(keep)-n:]
+	return total, nil
+}
+
+func (m *matcher) line(s string) {
+	if m.needle != "" && !strings.Contains(strings.ToLower(s), m.needle) {
+		return
 	}
-	if keep == nil {
-		keep = []string{}
+	m.keep = append(m.keep, s)
+	if len(m.keep) >= 2*m.n {
+		m.keep = append(m.keep[:0], m.keep[len(m.keep)-m.n:]...)
 	}
-	return keep
+}
+
+// lines returns the kept lines, including an unterminated last one.
+func (m *matcher) lines() []string {
+	if len(m.partial) > 0 {
+		m.line(string(m.partial))
+		m.partial = m.partial[:0]
+	}
+	if len(m.keep) > m.n {
+		m.keep = m.keep[len(m.keep)-m.n:]
+	}
+	if m.keep == nil {
+		return []string{}
+	}
+	return m.keep
 }

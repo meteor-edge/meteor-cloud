@@ -81,13 +81,20 @@ func TestStatusAndModuleRestartThroughAgent(t *testing.T) {
 		t.Error("status printed the token")
 	}
 
+	sock := filepath.Join(root, "run", "meteorcli", "agent.sock")
+	before := agent.SocketID(sock)
 	r := meteorcli(t, root, nil, "module", "restart", "socket")
 	if r.code != 0 || !strings.Contains(r.stdout, "Module socket restarted.") {
 		t.Errorf("module restart = %+v", r)
 	}
-	// The socket module listens again a moment after its restart.
+	// The restarted socket module listens on a new socket; the old one may still
+	// answer for a moment, so wait for the new one before going on.
 	deadline := time.Now().Add(5 * time.Second)
-	for !strings.Contains(meteorcli(t, root, nil, "status").stdout, "Agent:          running") && time.Now().Before(deadline) {
+	for time.Now().Before(deadline) {
+		id := agent.SocketID(sock)
+		if id != "" && id != before && strings.Contains(meteorcli(t, root, nil, "status").stdout, "Agent:          running") {
+			break
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	if r := meteorcli(t, root, nil, "module", "restart", "nope"); r.code != 1 || !strings.Contains(r.stderr, "no module named") {

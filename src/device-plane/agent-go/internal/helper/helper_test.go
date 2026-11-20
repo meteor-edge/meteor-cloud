@@ -1,9 +1,11 @@
 package helper
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -25,7 +27,7 @@ type fakeHost struct {
 }
 
 func (f *fakeHost) host(unitDir string) Host {
-	return Host{UnitDir: unitDir, Run: func(_ context.Context, name string, args ...string) ([]byte, error) {
+	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.calls = append(f.calls, append([]string{name}, args...))
@@ -33,7 +35,16 @@ func (f *fakeHost) host(unitDir string) Host {
 			return nil, errors.New(name + " failed")
 		}
 		return []byte(f.output), nil
-	}}
+	}
+	stream := func(ctx context.Context, w io.Writer, name string, args ...string) error {
+		out, err := run(ctx, name, args...)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(out)
+		return err
+	}
+	return Host{UnitDir: unitDir, Run: run, Stream: stream}
 }
 
 func call(t *testing.T, h Host, op string, params any) (json.RawMessage, error) {
@@ -117,20 +128,49 @@ func TestLogsRead(t *testing.T) {
 	}
 }
 
-func TestLastMatching(t *testing.T) {
+func TestMatcher(t *testing.T) {
 	var b strings.Builder
 	for i := range 1000 {
 		b.WriteString("line ")
 		b.WriteString(strings.Repeat("x", i%3))
 		b.WriteString("\n")
 	}
-	if got := lastMatching([]byte(b.String()), "", 5); len(got) != 5 {
+	m := newMatcher("", 5)
+	_, _ = m.Write([]byte(b.String()))
+	if got := m.lines(); len(got) != 5 {
 		t.Errorf("got %d", len(got))
 	}
-	if got := lastMatching(nil, "x", 5); got == nil || len(got) != 0 {
+	if got := newMatcher("x", 5).lines(); got == nil || len(got) != 0 {
 		t.Errorf("empty output: %#v", got)
 	}
+
+	// An oversized line is cut, and the lines after it are still searched.
+	m = newMatcher("ERROR", 10)
+	big := strings.Repeat("a", 3*maxLineBytes) + " error hidden at the end\n"
+	for _, chunk := range []string{big[:1000], big[1000:], "short error li", "ne\nok\n", "tail error"} {
+		_, _ = m.Write([]byte(chunk))
+	}
+	got := m.lines()
+	if len(got) != 2 || got[0] != "short error line" || got[1] != "tail error" {
+		t.Errorf("lines %q", got)
+	}
+	if len(m.keep[0]) > maxLineBytes {
+		t.Error("kept an uncut line")
+	}
 }
+
+func TestAuditFieldsHoldNoContent(t *testing.T) {
+	raw, _ := json.Marshal(InstallUnitRequest{Name: "demo.service", Content: "Environment=PW=hunter2\n[Service]"})
+	if got := fmtAttrs(auditInstallUnit(raw)); strings.Contains(got, "hunter2") || !strings.Contains(got, "demo.service") {
+		t.Errorf("install audit %s", got)
+	}
+	raw, _ = json.Marshal(LogsRequest{Source: "journal", Grep: "hunter2"})
+	if got := fmtAttrs(auditLogs(raw)); strings.Contains(got, "hunter2") || !strings.Contains(got, "journal") {
+		t.Errorf("logs audit %s", got)
+	}
+}
+
+func fmtAttrs(a []any) string { b, _ := json.Marshal(a); return string(b) }
 
 func TestInstallUnit(t *testing.T) {
 	dir := t.TempDir()
@@ -247,6 +287,36 @@ func TestListenerFromSystemdNeedsActivation(t *testing.T) {
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
+
+func TestLookToolUsesSafePathOnly(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "systemctl-fake")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	if _, err := lookTool("systemctl-fake"); err == nil {
+		t.Error("found a tool through the process PATH")
+	}
+	if _, err := lookTool("/bin/echo"); err == nil {
+		t.Error("accepted a path")
+	}
+	if p, err := lookTool("echo"); err != nil || !strings.HasPrefix(p, "/") {
+		t.Errorf("echo = %q, %v", p, err)
+	}
+	var out bytes.Buffer
+	if err := streamTool(context.Background(), &out, "echo", "hi"); err != nil || out.String() != "hi\n" {
+		t.Errorf("stream = %q, %v", out.String(), err)
+	}
+	if err := streamTool(context.Background(), &out, "no-such-tool-meteorcli"); err == nil {
+		t.Error("missing tool: want error")
+	}
+	c := &capped{max: 4}
+	_, _ = c.Write([]byte("abcdef"))
+	if n, _ := c.Write([]byte("gh")); n != 2 || c.String() != "abcd" {
+		t.Errorf("capped %q", c.String())
+	}
+}
 
 func TestRunToolUsesArgList(t *testing.T) {
 	out, err := runTool(context.Background(), "echo", "a; rm -rf /", "$HOME")
