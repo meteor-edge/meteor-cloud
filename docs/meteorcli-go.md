@@ -448,7 +448,11 @@ A `connect_now` change is kept only when `GET /api/v1/health` answers on the new
 `rolled_back` with the console's message. A network that cannot be joined is `rolled_back` at
 once. A change a restart or power cut left unconfirmed is rolled back when the agent starts and
 reported `rolled_back` ("The device restarted before the new network was confirmed…").
-Confirm and rollback are tried three times; a change that cannot be confirmed is rolled back,
+A `connect_now` change turns the Wi-Fi radio on first when it is switched off (Raspberry Pi OS
+boots with it soft-blocked until a Wi-Fi country is set), waits for the adapter and scans; a radio
+that stays off (hardware block) fails with `radio_off` before anything changes. A failed join says
+whether the password was rejected or the network was not found. Save-for-later changes leave the
+radio as it is. Confirm and rollback are tried three times; a change that cannot be confirmed is rolled back,
 and one whose rollback fails is reported `failed` and rolled back by the next status check
 (every minute), which then reports it `rolled_back`. An action other than `apply` or `remove`
 is reported `failed` without touching the device. Helper changes are serialized; a restore that

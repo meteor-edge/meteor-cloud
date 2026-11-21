@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"meteorcloud/meteorcli/internal/localrpc"
@@ -36,6 +37,7 @@ import (
 // Error codes the agent branches on.
 const (
 	CodeNotJoined   = "not_joined"    // the network could not be joined; the old settings are back
+	CodeRadioOff    = "radio_off"     // the Wi-Fi radio is off and could not be turned on; nothing changed
 	CodeWouldCutOff = "would_cut_off" // removing the network would leave the device offline
 	CodeUnsupported = "unsupported"   // Wi-Fi cannot be managed on this device
 )
@@ -481,6 +483,12 @@ func (h Host) wifiApply(ctx context.Context, _ localrpc.Peer, raw json.RawMessag
 	if h.readWifiPending() != nil {
 		return nil, localrpc.Errorf(localrpc.CodeBadRequest, "an earlier change is still waiting for confirm or rollback")
 	}
+	if r.ConnectNow {
+		// Before anything is changed: with the radio off nothing can be joined.
+		if err := h.wifiRadioOn(ctx); err != nil {
+			return nil, err
+		}
+	}
 
 	name := wifiProfileName(r.SSID)
 	newFile := filepath.Join(h.NMConnectionsDir, name+nmKeyfileExtension)
@@ -543,14 +551,83 @@ func (h Host) wifiApply(ctx context.Context, _ localrpc.Peer, raw json.RawMessag
 	if iface := h.wifiInterface(ctx); iface != "" {
 		args = append(args, "ifname", iface)
 	}
-	if _, err := h.nmcli(ctx, args...); err != nil {
-		if err := h.rollBackOrKeep(ctx, nil); err != nil {
-			return nil, err
+	if out, err := h.nmcli(ctx, args...); err != nil {
+		if rerr := h.rollBackOrKeep(ctx, nil); rerr != nil {
+			return nil, rerr
 		}
-		return nil, localrpc.Errorf(CodeNotJoined, "The device could not join this network (wrong password, or out of range). "+
-			"The old Wi-Fi settings were put back.")
+		return nil, localrpc.Errorf(CodeNotJoined, "%s The old Wi-Fi settings were put back.", joinFailure(out, err))
 	}
 	return WifiApplyReply{Applied: true, Connected: true}, nil
+}
+
+// radioWait bounds the wait for the Wi-Fi device after the radio is turned on
+// (a variable for tests).
+var radioWait = 15 * time.Second
+
+// wifiRadioOn turns the Wi-Fi radio on when it is switched off (Raspberry Pi
+// OS images boot with it soft-blocked until a country is set) and waits until
+// NetworkManager can use the adapter and has scanned. An explicit "connect
+// now" from the console is the owner asking for Wi-Fi. A radio that stays off
+// (a hardware switch or block) is an error before anything is changed.
+func (h Host) wifiRadioOn(ctx context.Context) error {
+	if out, err := h.nmcli(ctx, "-t", "-f", "WIFI", "radio"); err == nil && strings.TrimSpace(out) == "disabled" {
+		if _, err := h.nmcli(ctx, "radio", "wifi", "on"); err != nil {
+			return localrpc.Errorf(CodeRadioOff, "Wi-Fi is switched off on this device and could not be turned on (%v). Nothing was changed.", err)
+		}
+	}
+	deadline := time.Now().Add(radioWait)
+	for {
+		iface, state := h.wifiDevice(ctx)
+		if iface != "" && state != "unavailable" {
+			// Fresh scan results, so a network that just came into view is found.
+			_, _ = h.nmcli(ctx, "-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "yes", "ifname", iface)
+			return nil
+		}
+		if time.Now().After(deadline) || !sleepCtx(ctx, 500*time.Millisecond) {
+			reason := "the adapter is unavailable"
+			if out, err := h.nmcli(ctx, "-t", "-f", "WIFI-HW", "radio"); err == nil && strings.TrimSpace(out) != "enabled" {
+				reason = "it is blocked by a hardware switch"
+			}
+			return localrpc.Errorf(CodeRadioOff, "Wi-Fi cannot be used on this device: %s. Nothing was changed.", reason)
+		}
+	}
+}
+
+// wifiDevice is the Wi-Fi adapter and its NetworkManager state.
+func (h Host) wifiDevice(ctx context.Context) (string, string) {
+	for _, d := range h.devices(ctx) {
+		if d.kind == "wifi" {
+			return d.name, d.state
+		}
+	}
+	return "", ""
+}
+
+// joinFailure says why `nmcli connection up` failed, from its output and
+// error (stderr's first line is often only a warning, so stdout counts too).
+func joinFailure(out string, err error) string {
+	msg := out + "\n" + err.Error()
+	switch {
+	case strings.Contains(msg, "Secrets were required"), strings.Contains(msg, "encryption keys are required"),
+		strings.Contains(msg, "802.1X supplicant"):
+		return "The device could not join this network: the password was not accepted."
+	case strings.Contains(msg, "No network with SSID"), strings.Contains(msg, "could not be found"):
+		return "The device could not join this network: it was not found (out of range, or the name is wrong)."
+	case strings.Contains(msg, "not available on device"):
+		return "The device could not join this network: the Wi-Fi adapter is not ready."
+	}
+	return "The device could not join this network (wrong password, or out of range)."
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 // rollBackOrKeep restores the pending change's old settings and returns cause.

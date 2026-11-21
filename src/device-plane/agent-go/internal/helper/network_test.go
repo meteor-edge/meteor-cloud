@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"meteorcloud/meteorcli/internal/localrpc"
 	"meteorcloud/meteorcli/internal/platform"
@@ -619,5 +620,67 @@ func TestWifiRollbackKeepsPendingWhenRestoreFails(t *testing.T) {
 	s.fail["nmcli connection reload"] = true
 	if _, err := call(t, h, "wifi.apply", WifiApplyRequest{SSID: "other", Password: "long-enough"}); err == nil {
 		t.Error("a profile NetworkManager did not load was reported applied")
+	}
+}
+
+func TestWifiRadioOff(t *testing.T) {
+	radioWait = 20 * time.Millisecond
+	req := WifiApplyRequest{ID: "8a1c2d3e-0000-4000-8000-000000000009", SSID: "lab", Password: "long-password", ConnectNow: true}
+
+	// The radio is off and the adapter stays unavailable (hardware block):
+	// refused before anything is written.
+	s, h := nmHost(t)
+	s.answers["nmcli -t -f WIFI radio"] = "disabled\n"
+	s.answers["nmcli -t -f WIFI-HW radio"] = "disabled\n"
+	s.answers["nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device"] = "eth0:ethernet:connected:Wired\nwlan0:wifi:unavailable:\n"
+	_, err := call(t, h, "wifi.apply", req)
+	if localrpc.CodeOf(err) != CodeRadioOff || !strings.Contains(err.Error(), "hardware switch") {
+		t.Fatalf("err = %v", err)
+	}
+	if !s.ran("nmcli radio wifi on") || h.readWifiPending() != nil || s.ran("nmcli --wait") {
+		t.Errorf("runs %v", s.calls)
+	}
+	if entries, _ := os.ReadDir(h.NMConnectionsDir); len(entries) != 0 {
+		t.Errorf("profiles written: %v", entries)
+	}
+
+	// The radio comes on: the adapter is scanned and the change goes ahead.
+	s, h = nmHost(t)
+	s.answers["nmcli -t -f WIFI radio"] = "disabled\n"
+	s.answers["nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device"] = "eth0:ethernet:connected:Wired\nwlan0:wifi:disconnected:\n"
+	if _, err := call(t, h, "wifi.apply", req); err != nil {
+		t.Fatal(err)
+	}
+	if !s.ran("nmcli radio wifi on") || !s.ran("nmcli -t -f SSID device wifi list --rescan yes ifname wlan0") {
+		t.Errorf("runs %v", s.calls)
+	}
+
+	// The radio is already on: left alone.
+	s, h = nmHost(t)
+	s.answers["nmcli -t -f WIFI radio"] = "enabled\n"
+	if _, err := call(t, h, "wifi.apply", WifiApplyRequest{ID: req.ID, SSID: "lab2", Password: "long-password", ConnectNow: true}); err != nil {
+		t.Fatal(err)
+	}
+	if s.ran("nmcli radio wifi on") {
+		t.Error("an enabled radio was switched")
+	}
+}
+
+func TestJoinFailure(t *testing.T) {
+	// What nmcli 1.52 prints for a wrong WPA password (stdout; stderr starts with a warning).
+	if got := joinFailure("Passwords or encryption keys are required to access the wireless network 'lab'.\n",
+		errors.New("nmcli --wait 90 connection up: exit status 4: Warning: password for '802-11-wireless-security.psk' not given")); !strings.Contains(got, "password was not accepted") {
+		t.Errorf("wrong password: %q", got)
+	}
+	for _, c := range []struct{ nmcli, want string }{
+		{"Error: Connection activation failed: Secrets were required, but not provided", "password was not accepted"},
+		{"Error: Connection activation failed: No network with SSID 'lab' found.", "not found"},
+		{"Error: Connection activation failed: (53) The Wi-Fi network could not be found", "not found"},
+		{"Error: Connection 'x' is not available on device wlan0 because device is not available", "adapter is not ready"},
+		{"Error: something else", "wrong password, or out of range"},
+	} {
+		if got := joinFailure("", errors.New(c.nmcli)); !strings.Contains(got, c.want) {
+			t.Errorf("%q: %q", c.nmcli, got)
+		}
 	}
 }
