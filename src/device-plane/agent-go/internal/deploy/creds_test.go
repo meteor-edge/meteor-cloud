@@ -35,7 +35,9 @@ func (e *env) credDirs() []string {
 	entries, _ := os.ReadDir(e.d.Paths.AppCredentialsDir())
 	var out []string
 	for _, en := range entries {
-		out = append(out, en.Name())
+		if en.IsDir() {
+			out = append(out, en.Name())
+		}
 	}
 	return out
 }
@@ -100,7 +102,7 @@ func TestRollbackNeverUsesAnotherApplicationsToken(t *testing.T) {
 	}
 }
 
-func TestRolledBackReleaseKeepsItsTokenFresh(t *testing.T) {
+func TestRolledBackReleaseKeepsItsToken(t *testing.T) {
 	e := newEnv(t)
 	e.issue("app-1")
 	e.desire(boundItem(rel1, "1", 1, "img1", "app-1", false))
@@ -110,7 +112,8 @@ func TestRolledBackReleaseKeepsItsTokenFresh(t *testing.T) {
 	if got := e.cycle()["demo-app"]; got.status() != statusRolledBack {
 		t.Fatalf("v2 %v", got)
 	}
-	// The kept release's token falls due: it is rotated while v2 stays refused.
+	// The kept release's token falls due: the appcreds module rotates it, not
+	// deploy, and v2 stays refused without a new apply.
 	dir := filepath.Join(e.d.Paths.AppCredentialsDir(), e.credDirs()[0])
 	var meta map[string]any
 	data, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
@@ -119,7 +122,7 @@ func TestRolledBackReleaseKeepsItsTokenFresh(t *testing.T) {
 	data, _ = json.Marshal(meta)
 	_ = os.WriteFile(filepath.Join(dir, "meta.json"), data, 0o600)
 	mints, runs := e.mints(), e.host.count("docker.run")
-	if got := e.cycle()["demo-app"]; got.status() != statusRolledBack || e.mints() != mints+1 || e.host.count("docker.run") != runs {
+	if got := e.cycle()["demo-app"]; got.status() != statusRolledBack || e.mints() != mints || e.host.count("docker.run") != runs {
 		t.Fatalf("report %v, mints %d->%d, runs %d->%d", got, mints, e.mints(), runs, e.host.count("docker.run"))
 	}
 	// Its token file is lost: v1 is applied again, not v2.

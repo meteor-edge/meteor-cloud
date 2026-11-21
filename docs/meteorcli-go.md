@@ -15,28 +15,32 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | Config: new file layout, import of a Python install | Done |
 | State: versioned state files, persistent outbox | Done |
 | API client: health, enrollment, register, heartbeat, MQTT settings, actions, software, signing keys, artifact downloads, application credentials | Done (the other routes come with their modules) |
-| CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `mqtt-test`, `mqtt-listen`, `helper`, `--version`, `agent` (alias `run`) | Done |
-| Agent socket with a group policy per command; root helper (`power.*`, `logs.read`, `logs.warnings`, `systemd.install_unit`, `systemd.control`, `users.*`, `docker.*`, `compose.*`) | Done |
+| CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `logs`, `mqtt-test`, `mqtt-listen`, `helper`, `--version`, `agent` (alias `run`) | Done |
+| Agent socket with a group policy per command; root helper (`power.*`, `logs.*`, `systemd.install_unit`, `systemd.control`, `users.*`, `docker.*`, `compose.*`, `wifi.*`, `wireguard.*`, `ssh.authorized_keys`) | Done |
 | systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done |
 | Board installer (`install-rpi.sh`), CI artifact, `meteorcli-go-edge` prerelease | Done (Raspberry Pi) |
 | Identity: register, request-token and claim run by the agent, background approval polling, credential storage, MQTT credential refresh, 401 handling | Done |
 | Heartbeat module; telemetry (inventory, metrics); platform adapters (Raspberry Pi, Jetson, generic Linux) | Done |
 | MQTT: `bus` (one session, TLS with the stored CA, reconnect with backoff), `mqtt` module (status, ping, `sync_desired`), `metrics` module (60 s metrics, app and journal events) | Done |
 | Actions: `reboot`, `shutdown`, `set_password`, `add_user` through the helper; `update_agent` reported unsupported | Done (the updater comes later) |
-| Deploy: signed desired software, streamed artifact downloads with SHA-256, `systemd`, `docker` and `docker_compose` runtimes through the helper, health gate and rollback, application credentials | Done |
-| Modules: network (Wi-Fi, WireGuard), update | Later pull requests |
+| Deploy: signed desired software, streamed artifact downloads with SHA-256, `systemd`, `docker` and `docker_compose` runtimes through the helper, health gate and rollback | Done |
+| `appcreds` module: SDK tokens of bound workloads rotated in place | Done |
+| Network: `wifi` module (changes with commit-confirm, status reports), `wireguard` module (device tunnel, SSH keys for the browser terminal); `logs` for the console's Logs window | Done |
+| Module: update | Later pull request |
 
 ## Files
 
 | Path | Owner, mode | Holds |
 | --- | --- | --- |
-| `/etc/meteorcli/config.json` | root:meteor 0640 | Server (`domain`, `api_base`, `server_url`), optional pinned CA (`ca_file`), `enroll_name` (from a meteorenv file). Written by root, read by the agent. |
+| `/etc/meteorcli/config.json` | root:meteor 0640 | Server (`domain`, `api_base`, `server_url`), optional pinned CA (`ca_file`), `enroll_name` (from a meteorenv file), `ssh_user` (the account the console's browser terminal signs in as; the installer sets the user who ran it). Written by root, read by the agent and the helper. |
 | `/var/lib/meteorcli/identity/` | meteor 0700, files 0600 | `device.json` (device id, organization, name, heartbeat interval), `device-token`, `mqtt.json`, `mqtt-ca.crt`, `api-key` (until enrolled), `pending-claim.json` (request id and claim secret while waiting), `wireguard/` keys. Written by the agent only, except `config` (root) storing an API key and removing a server's files. |
-| `/var/lib/meteorcli/state/` | meteor 0700 | Versioned module state (`signing-keys.json`, `applied-software.json`, ...) and `outbox/` |
+| `/var/lib/meteorcli/state/` | meteor 0700 | Versioned module state (`signing-keys.json`, `applied-software.json`, `wireguard.json` (the last tunnel settings, no private key), ...) and `outbox/` |
 | `/var/lib/meteorcli/artifacts/` | meteor 0750 | Downloaded release artifacts (`<artifact id>` and `<artifact id>.sha256`) |
 | `/var/lib/meteorcli/compose/` | meteor 0700 | One directory per Compose project (0755): the compose file or unpacked bundle, `.env.meteorcloud` (0600) and `compose.meteorcloud.json` (0600) |
 | `/var/lib/meteorcli/app-credentials/` | meteor 0700 | Application tokens of bound workloads, one directory per workload: `token` (0644, mounted read-only into the container) and `meta.json` (0600) |
 | `/etc/meteorcli/docker/` | root, optional | Docker registry credentials for deploys (`sudo docker --config /etc/meteorcli/docker login …`); the helper runs docker with `DOCKER_CONFIG` pointing here |
+| `/var/lib/meteorcli-helper/` | root 0700 (`StateDirectory=`) | The helper's own state: `wifi/pending.json` and `wifi/backup/` (a Wi-Fi change waiting for confirm and the profiles it replaced), `wireguard/wg0.conf` (0600, holds the private key) |
+| `/usr/local/libexec/meteorcli-logs`, `/etc/sudoers.d/meteorcli-logs` | root 0755 / 0440 | The path the console's Logs window runs over SSH (`exec meteorcli logs "$@"`), allowed with `sudo -n` for the `meteorcli` group |
 | `/run/meteorcli/` | meteor:meteorcli 0750 | `agent.sock` (meteor:meteorcli 0660), `helper.sock` (root:meteor 0660) |
 
 Every JSON file has a `version` field and keeps keys this version does not know. Files are written
@@ -126,7 +130,7 @@ The modules that own them recreate them.
 
 | Command | Same as Python | Notes |
 | --- | --- | --- |
-| `meteorcli config --domain HOST [--api-base URL] [--http] [--api-key KEY]` | Yes | Same URL rules (IPs and localhost use HTTP, `api.<ip>` is stripped). Changing the server removes the old server's credentials. Needs root. |
+| `meteorcli config --domain HOST [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME]` | Yes | Same URL rules (IPs and localhost use HTTP, `api.<ip>` is stripped). Changing the server removes the old server's credentials. `--ssh-user` is new (Python used the user that ran the installer). Needs root. |
 | `meteorcli config --show` | Yes | Never prints secrets. |
 | `meteorcli config import [--from DIR] [--force]` | New | See above. |
 | `meteorcli config meteorenv` | Python service did it at start | Applies a first-boot `meteorenv` file; `meteorcli.service` runs it as root before the agent. See [Enrollment](#enrollment). |
@@ -136,6 +140,7 @@ The modules that own them recreate them.
 | `meteorcli claim [--wait S]` | Mostly | Reports the pending request (exit 0 enrolled, 2 still pending, 1 ended); the agent collects the approval by itself, so this is optional. Needs `meteorcli-admin`. |
 | `meteorcli test` | Yes | The agent checks `/api/v1/health` and the saved API key. Only a 401/403 reports the key as rejected; other failures are errors. |
 | `meteorcli module restart NAME` | New | Restarts (or unparks) one module of the running agent. Needs `meteorcli-admin`. |
+| `meteorcli logs [SOURCE] [--json] [-n N] [--since S] [--grep T] [-f]` | Yes, same arguments | Without a source lists the sources (journal, systemd units, Docker containers, `/var/log` files); `SOURCE` is `journal`, `systemd:UNIT`, `docker:NAME` or `file:PATH`. Also takes the Python helper's `logs list` and `logs show KIND [NAME] [--project P] [--lines N] [--since S] [--grep T] [--follow]`, which the console runs. Members of `meteorcli` read through the agent and the helper; root reads in-process (works with the agent stopped). |
 | `meteorcli mqtt-test [TOPIC] [MESSAGE]` | Yes, same arguments | The agent publishes through its own session (client id `device-<id>`), not retained; default a small JSON object on `status`. Fails with the last connection error while the agent is not connected. Needs `meteorcli-admin` (it speaks as the device). |
 | `meteorcli mqtt-listen [TOPIC] [--timeout S]` | Yes, same arguments | Prints `<topic> <payload>` for each command the agent's session receives (only `commands` is subscribed). Needs `meteorcli`. |
 | `meteorcli helper` | Service entry point | The root helper behind `meteorcli-helper.socket`. |
@@ -159,7 +164,8 @@ policy per command (`socketPolicy` in `internal/agent/socket.go`):
 | root | everything |
 
 Today the socket serves `status`, `test`, `register`, `enroll.request`, `enroll.claim`,
-`config.reload`, `module restart`, `mqtt.test` (admin) and `mqtt.listen` (read); the other
+`config.reload`, `module restart`, `mqtt.test` (admin), `mqtt.listen`, `logs.list` and `logs.show`
+(read); the other
 commands arrive with their modules. The agent's own
 user (`meteor`) is always allowed, like root. `agent.sock` belongs to the `meteorcli` group, so an
 administrator is in **both** groups:
@@ -190,7 +196,8 @@ The few privileged operations go through `meteorcli helper`, a root service star
 of the `meteor` user (root and other members of the `meteor` group are refused), runs only the
 operations in `internal/helper/ops.go` with typed, validated parameters (unknown fields are
 rejected), runs tools with an argument list and a fixed `PATH`, logs every request, and exits after
-a minute without requests.
+a minute without requests (a followed log keeps it running). It serves at most 32 connections, all
+from the agent, which follows at most 8 logs at once.
 
 | Operation | Params | Does |
 | --- | --- | --- |
@@ -205,6 +212,16 @@ a minute without requests.
 | `docker.load` | `path` (a file directly in `/var/lib/meteorcli/artifacts`, symlinks resolved and checked) | `docker load -i` (15 min) |
 | `docker.run` | `name`, `image` (no leading `-`), `restart` (`no`, `always`, `unless-stopped`, `on-failure[:N]`), `ports` (`-p` values), `env` (names `^[A-Za-z_][A-Za-z0-9_.-]*$`, values without line breaks), `token_file` (a `token` under `/var/lib/meteorcli/app-credentials/<dir>/`), `command` (container arguments), `pull_never` | Prepares the environment in a 0600 `--env-file` in the helper's private `/tmp` (never on the command line), then `docker rm -f` and `docker run -d [--pull never]` (15 min, for the pull) |
 | `docker.health`, `docker.remove` | `name` | `docker inspect -f '{{.State.Running}}\|{{.State.Status}}\|{{.State.ExitCode}}\|<health>'` (never env or labels) / `docker rm -f` |
+| `logs.list` | none | The sources `meteorcli logs` offers: `journal`, loaded `systemd` service units, Docker containers (with their compose project) when the Docker socket exists, readable regular files from a fixed glob list (`/var/log/syslog`, `messages`, `kern.log`, `auth.log`, `daemon.log`, `dpkg.log`, `/var/log/nginx/*.log`, `/var/log/apache2/*.log`, ...) |
+| `logs.show` (streamed) | `kind`, `name`, `project`, `lines` (1-10000), `since` (`15m`, `1h`, `7d`), `grep`, `follow` | Only a source `logs.list` returned: `journalctl [--unit]`, `docker logs --timestamps --tail`, `tail -n`/`tail -F`. Lines go out as they come (one frame per line, cut at 64 KiB); `follow` runs until the caller hangs up, at most 24 hours. `grep` scans the last 50 000 lines for the `lines` last matches, then filters followed lines |
+| `wifi.status` | none | NetworkManager's state (`nmcli -t`, stdout only): `supported`/`unsupported_reason`, `connected_ssid`, `signal_percent`, `interface`, `wired_connected`, `saved_networks` (managed or not), `pending`, plus the uplink (`uplink_type`, `uplink_interface`) |
+| `wifi.apply` | `id`, `revision`, `ssid` (1-32 bytes), `security` (`wpa-psk`, `open`), `password` (8-63 characters), `hidden`, `connect_now` | Writes a keyfile (0600, `O_EXCL`/`O_NOFOLLOW`) in `/etc/NetworkManager/system-connections` and `nmcli connection reload` (the password is never on a command line). Other profiles for the same SSID are backed up and removed. With `connect_now` it activates the profile (45 s) and keeps a pending record until `wifi.confirm`; a network it cannot join is rolled back at once (`not_joined`). Netplan definitions of that SSID are forgotten with `netplan set` when netplan exists |
+| `wifi.confirm`, `wifi.rollback` | none | Drop the pending record and backups / put the backed-up profiles back, remove the new one and reconnect |
+| `wifi.remove` | `ssid` | Deletes the profiles of that SSID; refused with `would_cut_off` when it is the device's only link |
+| `wireguard.apply` | `address`, `private_key`, `public_key`, `endpoint` (`host:port`), `allowed_ips` (single private hosts), `keepalive` | Renders `wg0.conf` (no hooks, every value checked), refuses tunnel hosts that route to the local network (`ip route get`), writes it 0600 and runs `wg-quick up`; does nothing when wg0 already runs the same config |
+| `wireguard.down`, `wireguard.show` | none | `wg-quick down` (or `ip link delete wg0`) / `wg show wg0 latest-handshakes` and `endpoints` |
+| `wireguard.endpoint` | `public_key`, `endpoint` (IP literal and port) | `wg set wg0 peer K endpoint E` (the agent resolved the server's name again) |
+| `ssh.authorized_keys` | `gateway_key`, `gateway_key_retired`, `ca_key`, `principal` | Keeps the managed lines in the `ssh_user`'s `~/.ssh/authorized_keys` (the gateway key, `cert-authority,principals="…" <ca> meteorcloud-ca`); the user comes from `config.json`, never the request, and is never root or a system account. Answers the CA the user trusts. An empty request changes nothing |
 | `compose.services`, `compose.up`, `compose.ps`, `compose.down` | `project` (`^[a-z0-9][a-z0-9_-]{0,62}$`), `file`, `env_file`, `override_file` (each directly in `/var/lib/meteorcli/compose/<project>/`), `force_recreate` | `docker compose -p <project> -f <file> [--env-file] config --services` / `[-f override] up -d --remove-orphans [--force-recreate]` (15 min) / `ps -a --format json` / `down --remove-orphans`; `services` and `ps` answer stdout only (warnings stay out of the parsed output) |
 
 **Trust boundary.** `systemd.install_unit` checks the unit's name and shape, not what `ExecStart`
@@ -229,7 +246,10 @@ and never on a command line. The helper unit hides `/root` and `/run/user` with
 (`ProtectHome=tmpfs` with `BindPaths=/home` remounts `/home` read-only on systemd 257;
 `ProtectHome=read-only` with `ReadWritePaths=/home` fails the same way on systemd 252.)
 
-Docker and file logs and Wi-Fi follow the Python helpers in later pull requests.
+Wi-Fi passwords and the WireGuard private key are never in an audit line (`wifi.*` log the SSID and
+`connect_now`; `wireguard.apply` logs the address and endpoint). The helper unit allows `AF_INET`
+and `AF_INET6` (wg-quick resolves a server given by name) and keeps its state in
+`/var/lib/meteorcli-helper`.
 
 ### Packaging
 
@@ -244,6 +264,13 @@ Docker and file logs and Wi-Fi follow the Python helpers in later pull requests.
 - `meteorcli-helper.service`: root with a limited capability set, `NoNewPrivileges`, `PrivateTmp`,
   `ProtectKernelModules`, `TemporaryFileSystem=/root:ro /run/user:ro` and a system call filter.
   Exposure about 2.9 on systemd 257.
+- The installer adds `/usr/local/libexec/meteorcli-logs` and its sudo rule (checked with
+  `visudo -c`), installs `wireguard-tools` with apt unless `--no-wireguard`, sets `--ssh-user`
+  from `--user`/`$SUDO_USER`, and removes the Python agent's other root helpers and their sudo rules
+  (`meteorcli-wg`, `meteorcli-wifi`, `meteorcli-systemd`, `meteorcli-action`). A Wi-Fi change the
+  Python agent had not confirmed is rolled back with its helper first; if that fails,
+  `/var/lib/meteorcli-wifi` is kept. A `--user` that cannot be the SSH user (root, system
+  accounts, names outside `^[a-z_][a-z0-9_-]{0,31}$`) only skips `--ssh-user`.
 - `/run/meteorcli` comes from tmpfiles.d instead of `RuntimeDirectory=`: systemd would delete it,
   with `helper.sock`, whenever the agent stops, and would give it to `meteor:meteor`, locking the
   `meteorcli` group out. The agent has `SupplementaryGroups=meteorcli` so it can give `agent.sock` to
@@ -394,8 +421,12 @@ own goroutine, so a slow image pull never delays a heartbeat. One cycle is the P
 Bound workloads (`spec.meteorcloud.application`) get a token from `POST
 /applications/credentials`, kept in `app-credentials/` and mounted read-only at
 `/run/secrets/meteorcloud-token`, with the `METEORCLOUD_*` variables; it is rewritten in place
-(same inode) when due, so the container sees the new token without a restart. A release the device
-rolled back to keeps its token fresh too. The server issues credentials for the desired release's
+(same inode) when due, so the container sees the new token without a restart. Rotation is the
+`appcreds` module's job (every minute it rewrites the tokens past `refresh_after`); deploy mints a
+token when a workload is installed. A rotation re-checks the stored binding under the store's lock,
+never creates a missing token file (deploy then recreates the container, whose mount needs the new
+inode), and keeps unknown `meta.json` keys; a damaged `meta.json` is moved to
+`meta.json.corrupt-<time>`. A release the device rolled back to keeps its token fresh too. The server issues credentials for the desired release's
 binding, so a credential for another application or environment is refused: a rollback to a
 release bound to a different application fails instead of running with the wrong token. Stored
 credentials are deleted only when verified desired software no longer binds the workload.
@@ -407,6 +438,54 @@ heartbeat. Install outcomes are also announced on `devices/{id}/events` as `depl
 `deploy.failed` or `deploy.rolled_back` (with `workload_key`, `release_version`, `health`,
 `error`), once per change. A runtime is a package under `internal/deploy/runtime/` plus one line in
 `internal/deploy/runtimes.go`.
+
+### Wi-Fi
+
+The `wifi` module waits for a heartbeat that says Wi-Fi changes wait (`wifi_pending`), collects
+them with `GET /network/wifi` (the only moment a password travels) and hands each to the helper.
+A `connect_now` change is kept only when `GET /api/v1/health` answers on the new network within
+90 seconds (tried every 5 seconds); otherwise the old settings come back and the result is
+`rolled_back` with the console's message. A network that cannot be joined is `rolled_back` at
+once. A change a restart or power cut left unconfirmed is rolled back when the agent starts and
+reported `rolled_back` ("The device restarted before the new network was confirmed…").
+A `connect_now` change turns the Wi-Fi radio on first when it is switched off (Raspberry Pi OS
+boots with it soft-blocked until a Wi-Fi country is set), waits for the adapter and scans; a radio
+that stays off (hardware block) fails with `radio_off` before anything changes. A failed join says
+whether the password was rejected or the network was not found. Save-for-later changes leave the
+radio as it is. Confirm and rollback are tried three times; a change that cannot be confirmed is rolled back,
+and one whose rollback fails is reported `failed` and rolled back by the next status check
+(every minute), which then reports it `rolled_back`. An action other than `apply` or `remove`
+is reported `failed` without touching the device. Helper changes are serialized; a restore that
+cannot put every old profile back keeps the pending record and backups for the next attempt.
+
+Results wait in the outbox (kind `wifi_result`) until `POST /network/wifi/report` accepted them.
+The state goes with them when it changed, at least every 5 minutes (checked every minute, first 15
+seconds after start) and after every collection. Without NetworkManager the report says
+`supported: false` with the reason, and the uplink the agent reads from `/proc/net/route`.
+
+### WireGuard
+
+The `wireguard` module makes an X25519 key pair in `identity/wireguard/` (the Python agent's
+private key is used as is; the public key is always derived from it, and a missing or wrong
+`public.key` is rewritten; the private key never leaves the device) and registers it with
+`POST /connectivity/wireguard`, together with `ssh_user`, the sshd host key (pinned by the
+server) and the SSH CA the user already trusts. It registers again every 15 minutes (×0.8-1.2),
+at once after enrollment, a credential rotation or a config change, and with backoff (30 s to
+30 min) after failures. `connectivity_disabled` stops it for 30 minutes;
+`connectivity_revoked` and `wireguard_key_changed` take wg0 down (retried until it is gone) and
+wait for an operator; the refusal is kept in `state/wireguard.json`, so the saved settings are not
+used again, also after a restart during an outage, until a registration succeeds. The same
+refusals on the immediate re-registration that reports a new SSH CA are handled the same way.
+
+wg0 is brought up through the helper and kept up every minute from the last settings in
+`state/wireguard.json`, also while the server is unreachable. Only settings the helper applied are
+saved, and the module reports `running` only once wg0 runs them. The helper checks the routes to
+the tunnel hosts before it touches a working wg0 (a route it cannot check is refused) and brings
+the previous config back when a new one fails to start. When the server is given by name
+and no handshake happened for 3 minutes, the agent resolves the name again (IPv4 first, IPv6 when the name
+has only AAAA records) and points the peer at the new address. The SSH lines from the answer go to the SSH user's `authorized_keys`; when the
+user trusts a new CA the agent registers again at once so the console can use certificates.
+Without `wg` and `wg-quick` the module waits and looks again every 10 minutes.
 
 ### Differences from the Python agent
 
@@ -455,6 +534,18 @@ heartbeat. Install outcomes are also announced on `devices/{id}/events` as `depl
 - Action results are kept in the outbox until the server accepts them. If the `done` of a reboot
   cannot be sent, the device still reboots and sends it afterwards (Python skipped the reboot and
   lost the action). The second publish of `online` is skipped when it cannot be sent, as before.
+- Wi-Fi and WireGuard go through the root helper instead of `sudo meteorcli-wifi` /
+  `meteorcli-wg`. Wi-Fi results wait in the outbox until accepted (Python kept them in memory).
+  The Wi-Fi state is reported every 5 minutes or on change, not in every heartbeat cycle.
+- `ssh_user` comes from `config.json` (`meteorcli config --ssh-user`), not from the account that
+  ran the installer at run time. Without it the device registers without `ssh_user` and the
+  helper leaves `authorized_keys` alone.
+- `ssh_host_key` is sent as `<type> <base64>`, without the file's comment (as Python did; the
+  contract recordings now match that).
+- `meteorcli logs` reads through the agent for group members (Python's CLI ran the helper with
+  sudo). The console's `meteorcli-logs` path keeps working as a wrapper. `--lines 0` means the
+  default (200).
+- Application tokens are rotated by the `appcreds` module instead of the deploy cycle.
 - While disconnected only the latest unsent metrics body is kept and sent on reconnect (Python's
   client queued every message and sent a burst). Events (app changes, journal warnings) wait in
   memory, at most 500, and go out after the metrics once connected.

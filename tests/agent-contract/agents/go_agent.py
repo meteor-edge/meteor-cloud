@@ -19,10 +19,15 @@ Differences from the Python adapter, all on the device side of the contract:
   commands and journal warnings go to the SimulatedDevice, with the same docker arguments the real
   helper uses. Metrics are published every second (``METEORCLI_METRICS_INTERVAL=1``).
 - Features: background enrollment (approval with no command, across restarts), the server's
-  heartbeat interval, MQTT, actions and docker deploys (the fake helper turns ``docker.load``,
+  heartbeat interval, MQTT, actions, docker deploys (the fake helper turns ``docker.load``,
   ``docker.run`` and ``docker.health`` into the real helper's docker commands on the
-  SimulatedDevice). Install outcomes go out at once in a heartbeat that carries only
-  ``software_report``, like the progress reports. Wi-Fi and WireGuard come in later pull requests.
+  SimulatedDevice), Wi-Fi (``wifi.*`` become the Python helper's commands on the
+  SimulatedDevice) and WireGuard (``wireguard.*`` become ``wg-quick``/``wg`` calls there;
+  ``ssh.authorized_keys`` keeps the managed lines in memory). Install outcomes go out at once in
+  a heartbeat that carries only ``software_report``, like the progress reports.
+- WireGuard and SSH facts are the Python adapter's: the same key pair in
+  ``identity/wireguard``, the SSH user ``pi`` (``meteorcli config --ssh-user``) and the same host
+  key in ``<root>/etc/ssh``.
 """
 
 from __future__ import annotations
@@ -43,6 +48,7 @@ import pytest
 
 from harness.device import SimulatedDevice
 from harness.fake_cp import FakeControlPlane
+from harness.script import ssh_key
 
 SOURCE = Path(__file__).resolve().parents[3] / "src" / "device-plane" / "agent-go"
 VERSION = "0.0.0"
@@ -63,6 +69,13 @@ INSPECT_TEMPLATE = (
 STATS_FORMAT = "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}"
 # The real helper's deploy health check (internal/helper/workloads.go).
 HEALTH_TEMPLATE = "{{.State.Running}}|{{.State.Status}}|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}"
+
+# The Python adapter's WireGuard key pair and SSH host key (same recordings).
+WG_PRIVATE = "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+WG_PUBLIC = "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw="  # X25519 public key of WG_PRIVATE
+SSH_HOST_KEY_FILE = ssh_key("contract host key", "root@device") + "\n"
+# What the real helper adds to wifi.status: the link traffic leaves on.
+UPLINK = {"uplink_type": "wifi", "uplink_interface": "wlan0"}
 
 _binary: Path | None = None
 
@@ -92,6 +105,7 @@ class FakeHelper:
     def __init__(self, path: Path, device: SimulatedDevice) -> None:
         self.device = device
         self.calls: list[str] = []
+        self.authorized_keys: list[str] = []
         path.parent.mkdir(parents=True, exist_ok=True)
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.bind(str(path))
@@ -161,6 +175,21 @@ class FakeHelper:
             result = self._docker(["docker", "inspect", "-f", HEALTH_TEMPLATE, params["name"]])
         elif method == "docker.remove":
             result = self._docker(["docker", "rm", "-f", params["name"]])
+        elif method.startswith("wifi."):
+            result = self._wifi(method.removeprefix("wifi."), params)
+        elif method == "wireguard.apply":
+            device.wireguard(["wg-quick", "up", "wg0"])
+            result = {"changed": True}
+        elif method == "wireguard.down":
+            device.wireguard(["wg-quick", "down", "wg0"])
+            result = {"down": True}
+        elif method == "wireguard.show":
+            result = {"up": True, "peers": []}
+        elif method == "wireguard.endpoint":
+            device.wireguard(["wg", "set", "wg0", "peer", params["public_key"], "endpoint", params["endpoint"]])
+            result = {"changed": True}
+        elif method == "ssh.authorized_keys":
+            result = self._ssh_keys(params)
         elif method == "logs.warnings":
             out = device.journal_helper(["warnings"]).stdout
             result = {"entries": [json.loads(line) for line in out.splitlines() if line.strip()]}
@@ -169,9 +198,32 @@ class FakeHelper:
         return {"ok": True, "result": result}
 
 
+    def _wifi(self, command: str, params: dict) -> dict:
+        """The Python meteorcli-wifi commands on the SimulatedDevice (the request on stdin)."""
+        stdin = json.dumps(params) if command in ("apply", "remove") else None
+        done = self.device.wifi_helper([command], stdin)
+        answer = json.loads(done.stdout or "{}")
+        if done.returncode != 0:
+            raise RuntimeError(answer.get("error") or f"wifi {command} failed")
+        if command == "status":
+            answer = {**answer, **UPLINK}
+        return answer
+
+    def _ssh_keys(self, params: dict) -> dict:
+        """The managed authorized_keys lines (the CA line is what matters to the contract)."""
+        ca, principal = params.get("ca_key") or "", params.get("principal") or ""
+        if ca and principal:
+            wanted = f'cert-authority,principals="{principal}" {" ".join(ca.split()[:2])} meteorcloud-ca'
+            self.authorized_keys = [line for line in self.authorized_keys if not line.endswith(" meteorcloud-ca")]
+            self.authorized_keys.append(wanted)
+        trusted = next((" ".join(line.split()[1:3]) for line in self.authorized_keys if line.endswith(" meteorcloud-ca")), "")
+        return {"user": "pi", "trusted_ca": trusted, "changed": bool(ca and principal)}
+
+
 class GoAgent:
     name = "go"
-    features = frozenset({"background_enrollment", "server_heartbeat_interval", "mqtt", "actions", "docker"})
+    features = frozenset({"background_enrollment", "server_heartbeat_interval", "mqtt", "actions", "docker", "wifi",
+                          "wireguard"})
 
     def __init__(self, workdir: Path, device: SimulatedDevice, plane: FakeControlPlane) -> None:
         self.device = device
@@ -190,6 +242,14 @@ class GoAgent:
         }
         for key in ("METEORCLI_TOKEN", "METEORCLI_API_KEY", "METEOR_BOOT_DIR"):
             self.env.pop(key, None)
+        # The Python adapter's WireGuard keys and SSH host key.
+        wg_dir = self.root / "var" / "lib" / "meteorcli" / "identity" / "wireguard"
+        wg_dir.mkdir(parents=True)
+        (wg_dir / "private.key").write_text(WG_PRIVATE + "\n", encoding="utf-8")
+        (wg_dir / "public.key").write_text(WG_PUBLIC + "\n", encoding="utf-8")
+        ssh_dir = self.root / "etc" / "ssh"
+        ssh_dir.mkdir(parents=True)
+        (ssh_dir / "ssh_host_ed25519_key.pub").write_text(SSH_HOST_KEY_FILE, encoding="utf-8")
         self.log = workdir / "agent.log"
         self._proc: subprocess.Popen[bytes] | None = None
         self.helper = FakeHelper(self.root / "run" / "meteorcli" / "helper.sock", device)
@@ -252,7 +312,7 @@ class GoAgent:
         return self._cli("config", "--api-base", server, "--api-key", api_key)
 
     def register(self, server: str, token: str) -> int:
-        code = self._cli("config", "--api-base", server)
+        code = self._cli("config", "--api-base", server, "--ssh-user", "pi")
         return code or self._cli("register", "--token", token)
 
     def test(self) -> int:

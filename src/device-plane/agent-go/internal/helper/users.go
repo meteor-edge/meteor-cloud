@@ -320,3 +320,7 @@ func lookupUser(name string) (UserInfo, error) {
 	}
 	return UserInfo{UID: uid, GID: gid, Home: u.HomeDir}, nil
 }
+
+// ValidSSHUser checks a name for config.json's ssh_user by the rule the
+// helper applies before it touches that account's authorized_keys.
+func ValidSSHUser(name string) error { return validUsername(name) }

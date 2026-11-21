@@ -23,7 +23,7 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/packaging"
 cp -r packaging/meteorcli.service packaging/meteorcli-helper.service packaging/meteorcli-helper.socket \
-	packaging/sysusers.d packaging/tmpfiles.d "$stage/packaging/"
+	packaging/sysusers.d packaging/tmpfiles.d packaging/libexec packaging/sudoers.d "$stage/packaging/"
 tar -C "$stage" --owner=0 --group=0 --numeric-owner -czf "$out/meteorcli-packaging.tar.gz" packaging
 
 # Boards with an installer: <script suffix>:<board name as platform.Detect calls it>.

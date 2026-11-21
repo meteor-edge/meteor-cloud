@@ -22,7 +22,7 @@ type cycle struct {
 	applied  map[string]workload
 	tools    map[string]bool
 	verifier *signing.Verifier
-	creds    credStore
+	creds    creds
 	refused  bool // the token was refused during this cycle
 }
 
@@ -130,15 +130,7 @@ func (c *cycle) reconcile(ctx context.Context, it item) (rep report, attempted b
 	}
 	wasApplied := had && c.alreadyApplied(it, rec)
 	if wasApplied {
-		fresh := true
-		if !rec.Reapply {
-			var err error
-			if fresh, err = c.creds.keepFresh(ctx, d.API, c.token, it, d.Log.Warn); err != nil {
-				c.authFailed() // only a refused token comes back as an error
-				return nil, false
-			}
-		}
-		if !fresh {
+		if !rec.Reapply && !c.creds.present(it) {
 			rec.Reapply = true
 			c.applied[key] = rec
 			release, revision, _ := it.identity()
@@ -313,14 +305,8 @@ func (c *cycle) stillRolledBack(ctx context.Context, it item, rec workload, had 
 	if reason == "" {
 		reason = "health check failed"
 	}
-	d := c.r.d
-	fresh, err := c.creds.keepFresh(ctx, d.API, c.token, rec.Item, d.Log.Warn)
-	if err != nil {
-		c.authFailed() // only a refused token comes back as an error
-		return nil
-	}
 	health := runtime.Unknown
-	if !fresh {
+	if !c.creds.present(rec.Item) {
 		restored, err := c.restore(ctx, rec.Item)
 		if err != nil {
 			return nil // errAuth: the cycle stops

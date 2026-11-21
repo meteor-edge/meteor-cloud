@@ -9,10 +9,12 @@ package modules
 import (
 	"meteorcloud/meteorcli/internal/actions"
 	"meteorcloud/meteorcli/internal/agent"
+	"meteorcloud/meteorcli/internal/appcreds"
 	"meteorcloud/meteorcli/internal/deploy"
 	"meteorcloud/meteorcli/internal/heartbeat"
 	"meteorcloud/meteorcli/internal/metrics"
 	"meteorcloud/meteorcli/internal/mqtt"
+	"meteorcloud/meteorcli/internal/network"
 )
 
 // All returns a fresh instance of every feature module, in no particular
@@ -25,5 +27,8 @@ func All() []agent.Module {
 		&metrics.Module{},
 		&actions.Module{},
 		&deploy.Module{},
+		&appcreds.Module{},
+		&network.WiFi{},
+		&network.WireGuard{},
 	}
 }

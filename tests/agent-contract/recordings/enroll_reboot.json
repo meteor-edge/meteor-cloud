@@ -69,6 +69,51 @@
     },
     {
       "request": {
+        "method": "GET",
+        "path": "/api/v1/agent/mqtt",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "enabled": false,
+          "config_version": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/connectivity/wireguard",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "public_key": "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {},
+        "body": {
+          "error": {
+            "code": "not_found",
+            "message": "POST /api/v1/agent/connectivity/wireguard is not scripted"
+          }
+        }
+      }
+    },
+    {
+      "request": {
         "method": "POST",
         "path": "/api/v1/agent/heartbeat",
         "headers": {
@@ -102,6 +147,11 @@
                 "restarts": 0,
                 "since": "<timestamp>"
               },
+              "appcreds": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
               "deploy": {
                 "state": "running",
                 "restarts": 0,
@@ -128,6 +178,16 @@
                 "since": "<timestamp>"
               },
               "socket": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "wifi": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "wireguard": {
                 "state": "running",
                 "restarts": 0,
                 "since": "<timestamp>"

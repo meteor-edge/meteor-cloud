@@ -42,6 +42,10 @@ func (s *Server) Serve(ctx context.Context, l *net.UnixListener) error {
 		Log:       s.Log,
 		Idle:      s.Idle,
 		Timeout:   2 * time.Minute,
+		// Only the agent is served: it may hold several calls at once (deploys,
+		// Wi-Fi, WireGuard) plus up to 8 followed logs.
+		MaxConns:   32,
+		MaxPerUser: 32,
 	}
 	return rpc.Serve(ctx, l)
 }
@@ -87,6 +91,14 @@ func NewClient(path string) *Client { return &Client{path: path} }
 // Call runs one operation and decodes its result into out (may be nil).
 func (c *Client) Call(ctx context.Context, op string, params, out any) error {
 	if err := localrpc.Call(ctx, c.path, op, params, out); err != nil {
+		return fmt.Errorf("helper %s: %w", op, err)
+	}
+	return nil
+}
+
+// Stream runs a streaming operation (logs.show) and hands each line to line.
+func (c *Client) Stream(ctx context.Context, op string, params any, line func(string) error) error {
+	if err := localrpc.CallStream(ctx, c.path, op, params, line); err != nil {
 		return fmt.Errorf("helper %s: %w", op, err)
 	}
 	return nil

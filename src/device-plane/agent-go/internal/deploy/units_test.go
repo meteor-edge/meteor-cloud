@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
@@ -147,62 +146,6 @@ func TestAppliedStateDamagedFileStartsClean(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(dir, appliedFile+".corrupt-*"))
 	if len(matches) != 1 {
 		t.Fatalf("damaged file not moved aside: %v", matches)
-	}
-}
-
-func TestTokenIsRewrittenInPlace(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "token")
-	if err := writeInPlace(path, []byte("a-long-first-token\n")); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := os.Stat(path)
-	if err := writeInPlace(path, []byte("short\n")); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := os.Stat(path)
-	data, _ := os.ReadFile(path)
-	if string(data) != "short\n" || after.Mode().Perm() != 0o644 {
-		t.Fatalf("content %q mode %v", data, after.Mode())
-	}
-	if before.Sys().(*syscall.Stat_t).Ino != after.Sys().(*syscall.Stat_t).Ino {
-		t.Fatal("the token file was replaced; a bind mount would keep the old one")
-	}
-}
-
-func TestCredStore(t *testing.T) {
-	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	s := credStore{root: t.TempDir(), now: func() time.Time { return now }}
-	b := map[string]any{"application": "app-1"}
-	key := "shop/main"
-	if s.current(key, b) != nil {
-		t.Fatal("credential before any was stored")
-	}
-	dir := s.dir(key)
-	if filepath.Base(dir)[:10] != "shop_main-" || s.dir("shop_main") == dir {
-		t.Fatalf("dir %s", dir)
-	}
-	_ = os.MkdirAll(dir, 0o700)
-	_ = os.WriteFile(filepath.Join(dir, "token"), []byte("tok\n"), 0o644)
-	meta := credMeta{Application: "app-1", Environment: "production", RefreshAfter: "2026-05-01T00:00:00Z",
-		ExpiresAt: "2026-07-01T00:00:00+00:00", Env: map[string]string{"METEORCLOUD_APP_ID": "app-1"}}
-	data, _ := json.Marshal(meta)
-	_ = os.WriteFile(filepath.Join(dir, "meta.json"), data, 0o600)
-
-	if app := s.current(key, b); app == nil || app.Env["METEORCLOUD_APP_ID"] != "app-1" {
-		t.Fatalf("current = %+v", app)
-	}
-	if s.current(key, map[string]any{"application": "app-2"}) != nil {
-		t.Error("another application's token reused")
-	}
-	if s.current(key, map[string]any{"application": "app-1", "environment": "staging"}) != nil {
-		t.Error("another environment's token reused")
-	}
-	if !s.refreshDue(key) || s.expired(key) {
-		t.Errorf("refresh due %v, expired %v", s.refreshDue(key), s.expired(key))
-	}
-	s.prune(map[string]bool{"other": true})
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Error("prune kept a workload that is no longer bound")
 	}
 }
 

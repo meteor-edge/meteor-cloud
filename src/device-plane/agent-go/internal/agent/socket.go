@@ -46,6 +46,8 @@ var socketPolicy = map[string]access{
 	"config.reload":  adminAccess,
 	"mqtt.listen":    readAccess,
 	"mqtt.test":      adminAccess,
+	"logs.list":      readAccess,
+	"logs.show":      readAccess,
 }
 
 // StatusReply answers `meteorcli status`. It says whether secrets exist, never
@@ -189,6 +191,11 @@ func (m *SocketModule) handlers(d Deps) map[string]localrpc.Handler {
 	}
 	if d.Bus != nil {
 		for name, handler := range mqttHandlers(d) {
+			h[name] = handler
+		}
+	}
+	if d.Helper != nil {
+		for name, handler := range logsHandlers(d) {
 			h[name] = handler
 		}
 	}

@@ -35,6 +35,10 @@ type Config struct {
 	// EnrollName is the device name to ask for when the agent submits an
 	// enrollment request by itself (from a meteorenv file at first boot).
 	EnrollName string `json:"enroll_name"`
+	// SSHUser is the account the console's browser terminal signs in as
+	// (reported with WireGuard; the helper keeps its authorized_keys lines).
+	// The installer sets it to the user who ran it.
+	SSHUser string `json:"ssh_user"`
 
 	extra Object
 }

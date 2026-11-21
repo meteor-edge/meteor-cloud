@@ -18,10 +18,12 @@
 #   --token TOKEN | --token-file F   enroll with a one-time registration token
 #   --api-key KEY                    enroll by approval with an enrollment API key
 #   --name NAME                      device name to ask for
-#   --user USER                      give USER the meteorcli and meteorcli-admin groups (default: $SUDO_USER)
+#   --user USER                      give USER the meteorcli and meteorcli-admin groups and make it the
+#                                    account the console's browser terminal signs in as (default: $SUDO_USER)
 #   --base-url URL                   where the release files are (also $METEORCLI_BASE_URL; file:// works;
 #                                    default: this script's folder when SHA256SUMS is next to it,
 #                                    else the release it came from)
+#   --no-wireguard                   do not install wireguard-tools (the device tunnel stays off without it)
 #   --force                          install on a board this script is not for
 #   --no-start                       install only
 set -euo pipefail
@@ -40,7 +42,7 @@ fi
 BIN=/usr/local/bin/meteorcli
 UNIT_DIR=/etc/systemd/system
 
-domain="" api_base="" token="" token_file="" api_key="" name="" user="${SUDO_USER:-}" force=0 start=1
+domain="" api_base="" token="" token_file="" api_key="" name="" user="${SUDO_USER:-}" force=0 start=1 wireguard=1
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--domain) domain="${2:?--domain needs a host}"; shift 2 ;;
@@ -52,6 +54,7 @@ while [[ $# -gt 0 ]]; do
 	--user) user="${2:?--user needs a name}"; shift 2 ;;
 	--base-url) BASE_URL="${2:?--base-url needs a URL}"; shift 2 ;;
 	--force) force=1; shift ;;
+	--no-wireguard) wireguard=0; shift ;;
 	--no-start) start=0; shift ;;
 	-h | --help) sed -n '2,/^set -euo/p' "$0" 2>/dev/null | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
 	*) echo "error: unknown option $1 (see --help)" >&2; exit 2 ;;
@@ -122,6 +125,49 @@ systemd-sysusers /usr/lib/sysusers.d/meteorcli.conf
 systemd-tmpfiles --create /usr/lib/tmpfiles.d/meteorcli.conf
 systemctl daemon-reload
 
+# The console's Logs window runs /usr/local/libexec/meteorcli-logs over SSH with
+# sudo -n; the wrapper runs `meteorcli logs`, for members of the meteorcli group.
+install -D -m 0755 "$work/packaging/libexec/meteorcli-logs" /usr/local/libexec/meteorcli-logs
+if [[ -d /etc/sudoers.d ]]; then
+	install -m 0440 "$work/packaging/sudoers.d/meteorcli-logs" /etc/sudoers.d/.meteorcli-logs.new
+	if ! command -v visudo >/dev/null 2>&1 || visudo -cqf /etc/sudoers.d/.meteorcli-logs.new; then
+		mv -f /etc/sudoers.d/.meteorcli-logs.new /etc/sudoers.d/meteorcli-logs
+	else
+		rm -f /etc/sudoers.d/.meteorcli-logs.new
+		say "warning: the sudo rule for meteorcli-logs did not validate; the console cannot read logs"
+	fi
+fi
+# A Wi-Fi change the Python agent had not confirmed yet: roll it back with the
+# Python helper while it still exists (the Go agent does not read its record).
+# If that fails, its record and backups stay in /var/lib/meteorcli-wifi.
+keep_wifi_record=0
+if [[ -f /var/lib/meteorcli-wifi/pending.json ]]; then
+	if [[ -x /usr/local/libexec/meteorcli-wifi ]] && /usr/local/libexec/meteorcli-wifi rollback >/dev/null 2>&1; then
+		say "rolled back a Wi-Fi change the Python agent had not confirmed"
+	else
+		keep_wifi_record=1
+		say "warning: an unconfirmed Wi-Fi change could not be rolled back; its backups stay in /var/lib/meteorcli-wifi"
+	fi
+fi
+# The Python agent's other root helpers and their sudo rules: the Go helper does
+# their work now (wg0 is taken over at the first WireGuard registration).
+rm -f /usr/local/libexec/meteorcli-wg /usr/local/libexec/meteorcli-wifi /usr/local/libexec/meteorcli-systemd \
+	/usr/local/libexec/meteorcli-action /etc/sudoers.d/meteorcli-wireguard /etc/sudoers.d/meteorcli-wifi \
+	/etc/sudoers.d/meteorcli-systemd /etc/sudoers.d/meteorcli-action
+[[ $keep_wifi_record -eq 1 ]] || rm -rf /var/lib/meteorcli-wifi
+
+# WireGuard tools for the device tunnel (the console's browser terminal).
+if [[ $wireguard -eq 1 ]] && ! { command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1; }; then
+	if command -v apt-get >/dev/null 2>&1; then
+		say "installing wireguard-tools"
+		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wireguard-tools >/dev/null 2>&1 ||
+			{ apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wireguard-tools >/dev/null 2>&1; } ||
+			say "warning: could not install wireguard-tools; the device tunnel stays off until it is installed"
+	else
+		say "warning: install wireguard-tools (wg, wg-quick) for the device tunnel"
+	fi
+fi
+
 if [[ $python_layout -eq 1 ]] || [[ -f /etc/meteorcli/device-token ]]; then
 	say "importing the Python agent's settings and identity"
 	"$BIN" config import || die "'meteorcli config import' failed; the Python install in /opt/meteorcli is untouched"
@@ -132,6 +178,20 @@ cfg=()
 [[ -n $domain ]] && cfg+=(--domain "$domain")
 [[ -n $api_base ]] && cfg+=(--api-base "$api_base")
 [[ -n $api_key ]] && cfg+=(--api-key "$api_key")
+# The browser terminal's account: the agent's rule for ssh_user (no root or
+# system accounts). Another name only skips this setting.
+if [[ -n $user ]] && id "$user" >/dev/null 2>&1; then
+	case "$user" in
+	root | daemon | bin | sys | sync | nobody | sshd | systemd-network | meteor)
+		say "note: $user cannot be the browser terminal's account; set one later with 'meteorcli config --ssh-user NAME'" ;;
+	*)
+		if [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+			cfg+=(--ssh-user "$user")
+		else
+			say "note: '$user' is not a name the agent accepts for the browser terminal; set one later with 'meteorcli config --ssh-user NAME'"
+		fi ;;
+	esac
+fi
 if [[ ${#cfg[@]} -gt 0 ]]; then
 	"$BIN" config "${cfg[@]}"
 fi
