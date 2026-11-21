@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/localrpc"
@@ -139,6 +141,11 @@ func logsShow(ctx context.Context, env *Env, r helper.ShowLogsRequest) int {
 		fmt.Fprintf(env.Stderr, "error: %s\n", agentError(err))
 		return 2
 	}
+	// SSH ends a session with SIGHUP, and a reader that went away gives
+	// SIGPIPE: stop cleanly (the tool too) instead of dying and leaving a
+	// `journalctl -f` or `tail -F` behind.
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGHUP, syscall.SIGPIPE)
+	defer stop()
 	if r.Follow {
 		ctx = stopOnHangup(ctx)
 	}
