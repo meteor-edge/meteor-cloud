@@ -22,6 +22,9 @@ func TestNewer(t *testing.T) {
 		{"junk", "0.1.0", false},
 		{"1.2", "0.1.0", false},
 		{"1.2.3-", "0.1.0", false},
+		{"1.0.0-rc.99999999999999999999", "1.0.0-rc.100000000000000000000", false},
+		{"1.0.0-rc.100000000000000000000", "1.0.0-rc.99999999999999999999", true},
+		{"1.0.0-rc.010", "1.0.0-rc.9", true},
 	}
 	for _, c := range cases {
 		if got := Newer(c.candidate, c.current); got != c.want {

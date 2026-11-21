@@ -13,6 +13,7 @@ import (
 	"meteorcloud/meteorcli/internal/agent"
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/state"
 	"meteorcloud/meteorcli/internal/update"
 )
 
@@ -59,6 +60,15 @@ func runUpdater(ctx context.Context, env *Env, args []string) int {
 		return failed(err)
 	}
 	defer unlock()
+	if *action == "" {
+		// One outcome file: a console update waiting for its result keeps it.
+		if st, err := state.NewStore(p.StateDir); err == nil {
+			if err := update.CheckNoPending(st); err != nil {
+				fmt.Fprintf(env.Stderr, "error: %v; try again when it has finished\n", err)
+				return 1
+			}
+		}
+	}
 
 	u, err := newUpdater(env, filepath.Join(p.Root, *bin), *timeout, log)
 	if err != nil {

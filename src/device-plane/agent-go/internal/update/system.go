@@ -55,23 +55,34 @@ func (Systemctl) Stop(ctx context.Context, unit string) error {
 	return err
 }
 
-// Active implements System. Any state but "active" (activating after a crash,
-// failed, inactive) is not active.
-func (Systemctl) Active(ctx context.Context, unit string) (bool, error) {
-	out, err := systemctl(ctx, queryTimeout, "show", "--property=ActiveState", "--value", "--", unit)
+// Unit implements System with one `systemctl show`.
+func (Systemctl) Unit(ctx context.Context, unit string) (UnitState, error) {
+	out, err := systemctl(ctx, queryTimeout, "show", "--property=ActiveState,NRestarts,InvocationID", "--", unit)
 	if err != nil {
-		return false, err
+		return UnitState{}, err
 	}
-	return out == "active", nil
+	return parseShow(out)
 }
 
-// Restarts implements System.
-func (Systemctl) Restarts(ctx context.Context, unit string) (int, error) {
-	out, err := systemctl(ctx, queryTimeout, "show", "--property=NRestarts", "--value", "--", unit)
-	if err != nil {
-		return 0, err
+// parseShow reads `systemctl show` KEY=value lines.
+func parseShow(out string) (UnitState, error) {
+	var st UnitState
+	for _, line := range strings.Split(out, "\n") {
+		key, value, _ := strings.Cut(strings.TrimSpace(line), "=")
+		switch key {
+		case "ActiveState":
+			st.Active = value == "active"
+		case "InvocationID":
+			st.Invocation = value
+		case "NRestarts":
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return UnitState{}, fmt.Errorf("NRestarts %q: %w", value, err)
+			}
+			st.Restarts = n
+		}
 	}
-	return strconv.Atoi(out)
+	return st, nil
 }
 
 // SocketProbe asks the agent at socket for its status (root may always).

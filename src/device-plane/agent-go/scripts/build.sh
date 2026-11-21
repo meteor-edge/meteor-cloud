@@ -13,7 +13,8 @@ version="${2:-0.0.0-dev}"
 max_bytes=$((15 * 1024 * 1024))
 ldflags="-s -w -X main.version=$version"
 if [ -n "${METEORCLI_RELEASE_KEYS:-}" ]; then
-  ldflags="$ldflags -X meteorcloud/meteorcli/internal/update.releaseKeys=$METEORCLI_RELEASE_KEYS"
+  # Inner quotes: go build splits -ldflags again, and a key list may hold ", ".
+  ldflags="$ldflags -X 'meteorcloud/meteorcli/internal/update.releaseKeys=$METEORCLI_RELEASE_KEYS'"
   echo "note: test build; it trusts release key(s) $METEORCLI_RELEASE_KEYS"
 fi
 

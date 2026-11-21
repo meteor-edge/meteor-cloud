@@ -60,3 +60,15 @@ func TestConfigReleaseURL(t *testing.T) {
 		t.Fatalf("reset release URL = %+v", r)
 	}
 }
+
+func TestUpdaterWaitsForAPendingAction(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "var", "lib", "meteorcli", "state", update.PendingFile), `{"version":1,"action_id":"act-1"}`)
+	r := meteorcli(t, root, nil, "updater")
+	if r.code != 1 || !strings.Contains(r.stderr, "still being settled") {
+		t.Fatalf("updater with a pending action = %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(root, "var", "lib", "meteorcli", "state", update.OutcomeFile)); err == nil {
+		t.Fatal("the outcome of the pending action was replaced")
+	}
+}

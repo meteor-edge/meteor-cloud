@@ -43,10 +43,19 @@ const (
 type System interface {
 	Restart(ctx context.Context, unit string) error
 	Stop(ctx context.Context, unit string) error
-	// Active reports whether the unit is active (not activating, failed, ...).
-	Active(ctx context.Context, unit string) (bool, error)
-	// Restarts is the unit's NRestarts: automatic restarts after a crash.
-	Restarts(ctx context.Context, unit string) (int, error)
+	// Unit reports the unit's state.
+	Unit(ctx context.Context, unit string) (UnitState, error)
+}
+
+// UnitState is what the health check reads of the agent's unit.
+type UnitState struct {
+	// Active is ActiveState=active (not activating after a crash, failed, ...).
+	Active bool
+	// Restarts is NRestarts: automatic restarts since the last manual start
+	// (systemd resets it to 0 on a manual start or restart).
+	Restarts int
+	// Invocation is InvocationID, new for every activation of the unit.
+	Invocation string
 }
 
 // AgentStatus is the part of the agent's status the health check reads.
@@ -56,8 +65,12 @@ type AgentStatus struct {
 	LastHeartbeat *time.Time `json:"last_heartbeat"`
 }
 
-// enrolledState is identity.StateEnrolled (the agent socket's status state).
-const enrolledState = "enrolled"
+// Identity states of the agent socket's status (identity.StateEnrolled,
+// identity.StateRejected).
+const (
+	enrolledState = "enrolled"
+	rejectedState = "credential_rejected"
+)
 
 // Updater replaces the installed meteorcli with a newer signed release.
 type Updater struct {
@@ -133,6 +146,7 @@ func (u *Updater) Run(ctx context.Context) Outcome {
 		_ = os.Remove(u.newPath())
 		return finish(StatusFailed, fmt.Errorf("install the new binary: %w", err))
 	}
+	// From here on Bin is the new binary: every failure rolls back.
 	if err := u.startAndWait(ctx, m.Version); err != nil {
 		u.Log.Error("new version is not healthy; rolling back", "version", m.Version, "err", err)
 		if rerr := u.rollback(ctx); rerr != nil {
@@ -183,7 +197,9 @@ func (u *Updater) stage(ctx context.Context, version string, f File) error {
 }
 
 // swap keeps the installed binary as .previous (a hard link: no copy, same
-// inode) and renames the new one over Bin, so Bin is never missing.
+// inode) and renames the new one over Bin, so Bin is never missing. It fails
+// only before the rename: afterwards the new binary is in place and the
+// health gate (with its rollback) decides.
 func (u *Updater) swap() error {
 	prev := u.Previous()
 	if err := os.Remove(prev); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -195,17 +211,30 @@ func (u *Updater) swap() error {
 	if err := os.Rename(u.newPath(), u.Bin); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(u.Bin))
+	if err := syncDir(filepath.Dir(u.Bin)); err != nil {
+		u.Log.Warn("could not sync the binary's directory", "err", err)
+	}
+	return nil
 }
 
 // startAndWait restarts the agent on the new binary, lets the helper start on
-// it at the next request, and waits for the health check.
+// it at the next request, and waits for the health check. The check is tied
+// to the activation the restart created: systemd resets NRestarts on a manual
+// restart, so any automatic restart, or another InvocationID, means the new
+// version crashed, even before the first look.
 func (u *Updater) startAndWait(ctx context.Context, version string) error {
 	if err := u.System.Restart(ctx, AgentUnit); err != nil {
 		return fmt.Errorf("meteorcli %s did not start: %w", version, err)
 	}
+	first, err := u.System.Unit(ctx, AgentUnit)
+	if err != nil {
+		return fmt.Errorf("read meteorcli.service: %w", err)
+	}
+	if first.Restarts > 0 {
+		return fmt.Errorf("meteorcli %s crashed and was restarted by systemd", version)
+	}
 	u.stopHelper(ctx)
-	return u.waitHealthy(ctx, version)
+	return u.waitHealthy(ctx, version, first.Invocation)
 }
 
 // stopHelper stops the running helper; its socket starts the new binary on the
@@ -216,10 +245,12 @@ func (u *Updater) stopHelper(ctx context.Context) {
 	}
 }
 
-// waitHealthy waits until the agent runs version without crashing and, when
-// enrolled, has sent a heartbeat the server accepted. A device that is not
-// enrolled cannot send one: it must keep answering on its socket for Settle.
-func (u *Updater) waitHealthy(ctx context.Context, version string) error {
+// waitHealthy waits until the agent runs version in the activation
+// invocation without crashing and, when enrolled, has sent a heartbeat the
+// server accepted. A device that is not enrolled cannot send one: it must
+// keep answering on its socket for Settle without a break. A refused device
+// credential is never healthy.
+func (u *Updater) waitHealthy(ctx context.Context, version, invocation string) error {
 	timeout, poll, settle := u.HealthTimeout, u.Poll, u.Settle
 	if timeout <= 0 {
 		timeout = DefaultHealthTimeout
@@ -232,22 +263,21 @@ func (u *Updater) waitHealthy(ctx context.Context, version string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	base, err := u.System.Restarts(ctx, AgentUnit)
-	if err != nil {
-		return fmt.Errorf("read meteorcli.service restarts: %w", err)
-	}
 	var answered time.Time
 	why := "it did not answer on its socket"
 	t := time.NewTicker(poll)
 	defer t.Stop()
 	for {
-		if n, err := u.System.Restarts(ctx, AgentUnit); err == nil && n > base {
-			return fmt.Errorf("meteorcli %s crashed and was restarted by systemd", version)
-		}
-		if active, err := u.System.Active(ctx, AgentUnit); err == nil && !active {
-			return fmt.Errorf("meteorcli %s stopped running", version)
+		if unit, err := u.System.Unit(ctx, AgentUnit); err == nil {
+			switch {
+			case unit.Restarts > 0 || (invocation != "" && unit.Invocation != invocation):
+				return fmt.Errorf("meteorcli %s crashed and was restarted by systemd", version)
+			case !unit.Active:
+				return fmt.Errorf("meteorcli %s stopped running", version)
+			}
 		}
 		st, err := u.Probe(ctx)
+		unenrolled := false
 		switch {
 		case err != nil:
 		case !Same(st.Version, version):
@@ -258,7 +288,10 @@ func (u *Updater) waitHealthy(ctx context.Context, version string) error {
 				return nil
 			}
 			why = "it sent no heartbeat the server accepted"
+		case st.State == rejectedState:
+			why = "the server refused its heartbeat (credential rejected)"
 		default:
+			unenrolled = true
 			if answered.IsZero() {
 				answered = time.Now()
 			}
@@ -266,6 +299,9 @@ func (u *Updater) waitHealthy(ctx context.Context, version string) error {
 				u.Log.Info("new version is running (not enrolled: no heartbeat to wait for)", "version", version, "state", st.State)
 				return nil
 			}
+		}
+		if !unenrolled {
+			answered = time.Time{} // the settle time must be one unbroken stretch
 		}
 		select {
 		case <-ctx.Done():

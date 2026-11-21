@@ -17,6 +17,7 @@ import (
 	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/identity"
 	"meteorcloud/meteorcli/internal/localrpc"
+	"meteorcloud/meteorcli/internal/update"
 )
 
 // Groups that may use the agent socket. Root may always.
@@ -205,6 +206,12 @@ func (m *SocketModule) handlers(d Deps) map[string]localrpc.Handler {
 		}
 		// `meteorcli update`: the helper starts the updater in its own unit.
 		h["update.start"] = localrpc.Handler{Timeout: time.Minute, Run: func(ctx context.Context, _ localrpc.Peer, _ json.RawMessage) (any, error) {
+			// Its outcome would replace the one a console update waits for.
+			if d.State != nil {
+				if err := update.CheckNoPending(d.State); err != nil {
+					return nil, localrpc.Errorf(localrpc.CodeBadRequest, "%v; try again when it has finished", err)
+				}
+			}
 			var reply helper.UpdateStartReply
 			if err := d.Helper.Call(ctx, "update.start", helper.UpdateStartRequest{}, &reply); err != nil {
 				return nil, err

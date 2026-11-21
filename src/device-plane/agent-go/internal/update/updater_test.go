@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -21,7 +22,8 @@ import (
 
 const asset = "meteorcli-linux-test"
 
-// fakeBinary is a stand-in binary: "version=<v> mode=<good|crash|silent|loop|stops>".
+// fakeBinary is a stand-in binary: "version=<v> mode=<good|crash|silent|loop|stops|
+// early|rejected|flaky>".
 func fakeBinary(version, mode string) []byte {
 	return []byte("version=" + version + " mode=" + mode + "\n")
 }
@@ -37,12 +39,14 @@ func field(b []byte, key string) string {
 
 // fakeSystem runs the fake binary at bin when the agent unit is restarted.
 type fakeSystem struct {
-	mu       sync.Mutex
-	bin      string
-	running  []byte
-	restarts int
-	calls    []string
-	enrolled bool
+	mu         sync.Mutex
+	bin        string
+	running    []byte
+	restarts   int
+	invocation int
+	probes     int
+	calls      []string
+	enrolled   bool
 }
 
 func (s *fakeSystem) Restart(_ context.Context, unit string) error {
@@ -54,6 +58,9 @@ func (s *fakeSystem) Restart(_ context.Context, unit string) error {
 		return err
 	}
 	s.running = b
+	// A manual restart is a new activation and resets NRestarts, as systemd does.
+	s.invocation++
+	s.restarts = 0
 	if field(b, "mode") == "crash" {
 		return errors.New("Job for meteorcli.service failed")
 	}
@@ -64,22 +71,22 @@ func (s *fakeSystem) Stop(_ context.Context, unit string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, "stop "+unit)
+	// "early" crashes while the helper stops and systemd restarts it at once.
+	if field(s.running, "mode") == "early" {
+		s.invocation++
+		s.restarts++
+	}
 	return nil
 }
 
-func (s *fakeSystem) Active(context.Context, string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return field(s.running, "mode") != "stops", nil
-}
-
-func (s *fakeSystem) Restarts(context.Context, string) (int, error) {
+func (s *fakeSystem) Unit(context.Context, string) (UnitState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if field(s.running, "mode") == "loop" {
 		s.restarts++
+		s.invocation++
 	}
-	return s.restarts, nil
+	return UnitState{Active: field(s.running, "mode") != "stops", Restarts: s.restarts, Invocation: fmt.Sprint(s.invocation)}, nil
 }
 
 func (s *fakeSystem) probe(context.Context) (AgentStatus, error) {
@@ -88,7 +95,16 @@ func (s *fakeSystem) probe(context.Context) (AgentStatus, error) {
 	if s.running == nil {
 		return AgentStatus{}, errors.New("not running")
 	}
+	s.probes++
+	mode := field(s.running, "mode")
+	// "flaky" answers once, then never again for long enough to settle.
+	if mode == "flaky" && s.probes > 1 && s.probes%3 != 0 {
+		return AgentStatus{}, errors.New("no answer")
+	}
 	st := AgentStatus{Version: field(s.running, "version"), State: "waiting_for_enrollment"}
+	if mode == "rejected" {
+		return AgentStatus{Version: st.Version, State: rejectedState}, nil
+	}
 	if s.enrolled {
 		st.State = enrolledState
 		if field(s.running, "mode") != "silent" {
@@ -199,12 +215,40 @@ func TestUpdateNotEnrolledSettles(t *testing.T) {
 	}
 }
 
+func TestUpdateNotEnrolledNeedsAnUnbrokenSettle(t *testing.T) {
+	f := newFixture(t)
+	f.sys.enrolled = false
+	f.u.HealthTimeout = 500 * time.Millisecond
+	f.publish(t, "0.2.0", fakeBinary("0.2.0", "flaky"))
+	// Answers every third probe only: never 50 ms without a break.
+	f.u.Settle = 25 * time.Millisecond
+	out := f.u.Run(context.Background())
+	if out.Status != StatusRolledBack {
+		t.Fatalf("outcome = %+v (gaps in the answers counted as healthy)", out)
+	}
+}
+
+func TestParseShow(t *testing.T) {
+	st, err := parseShow("ActiveState=active\nNRestarts=2\nInvocationID=abc\n")
+	if err != nil || !st.Active || st.Restarts != 2 || st.Invocation != "abc" {
+		t.Fatalf("parseShow = %+v, %v", st, err)
+	}
+	if st, _ := parseShow("ActiveState=activating\nNRestarts=0\n"); st.Active {
+		t.Fatal("activating counted as active")
+	}
+	if _, err := parseShow("NRestarts=x"); err == nil {
+		t.Fatal("bad NRestarts accepted")
+	}
+}
+
 func TestUpdateRollsBack(t *testing.T) {
 	cases := map[string]string{
-		"exits at start":   "crash",
-		"crash loop":       "loop",
-		"stops":            "stops",
-		"never heartbeats": "silent",
+		"exits at start":                 "crash",
+		"crash loop":                     "loop",
+		"crashes while the helper stops": "early",
+		"stops":                          "stops",
+		"never heartbeats":               "silent",
+		"heartbeat refused":              "rejected",
 	}
 	for name, mode := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -337,10 +381,25 @@ func TestHTTPFetcher(t *testing.T) {
 	if _, err := f.Get(ctx, "missing", 100); err == nil || !strings.Contains(err.Error(), "HTTP 404") {
 		t.Fatalf("missing file: %v", err)
 	}
-	for _, bad := range []string{"ftp://x/y", "https://", "relative/path", ""} {
-		if _, err := NewHTTPFetcher(bad, "", nil); err == nil {
+	for _, bad := range []string{"ftp://x/y", "https://", "relative/path", "", "https://u:secret@x/dist",
+		"https://x/dist?a=b", "https://x/dist#edge", "https://x/dist?"} {
+		_, err := NewHTTPFetcher(bad, "", nil)
+		if err == nil {
 			t.Errorf("release URL %q accepted", bad)
+		} else if strings.Contains(err.Error(), "secret") {
+			t.Errorf("error repeats the URL: %v", err)
 		}
+	}
+	// The file name is a path element (escaped), not glued to the string.
+	var paths []string
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.EscapedPath())
+		w.Write([]byte("x"))
+	}))
+	defer srv2.Close()
+	f2, _ := NewHTTPFetcher(srv2.URL+"/a b/", "", nil)
+	if _, err := f2.Get(ctx, ManifestName, 10); err != nil || len(paths) != 1 || paths[0] != "/a%20b/"+ManifestName {
+		t.Fatalf("request path %v, %v", paths, err)
 	}
 }
 
@@ -351,6 +410,17 @@ func TestRedirectToHTTPIsRefused(t *testing.T) {
 	}
 	if err := checkRedirect(&http.Request{URL: mustURL(t, "https://cdn.example.com/b")}, via); err != nil {
 		t.Fatalf("https redirect refused: %v", err)
+	}
+	// http mirror -> https -> http: the last hop is the downgrade.
+	hops := []*http.Request{{URL: mustURL(t, "http://mirror/a")}, {URL: mustURL(t, "https://cdn/b")}}
+	if err := checkRedirect(&http.Request{URL: mustURL(t, "http://evil/c")}, hops); err == nil {
+		t.Fatal("downgrade on a later hop allowed")
+	}
+	if err := checkRedirect(&http.Request{URL: mustURL(t, "https://u:p@cdn/b")}, via); err == nil {
+		t.Fatal("redirect with credentials allowed")
+	}
+	if err := checkRedirect(&http.Request{URL: mustURL(t, "http://mirror2/b")}, hops[:1]); err != nil {
+		t.Fatalf("http to http refused: %v", err)
 	}
 }
 
@@ -392,6 +462,12 @@ func TestSmokeVersion(t *testing.T) {
 	os.WriteFile(script, []byte("#!/bin/sh\necho hello\n"), 0o755)
 	if _, err := SmokeVersion(context.Background(), script); err == nil {
 		t.Fatal("non-meteorcli output accepted")
+	}
+	// A child that keeps stdout open does not hold the check past WaitDelay.
+	os.WriteFile(script, []byte("#!/bin/sh\necho 'meteorcli 0.2.0'\nsleep 30 &\n"), 0o755)
+	start := time.Now()
+	if v, err := SmokeVersion(context.Background(), script); time.Since(start) > 10*time.Second {
+		t.Fatalf("smoke check waited %v (%q, %v)", time.Since(start), v, err)
 	}
 	if free, err := FreeBytes(dir); err != nil || free == 0 {
 		t.Fatalf("FreeBytes = %d, %v", free, err)

@@ -15,17 +15,22 @@ import (
 const (
 	// settleEvery is how often a started update is checked for its outcome.
 	settleEvery = 10 * time.Second
-	// updateTimeout matches the console's plan timeout: after it the action
-	// is reported failed even without an outcome (the updater died).
-	updateTimeout = 30 * time.Minute
+	// updateTimeout: after it the action is reported failed even without an
+	// outcome (the updater died).
+	updateTimeout = update.ActionTimeout
 )
 
 // startUpdate records the update_agent action, then asks the helper to start
 // the updater. The updater restarts this agent, so the result is reported by
 // settle, from the outcome file, once the update has finished (or rolled back).
+// While an earlier action is still being settled the new one fails and the
+// earlier record is left alone.
 func startUpdate(ctx context.Context, e env, a api.Action) error {
 	if e.state == nil {
 		return errors.New("the agent has no state directory")
+	}
+	if err := update.CheckNoPending(e.state); err != nil {
+		return fmt.Errorf("another meteorcli update is running: %w", err)
 	}
 	p := update.Pending{ActionID: a.ID, FromVersion: e.version, StartedAt: e.now().UTC()}
 	if err := e.state.Write(update.PendingFile, update.FileVersion, p); err != nil {
@@ -50,10 +55,13 @@ func (r *runner) settle(ctx context.Context) (running bool) {
 	}
 	var p update.Pending
 	if _, err := st.Read(update.PendingFile, &p); err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			log.Error("read the pending agent update", "err", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false
 		}
-		return false
+		// Keep checking: a damaged file is moved aside (the next read sees
+		// none), anything else may pass.
+		log.Error("read the pending agent update", "err", err)
+		return true
 	}
 	var o update.Outcome
 	_, oerr := st.Read(update.OutcomeFile, &o)
@@ -80,10 +88,14 @@ func (r *runner) settle(ctx context.Context) (running bool) {
 	} else {
 		log.Info("agent update done", "id", p.ActionID, "status", o.Status, "from", o.FromVersion, "to", o.ToVersion)
 	}
-	for _, name := range []string{update.OutcomeFile, update.PendingFile} {
-		if err := st.Remove(name); err != nil {
-			log.Error("remove a settled agent update file", "file", name, "err", err)
-		}
+	// Pending first: an outcome without a pending record is ignored, a pending
+	// record without its outcome would time out and be reported again.
+	if err := st.Remove(update.PendingFile); err != nil {
+		log.Error("remove the settled agent update; trying again", "err", err)
+		return true
+	}
+	if err := st.Remove(update.OutcomeFile); err != nil {
+		log.Error("remove the agent update outcome", "err", err)
 	}
 	return false
 }

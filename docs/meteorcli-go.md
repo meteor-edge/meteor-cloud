@@ -395,8 +395,9 @@ cannot stop it. For an action the agent first writes `state/agent-update.json`.
    SHA-256 and size of each binary; the signature is ed25519 over its exact bytes, checked against
    the release public key compiled into the binary (`internal/update/key.go`). An unsigned manifest,
    or one signed by any other key, is refused before anything is downloaded. A redirect is followed
-   (GitHub release files redirect to their storage) but never from `https` to `http`; no credential
-   is sent. `http://` and `file://` URLs are allowed because the signature, not the transport,
+   (GitHub release files redirect to their storage) but never from `https` to `http` on any hop and
+   never to a URL with credentials; no credential is sent. `release_url` is a folder URL without a
+   user name, password, query or fragment. `http://` and `file://` URLs are allowed because the signature, not the transport,
    is what the updater trusts.
 2. **Version.** A release at the installed version, or older, ends with `already_current` (like the
    Python updater). Versions compare as semver; build metadata (`+commit`) is ignored; edge builds
@@ -411,9 +412,11 @@ cannot stop it. For an action the agent first writes `state/agent-update.json`.
    running helper is stopped so its socket starts the new binary at the next request.
 6. **Health.** Within `--health-timeout` (3 minutes) the agent must report the new version on
    `agent.sock` and, when enrolled, a heartbeat the server accepted since it started
-   (`last_heartbeat` in `status`). Not enrolled, it must keep answering for 10 s. A crash
-   (systemd's `NRestarts` grows), a unit that is no longer active, a failed start or the timeout
-   count as unhealthy.
+   (`last_heartbeat` in `status`); a refused credential (`credential_rejected`) is never healthy.
+   Not enrolled, it must keep answering for 10 s without a break. The check is tied to the
+   activation the restart created: systemd resets `NRestarts` on a manual restart, so any
+   automatic restart, or another `InvocationID`, means the new version crashed. That, a unit that
+   is no longer active, a failed start or the timeout count as unhealthy.
 7. **Rollback.** Then `meteorcli.previous` is put back (it stays as `.previous` too), the agent is
    restarted on it and the helper stopped.
 
@@ -423,6 +426,9 @@ an update runs, reports the action `done` (updated, already current) or `failed`
 updater's error (for example `meteorcli 0.3.0 did not start: …; rolled back to 0.2.0`), and removes
 both files once the result is in the outbox. Without an outcome after 30 minutes the action is
 reported failed. A lock (`/run/meteorcli-update/lock`) keeps a second updater from running.
+While an `update_agent` action waits for its outcome, a second `update_agent` is reported failed
+and `meteorcli update` (or `sudo meteorcli updater`) is refused, so the one outcome file is never
+replaced before the action is reported.
 
 Only the binary is replaced: unit files, sysusers.d and tmpfiles.d stay as the installer wrote
 them. A release that changes them needs the installer (`install-rpi.sh`) once.

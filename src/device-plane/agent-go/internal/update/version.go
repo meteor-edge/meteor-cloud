@@ -69,14 +69,13 @@ func (a version) compare(b version) int {
 		if x == y {
 			continue
 		}
-		nx, ex := strconv.ParseUint(x, 10, 64)
-		ny, ey := strconv.ParseUint(y, 10, 64)
+		dx, dy := digits(x), digits(y)
 		switch {
-		case ex == nil && ey == nil:
-			return cmp(nx < ny)
-		case ex == nil:
+		case dx && dy:
+			return compareNumbers(x, y)
+		case dx:
 			return -1
-		case ey == nil:
+		case dy:
 			return 1
 		default:
 			return cmp(x < y)
@@ -86,6 +85,29 @@ func (a version) compare(b version) int {
 		return 0
 	}
 	return cmp(len(a.pre) < len(b.pre))
+}
+
+// digits reports a numeric identifier (digits only).
+func digits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// compareNumbers orders two digit strings of any length (no overflow):
+// without leading zeros, the longer one is larger.
+func compareNumbers(x, y string) int {
+	x, y = strings.TrimLeft(x, "0"), strings.TrimLeft(y, "0")
+	if len(x) != len(y) {
+		return cmp(len(x) < len(y))
+	}
+	if x == y {
+		return 0
+	}
+	return cmp(x < y)
 }
 
 func cmp(less bool) int {

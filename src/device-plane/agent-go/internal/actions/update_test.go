@@ -3,6 +3,8 @@ package actions
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -125,5 +127,44 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSecondUpdateKeepsTheFirstRecord(t *testing.T) {
+	r, cp := updateRunner(t, &fakeHelper{})
+	ctx := context.Background()
+	r.collect(ctx) // act-1 starts
+	cp.On("GET", listRoute, fakecp.OK(map[string]any{"actions": []map[string]any{
+		{"id": "act-2", "kind": "update_agent"},
+	}}))
+	h := &fakeHelper{}
+	r.helper = h
+	r.collect(ctx)
+	r.flush(ctx)
+	if len(h.ops) != 0 {
+		t.Fatalf("a second updater was started: %v", h.ops)
+	}
+	got := reported(t, cp)
+	if len(got) != 1 || got[0].ID != "act-2" || got[0].State != "failed" || !strings.Contains(got[0].Error, "another meteorcli update is running") {
+		t.Fatalf("report = %+v", got)
+	}
+	var p update.Pending
+	if _, err := r.d.State.Read(update.PendingFile, &p); err != nil || p.ActionID != "act-1" {
+		t.Fatalf("first record = %+v, %v", p, err)
+	}
+}
+
+func TestSettleKeepsPollingAfterAReadError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any file")
+	}
+	r, _ := updateRunner(t, &fakeHelper{})
+	ctx := context.Background()
+	r.collect(ctx)
+	path := filepath.Join(r.d.State.Dir(), update.PendingFile)
+	must(t, os.Chmod(path, 0))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	if !r.settle(ctx) {
+		t.Fatal("settle stopped polling after a read error")
 	}
 }

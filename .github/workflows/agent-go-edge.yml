@@ -73,6 +73,13 @@ jobs:
             # Move the tag to this commit, then replace the files.
             gh api -X PATCH "repos/$REPO/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
             gh release edit "$TAG" -R "$REPO" --prerelease --latest=false --notes "$notes"
+            # Unsigned (no secret): drop the previous signed manifest first, or a
+            # device would verify it and then fail on the new binaries.
+            if [ ! -f "$RUNNER_TEMP/dist/meteorcli-release.json.sig" ]; then
+              for asset in meteorcli-release.json meteorcli-release.json.sig; do
+                gh release delete-asset "$TAG" "$asset" -R "$REPO" --yes 2>/dev/null || true
+              done
+            fi
             # Binaries first, then the signed manifest (an updater never sees a
             # manifest for binaries not uploaded yet), SHA256SUMS last: an install or
             # update during the upload fails its checksum instead of mixing builds.

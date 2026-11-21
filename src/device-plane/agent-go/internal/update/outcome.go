@@ -1,7 +1,12 @@
 package update
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"time"
+
+	"meteorcloud/meteorcli/internal/state"
 )
 
 // State files (in /var/lib/meteorcli/state) that tie an update_agent action to
@@ -14,6 +19,28 @@ const (
 	// FileVersion is the format of both files.
 	FileVersion = 1
 )
+
+// ActionTimeout matches the console's plan timeout: an update_agent action
+// without an outcome after this long is reported failed.
+const ActionTimeout = 30 * time.Minute
+
+// ErrActionPending refuses an update while an update_agent action waits for
+// its outcome: there is one outcome file, and its result must not be lost.
+var ErrActionPending = errors.New("an update_agent action is still being settled")
+
+// CheckNoPending returns ErrActionPending (with the action id) while st holds
+// a pending update_agent action, nil when there is none.
+func CheckNoPending(st *state.Store) error {
+	var p Pending
+	_, err := st.Read(PendingFile, &p)
+	switch {
+	case err == nil:
+		return fmt.Errorf("%w (action %s, started %s)", ErrActionPending, p.ActionID, p.StartedAt.UTC().Format(time.RFC3339))
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	}
+	return err
+}
 
 // Outcome statuses. updated and already_current report the action done.
 const (
