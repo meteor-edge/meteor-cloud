@@ -14,7 +14,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -72,6 +71,8 @@ type Meta struct {
 	ExpiresAt    string            `json:"expires_at"`
 	RefreshAfter string            `json:"refresh_after"`
 	Env          map[string]string `json:"env"`
+
+	extra config.Object // keys this version does not know, kept on rewrite
 }
 
 // Store keeps token files and their metadata, one directory per workload.
@@ -107,12 +108,19 @@ func (s Store) Meta(key string) (Meta, bool) {
 	return readMeta(filepath.Join(s.Dir(key), "meta.json"))
 }
 
+// readMeta reads meta.json. A damaged one is moved aside
+// (meta.json.corrupt-<time>) and the workload starts clean, like every other
+// state file.
 func readMeta(path string) (Meta, bool) {
 	var m Meta
-	data, err := os.ReadFile(path)
-	if err != nil || json.Unmarshal(data, &m) != nil {
+	extra, err := config.ReadJSON(path, &m)
+	if errors.Is(err, config.ErrCorrupt) {
+		_, _ = config.Quarantine(path, time.Now())
+	}
+	if err != nil {
 		return Meta{}, false
 	}
+	m.extra = extra
 	return m, true
 }
 
@@ -208,20 +216,30 @@ func (s Store) Mint(ctx context.Context, client *api.Client, token, key string, 
 	}
 	defer unlock()
 	dir := s.Dir(key)
-	if _, err := os.Stat(filepath.Join(dir, "meta.json")); mustExist && err != nil {
-		return nil, fs.ErrNotExist
+	old, haveOld := readMeta(filepath.Join(dir, "meta.json"))
+	if mustExist {
+		// Checked again under the lock: deploy may have removed the credential
+		// or stored one for another binding while this request was out.
+		if !haveOld {
+			return nil, fs.ErrNotExist
+		}
+		if old.Application != b.Application || old.Environment != b.env() {
+			return nil, Error{"The workload's credential changed while it was being rotated; not replacing it."}
+		}
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(dir, "token")
-	if err := writeInPlace(path, []byte(issued.Token+"\n")); err != nil {
+	// A rotation never creates the token file: a container mounts the
+	// original inode, so a new file would not reach it. fs.ErrNotExist makes
+	// deploy recreate the container instead.
+	if err := writeInPlace(path, []byte(issued.Token+"\n"), !mustExist); err != nil {
 		return nil, err
 	}
 	meta := Meta{Version: metaVersion, WorkloadKey: key, Application: issued.Application, Environment: issued.Environment,
 		CredentialID: issued.CredentialID, ExpiresAt: issued.ExpiresAt, RefreshAfter: issued.RefreshAfter, Env: env}
-	data, _ := json.MarshalIndent(meta, "", "  ")
-	if err := config.WriteFileAtomic(filepath.Join(dir, "meta.json"), append(data, '\n'), 0o600); err != nil {
+	if err := config.WriteJSON(filepath.Join(dir, "meta.json"), meta, old.extra, 0o600); err != nil {
 		return nil, err
 	}
 	return &Credential{TokenFile: path, Env: env}, nil
@@ -233,8 +251,12 @@ func (s Store) Mint(ctx context.Context, client *api.Client, token, key string, 
 // one write and the file cut afterwards, so a reader never sees it empty.
 // The file is world-readable for containers that do not run as root; its
 // directory is the agent's own (0700).
-func writeInPlace(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644)
+func writeInPlace(path string, data []byte, create bool) error {
+	flags := os.O_WRONLY
+	if create {
+		flags |= os.O_CREATE
+	}
+	f, err := os.OpenFile(path, flags, 0o644)
 	if err != nil {
 		return err
 	}

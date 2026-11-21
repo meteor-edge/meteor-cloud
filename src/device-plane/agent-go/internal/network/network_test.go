@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,7 +316,11 @@ func TestWireGuardRefusals(t *testing.T) {
 		w, h := newWG(t, cp)
 		cp.On("POST", "/api/v1/agent/connectivity/wireguard", c.reply)
 		w.register(context.Background())
-		if w.blocked != c.block || (h.count("wireguard.down") == 1) != c.down {
+		wantDown := 0
+		if c.down {
+			wantDown = 1
+		}
+		if w.blocked != c.block || h.count("wireguard.down") != wantDown {
 			t.Errorf("%s: blocked %q, down %d", c.block, w.blocked, h.count("wireguard.down"))
 		}
 		if until := time.Until(w.next); until < 25*time.Minute {
@@ -361,5 +366,141 @@ func TestSSHUser(t *testing.T) {
 		if sshUserRe(s) != ok {
 			t.Errorf("%q", s)
 		}
+	}
+}
+
+func TestWireGuardRevocationSurvivesRestart(t *testing.T) {
+	cp := fakecp.New(t)
+	w, h := newWG(t, cp)
+	cp.On("POST", "/api/v1/agent/connectivity/wireguard", registered(nil))
+	w.register(context.Background())
+	cp.On("POST", "/api/v1/agent/connectivity/wireguard", fakecp.Fail(403, codeRevoked))
+	w.next = time.Now()
+	w.register(context.Background())
+	// A restart (a new module instance) while the server is down: the refused
+	// tunnel is not brought back from the saved settings.
+	restarted := &wg{d: w.d, helper: h, next: time.Now(), rand: func() float64 { return 0.5 }}
+	cp.On("POST", "/api/v1/agent/connectivity/wireguard", fakecp.Fail(503, "down"))
+	applies := h.count("wireguard.apply")
+	restarted.register(context.Background())
+	restarted.keepUp(context.Background())
+	if h.count("wireguard.apply") != applies {
+		t.Fatal("a revoked tunnel came back from the saved settings")
+	}
+	// The operator enrolled the device again: registration works and clears it.
+	cp.On("POST", "/api/v1/agent/connectivity/wireguard", registered(nil))
+	restarted.next = time.Now()
+	restarted.register(context.Background())
+	var saved tunnel
+	if _, err := w.d.State.Read(tunnelState, &saved); err != nil || saved.Refused != "" || h.count("wireguard.apply") != applies+1 {
+		t.Errorf("after re-enrollment: %+v %v", saved, err)
+	}
+}
+
+func TestWireGuardFailedApplyIsNotSaved(t *testing.T) {
+	cp := fakecp.New(t)
+	w, h := newWG(t, cp)
+	cp.On("POST", "/api/v1/agent/connectivity/wireguard", registered(nil))
+	w.register(context.Background())
+	cp.On("POST", "/api/v1/agent/connectivity/wireguard", registered(map[string]any{"server_endpoint": "192.0.2.99:51820"}))
+	h.errs["wireguard.apply"] = localrpc.Errorf(localrpc.CodeBadRequest, "local network")
+	w.next = time.Now()
+	w.register(context.Background())
+	var saved tunnel
+	if _, err := w.d.State.Read(tunnelState, &saved); err != nil || saved.Endpoint != "192.0.2.1:51820" {
+		t.Errorf("rejected settings replaced the working ones: %+v %v", saved, err)
+	}
+	if st, _ := w.d.Health.Get(wgName); st.State != string(agent.StateFailed) {
+		t.Errorf("health %v after a failed apply", st)
+	}
+}
+
+func TestWireGuardRefusalOnCAAcknowledgement(t *testing.T) {
+	cp := fakecp.New(t)
+	w, h := newWG(t, cp)
+	ca := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICa"
+	cp.On("POST", "/api/v1/agent/connectivity/wireguard",
+		registered(map[string]any{"ssh_ca_public_key": ca, "ssh_principal": "device-1"}), fakecp.Fail(403, codeRevoked))
+	h.answer = func(op string, params json.RawMessage) any {
+		if op == "ssh.authorized_keys" && strings.Contains(string(params), "device-1") {
+			return helper.SSHKeysReply{TrustedCA: ca}
+		}
+		return nil
+	}
+	w.register(context.Background())
+	if w.blocked != codeRevoked || h.count("wireguard.down") != 1 {
+		t.Errorf("blocked %q, down %d", w.blocked, h.count("wireguard.down"))
+	}
+}
+
+func TestWifiConfirmAndRollbackFailures(t *testing.T) {
+	helperRetry = time.Millisecond
+	cp := fakecp.New(t)
+	d := deps(t, cp)
+	h := newFakeHelper()
+	w := &wifi{d: d, helper: h, verifyFor: 50 * time.Millisecond, verifyPause: 5 * time.Millisecond}
+	ctx := context.Background()
+	pw := "long-password"
+	cp.On("GET", "/api/v1/health", fakecp.OK(map[string]string{"status": "ok"}))
+
+	if r := w.apply(ctx, api.WifiChange{ID: "x", SSID: "lab", Action: "replace"}); r.State != api.WifiFailed || h.count("wifi.apply") != 0 {
+		t.Errorf("unknown action = %+v, applies %d", r, h.count("wifi.apply"))
+	}
+	// Reachable, but confirm keeps failing: undone, not reported applied.
+	h.errs["wifi.confirm"] = errors.New("helper gone")
+	if r := w.apply(ctx, api.WifiChange{ID: "a", SSID: "lab", Password: &pw, ConnectNow: true}); r.State != api.WifiRolledBack ||
+		h.count("wifi.confirm") != helperTries || h.count("wifi.rollback") != 1 {
+		t.Fatalf("confirm failed = %+v confirms %d rollbacks %d", r, h.count("wifi.confirm"), h.count("wifi.rollback"))
+	}
+	// The rollback fails too: reported failed, and retried later by recover.
+	h.errs["wifi.rollback"] = errors.New("helper gone")
+	if r := w.apply(ctx, api.WifiChange{ID: "b", Revision: rev(7), SSID: "lab", Password: &pw, ConnectNow: true}); r.State != api.WifiFailed {
+		t.Fatalf("rollback failed = %+v", r)
+	}
+	h.answers["wifi.status"] = map[string]any{"pending": map[string]any{"id": "b", "revision": 7}}
+	before, _ := d.Outbox.Pending(KindWifiResult)
+	w.recover(ctx)
+	if after, _ := d.Outbox.Pending(KindWifiResult); len(after) != len(before) {
+		t.Error("a failed rollback was reported rolled_back")
+	}
+	delete(h.errs, "wifi.rollback")
+	w.recover(ctx)
+	after, _ := d.Outbox.Pending(KindWifiResult)
+	if len(after) != len(before)+1 || !strings.Contains(string(after[len(after)-1].Body), "rolled_back") {
+		t.Errorf("recover did not finish the rollback: %d results", len(after))
+	}
+}
+
+func TestWifiVerifyDeadline(t *testing.T) {
+	cp := fakecp.New(t)
+	d := deps(t, cp)
+	w := &wifi{d: d, helper: newFakeHelper(), verifyFor: 30 * time.Millisecond, verifyPause: 100 * time.Millisecond}
+	cp.On("GET", "/api/v1/health", fakecp.Fail(503, "down"), fakecp.OK(map[string]string{"status": "ok"}))
+	start := time.Now()
+	if w.serverReachable(context.Background()) {
+		t.Error("an answer after the window kept the change")
+	}
+	if time.Since(start) > 90*time.Millisecond {
+		t.Errorf("the pause ran past the deadline: %v", time.Since(start))
+	}
+}
+
+func TestKeypairKeepsIdentity(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "wg")
+	priv, pub, _ := ensureKeypair(dir)
+	_ = os.Remove(filepath.Join(dir, "public.key"))
+	if p2, pub2, err := ensureKeypair(dir); err != nil || p2 != priv || pub2 != pub {
+		t.Fatalf("a missing public.key replaced the identity: %v", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "public.key")); strings.TrimSpace(string(data)) != pub {
+		t.Error("public.key not rewritten")
+	}
+	_ = os.WriteFile(filepath.Join(dir, "public.key"), []byte(serverKey+"\n"), 0o600)
+	if _, pub3, _ := ensureKeypair(dir); pub3 != pub {
+		t.Error("a mismatched public.key was used")
+	}
+	_ = os.WriteFile(filepath.Join(dir, "private.key"), []byte("garbage\n"), 0o600)
+	if _, _, err := ensureKeypair(dir); err == nil {
+		t.Error("an unreadable private key was replaced")
 	}
 }

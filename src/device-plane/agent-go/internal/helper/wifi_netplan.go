@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -65,6 +66,27 @@ func netplanDefinition(p nmProfile) string {
 	return def
 }
 
+// netplanAccessPoints lists the SSIDs of a netplan wifis definition, as
+// `netplan get` prints them (the top-level keys of the access-points map).
+func (h Host) netplanAccessPoints(ctx context.Context, def string) ([]string, bool) {
+	out, err := h.Run(ctx, "netplan", "get", "wifis."+def+".access-points")
+	if err != nil {
+		return nil, false
+	}
+	var aps []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' || !strings.HasSuffix(line, ":") {
+			continue
+		}
+		key := strings.TrimSuffix(line, ":")
+		if len(key) >= 2 && (key[0] == '"' || key[0] == '\'') && key[len(key)-1] == key[0] {
+			key = key[1 : len(key)-1]
+		}
+		aps = append(aps, key)
+	}
+	return aps, len(aps) > 0
+}
+
 // forgetInNetplan deletes ssid from the netplan definitions behind profiles,
 // regenerates, and deletes the generated profiles. It reports whether every
 // definition could be changed.
@@ -76,7 +98,6 @@ func (h Host) forgetInNetplan(ctx context.Context, profiles []nmProfile, ssid st
 	if !look() {
 		return false
 	}
-	everything := h.wifiProfiles(ctx)
 	done := true
 	for _, p := range profiles {
 		def := netplanDefinition(p)
@@ -84,14 +105,16 @@ func (h Host) forgetInNetplan(ctx context.Context, profiles []nmProfile, ssid st
 			done = false
 			continue
 		}
-		others := false
-		for _, o := range everything {
-			if o.ssid != ssid && netplanDefinition(o) == def {
-				others = true
-			}
+		// The access points come from the persistent definition: the runtime
+		// profiles may miss one (an SSID nmcli could not read), and deleting
+		// the whole definition would then drop that network too.
+		aps, ok := h.netplanAccessPoints(ctx, def)
+		if !ok || !slices.Contains(aps, ssid) {
+			done = false
+			continue
 		}
 		key := "wifis." + def
-		if others {
+		if len(aps) > 1 {
 			// The definition has other networks: drop only this one.
 			if !plainKeyRe.MatchString(ssid) {
 				done = false

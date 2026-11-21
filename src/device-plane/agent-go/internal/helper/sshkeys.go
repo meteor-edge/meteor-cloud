@@ -51,9 +51,15 @@ type SSHKeysReply struct {
 	Changed   bool   `json:"changed"`
 }
 
+// maxAuthorizedKeys is the largest authorized_keys the helper rewrites.
+const maxAuthorizedKeys = 1 << 20
+
 // keyOf returns "<type> <base64>" of an authorized_keys line (with or without
-// options), or "".
+// options), or "" (also for a blank or commented-out line, which sshd ignores).
 func keyOf(line string) string {
+	if t := strings.TrimSpace(line); t == "" || t[0] == '#' {
+		return ""
+	}
 	f := strings.Fields(line)
 	for i := 0; i+1 < len(f); i++ {
 		if strings.HasPrefix(f[i], "ssh-") || strings.HasPrefix(f[i], "ecdsa-") || strings.HasPrefix(f[i], "sk-") {
@@ -71,12 +77,14 @@ func lastField(line string) string {
 	return f[len(f)-1]
 }
 
+// isGatewayLine and isCALine match only active key lines: a commented-out
+// copy is left alone and never counts as installed or trusted.
 func isGatewayLine(l string) bool {
 	c := lastField(l)
-	return c == gatewayKeyComment || c == legacyGatewayKeyComment
+	return keyOf(l) != "" && (c == gatewayKeyComment || c == legacyGatewayKeyComment)
 }
 
-func isCALine(l string) bool { return lastField(l) == caKeyComment }
+func isCALine(l string) bool { return keyOf(l) != "" && lastField(l) == caKeyComment }
 
 // syncKeyLines is the Python agent's sync_authorized_keys on a list of lines:
 // lines are added or replaced, and removed only when the server says so (the
@@ -216,9 +224,13 @@ func readAuthorizedKeys(home *os.Root) ([]string, error) {
 		return nil, fmt.Errorf("authorized_keys: %w", err)
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(f, maxAuthorizedKeys+1))
 	if err != nil {
 		return nil, fmt.Errorf("authorized_keys: %w", err)
+	}
+	if len(data) > maxAuthorizedKeys {
+		// Rewriting a cut copy would drop the operator's keys past the limit.
+		return nil, localrpc.Errorf(localrpc.CodeBadRequest, "authorized_keys is larger than %d bytes; not changing it", maxAuthorizedKeys)
 	}
 	text := strings.TrimRight(string(data), "\n")
 	if text == "" {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -163,30 +164,37 @@ func (h Host) wgUp() bool {
 	return err == nil
 }
 
-// wgTearDown removes wg0 (and the routes wg-quick added with it).
-func (h Host) wgTearDown(ctx context.Context) {
+// wgTearDown removes wg0 (and the routes wg-quick added with it). An absent
+// wg0 is a success; one still there afterwards is an error.
+func (h Host) wgTearDown(ctx context.Context) error {
 	if !h.wgUp() {
-		return
+		return nil
 	}
 	if _, err := os.Stat(h.wgConf()); err == nil {
-		if _, err := h.Run(ctx, "wg-quick", "down", h.wgConf()); err == nil {
-			return
+		if _, err := h.Run(ctx, "wg-quick", "down", h.wgConf()); err == nil && !h.wgUp() {
+			return nil
 		}
 	}
-	_, _ = h.Run(ctx, "ip", "link", "delete", "dev", wgInterface)
+	_, err := h.Run(ctx, "ip", "link", "delete", "dev", wgInterface)
+	if h.wgUp() {
+		return fmt.Errorf("wg0 is still up: %v", err)
+	}
+	return nil
 }
 
 // refuseLocalHosts fails when a tunnel host is reachable without a gateway:
 // it is on a local network, and taking it over would hijack that link.
 func (h Host) refuseLocalHosts(ctx context.Context, hosts []netip.Addr) error {
 	for _, a := range hosts {
-		out, _ := h.Run(ctx, "ip", "-j", "route", "get", a.String())
+		out, err := h.Run(ctx, "ip", "-j", "route", "get", a.String())
 		var routes []struct {
 			Dev     string `json:"dev"`
 			Gateway string `json:"gateway"`
 		}
-		if json.Unmarshal(bytes.TrimSpace(out), &routes) != nil {
-			continue
+		// No usable answer means the check cannot be made: refuse rather
+		// than risk taking over a local link.
+		if err != nil || json.Unmarshal(bytes.TrimSpace(out), &routes) != nil || len(routes) == 0 {
+			return fmt.Errorf("cannot check the route to %s: %v", a, err)
 		}
 		for _, r := range routes {
 			if r.Dev != wgInterface && r.Gateway == "" {
@@ -206,23 +214,47 @@ func (h Host) wireguardApply(ctx context.Context, _ localrpc.Peer, raw json.RawM
 	if err != nil {
 		return nil, err
 	}
-	if old, err := os.ReadFile(h.wgConf()); err == nil && string(old) == conf && h.wgUp() {
+	old, oldErr := os.ReadFile(h.wgConf())
+	wasUp := h.wgUp()
+	if oldErr == nil && string(old) == conf && wasUp {
 		return WireGuardApplyReply{}, nil
 	}
-	h.wgTearDown(ctx)
-	// After the old wg0 is gone, so its own addresses do not look local.
+	// Checked first with the working tunnel still up (hosts routed through
+	// wg0 are checked again below), so a bad config usually never touches it.
 	if err := h.refuseLocalHosts(ctx, hosts); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(h.wgConf()), 0o700); err != nil {
+	// restore brings the previous working tunnel back after a failed change.
+	restore := func(cause error) error {
+		if oldErr != nil || !wasUp {
+			return cause
+		}
+		_ = h.wgTearDown(ctx)
+		_ = os.Remove(h.wgConf())
+		if err := writePrivate(h.wgConf(), old); err != nil {
+			return fmt.Errorf("%w (the previous tunnel could not be restored: %v)", cause, err)
+		}
+		if _, err := h.Run(ctx, "wg-quick", "up", h.wgConf()); err != nil {
+			return fmt.Errorf("%w (the previous tunnel could not be restored: %v)", cause, err)
+		}
+		return cause
+	}
+	if err := h.wgTearDown(ctx); err != nil {
 		return nil, err
+	}
+	// Again after the old wg0 is gone, so its own routes do not hide a local host.
+	if err := h.refuseLocalHosts(ctx, hosts); err != nil {
+		return nil, restore(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(h.wgConf()), 0o700); err != nil {
+		return nil, restore(err)
 	}
 	_ = os.Remove(h.wgConf())
 	if err := writePrivate(h.wgConf(), []byte(conf)); err != nil {
-		return nil, err
+		return nil, restore(err)
 	}
 	if _, err := h.Run(ctx, "wg-quick", "up", h.wgConf()); err != nil {
-		return nil, err
+		return nil, restore(err)
 	}
 	return WireGuardApplyReply{Changed: true}, nil
 }
@@ -231,7 +263,9 @@ func (h Host) wireguardDown(ctx context.Context, _ localrpc.Peer, raw json.RawMe
 	if err := decode(raw, &struct{}{}); err != nil {
 		return nil, err
 	}
-	h.wgTearDown(ctx)
+	if err := h.wgTearDown(ctx); err != nil {
+		return nil, err
+	}
 	return map[string]bool{"down": true}, nil
 }
 

@@ -34,11 +34,11 @@ func client(t *testing.T, cp *fakecp.Server) *api.Client {
 
 func TestTokenIsRewrittenInPlace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
-	if err := writeInPlace(path, []byte("a-long-first-token\n")); err != nil {
+	if err := writeInPlace(path, []byte("a-long-first-token\n"), true); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.Stat(path)
-	if err := writeInPlace(path, []byte("short\n")); err != nil {
+	if err := writeInPlace(path, []byte("short\n"), false); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.Stat(path)
@@ -135,5 +135,51 @@ func TestMint(t *testing.T) {
 	cp.On("POST", "/api/v1/agent/applications/credentials", fakecp.Fail(503, "down"))
 	if _, err := s.Mint(ctx, c, "dev", "web", Binding{Application: "app-1"}, true); !errors.As(err, &ce) {
 		t.Errorf("an outage is %v", err)
+	}
+}
+
+func TestRotationEdgeCases(t *testing.T) {
+	cp := fakecp.New(t)
+	c := client(t, cp)
+	s := Store{Root: t.TempDir()}
+	ctx := context.Background()
+	b := Binding{Application: "app-1"}
+	cp.On("POST", "/api/v1/agent/applications/credentials", issued("app-1", "production"))
+	cred, err := s.Mint(ctx, c, "dev", "web", b, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Unknown meta.json keys survive a rotation.
+	metaPath := filepath.Join(s.Dir("web"), "meta.json")
+	data, _ := os.ReadFile(metaPath)
+	_ = os.WriteFile(metaPath, []byte(strings.Replace(string(data), "{", `{"future_field": 7,`, 1)), 0o600)
+	if _, err := s.Mint(ctx, c, "dev", "web", b, true); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(metaPath); !strings.Contains(string(data), `"future_field": 7`) {
+		t.Errorf("unknown key dropped:\n%s", data)
+	}
+	// Deploy stored another binding meanwhile: the rotation does not overwrite it.
+	_ = os.WriteFile(metaPath, []byte(`{"version":1,"workload_key":"web","application":"app-2","environment":"production"}`), 0o600)
+	var ce Error
+	if _, err := s.Mint(ctx, c, "dev", "web", b, true); !errors.As(err, &ce) {
+		t.Errorf("stale binding rotated: %v", err)
+	}
+	// The token file was deleted: a rotation does not create a new inode.
+	_ = os.WriteFile(metaPath, data, 0o600)
+	_ = os.Remove(cred.TokenFile)
+	if _, err := s.Mint(ctx, c, "dev", "web", b, true); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing token file: %v", err)
+	}
+	if _, err := os.Stat(cred.TokenFile); err == nil {
+		t.Error("a rotation recreated the token file")
+	}
+	// A damaged meta.json is moved aside, not left to be skipped forever.
+	_ = os.WriteFile(metaPath, []byte("{broken"), 0o600)
+	if _, ok := s.Meta("web"); ok {
+		t.Error("damaged meta read as valid")
+	}
+	if matches, _ := filepath.Glob(metaPath + ".corrupt-*"); len(matches) != 1 {
+		t.Errorf("not quarantined: %v", matches)
 	}
 }

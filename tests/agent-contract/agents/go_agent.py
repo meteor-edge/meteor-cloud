@@ -72,7 +72,7 @@ HEALTH_TEMPLATE = "{{.State.Running}}|{{.State.Status}}|{{.State.ExitCode}}|{{if
 
 # The Python adapter's WireGuard key pair and SSH host key (same recordings).
 WG_PRIVATE = "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
-WG_PUBLIC = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+WG_PUBLIC = "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw="  # X25519 public key of WG_PRIVATE
 SSH_HOST_KEY_FILE = ssh_key("contract host key", "root@device") + "\n"
 # What the real helper adds to wifi.status: the link traffic leaves on.
 UPLINK = {"uplink_type": "wifi", "uplink_interface": "wlan0"}

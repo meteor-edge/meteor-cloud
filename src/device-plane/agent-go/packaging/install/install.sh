@@ -137,12 +137,24 @@ if [[ -d /etc/sudoers.d ]]; then
 		say "warning: the sudo rule for meteorcli-logs did not validate; the console cannot read logs"
 	fi
 fi
+# A Wi-Fi change the Python agent had not confirmed yet: roll it back with the
+# Python helper while it still exists (the Go agent does not read its record).
+# If that fails, its record and backups stay in /var/lib/meteorcli-wifi.
+keep_wifi_record=0
+if [[ -f /var/lib/meteorcli-wifi/pending.json ]]; then
+	if [[ -x /usr/local/libexec/meteorcli-wifi ]] && /usr/local/libexec/meteorcli-wifi rollback >/dev/null 2>&1; then
+		say "rolled back a Wi-Fi change the Python agent had not confirmed"
+	else
+		keep_wifi_record=1
+		say "warning: an unconfirmed Wi-Fi change could not be rolled back; its backups stay in /var/lib/meteorcli-wifi"
+	fi
+fi
 # The Python agent's other root helpers and their sudo rules: the Go helper does
 # their work now (wg0 is taken over at the first WireGuard registration).
 rm -f /usr/local/libexec/meteorcli-wg /usr/local/libexec/meteorcli-wifi /usr/local/libexec/meteorcli-systemd \
 	/usr/local/libexec/meteorcli-action /etc/sudoers.d/meteorcli-wireguard /etc/sudoers.d/meteorcli-wifi \
 	/etc/sudoers.d/meteorcli-systemd /etc/sudoers.d/meteorcli-action
-rm -rf /var/lib/meteorcli-wifi
+[[ $keep_wifi_record -eq 1 ]] || rm -rf /var/lib/meteorcli-wifi
 
 # WireGuard tools for the device tunnel (the console's browser terminal).
 if [[ $wireguard -eq 1 ]] && ! { command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1; }; then
@@ -166,8 +178,19 @@ cfg=()
 [[ -n $domain ]] && cfg+=(--domain "$domain")
 [[ -n $api_base ]] && cfg+=(--api-base "$api_base")
 [[ -n $api_key ]] && cfg+=(--api-key "$api_key")
-if [[ -n $user && $user != root ]] && id "$user" >/dev/null 2>&1; then
-	cfg+=(--ssh-user "$user")
+# The browser terminal's account: the agent's rule for ssh_user (no root or
+# system accounts). Another name only skips this setting.
+if [[ -n $user ]] && id "$user" >/dev/null 2>&1; then
+	case "$user" in
+	root | daemon | bin | sys | sync | nobody | sshd | systemd-network | meteor)
+		say "note: $user cannot be the browser terminal's account; set one later with 'meteorcli config --ssh-user NAME'" ;;
+	*)
+		if [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+			cfg+=(--ssh-user "$user")
+		else
+			say "note: '$user' is not a name the agent accepts for the browser terminal; set one later with 'meteorcli config --ssh-user NAME'"
+		fi ;;
+	esac
 fi
 if [[ ${#cfg[@]} -gt 0 ]]; then
 	"$BIN" config "${cfg[@]}"

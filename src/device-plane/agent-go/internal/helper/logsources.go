@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -333,31 +334,55 @@ func ShowLogs(ctx context.Context, h Host, r ShowLogsRequest, w io.Writer) error
 
 // grepWriter passes on the lines that contain needle (lower-cased).
 type grepWriter struct {
-	needle  []byte
+	needle  []byte // lower-cased
 	w       io.Writer
-	partial []byte
+	partial []byte // the line's first maxLineBytes, for display
+	tail    []byte // the line's last len(needle)-1 bytes, lower-cased: a match across writes
+	matched bool   // the line so far contains needle (searched in full, not only partial)
 }
 
 func (g *grepWriter) Write(p []byte) (int, error) {
 	n := len(p)
 	for len(p) > 0 {
-		i := strings.IndexByte(string(p), '\n')
+		i := bytes.IndexByte(p, '\n')
+		seg := p
+		if i >= 0 {
+			seg = p[:i]
+		}
+		g.scan(seg)
+		if len(g.partial) < maxLineBytes {
+			g.partial = append(g.partial, seg[:min(len(seg), maxLineBytes-len(g.partial))]...)
+		}
 		if i < 0 {
-			if len(g.partial) < maxLineBytes {
-				g.partial = append(g.partial, p[:min(len(p), maxLineBytes-len(g.partial))]...)
-			}
 			break
 		}
-		line := append(g.partial, p[:i]...)
-		g.partial = g.partial[:0]
-		if strings.Contains(string(lowerASCII(line)), string(g.needle)) {
-			if _, err := g.w.Write(append(line, '\n')); err != nil {
+		if g.matched {
+			if _, err := g.w.Write(append(g.partial, '\n')); err != nil {
 				return 0, err
 			}
 		}
+		g.partial, g.tail, g.matched = g.partial[:0], g.tail[:0], false
 		p = p[i+1:]
 	}
 	return n, nil
+}
+
+// scan searches the next piece of the current line, joined to the end of the
+// previous piece so a match split between writes is found.
+func (g *grepWriter) scan(seg []byte) {
+	if g.matched || len(seg) == 0 {
+		return
+	}
+	window := append(append([]byte(nil), g.tail...), lowerASCII(seg)...)
+	if bytes.Contains(window, g.needle) {
+		g.matched = true
+		return
+	}
+	keep := max(len(g.needle)-1, 0)
+	if len(window) > keep {
+		window = window[len(window)-keep:]
+	}
+	g.tail = append(g.tail[:0], window...)
 }
 
 func (h Host) logsList(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {

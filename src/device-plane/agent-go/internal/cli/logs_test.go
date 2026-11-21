@@ -122,8 +122,10 @@ func TestParseInterspersed(t *testing.T) {
 
 func TestConfigSSHUser(t *testing.T) {
 	root := t.TempDir()
-	if r := meteorcli(t, root, nil, "config", "--ssh-user", "Bad User"); r.code != 2 {
-		t.Errorf("bad user = %+v", r)
+	for _, bad := range []string{"Bad User", "root", "meteor"} {
+		if r := meteorcli(t, root, nil, "config", "--ssh-user", bad); r.code != 2 {
+			t.Errorf("%q = %+v", bad, r)
+		}
 	}
 	r := meteorcli(t, root, nil, "config", "--domain", "a.example", "--ssh-user", "pi")
 	if r.code != 0 || !strings.Contains(r.stdout, "SSH user:       pi") {

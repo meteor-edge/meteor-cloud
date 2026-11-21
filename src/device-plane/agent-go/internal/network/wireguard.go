@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"math/rand/v2"
 	"net"
 	"net/netip"
@@ -68,6 +69,10 @@ type tunnel struct {
 	Endpoint        string `json:"endpoint"`
 	AllowedIPs      string `json:"allowed_ips"`
 	Keepalive       int    `json:"keepalive"`
+	// Refused is the server's connectivity_revoked or wireguard_key_changed:
+	// the saved settings are not used again (also across restarts) until a
+	// registration succeeds, i.e. an operator enrolled the device again.
+	Refused string `json:"refused"` // always written: the store keeps keys a write leaves out
 }
 
 // Run implements agent.Module.
@@ -137,8 +142,11 @@ func (w *wg) cycle(ctx context.Context) time.Duration {
 		return noToolsFor
 	}
 	if time.Now().Before(w.next) {
-		if w.blocked == "" {
+		switch w.blocked {
+		case "":
 			w.keepUp(ctx)
+		case codeRevoked, codeKeyChanged:
+			w.down(ctx) // until it is really gone
 		}
 		return min(keepEvery, time.Until(w.next))
 	}
@@ -178,10 +186,14 @@ func (w *wg) register(ctx context.Context) {
 	if !strings.Contains(t.Address, "/") && t.Address != "" {
 		t.Address += "/32"
 	}
+	if !w.up(ctx, t, priv) {
+		// Not saved: keepUp goes on with the last settings that worked.
+		w.next = time.Now().Add(w.jitter(registerEvery, 0.8, 1.2))
+		return
+	}
 	if err := d.State.Write(tunnelState, tunnelVersion, t); err != nil {
 		d.Log.Error("keep the WireGuard settings", "err", err)
 	}
-	w.up(ctx, t, priv)
 	keys := helper.SSHKeysRequest{GatewayKeyRetired: resp.SSHGatewayKeyRetired}
 	if resp.SSHGatewayPublicKey != nil {
 		keys.GatewayKey = *resp.SSHGatewayPublicKey
@@ -200,12 +212,15 @@ func (w *wg) register(ctx context.Context) {
 		// Tell the server now that this device accepts certificates, not at the next refresh.
 		req.SSHCAPublicKey = trusted
 		if _, err := d.API.RegisterWireGuard(ctx, token, req); err != nil {
+			if code := codeOf(err); api.IsAuth(err) || code == codeDisabled || code == codeRevoked || code == codeKeyChanged {
+				w.refused(ctx, token, err)
+				return
+			}
 			d.Log.Info("could not report SSH certificate support yet; will with the next refresh", "err", err)
 		}
 	}
 	w.failures, w.blocked = 0, ""
 	w.next = time.Now().Add(w.jitter(registerEvery, 0.8, 1.2))
-	d.Health.Set(wgName, agent.StateRunning, nil)
 }
 
 // refused handles a failed registration.
@@ -224,13 +239,32 @@ func (w *wg) refused(ctx context.Context, token string, err error) {
 		if w.blocked != code {
 			d.Log.Warn("WireGuard access refused; tunnel stopped until an operator enrolls this device again", "code", code, "err", err)
 		}
-		if herr := w.helper.Call(ctx, "wireguard.down", nil, nil); herr != nil {
-			d.Log.Warn("stop the WireGuard tunnel", "err", herr)
-		}
+		w.remember(code)
+		w.down(ctx)
 		w.block(code)
 	default:
 		wait := w.failed(ctx, err)
 		d.Log.Warn("WireGuard registration failed; keeping the current tunnel", "err", err, "retry_in", wait.Round(time.Second))
+	}
+}
+
+// remember keeps a revocation in the saved settings, so a restart followed by
+// an outage never brings the refused tunnel back from them.
+func (w *wg) remember(code string) {
+	var t tunnel
+	if _, err := w.d.State.Read(tunnelState, &t); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		w.d.Log.Warn("read the WireGuard settings", "err", err)
+	}
+	t.Refused = code
+	if err := w.d.State.Write(tunnelState, tunnelVersion, t); err != nil {
+		w.d.Log.Error("keep the WireGuard refusal", "err", err)
+	}
+}
+
+// down takes wg0 down; a failure is retried at the next check.
+func (w *wg) down(ctx context.Context) {
+	if err := w.helper.Call(ctx, "wireguard.down", nil, nil); err != nil {
+		w.d.Log.Warn("stop the WireGuard tunnel; trying again", "err", err)
 	}
 }
 
@@ -255,7 +289,7 @@ func (w *wg) failed(ctx context.Context, _ error) time.Duration {
 // an outage even while the control plane is unreachable.
 func (w *wg) keepUp(ctx context.Context) {
 	var t tunnel
-	if _, err := w.d.State.Read(tunnelState, &t); err != nil || t.Address == "" {
+	if _, err := w.d.State.Read(tunnelState, &t); err != nil || t.Address == "" || t.Refused != "" {
 		return
 	}
 	priv, _, err := readKeypair(w.d.Paths.WireGuardDir())
@@ -265,9 +299,9 @@ func (w *wg) keepUp(ctx context.Context) {
 	w.up(ctx, t, priv)
 }
 
-// up applies t (the helper does nothing when wg0 already runs it) and points
-// the peer at the server's current address.
-func (w *wg) up(ctx context.Context, t tunnel, priv string) {
+// up applies t (the helper does nothing when wg0 already runs it), points
+// the peer at the server's current address, and reports whether wg0 runs t.
+func (w *wg) up(ctx context.Context, t tunnel, priv string) bool {
 	d := w.d
 	cfg := helper.WireGuardConfig{Address: t.Address, PrivateKey: priv, PublicKey: t.ServerPublicKey,
 		Endpoint: t.Endpoint, AllowedIPs: t.AllowedIPs, Keepalive: t.Keepalive}
@@ -275,12 +309,14 @@ func (w *wg) up(ctx context.Context, t tunnel, priv string) {
 	if err := w.helper.Call(ctx, "wireguard.apply", cfg, &reply); err != nil {
 		d.Health.Set(wgName, agent.StateFailed, err)
 		d.Log.Warn("could not bring the WireGuard tunnel up", "err", err)
-		return
+		return false
 	}
 	if reply.Changed {
 		d.Log.Info("WireGuard tunnel up", "address", t.Address, "endpoint", t.Endpoint)
 	}
+	d.Health.Set(wgName, agent.StateRunning, nil)
 	w.refreshEndpoint(ctx, t)
+	return true
 }
 
 // refreshEndpoint looks a DNS endpoint up again when handshakes stopped:
@@ -311,12 +347,21 @@ func (w *wg) refreshEndpoint(ctx context.Context, t tunnel) {
 	}
 	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	ips, err := net.DefaultResolver.LookupNetIP(rctx, "ip4", host)
+	// Both families: a server with only an AAAA record moves too. IPv4 first,
+	// as wg-quick prefers it.
+	ips, err := net.DefaultResolver.LookupNetIP(rctx, "ip", host)
 	if err != nil || len(ips) == 0 {
 		w.d.Log.Warn("could not resolve the WireGuard server", "host", host, "err", err)
 		return
 	}
-	target := net.JoinHostPort(ips[0].Unmap().String(), port)
+	best := ips[0].Unmap()
+	for _, ip := range ips {
+		if ip.Unmap().Is4() {
+			best = ip.Unmap()
+			break
+		}
+	}
+	target := net.JoinHostPort(best.String(), port)
 	if target == current {
 		return
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,34 +22,48 @@ import (
 // hostKeyTypes are the sshd host key types the server pins.
 var hostKeyTypes = map[string]bool{"ssh-ed25519": true, "ecdsa-sha2-nistp256": true, "ssh-rsa": true}
 
-// readKeypair returns the stored key pair (base64), or an error when either
-// file is missing or not a key.
-func readKeypair(dir string) (priv, pub string, err error) {
-	read := func(name string) (string, error) {
-		data, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			return "", err
-		}
-		v := strings.TrimSpace(string(data))
-		if raw, err := base64.StdEncoding.DecodeString(v); err != nil || len(raw) != 32 {
-			return "", fmt.Errorf("%s is not a WireGuard key", name)
-		}
-		return v, nil
+// readKey reads one base64 WireGuard key file.
+func readKey(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
 	}
-	if priv, err = read("private.key"); err != nil {
+	v := strings.TrimSpace(string(data))
+	if raw, err := base64.StdEncoding.DecodeString(v); err != nil || len(raw) != 32 {
+		return "", fmt.Errorf("%s is not a WireGuard key", filepath.Base(path))
+	}
+	return v, nil
+}
+
+// readKeypair returns the stored key pair (base64). The public key is always
+// derived from the private one, so a mismatched public.key is never used.
+func readKeypair(dir string) (priv, pub string, err error) {
+	if priv, err = readKey(filepath.Join(dir, "private.key")); err != nil {
 		return "", "", err
 	}
-	if pub, err = read("public.key"); err != nil {
+	if pub, err = publicKeyOf(priv); err != nil {
 		return "", "", err
 	}
 	return priv, pub, nil
 }
 
-// ensureKeypair returns the stored key pair, making one when there is none.
-// Keys imported from the Python agent are used as they are.
+// ensureKeypair returns the stored key pair, making one only when there is no
+// private key. Keys imported from the Python agent are used as they are; a
+// missing or wrong public.key is rewritten from the private key, so the
+// device keeps its WireGuard identity.
 func ensureKeypair(dir string) (priv, pub string, err error) {
-	if priv, pub, err = readKeypair(dir); err == nil {
+	pubPath := filepath.Join(dir, "public.key")
+	priv, pub, err = readKeypair(dir)
+	switch {
+	case err == nil:
+		if stored, rerr := readKey(pubPath); rerr != nil || stored != pub {
+			if werr := config.WriteFileAtomic(pubPath, []byte(pub+"\n"), 0o600); werr != nil {
+				return "", "", fmt.Errorf("wireguard keys: %w", werr)
+			}
+		}
 		return priv, pub, nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return "", "", fmt.Errorf("wireguard keys: %w", err) // never replace a key we cannot read
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", fmt.Errorf("wireguard keys: %w", err)
@@ -60,7 +75,7 @@ func ensureKeypair(dir string) (priv, pub string, err error) {
 	if err := config.WriteFileAtomic(filepath.Join(dir, "private.key"), []byte(priv+"\n"), 0o600); err != nil {
 		return "", "", fmt.Errorf("wireguard keys: %w", err)
 	}
-	if err := config.WriteFileAtomic(filepath.Join(dir, "public.key"), []byte(pub+"\n"), 0o600); err != nil {
+	if err := config.WriteFileAtomic(pubPath, []byte(pub+"\n"), 0o600); err != nil {
 		return "", "", fmt.Errorf("wireguard keys: %w", err)
 	}
 	return priv, pub, nil

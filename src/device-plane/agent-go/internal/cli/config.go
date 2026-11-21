@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"regexp"
 	"strings"
 
 	"meteorcloud/meteorcli/internal/config"
+	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/localrpc"
 )
 
@@ -37,9 +37,11 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if code, done := parseFlags(fl, args); done {
 		return code
 	}
-	if *sshUser != "" && !sshUserRe.MatchString(*sshUser) {
-		fmt.Fprintf(env.Stderr, "error: --ssh-user %q is not a user name\n", *sshUser)
-		return 2
+	if *sshUser != "" {
+		if err := helper.ValidSSHUser(*sshUser); err != nil {
+			fmt.Fprintf(env.Stderr, "error: --ssh-user %q: %s\n", *sshUser, agentError(err))
+			return 2
+		}
 	}
 	p := env.Paths
 	if config.LooksLikePython(p.LegacyDir) {
@@ -97,10 +99,6 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	reloadAgent(ctx, env)
 	return 0
 }
-
-// sshUserRe is the contract's ssh_user (connectivity-wireguard.request.json),
-// limited to names the helper accepts.
-var sshUserRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 // badValue is a setting that cannot be used (exit 2, not a write failure).
 type badValue struct{ error }

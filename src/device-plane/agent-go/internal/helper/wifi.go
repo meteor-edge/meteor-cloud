@@ -7,11 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"meteorcloud/meteorcli/internal/localrpc"
@@ -330,26 +333,45 @@ func (h Host) clearWifiPending() {
 	_ = os.Remove(filepath.Join(h.wifiDir(), wifiPendingFile))
 }
 
+// wifiMu makes each Wi-Fi change one critical section: the pending check, the
+// backups and the profile writes of one change never interleave with another's.
+var wifiMu sync.Mutex
+
 // restoreWifi puts the old profiles back, removes the new one, and reconnects.
-func (h Host) restoreWifi(ctx context.Context, p *wifiPendingState) {
-	if p.NewFile != "" && h.inConnectionsDir(p.NewFile) {
-		_ = os.Remove(p.NewFile)
-	}
+// An error means the old settings are not all back: the caller keeps the
+// pending record and backups so a later rollback can finish the job.
+// Reconnecting is best effort (the old profiles are in place either way).
+func (h Host) restoreWifi(ctx context.Context, p *wifiPendingState) error {
+	backedUp := map[string]bool{}
 	for _, name := range p.Backups {
-		src := filepath.Join(h.wifiDir(), wifiBackupDir, filepath.Base(name))
-		if data, err := os.ReadFile(src); err == nil {
-			_ = writePrivate(filepath.Join(h.NMConnectionsDir, filepath.Base(src)), data)
+		backedUp[filepath.Base(name)] = true
+	}
+	if p.NewFile != "" && h.inConnectionsDir(p.NewFile) && !backedUp[filepath.Base(p.NewFile)] {
+		if err := os.Remove(p.NewFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove the new profile: %w", err)
 		}
 	}
-	_, _ = h.nmcli(ctx, "connection", "reload")
+	for name := range backedUp {
+		data, err := os.ReadFile(filepath.Join(h.wifiDir(), wifiBackupDir, name))
+		if err != nil {
+			return fmt.Errorf("read the backup of %s: %w", name, err)
+		}
+		if err := writePrivate(filepath.Join(h.NMConnectionsDir, name), data); err != nil {
+			return fmt.Errorf("restore %s: %w", name, err)
+		}
+	}
+	if _, err := h.nmcli(ctx, "connection", "reload"); err != nil {
+		return fmt.Errorf("NetworkManager did not reload the old profiles: %w", err)
+	}
 	if p.PreviousUUID != "" {
 		if _, err := h.nmcli(ctx, "connection", "up", "uuid", p.PreviousUUID); err == nil {
-			return
+			return nil
 		}
 	}
 	if iface := h.wifiInterface(ctx); iface != "" {
 		_, _ = h.nmcli(ctx, "device", "connect", iface)
 	}
+	return nil
 }
 
 // writePrivate creates path readable by root only, atomically (it holds a password).
@@ -454,6 +476,8 @@ func (h Host) wifiApply(ctx context.Context, _ localrpc.Peer, raw json.RawMessag
 	if err := h.requireWifi(ctx); err != nil {
 		return nil, err
 	}
+	wifiMu.Lock()
+	defer wifiMu.Unlock()
 	if h.readWifiPending() != nil {
 		return nil, localrpc.Errorf(localrpc.CodeBadRequest, "an earlier change is still waiting for confirm or rollback")
 	}
@@ -494,15 +518,24 @@ func (h Host) wifiApply(ctx context.Context, _ localrpc.Peer, raw json.RawMessag
 			return nil, err
 		}
 	}
+	// The new profile first: if it cannot be written, the old ones stay.
+	if err := writePrivate(newFile, []byte(wifiKeyfile(r))); err != nil {
+		if r.ConnectNow {
+			h.clearWifiPending()
+		}
+		return nil, err
+	}
 	for _, p := range replaced {
 		if p.file != newFile {
 			_ = os.Remove(p.file)
 		}
 	}
-	if err := writePrivate(newFile, []byte(wifiKeyfile(r))); err != nil {
-		return nil, err
+	if _, err := h.nmcli(ctx, "connection", "reload"); err != nil {
+		if r.ConnectNow {
+			return nil, h.rollBackOrKeep(ctx, fmt.Errorf("NetworkManager did not load the new profile: %w", err))
+		}
+		return nil, fmt.Errorf("NetworkManager did not load the new profile (it loads it at the next reload or boot): %w", err)
 	}
-	_, _ = h.nmcli(ctx, "connection", "reload")
 	if !r.ConnectNow {
 		return WifiApplyReply{Applied: true}, nil
 	}
@@ -511,20 +544,36 @@ func (h Host) wifiApply(ctx context.Context, _ localrpc.Peer, raw json.RawMessag
 		args = append(args, "ifname", iface)
 	}
 	if _, err := h.nmcli(ctx, args...); err != nil {
-		if p := h.readWifiPending(); p != nil {
-			h.restoreWifi(ctx, p)
+		if err := h.rollBackOrKeep(ctx, nil); err != nil {
+			return nil, err
 		}
-		h.clearWifiPending()
 		return nil, localrpc.Errorf(CodeNotJoined, "The device could not join this network (wrong password, or out of range). "+
 			"The old Wi-Fi settings were put back.")
 	}
 	return WifiApplyReply{Applied: true, Connected: true}, nil
 }
 
+// rollBackOrKeep restores the pending change's old settings and returns cause.
+// When the restore itself fails, the pending record stays for wifi.rollback
+// and the restore error is returned instead.
+func (h Host) rollBackOrKeep(ctx context.Context, cause error) error {
+	p := h.readWifiPending()
+	if p == nil {
+		return cause
+	}
+	if err := h.restoreWifi(ctx, p); err != nil {
+		return fmt.Errorf("the old Wi-Fi settings could not be put back yet (%v); the change stays pending", err)
+	}
+	h.clearWifiPending()
+	return cause
+}
+
 func (h Host) wifiConfirm(_ context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
 	if err := decode(raw, &struct{}{}); err != nil {
 		return nil, err
 	}
+	wifiMu.Lock()
+	defer wifiMu.Unlock()
 	h.clearWifiPending()
 	return map[string]bool{"confirmed": true}, nil
 }
@@ -533,11 +582,15 @@ func (h Host) wifiRollback(ctx context.Context, _ localrpc.Peer, raw json.RawMes
 	if err := decode(raw, &struct{}{}); err != nil {
 		return nil, err
 	}
+	wifiMu.Lock()
+	defer wifiMu.Unlock()
 	p := h.readWifiPending()
 	if p == nil {
 		return WifiRollbackReply{}, nil
 	}
-	h.restoreWifi(ctx, p)
+	if err := h.restoreWifi(ctx, p); err != nil {
+		return nil, fmt.Errorf("the old Wi-Fi settings could not be put back (%v); the change stays pending", err)
+	}
 	h.clearWifiPending()
 	return WifiRollbackReply{RolledBack: true, WifiPending: WifiPending{ID: p.ID, Revision: p.Revision}}, nil
 }
@@ -553,6 +606,8 @@ func (h Host) wifiRemove(ctx context.Context, _ localrpc.Peer, raw json.RawMessa
 	if err := h.requireWifi(ctx); err != nil {
 		return nil, err
 	}
+	wifiMu.Lock()
+	defer wifiMu.Unlock()
 	var profiles []nmProfile
 	for _, p := range h.wifiProfiles(ctx) {
 		if p.ssid == r.SSID {
@@ -569,13 +624,18 @@ func (h Host) wifiRemove(ctx context.Context, _ localrpc.Peer, raw json.RawMessa
 	var generated []nmProfile
 	for _, p := range profiles {
 		if h.inConnectionsDir(p.file) {
-			_, _ = h.nmcli(ctx, "connection", "delete", "uuid", p.uuid)
+			if _, err := h.nmcli(ctx, "connection", "delete", "uuid", p.uuid); err != nil && h.profileExists(ctx, p.uuid) {
+				return nil, fmt.Errorf("NetworkManager did not delete %s: %w", p.name, err)
+			}
 		} else {
 			generated = append(generated, p)
 		}
 	}
 	if len(generated) > 0 {
-		h.forgetInNetplan(ctx, generated, r.SSID)
+		if !h.forgetInNetplan(ctx, generated, r.SSID) {
+			return nil, localrpc.Errorf(CodeUnsupported, "This network was set up by the operating system's own configuration "+
+				"(netplan), which this device recreates at boot, and it could not be removed from there.")
+		}
 		var kept []string
 		for _, p := range h.wifiProfiles(ctx) {
 			if p.ssid == r.SSID {
@@ -588,6 +648,16 @@ func (h Host) wifiRemove(ctx context.Context, _ localrpc.Peer, raw json.RawMessa
 		}
 	}
 	return map[string]bool{"removed": true, "found": true}, nil
+}
+
+// profileExists says NetworkManager still has a connection with this UUID.
+func (h Host) profileExists(ctx context.Context, uuid string) bool {
+	for _, p := range h.wifiProfiles(ctx) {
+		if p.uuid == uuid {
+			return true
+		}
+	}
+	return false
 }
 
 // auditWifi names the network, never the password.

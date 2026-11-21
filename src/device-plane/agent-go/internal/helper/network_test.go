@@ -319,6 +319,19 @@ func TestWireGuardRender(t *testing.T) {
 func TestWireGuardApply(t *testing.T) {
 	s := &scripted{answers: map[string]string{"ip -j route get": `[{"dst":"10.8.0.12","gateway":"192.168.0.1","dev":"eth0"}]`}}
 	h := s.host(t)
+	// wg-quick creates and removes the interface, as the kernel would.
+	run := h.Run
+	h.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		out, err := run(ctx, name, args...)
+		if err == nil && name == "wg-quick" && len(args) > 0 {
+			if args[0] == "up" {
+				_ = os.MkdirAll(filepath.Join(h.SysNetDir, "wg0"), 0o755)
+			} else {
+				_ = os.RemoveAll(filepath.Join(h.SysNetDir, "wg0"))
+			}
+		}
+		return out, err
+	}
 	out, err := call(t, h, "wireguard.apply", wgCfg())
 	if err != nil || string(out) != `{"changed":true}` {
 		t.Fatalf("apply = %s, %v", out, err)
@@ -330,7 +343,6 @@ func TestWireGuardApply(t *testing.T) {
 		t.Fatalf("not brought up: %v", s.calls)
 	}
 	// wg0 runs that config: nothing to do.
-	_ = os.MkdirAll(filepath.Join(h.SysNetDir, "wg0"), 0o755)
 	runs := len(s.calls)
 	if out, _ := call(t, h, "wireguard.apply", wgCfg()); string(out) != `{"changed":false}` || len(s.calls) != runs {
 		t.Errorf("unchanged apply = %s, ran %v", out, s.calls[runs:])
@@ -341,12 +353,39 @@ func TestWireGuardApply(t *testing.T) {
 	if out, _ := call(t, h, "wireguard.apply", c); string(out) != `{"changed":true}` || !s.ran("wg-quick down "+h.wgConf()) {
 		t.Errorf("changed apply = %s, ran %v", out, s.calls[runs:])
 	}
-	// A tunnel host on the LAN is refused.
+	// A tunnel host on the LAN is refused before the working tunnel is touched.
 	s.answers["ip -j route get"] = `[{"dst":"10.8.0.12","dev":"eth0","prefsrc":"10.8.0.2"}]`
 	c.Endpoint = "192.0.2.11:51820"
+	runs = len(s.calls)
 	if _, err := call(t, h, "wireguard.apply", c); err == nil || !strings.Contains(err.Error(), "local network") {
 		t.Errorf("LAN host: %v", err)
 	}
+	if s.ran("wg-quick down") && slices.ContainsFunc(s.calls[runs:], func(c string) bool { return strings.HasPrefix(c, "wg-quick down") }) {
+		t.Errorf("the working tunnel was taken down: %v", s.calls[runs:])
+	}
+	// A route that cannot be checked is refused too.
+	s.answers["ip -j route get"] = "not json"
+	if _, err := call(t, h, "wireguard.apply", c); err == nil || !strings.Contains(err.Error(), "cannot check") {
+		t.Errorf("unchecked route: %v", err)
+	}
+	// wg-quick fails to start the new config: the previous tunnel comes back.
+	s.answers["ip -j route get"] = `[{"dst":"10.8.0.12","gateway":"192.168.0.1","dev":"eth0"}]`
+	working, _ := os.ReadFile(h.wgConf())
+	s.fail = map[string]bool{"wg-quick up": true}
+	if _, err := call(t, h, "wireguard.apply", wgCfg()); err == nil {
+		t.Fatal("a failed start was reported as applied")
+	}
+	if now, _ := os.ReadFile(h.wgConf()); string(now) != string(working) {
+		t.Errorf("the previous config was not put back")
+	}
+	s.fail = nil
+	// A teardown that leaves wg0 up is an error.
+	_ = os.MkdirAll(filepath.Join(h.SysNetDir, "wg0"), 0o755)
+	s.fail = map[string]bool{"wg-quick down": true, "ip link delete": true}
+	if _, err := call(t, h, "wireguard.down", nil); err == nil {
+		t.Error("a failed teardown was reported as down")
+	}
+	s.fail = nil
 }
 
 func TestWireGuardShowAndEndpoint(t *testing.T) {
@@ -517,5 +556,68 @@ func TestGrepWriter(t *testing.T) {
 	_, _ = g.Write([]byte("ning here\n"))
 	if out.String() != "a WARN\nwarning here\n" {
 		t.Errorf("%q", out.String())
+	}
+	// A match past the displayed prefix of a long line, split between writes.
+	out.Reset()
+	_, _ = g.Write([]byte(strings.Repeat("x", maxLineBytes+100) + "wa"))
+	_, _ = g.Write([]byte("rn tail\nnope\n"))
+	if !strings.HasPrefix(out.String(), "xxx") || strings.Count(out.String(), "\n") != 1 || len(out.String()) != maxLineBytes+1 {
+		t.Errorf("long line: %d bytes, %d lines", len(out.String()), strings.Count(out.String(), "\n"))
+	}
+}
+
+func TestForgetInNetplanUsesPersistentAccessPoints(t *testing.T) {
+	s := &scripted{answers: map[string]string{
+		"netplan get wifis.wlan0.access-points": "lab:\n  password: x\nbackup:\n  password: y\n",
+	}}
+	h := s.host(t)
+	h.LookNetplan = func() bool { return true }
+	lab := nmProfile{name: "netplan-wlan0-lab", uuid: "u1", file: "/run/NetworkManager/system-connections/netplan-wlan0-lab.nmconnection", ssid: "lab"}
+	// nmcli could not read backup's SSID, so only lab shows at runtime: the
+	// definition still has two networks and only lab goes.
+	if !h.forgetInNetplan(context.Background(), []nmProfile{lab}, "lab") {
+		t.Fatalf("not done: %v", s.calls)
+	}
+	if !s.ran("netplan set wifis.wlan0.access-points.lab=null") || s.ran("netplan set wifis.wlan0=null") {
+		t.Errorf("runs %v", s.calls)
+	}
+	// Only network in the definition: the definition goes.
+	s.answers["netplan get wifis.wlan0.access-points"] = "\"lab\":\n  password: x\n"
+	s.calls = nil
+	if !h.forgetInNetplan(context.Background(), []nmProfile{lab}, "lab") || !s.ran("netplan set wifis.wlan0=null") {
+		t.Errorf("runs %v", s.calls)
+	}
+	// The definition cannot be read: nothing is changed.
+	s.fail = map[string]bool{"netplan get": true}
+	s.calls = nil
+	if h.forgetInNetplan(context.Background(), []nmProfile{lab}, "lab") || s.ran("netplan set") {
+		t.Errorf("changed an unread definition: %v", s.calls)
+	}
+}
+
+func TestWifiRollbackKeepsPendingWhenRestoreFails(t *testing.T) {
+	s, h := nmHost(t)
+	_ = os.MkdirAll(h.NMConnectionsDir, 0o755)
+	old := filepath.Join(h.NMConnectionsDir, "lab-old.nmconnection")
+	_ = os.WriteFile(old, []byte("[connection]\nid=lab-old\n"), 0o600)
+	s.answers["nmcli -t -f NAME,UUID,TYPE,FILENAME connection show"] = "lab-old:u9:802-11-wireless:" + old + "\n"
+	s.answers["nmcli -e no -g 802-11-wireless.ssid connection show uuid u9"] = "lab\n"
+	req := WifiApplyRequest{ID: "8a1c2d3e-0000-4000-8000-000000000001", SSID: "lab", Password: "new-password", ConnectNow: true}
+	if _, err := call(t, h, "wifi.apply", req); err != nil {
+		t.Fatal(err)
+	}
+	// The backup is gone (disk trouble): the rollback fails and stays pending.
+	_ = os.RemoveAll(filepath.Join(h.wifiDir(), wifiBackupDir))
+	if _, err := call(t, h, "wifi.rollback", nil); err == nil {
+		t.Fatal("a failed restore reported rolled back")
+	}
+	if h.readWifiPending() == nil {
+		t.Error("the pending record was dropped after a failed restore")
+	}
+	// Save-for-later: a failed reload is not reported applied.
+	_, _ = call(t, h, "wifi.confirm", nil)
+	s.fail["nmcli connection reload"] = true
+	if _, err := call(t, h, "wifi.apply", WifiApplyRequest{SSID: "other", Password: "long-enough"}); err == nil {
+		t.Error("a profile NetworkManager did not load was reported applied")
 	}
 }

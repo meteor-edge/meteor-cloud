@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"meteorcloud/meteorcli/internal/agent"
@@ -18,6 +19,9 @@ import (
 // "connect now" is kept only if MeteorCloud answers on the new network;
 // otherwise the old settings come back. Passwords are never logged or stored
 // by the agent. Results wait in the outbox until the server took them.
+
+// helperRetry spaces retried confirm and rollback calls (a variable for tests).
+var helperRetry = 2 * time.Second
 
 // KindWifiResult is the outbox kind of Wi-Fi results.
 const KindWifiResult = "wifi_result"
@@ -35,7 +39,9 @@ const (
 	// firstStatus delays the first report, so changes waiting at enrollment
 	// go out in the same report as the state (as the Python agent's first
 	// heartbeat did).
-	firstStatus  = 15 * time.Second
+	firstStatus = 15 * time.Second
+	// helperTries calls to confirm or roll back, helperRetry apart.
+	helperTries  = 3
 	maxResultErr = 500
 )
 
@@ -89,6 +95,7 @@ func (m *WiFi) Run(ctx context.Context, d agent.Deps) error {
 			w.collect(ctx)
 			w.report(ctx, true)
 		case <-timer.C:
+			w.recover(ctx) // a rollback that failed earlier is tried again
 			w.report(ctx, false)
 			timer.Reset(statusEvery)
 		}
@@ -112,8 +119,9 @@ func (w *wifi) recover(ctx context.Context) {
 		return
 	}
 	w.d.Log.Warn("an unconfirmed Wi-Fi change was found; putting the old settings back")
-	if err := w.helper.Call(ctx, "wifi.rollback", nil, nil); err != nil {
-		w.d.Log.Error("roll back the unconfirmed Wi-Fi change", "err", err)
+	if err := w.rollback(ctx); err != nil {
+		w.d.Log.Error("roll back the unconfirmed Wi-Fi change; trying again later", "err", err)
+		return
 	}
 	if st.Pending.ID != "" && st.Pending.Revision != nil {
 		w.keep(api.WifiResult{ID: st.Pending.ID, Revision: st.Pending.Revision, State: api.WifiRolledBack, Error: errInterrupted})
@@ -164,6 +172,12 @@ func (w *wifi) apply(ctx context.Context, c api.WifiChange) api.WifiResult {
 		}
 		return res
 	}
+	switch c.Action {
+	case "", "apply", "remove":
+	default:
+		d.Log.Warn("unknown Wi-Fi action; nothing changed", "action", c.Action, "ssid", c.SSID)
+		return fail(api.WifiFailed, errors.New("Unsupported Wi-Fi action "+c.Action))
+	}
 	if c.Action == "remove" {
 		if err := w.helper.Call(ctx, "wifi.remove", helper.WifiRemoveRequest{SSID: c.SSID}, nil); err != nil {
 			d.Log.Warn("Wi-Fi network not removed", "ssid", c.SSID, "err", err)
@@ -195,32 +209,55 @@ func (w *wifi) apply(ctx context.Context, c api.WifiChange) api.WifiResult {
 		return res
 	}
 	if w.serverReachable(ctx) {
-		if err := w.helper.Call(ctx, "wifi.confirm", nil, nil); err != nil {
-			d.Log.Error("confirm the Wi-Fi change", "err", err)
+		err := w.retry(ctx, "wifi.confirm")
+		if err == nil {
+			d.Log.Info("Wi-Fi changed; MeteorCloud is reachable on the new network", "ssid", c.SSID)
+			res.State = api.WifiApplied
+			return res
 		}
-		d.Log.Info("Wi-Fi changed; MeteorCloud is reachable on the new network", "ssid", c.SSID)
-		res.State = api.WifiApplied
-		return res
+		// Unconfirmed, the change would be undone at the next start anyway:
+		// undo it now rather than report it applied.
+		d.Log.Error("could not confirm the Wi-Fi change; putting the old settings back", "err", err)
+	} else {
+		d.Log.Warn("Wi-Fi change not kept: MeteorCloud was unreachable on the new network", "ssid", c.SSID)
 	}
-	d.Log.Warn("Wi-Fi change not kept: MeteorCloud was unreachable on the new network", "ssid", c.SSID)
-	if err := w.helper.Call(ctx, "wifi.rollback", nil, nil); err != nil {
-		d.Log.Error("roll back the Wi-Fi change", "err", err)
+	if err := w.rollback(ctx); err != nil {
+		// Still pending: recover retries it and reports rolled_back then.
+		d.Log.Error("roll back the Wi-Fi change; trying again later", "err", err)
+		return fail(api.WifiFailed, fmt.Errorf("the old Wi-Fi settings could not be put back yet; the device keeps trying: %w", err))
 	}
 	res.State, res.Error = api.WifiRolledBack, errUnreachable
 	return res
 }
 
-// serverReachable asks GET /api/v1/health until it answers or verifyFor passed.
+// retry calls a helper operation a few times (the helper may be restarting).
+func (w *wifi) retry(ctx context.Context, op string) error {
+	var err error
+	for i := 0; i < helperTries; i++ {
+		if err = w.helper.Call(ctx, op, nil, nil); err == nil || !sleep(ctx, helperRetry) {
+			return err
+		}
+	}
+	return err
+}
+
+// rollback puts the old settings back; nil only when the helper confirmed it.
+func (w *wifi) rollback(ctx context.Context) error { return w.retry(ctx, "wifi.rollback") }
+
+// serverReachable asks GET /api/v1/health until it answers or verifyFor
+// passed. Neither a request nor a pause runs past that deadline, so only an
+// answer within the window keeps the change.
 func (w *wifi) serverReachable(ctx context.Context) bool {
-	deadline := time.Now().Add(w.verifyFor)
+	vctx, cancel := context.WithTimeout(ctx, w.verifyFor)
+	defer cancel()
 	for {
-		hctx, cancel := context.WithTimeout(ctx, healthCall)
+		hctx, hcancel := context.WithTimeout(vctx, healthCall)
 		err := w.d.API.Health(hctx)
-		cancel()
-		if err == nil {
+		hcancel()
+		if err == nil && vctx.Err() == nil {
 			return true
 		}
-		if time.Now().After(deadline) || !sleep(ctx, w.verifyPause) {
+		if !sleep(vctx, w.verifyPause) {
 			return false
 		}
 	}

@@ -267,7 +267,10 @@ and `AF_INET6` (wg-quick resolves a server given by name) and keeps its state in
 - The installer adds `/usr/local/libexec/meteorcli-logs` and its sudo rule (checked with
   `visudo -c`), installs `wireguard-tools` with apt unless `--no-wireguard`, sets `--ssh-user`
   from `--user`/`$SUDO_USER`, and removes the Python agent's other root helpers and their sudo rules
-  (`meteorcli-wg`, `meteorcli-wifi`, `meteorcli-systemd`, `meteorcli-action`).
+  (`meteorcli-wg`, `meteorcli-wifi`, `meteorcli-systemd`, `meteorcli-action`). A Wi-Fi change the
+  Python agent had not confirmed is rolled back with its helper first; if that fails,
+  `/var/lib/meteorcli-wifi` is kept. A `--user` that cannot be the SSH user (root, system
+  accounts, names outside `^[a-z_][a-z0-9_-]{0,31}$`) only skips `--ssh-user`.
 - `/run/meteorcli` comes from tmpfiles.d instead of `RuntimeDirectory=`: systemd would delete it,
   with `helper.sock`, whenever the agent stops, and would give it to `meteor:meteor`, locking the
   `meteorcli` group out. The agent has `SupplementaryGroups=meteorcli` so it can give `agent.sock` to
@@ -420,7 +423,10 @@ Bound workloads (`spec.meteorcloud.application`) get a token from `POST
 `/run/secrets/meteorcloud-token`, with the `METEORCLOUD_*` variables; it is rewritten in place
 (same inode) when due, so the container sees the new token without a restart. Rotation is the
 `appcreds` module's job (every minute it rewrites the tokens past `refresh_after`); deploy mints a
-token when a workload is installed. A release the device rolled back to keeps its token fresh too. The server issues credentials for the desired release's
+token when a workload is installed. A rotation re-checks the stored binding under the store's lock,
+never creates a missing token file (deploy then recreates the container, whose mount needs the new
+inode), and keeps unknown `meta.json` keys; a damaged `meta.json` is moved to
+`meta.json.corrupt-<time>`. A release the device rolled back to keeps its token fresh too. The server issues credentials for the desired release's
 binding, so a credential for another application or environment is refused: a rollback to a
 release bound to a different application fails instead of running with the wrong token. Stored
 credentials are deleted only when verified desired software no longer binds the workload.
@@ -442,6 +448,11 @@ A `connect_now` change is kept only when `GET /api/v1/health` answers on the new
 `rolled_back` with the console's message. A network that cannot be joined is `rolled_back` at
 once. A change a restart or power cut left unconfirmed is rolled back when the agent starts and
 reported `rolled_back` ("The device restarted before the new network was confirmed…").
+Confirm and rollback are tried three times; a change that cannot be confirmed is rolled back,
+and one whose rollback fails is reported `failed` and rolled back by the next status check
+(every minute), which then reports it `rolled_back`. An action other than `apply` or `remove`
+is reported `failed` without touching the device. Helper changes are serialized; a restore that
+cannot put every old profile back keeps the pending record and backups for the next attempt.
 
 Results wait in the outbox (kind `wifi_result`) until `POST /network/wifi/report` accepted them.
 The state goes with them when it changed, at least every 5 minutes (checked every minute, first 15
@@ -450,18 +461,25 @@ seconds after start) and after every collection. Without NetworkManager the repo
 
 ### WireGuard
 
-The `wireguard` module makes an X25519 key pair in `identity/wireguard/` (the Python agent's pair is
-used as is; the private key never leaves the device) and registers it with
+The `wireguard` module makes an X25519 key pair in `identity/wireguard/` (the Python agent's
+private key is used as is; the public key is always derived from it, and a missing or wrong
+`public.key` is rewritten; the private key never leaves the device) and registers it with
 `POST /connectivity/wireguard`, together with `ssh_user`, the sshd host key (pinned by the
 server) and the SSH CA the user already trusts. It registers again every 15 minutes (×0.8-1.2),
 at once after enrollment, a credential rotation or a config change, and with backoff (30 s to
 30 min) after failures. `connectivity_disabled` stops it for 30 minutes;
-`connectivity_revoked` and `wireguard_key_changed` take wg0 down and wait for an operator.
+`connectivity_revoked` and `wireguard_key_changed` take wg0 down (retried until it is gone) and
+wait for an operator; the refusal is kept in `state/wireguard.json`, so the saved settings are not
+used again, also after a restart during an outage, until a registration succeeds. The same
+refusals on the immediate re-registration that reports a new SSH CA are handled the same way.
 
 wg0 is brought up through the helper and kept up every minute from the last settings in
-`state/wireguard.json`, also while the server is unreachable. When the server is given by name
-and no handshake happened for 3 minutes, the agent resolves the name again and points the peer at
-the new address. The SSH lines from the answer go to the SSH user's `authorized_keys`; when the
+`state/wireguard.json`, also while the server is unreachable. Only settings the helper applied are
+saved, and the module reports `running` only once wg0 runs them. The helper checks the routes to
+the tunnel hosts before it touches a working wg0 (a route it cannot check is refused) and brings
+the previous config back when a new one fails to start. When the server is given by name
+and no handshake happened for 3 minutes, the agent resolves the name again (IPv4 first, IPv6 when the name
+has only AAAA records) and points the peer at the new address. The SSH lines from the answer go to the SSH user's `authorized_keys`; when the
 user trusts a new CA the agent registers again at once so the console can use certificates.
 Without `wg` and `wg-quick` the module waits and looks again every 10 minutes.
 
