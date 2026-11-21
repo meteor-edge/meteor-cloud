@@ -61,6 +61,9 @@ type Verifier struct {
 	Fetch func(ctx context.Context) ([]Key, error)
 	// Log should carry module=deploy.
 	Log *slog.Logger
+	// Stop picks the Fetch errors Check returns instead of turning them into a
+	// refusal (a refused device token: the caller must stop). nil: none.
+	Stop func(error) bool
 
 	serverSigns *bool
 }
@@ -73,14 +76,18 @@ func CredentialFingerprint(deviceToken string) string {
 }
 
 // Check returns "" when item may be installed, otherwise why it is refused.
-// item is the desired item as decoded JSON (UseNumber).
-func (v *Verifier) Check(ctx context.Context, item map[string]any) string {
+// item is the desired item as decoded JSON (UseNumber). The error is set only
+// for a Fetch error that Stop picks; the reason is then empty.
+func (v *Verifier) Check(ctx context.Context, item map[string]any) (string, error) {
 	reason, err := v.check(ctx, item)
 	if err != nil {
+		if v.Stop != nil && v.Stop(err) {
+			return "", err
+		}
 		v.Log.Warn("could not check the signature", "workload", item["workload_key"], "err", err)
-		return fmt.Sprintf("Could not check the update signature (%v); will retry.", err)
+		return fmt.Sprintf("Could not check the update signature (%v); will retry.", err), nil
 	}
-	return reason
+	return reason, nil
 }
 
 func (v *Verifier) check(ctx context.Context, item map[string]any) (string, error) {

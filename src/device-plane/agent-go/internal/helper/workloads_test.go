@@ -3,6 +3,8 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -232,5 +234,71 @@ func TestDeployAuditsHoldNoSecrets(t *testing.T) {
 	raw, _ := json.Marshal(DockerRunRequest{Name: "a", Image: "i", Env: map[string]string{"K": "secret-value"}})
 	if got, _ := json.Marshal(auditDockerRun(raw)); strings.Contains(string(got), "secret-value") {
 		t.Fatalf("audit holds an env value: %s", got)
+	}
+}
+
+func TestDockerRunPullNever(t *testing.T) {
+	f := &fakeHost{}
+	h, _ := deployHost(t, f)
+	if _, err := call(t, h, "docker.run", DockerRunRequest{Name: "app", Image: "demo/app:1.0", PullNever: true}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"docker", "run", "-d", "--name", "app", "--pull", "never", "demo/app:1.0"}
+	if !slices.Equal(f.calls[1], want) {
+		t.Fatalf("ran %v\nwant %v", f.calls[1], want)
+	}
+}
+
+func TestDockerRunKeepsTheContainerWhenPreparationFails(t *testing.T) {
+	f := &fakeHost{}
+	h, root := deployHost(t, f)
+	h.TempDir = filepath.Join(root, "no-such-dir")
+	if _, err := call(t, h, "docker.run", DockerRunRequest{Name: "app", Image: "nginx", Env: map[string]string{"A": "1"}}); err == nil {
+		t.Fatal("docker.run without an env file succeeded")
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("ran %v: the running container was removed before anything could start", f.calls)
+	}
+}
+
+func TestSystemdRemoveKeepsAUnitThatDidNotStop(t *testing.T) {
+	f := &fakeHost{fail: "disable"}
+	h, _ := deployHost(t, f)
+	unitFile := filepath.Join(h.UnitDir, "demo.service")
+	_ = os.MkdirAll(h.UnitDir, 0o755)
+	touch(t, unitFile)
+	if _, err := call(t, h, "systemd.control", SystemdControlRequest{Unit: "demo.service", Action: "remove"}); err == nil {
+		t.Fatal("remove succeeded although the unit did not stop")
+	}
+	if _, err := os.Stat(unitFile); err != nil {
+		t.Fatal("the unit file was deleted")
+	}
+	// A unit that was never installed: its disable failing is fine.
+	if _, err := call(t, h, "systemd.control", SystemdControlRequest{Unit: "gone.service", Action: "remove"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestComposeParsedOutputIsStdoutOnly(t *testing.T) {
+	f := &fakeHost{}
+	h, _ := deployHost(t, f)
+	file := touch(t, filepath.Join(h.ComposeDir, "shop", "compose.yaml"))
+	h.Stream = func(_ context.Context, w io.Writer, name string, args ...string) error {
+		_, err := w.Write([]byte("web\n")) // the warning went to stderr, which Stream does not pass on
+		return err
+	}
+	out, err := call(t, h, "compose.services", ComposeRequest{Project: "shop", File: file})
+	var reply DockerOutput
+	_ = json.Unmarshal(out, &reply)
+	if err != nil || !reply.OK || reply.Output != "web\n" {
+		t.Fatalf("reply %+v, %v", reply, err)
+	}
+	h.Stream = func(context.Context, io.Writer, string, ...string) error {
+		return errors.New("docker compose config: exit status 15: yaml: line 2: bad")
+	}
+	out, _ = call(t, h, "compose.services", ComposeRequest{Project: "shop", File: file})
+	_ = json.Unmarshal(out, &reply)
+	if reply.OK || !strings.Contains(reply.Output, "yaml: line 2: bad") {
+		t.Fatalf("failure reply %+v", reply)
 	}
 }

@@ -67,7 +67,7 @@ func (h Host) composeServices(ctx context.Context, _ localrpc.Peer, raw json.Raw
 	if err != nil {
 		return nil, err
 	}
-	return h.dockerRun(ctx, append(args, "config", "--services")...)
+	return h.dockerStdout(ctx, append(args, "config", "--services")...)
 }
 
 func (h Host) composeUp(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
@@ -102,7 +102,7 @@ func (h Host) composePS(ctx context.Context, _ localrpc.Peer, raw json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	return h.dockerRun(ctx, append(args, "ps", "-a", "--format", "json")...)
+	return h.dockerStdout(ctx, append(args, "ps", "-a", "--format", "json")...)
 }
 
 func (h Host) composeDown(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {

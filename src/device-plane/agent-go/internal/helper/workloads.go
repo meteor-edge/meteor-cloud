@@ -65,6 +65,9 @@ type DockerRunRequest struct {
 	Env       map[string]string `json:"env"`
 	TokenFile string            `json:"token_file"`
 	Command   []string          `json:"command"`
+	// PullNever runs only an image already on the device (one loaded from a
+	// verified artifact): docker run never pulls it from a registry.
+	PullNever bool `json:"pull_never,omitempty"`
 }
 
 func (r *DockerRunRequest) validate(h Host) error {
@@ -165,15 +168,17 @@ func (h Host) dockerRunContainer(ctx context.Context, _ localrpc.Peer, raw json.
 	if err := r.validate(h); err != nil {
 		return nil, err
 	}
-	_, _ = h.Run(ctx, "docker", "rm", "-f", r.Name) // a missing container is fine
-
 	args := []string{"run", "-d", "--name", r.Name}
+	if r.PullNever {
+		args = append(args, "--pull", "never")
+	}
 	if r.Restart != "" {
 		args = append(args, "--restart", r.Restart)
 	}
 	for _, p := range r.Ports {
 		args = append(args, "-p", p)
 	}
+	// Everything that can fail is ready before the running container goes.
 	if len(r.Env) > 0 {
 		envFile, err := writeEnvFile(h.TempDir, r.Env)
 		if err != nil {
@@ -187,6 +192,8 @@ func (h Host) dockerRunContainer(ctx context.Context, _ localrpc.Peer, raw json.
 	}
 	args = append(args, r.Image)
 	args = append(args, r.Command...) // after the image: arguments of the container, not of docker
+
+	_, _ = h.Run(ctx, "docker", "rm", "-f", r.Name) // a missing container is fine
 	return h.dockerRun(ctx, args...)
 }
 

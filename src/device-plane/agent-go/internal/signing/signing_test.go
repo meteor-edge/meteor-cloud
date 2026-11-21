@@ -155,7 +155,7 @@ func TestVerifier(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			got := v.Check(ctx, tc.item(t))
+			got, _ := v.Check(ctx, tc.item(t))
 			if (tc.want == "") != (got == "") || !strings.HasPrefix(got, tc.want) {
 				t.Fatalf("Check = %q, want %q", got, tc.want)
 			}
@@ -167,16 +167,16 @@ func TestPinsBelongToOneToken(t *testing.T) {
 	a, b := newOrg("k-a", 1), newOrg("k-b", 2)
 	store, _ := state.NewStore(t.TempDir())
 	first := newVerifier(t, store, func() ([]Key, error) { return []Key{a.key()}, nil })
-	if got := first.Check(context.Background(), a.sign(t, "d-1", item(t))); got != "" {
+	if got, _ := first.Check(context.Background(), a.sign(t, "d-1", item(t))); got != "" {
 		t.Fatal(got)
 	}
 	// Re-enrolled into another organization: the old pins must not count.
 	second := newVerifier(t, store, func() ([]Key, error) { return []Key{b.key()}, nil })
 	second.Fingerprint = CredentialFingerprint("new-token")
-	if got := second.Check(context.Background(), b.sign(t, "d-1", item(t))); got != "" {
+	if got, _ := second.Check(context.Background(), b.sign(t, "d-1", item(t))); got != "" {
 		t.Fatalf("new token, new org: %q", got)
 	}
-	if got := second.Check(context.Background(), a.sign(t, "d-1", item(t))); !strings.Contains(got, "untrusted key") {
+	if got, _ := second.Check(context.Background(), a.sign(t, "d-1", item(t))); !strings.Contains(got, "untrusted key") {
 		t.Fatalf("old org key after re-enrollment: %q", got)
 	}
 }
@@ -191,9 +191,22 @@ func TestPythonPinsFileIsRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := newVerifier(t, store, func() ([]Key, error) { return nil, errors.New("must not fetch") })
-	if got := v.Check(context.Background(), a.sign(t, "d-1", item(t))); got != "" {
+	if got, _ := v.Check(context.Background(), a.sign(t, "d-1", item(t))); got != "" {
 		t.Fatal(got)
 	}
 }
 
 func writeFile(path, content string) error { return os.WriteFile(path, []byte(content), 0o600) }
+
+func TestCheckReturnsStopErrors(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("token refused")
+	v := newVerifier(t, store, func() ([]Key, error) { return nil, refused })
+	v.Stop = func(err error) bool { return errors.Is(err, refused) }
+	if why, err := v.Check(context.Background(), item(t)); why != "" || !errors.Is(err, refused) {
+		t.Fatalf("Check = %q, %v", why, err)
+	}
+}

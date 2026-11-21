@@ -67,6 +67,10 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 	if w.App != nil {
 		req.TokenFile = w.App.TokenFile
 	}
+	// An image from a verified artifact runs as loaded: when the tarball does
+	// not hold the named image, docker run fails instead of pulling a tag
+	// that may have changed since the release was signed.
+	req.PullNever = w.Artifact != ""
 	var out helper.DockerOutput
 	if err := r.Helper.Call(ctx, "docker.run", req, &out); err != nil {
 		return runtime.Result{}, err
@@ -119,7 +123,11 @@ func (r Runtime) Check(ctx context.Context, w runtime.Workload) runtime.Health {
 		return runtime.Health{Status: runtime.Unhealthy, Problem: subject + " could not be inspected"}
 	}
 	if !out.OK {
-		return runtime.Health{Status: runtime.Missing, Problem: subject + " not found"}
+		if gone(out.Output) {
+			return runtime.Health{Status: runtime.Missing, Problem: subject + " not found"}
+		}
+		// The daemon could not answer: not a reason to replace the container.
+		return runtime.Health{Status: runtime.Unhealthy, Problem: subject + " could not be inspected: " + detail(out.Output)}
 	}
 	parts := append(strings.Split(strings.TrimSpace(out.Output), "|"), "", "", "", "")
 	running, status, exitCode, health := parts[0], parts[1], parts[2], parts[3]
@@ -193,3 +201,9 @@ func detail(output string) string {
 
 // pyQuote writes s as Python's repr of a str does for plain text.
 func pyQuote(s string) string { return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", `\'`)) }
+
+// gone reports whether docker inspect failed because the container does not exist.
+func gone(output string) bool {
+	o := strings.ToLower(output)
+	return strings.Contains(o, "no such object") || strings.Contains(o, "no such container")
+}

@@ -42,6 +42,15 @@ func (c *cycle) run(ctx context.Context) (reports []report, attempts map[string]
 	attempts = map[string]bool{}
 
 	var accepted []item
+	// keep is the workloads whose stored credentials stay: the bound accepted
+	// items, and every refused one (a refused item cannot unbind a workload).
+	keep := map[string]bool{}
+	refuse := func(key, why string) {
+		d.Log.Warn("refusing desired software", "workload", key, "reason", why)
+		reports = append(reports, failed(key, why))
+		attempts[key] = true
+		keep[key] = true
+	}
 	for _, m := range raw {
 		it := item(m)
 		key := it.key()
@@ -51,33 +60,35 @@ func (c *cycle) run(ctx context.Context) (reports []report, attempts map[string]
 		if _, ok := c.r.runtimes[it.kind()]; !ok {
 			reports = append(reports, failed(key, "Unsupported release kind: "+pyRepr(it["kind"])))
 			attempts[key] = true
+			keep[key] = true
 			continue
 		}
 		if c.verifier != nil {
-			if why := c.verifier.Check(ctx, m); why != "" {
-				d.Log.Warn("refusing desired software", "workload", key, "reason", why)
-				reports = append(reports, failed(key, why))
-				attempts[key] = true
+			why, err := c.verifier.Check(ctx, m)
+			if err != nil {
+				// Only a refused token comes back as an error: no reports, nothing pruned.
+				c.authFailed()
+				return nil, nil
+			}
+			if why != "" {
+				refuse(key, why)
 				continue
 			}
 		}
 		if why := c.stale(it); why != "" {
-			d.Log.Warn("refusing desired software", "workload", key, "reason", why)
-			reports = append(reports, failed(key, why))
-			attempts[key] = true
+			refuse(key, why)
 			continue
 		}
 		accepted = append(accepted, it)
 	}
 
 	// Prune only after verification, so a refused item cannot drop stored credentials.
-	bound := map[string]bool{}
 	for _, it := range accepted {
 		if binding(it) != nil {
-			bound[it.key()] = true
+			keep[it.key()] = true
 		}
 	}
-	c.creds.prune(bound)
+	c.creds.prune(keep)
 
 	for _, it := range accepted {
 		rep, attempted := c.reconcile(ctx, it)
@@ -114,9 +125,20 @@ func (c *cycle) reconcile(ctx context.Context, it item) (rep report, attempted b
 	if rep := c.stillRolledBack(ctx, it, rec, had); rep != nil {
 		return rep, false
 	}
+	if c.refused {
+		return nil, false
+	}
 	wasApplied := had && c.alreadyApplied(it, rec)
 	if wasApplied {
-		if !rec.Reapply && !c.creds.keepFresh(ctx, d.API, c.token, it, d.Log.Warn) {
+		fresh := true
+		if !rec.Reapply {
+			var err error
+			if fresh, err = c.creds.keepFresh(ctx, d.API, c.token, it, d.Log.Warn); err != nil {
+				c.authFailed() // only a refused token comes back as an error
+				return nil, false
+			}
+		}
+		if !fresh {
 			rec.Reapply = true
 			c.applied[key] = rec
 			release, revision, _ := it.identity()
@@ -276,7 +298,9 @@ func (c *cycle) healthOnly(ctx context.Context, it item) report {
 }
 
 // stillRolledBack reports a desired release this device already rolled back
-// from (until the desired release changes), nil to go on.
+// from (until the desired release changes), nil to go on. The release it
+// runs instead keeps its application token fresh, and is applied again (not
+// the failed one) when its token file was lost.
 func (c *cycle) stillRolledBack(ctx context.Context, it item, rec workload, had bool) report {
 	if !had || rec.RolledBackFrom == nil || rec.Item == nil {
 		return nil
@@ -285,15 +309,51 @@ func (c *cycle) stillRolledBack(ctx context.Context, it item, rec workload, had 
 	if !ok || rec.RolledBackFrom.ReleaseID != release || rec.RolledBackFrom.Revision != revision {
 		return nil
 	}
-	health := runtime.Unknown
-	if cur := c.healthOnly(ctx, rec.Item); cur != nil {
-		health = cur.health()
-	}
 	reason := rec.RolledBackFrom.Reason
 	if reason == "" {
 		reason = "health check failed"
 	}
+	d := c.r.d
+	fresh, err := c.creds.keepFresh(ctx, d.API, c.token, rec.Item, d.Log.Warn)
+	if err != nil {
+		c.authFailed() // only a refused token comes back as an error
+		return nil
+	}
+	health := runtime.Unknown
+	if !fresh {
+		restored, err := c.restore(ctx, rec.Item)
+		if err != nil {
+			return nil // errAuth: the cycle stops
+		}
+		if restored.status() != statusInSync {
+			return failed(it.key(), fmt.Sprintf("%s; restoring %s failed: %s", reason, rec.Item.version(), restored.lastError()))
+		}
+		health = restored.health()
+	} else if cur := c.healthOnly(ctx, rec.Item); cur != nil {
+		health = cur.health()
+	}
 	return rolledBack(it, rec.Item, health, reason)
+}
+
+// restore applies a release this device ran before (a rollback target), with
+// its application credentials. It returns errAuth only.
+func (c *cycle) restore(ctx context.Context, previous item) (report, error) {
+	d := c.r.d
+	app, err := c.creds.forApply(ctx, d.API, c.token, previous)
+	if err != nil {
+		if err := c.check(err); errors.Is(err, errAuth) {
+			return nil, err
+		}
+		return failed(previous.key(), message(err)), nil
+	}
+	restored, err := c.apply(ctx, previous, app, false)
+	if errors.Is(err, errAuth) {
+		return nil, err
+	}
+	if err != nil {
+		restored = failed(previous.key(), message(err))
+	}
+	return restored, nil
 }
 
 // rollBack applies the release that ran before it; failure stands when there is none.
@@ -313,22 +373,9 @@ func (c *cycle) rollBack(ctx context.Context, it item, failure report, rec workl
 		return failure, nil
 	}
 	d.Log.Warn("update failed; rolling back", "workload", it.key(), "reason", reason, "to", previous.version())
-	var app *runtime.App
-	if binding(previous) != nil {
-		var err error
-		if app, err = c.creds.forApply(ctx, d.API, c.token, previous); err != nil {
-			if err := c.check(err); errors.Is(err, errAuth) {
-				return nil, err
-			}
-			return failed(it.key(), fmt.Sprintf("%s; rolling back to %s also failed: %s", reason, previous.version(), message(err))), nil
-		}
-	}
-	restored, err := c.apply(ctx, previous, app, false)
-	if errors.Is(err, errAuth) {
-		return nil, err
-	}
+	restored, err := c.restore(ctx, previous)
 	if err != nil {
-		restored = failed(it.key(), message(err))
+		return nil, err
 	}
 	if restored.status() != statusInSync {
 		return failed(it.key(), fmt.Sprintf("%s; rolling back to %s also failed: %s", reason, previous.version(), restored.lastError())), nil

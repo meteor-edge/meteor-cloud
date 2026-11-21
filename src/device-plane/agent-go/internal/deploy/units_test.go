@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -220,7 +221,7 @@ func TestCachedArtifact(t *testing.T) {
 		t.Fatal("cached with another checksum")
 	}
 	_ = os.WriteFile(path, []byte("tampered"), 0o640)
-	if cached(path, sha(tarball)) {
+	if cached(path, sha(tarball)) || cached(path, "") {
 		t.Fatal("a changed file counted as cached")
 	}
 }
@@ -233,5 +234,72 @@ func TestKindsMatchTheRegistry(t *testing.T) {
 		if _, ok := kinds[k]; !ok {
 			t.Errorf("%s not in the registry", k)
 		}
+	}
+}
+
+func TestGateDoesNotCountASlowCheckAsStableTime(t *testing.T) {
+	clk := &fakeClock{now: time.Unix(0, 0)}
+	var at []time.Duration
+	check := func(context.Context) runtime.Health {
+		if len(at) == 0 {
+			clk.now = clk.now.Add(40 * time.Second) // the first check hangs for 40 s
+		}
+		at = append(at, clk.now.Sub(time.Unix(0, 0)))
+		return runtime.Health{Status: runtime.Healthy}
+	}
+	g := gate{Timeout: 60 * time.Second, Stable: 10 * time.Second}
+	if why := g.wait(context.Background(), check, nil, clk); why != "" {
+		t.Fatal(why)
+	}
+	if last := at[len(at)-1]; last < 50*time.Second {
+		t.Fatalf("passed at %v, before 10 s of healthy observations (checks at %v)", last, at)
+	}
+}
+
+func TestAppliedStateKeepsUnknownWorkloadFields(t *testing.T) {
+	a, dir := newApplied(t)
+	file := `{"version": 1, "workloads": {"w": {"release_id": "r1", "revision": 1, "future": {"x": 1}},
+		"other": {"release_id": "r9", "revision": 2, "note": "kept"}}}`
+	if err := os.WriteFile(filepath.Join(dir, appliedFile), []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.save(record{key: "w", release: "r2", revision: 2}); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Workloads map[string]map[string]json.RawMessage `json:"workloads"`
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, appliedFile))
+	_ = json.Unmarshal(data, &got)
+	compact := func(raw json.RawMessage) string {
+		var b bytes.Buffer
+		_ = json.Compact(&b, raw)
+		return b.String()
+	}
+	if compact(got.Workloads["w"]["future"]) != `{"x":1}` || compact(got.Workloads["other"]["note"]) != `"kept"` ||
+		compact(got.Workloads["w"]["release_id"]) != `"r2"` {
+		t.Fatalf("file after save: %s", data)
+	}
+}
+
+func TestPythonAppliedStateStaysWhenTheMigrationFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	a, dir := newApplied(t)
+	py := `{"demo-app": {"release_id": "r1", "revision": 3}}`
+	path := filepath.Join(dir, appliedFile)
+	if err := os.WriteFile(path, []byte(py), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	if err := a.save(record{key: "demo-app", release: "r2", revision: 4}); err == nil {
+		t.Fatal("save succeeded in a read-only directory")
+	}
+	if data, _ := os.ReadFile(path); string(data) != py {
+		t.Fatalf("Python file changed: %s", data)
 	}
 }

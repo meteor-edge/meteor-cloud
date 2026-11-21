@@ -200,9 +200,9 @@ a minute without requests.
 | `logs.warnings` | `after_cursor` (optional journal cursor) | `journalctl --priority=warning --output=json`, at most 200 entries (the last 10 minutes without a cursor); returns message (cut to 1000 characters), priority, unit, source, time and cursor |
 | `systemd.control` | `unit` (as `systemd.install_unit`, never `meteorcli*`), `action` (`is_active`, `restart`, `remove`) | `systemctl is-active --quiet` (answers `active`), `restart`, or `disable --now` plus deleting the unit file |
 | `docker.load` | `path` (a file directly in `/var/lib/meteorcli/artifacts`, symlinks resolved and checked) | `docker load -i` (15 min) |
-| `docker.run` | `name`, `image` (no leading `-`), `restart` (`no`, `always`, `unless-stopped`, `on-failure[:N]`), `ports` (`-p` values), `env` (names `^[A-Za-z_][A-Za-z0-9_.-]*$`, values without line breaks), `token_file` (a `token` under `/var/lib/meteorcli/app-credentials/<dir>/`), `command` (container arguments) | `docker rm -f`, then `docker run -d` (15 min, for the pull); the environment goes in a 0600 `--env-file` in the helper's private `/tmp`, never on the command line |
+| `docker.run` | `name`, `image` (no leading `-`), `restart` (`no`, `always`, `unless-stopped`, `on-failure[:N]`), `ports` (`-p` values), `env` (names `^[A-Za-z_][A-Za-z0-9_.-]*$`, values without line breaks), `token_file` (a `token` under `/var/lib/meteorcli/app-credentials/<dir>/`), `command` (container arguments), `pull_never` | Prepares the environment in a 0600 `--env-file` in the helper's private `/tmp` (never on the command line), then `docker rm -f` and `docker run -d [--pull never]` (15 min, for the pull) |
 | `docker.health`, `docker.remove` | `name` | `docker inspect -f '{{.State.Running}}\|{{.State.Status}}\|{{.State.ExitCode}}\|<health>'` (never env or labels) / `docker rm -f` |
-| `compose.services`, `compose.up`, `compose.ps`, `compose.down` | `project` (`^[a-z0-9][a-z0-9_-]{0,62}$`), `file`, `env_file`, `override_file` (each directly in `/var/lib/meteorcli/compose/<project>/`), `force_recreate` | `docker compose -p <project> -f <file> [--env-file] config --services` / `[-f override] up -d --remove-orphans [--force-recreate]` (15 min) / `ps -a --format json` / `down --remove-orphans` |
+| `compose.services`, `compose.up`, `compose.ps`, `compose.down` | `project` (`^[a-z0-9][a-z0-9_-]{0,62}$`), `file`, `env_file`, `override_file` (each directly in `/var/lib/meteorcli/compose/<project>/`), `force_recreate` | `docker compose -p <project> -f <file> [--env-file] config --services` / `[-f override] up -d --remove-orphans [--force-recreate]` (15 min) / `ps -a --format json` / `down --remove-orphans`; `services` and `ps` answer stdout only (warnings stay out of the parsed output) |
 
 **Trust boundary.** `systemd.install_unit` checks the unit's name and shape, not what `ExecStart`
 runs, and `docker.run` / `compose.up` start whatever image or compose file they are given, so
@@ -210,8 +210,9 @@ whoever controls the `meteor` user can run commands as root through them (as wit
 device). The helper builds every docker command itself from typed fields (there is no field for
 `--privileged` or a host mount in `docker.run`) and reads files only from the agent's artifact,
 compose and credential directories, but a compose file can still ask for anything. The `meteor`
-account is unprivileged, not confined: protect it like root. The agent only applies releases whose
-signature it verified. The agent never gets the Docker socket and `meteor` is never in the `docker`
+account is unprivileged, not confined: protect it like root. The agent applies only releases whose
+signature it verified, except from an older control plane that does not sign (`/signing-keys`
+answers 404 and no key is pinned yet; see [Deploy](#deploy)). The agent never gets the Docker socket and `meteor` is never in the `docker`
 group.
 
 Tools (`systemctl`, `journalctl`) are looked up only in a fixed root-owned `PATH`, never in the
@@ -371,7 +372,12 @@ own goroutine, so a slow image pull never delays a heartbeat. One cycle is the P
    in heartbeats that carry only `software_report`.
 5. The runtime applies it through the helper (`systemd.install_unit`, `docker.load` and
    `docker.run`, `compose.up`) and checks it right after; a container or unit that is not up fails
-   the install.
+   the install. An image from an artifact runs with `--pull never`, so a tag missing from the
+   tarball fails instead of being pulled. A compose release replaces the compose file of the one
+   before it (other files in the project directory stay); `spec.env` goes in `.env.meteorcloud`
+   with every value quoted, so Compose takes it literally (no `${VAR}` interpolation). A compose
+   service without any container, or a container docker says does not exist, is installed again;
+   a Docker daemon that does not answer is reported `unhealthy`, nothing is replaced.
 6. With a `health_check` in the spec, the workload must be healthy (runtime, plus `http_url`
    answering 2xx/3xx without following redirects) within `timeout_seconds` (60) and stay so for
    `stable_seconds` (10). If not, and `rollback` is not `false`, the previous release recorded in
@@ -381,7 +387,11 @@ own goroutine, so a slow image pull never delays a heartbeat. One cycle is the P
 Bound workloads (`spec.meteorcloud.application`) get a token from `POST
 /applications/credentials`, kept in `app-credentials/` and mounted read-only at
 `/run/secrets/meteorcloud-token`, with the `METEORCLOUD_*` variables; it is rewritten in place
-(same inode) when due, so the container sees the new token without a restart.
+(same inode) when due, so the container sees the new token without a restart. A release the device
+rolled back to keeps its token fresh too. The server issues credentials for the desired release's
+binding, so a credential for another application or environment is refused: a rollback to a
+release bound to a different application fails instead of running with the wrong token. Stored
+credentials are deleted only when verified desired software no longer binds the workload.
 
 Each report is kept in the outbox (kind `software_report`, one per workload, latest wins). The
 outcome of an install attempt is also sent at once in a heartbeat with only `software_report` and
@@ -423,7 +433,14 @@ heartbeat. Install outcomes are also announced on `devices/{id}/events` as `depl
   limited to 2000 files and 1 GiB unpacked, and its symlinks are not created. Bundle directories
   are 0755 and files 0644 whatever the agent's umask.
 - A download that stalls for 5 minutes is cut (Python: a 300 s socket timeout per read; no total
-  limit).
+  limit). A storage error after the redirect (an expired link) fails the install; it no longer
+  counts as a refused device token.
+- Compose `spec.env` values are quoted in `.env.meteorcloud` (Python wrote them bare, so Compose
+  interpolated `$VAR` and cut `#` comments). An image from an artifact is never pulled
+  (`--pull never`). A compose service whose container was removed is brought back; a docker
+  inspect error is `unhealthy`, not a reason to recreate the container (Python treated any inspect
+  failure as a missing container). A desired software answer that is not a JSON array is an error,
+  not "nothing desired".
 - MQTT 5 instead of 3.1.1 (same topics, QoS, retain, will and client id; Mosquitto and EMQX speak
   both). `METEORCLI_MQTT_TLS_INSECURE` is gone: TLS is always verified.
 - `mqtt-test` and `mqtt-listen` use the agent's session over `agent.sock` instead of a second

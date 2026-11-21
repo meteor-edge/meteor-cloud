@@ -89,14 +89,21 @@ func (s credStore) current(key string, b map[string]any) *runtime.App {
 	if !ok || err != nil || st.Size() == 0 {
 		return nil
 	}
+	if !sameBinding(b, m.Application, m.Environment) {
+		return nil
+	}
+	return &runtime.App{TokenFile: token, Env: m.Env}
+}
+
+// sameBinding reports whether a credential for application and environment
+// belongs to binding b (no environment means production).
+func sameBinding(b map[string]any, application, environment any) bool {
 	env := b["environment"]
 	if env == nil || env == "" {
 		env = "production"
 	}
-	if m.Application != b["application"] || m.Environment != env {
-		return nil
-	}
-	return &runtime.App{TokenFile: token, Env: m.Env}
+	return runtime.Stringify(application) == runtime.Stringify(b["application"]) &&
+		runtime.Stringify(environment) == runtime.Stringify(env)
 }
 
 func parseTime(s string) (time.Time, bool) {
@@ -124,8 +131,11 @@ func (s credStore) expired(key string) bool {
 	return s.due(key, func(m credMeta) string { return m.ExpiresAt })
 }
 
-// mint asks the server for a new token and stores it.
-func (s credStore) mint(ctx context.Context, client *api.Client, token, key string) (*runtime.App, error) {
+// mint asks the server for a new token for binding b and stores it. The server
+// issues it for the binding of the workload's desired release; one for another
+// application or environment (a rollback to a release bound differently) is
+// refused and the stored token is left alone.
+func (s credStore) mint(ctx context.Context, client *api.Client, token, key string, b map[string]any) (*runtime.App, error) {
 	issued, err := client.AppCredentials(ctx, token, key)
 	if err != nil {
 		if api.IsAuth(err) {
@@ -135,6 +145,10 @@ func (s credStore) mint(ctx context.Context, client *api.Client, token, key stri
 	}
 	if issued.Token == "" {
 		return nil, credErr{"The control plane answered without an application token."}
+	}
+	if !sameBinding(b, issued.Application, issued.Environment) {
+		return nil, credErr{fmt.Sprintf("The control plane issued credentials for application %s (%s), not for %s; "+
+			"this release's binding is not the desired release's.", issued.Application, issued.Environment, runtime.Stringify(b["application"]))}
 	}
 	env := map[string]string{
 		"METEORCLOUD_TOKEN_FILE":      runtime.TokenMountPath,
@@ -201,7 +215,7 @@ func (s credStore) forApply(ctx context.Context, client *api.Client, token strin
 	if cur != nil && !s.refreshDue(it.key()) {
 		return cur, nil
 	}
-	app, err := s.mint(ctx, client, token, it.key())
+	app, err := s.mint(ctx, client, token, it.key(), b)
 	if err != nil && cur != nil && !s.expired(it.key()) && !api.IsAuth(err) {
 		return cur, nil // offline: the stored token still works
 	}
@@ -209,22 +223,26 @@ func (s credStore) forApply(ctx context.Context, client *api.Client, token strin
 }
 
 // keepFresh rotates a running workload's token when due. It returns false
-// when the workload must be applied again (token lost or binding changed).
-func (s credStore) keepFresh(ctx context.Context, client *api.Client, token string, it item, log func(string, ...any)) bool {
+// when the workload must be applied again (token lost or binding changed). The
+// error is set only when the server refused the device token.
+func (s credStore) keepFresh(ctx context.Context, client *api.Client, token string, it item, log func(string, ...any)) (bool, error) {
 	b := binding(it)
 	if b == nil {
-		return true
+		return true, nil
 	}
 	if s.current(it.key(), b) == nil {
-		return false
+		return false, nil
 	}
 	if s.refreshDue(it.key()) {
-		if _, err := s.mint(ctx, client, token, it.key()); err != nil {
+		if _, err := s.mint(ctx, client, token, it.key(), b); err != nil {
+			if api.IsAuth(err) {
+				return true, err
+			}
 			// A full disk or an offline server must not stop the other workloads.
 			log("application token was not rotated", "workload", it.key(), "err", err)
 		}
 	}
-	return true
+	return true, nil
 }
 
 // prune deletes stored tokens of workloads no longer desired or no longer bound.

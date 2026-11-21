@@ -189,6 +189,9 @@ def test_docker_deploy(contract, agent, device) -> None:
     assert progress == [0, 99, 100]
     assert reports()[-1]["sync_status"] == "in_sync" and reports()[-1]["installed_version"] == "1.0.0"
     # The Go agent lists desired software after every heartbeat, so how often it asks depends on
-    # timing; the exchanges that make the deploy (signing keys, download, storage) are fixed.
-    downloads = [("GET", f"/api/v1/agent/artifacts/{artifact_id}/download"), ("GET", f"/storage/{artifact_id}")]
-    contract.finish(routes=background_routes(agent, REGISTER, ("GET", "/api/v1/agent/signing-keys"), *downloads))
+    # timing; the exchanges that make the deploy (signing keys, download, storage) are fixed. The
+    # ids are globs: a replay answers with the recording's artifact id, not this run's.
+    downloads = [("GET", "/api/v1/agent/artifacts/*/download"), ("GET", "/storage/*")]
+    compared = contract.finish(routes=background_routes(agent, REGISTER, ("GET", "/api/v1/agent/signing-keys"), *downloads))
+    paths = [e["request"]["path"] for e in compared["http"]]
+    assert any(p.endswith("/download") for p in paths) and any(p.startswith("/storage/") for p in paths), paths

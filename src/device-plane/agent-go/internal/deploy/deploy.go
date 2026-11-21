@@ -113,7 +113,7 @@ func (m *Module) reconcile(ctx context.Context) {
 		creds: credStore{root: d.Paths.AppCredentialsDir(), now: time.Now}}
 	if id := d.Identity.DeviceID(); id != "" {
 		c.verifier = &signing.Verifier{
-			Store: d.State, DeviceID: id, Fingerprint: signing.CredentialFingerprint(token), Log: d.Log,
+			Store: d.State, DeviceID: id, Fingerprint: signing.CredentialFingerprint(token), Log: d.Log, Stop: api.IsAuth,
 			Fetch: func(ctx context.Context) ([]signing.Key, error) { return m.signingKeys(ctx, token) },
 		}
 	}

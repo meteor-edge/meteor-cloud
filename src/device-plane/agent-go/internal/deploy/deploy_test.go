@@ -322,7 +322,7 @@ func TestComposeAppDeploys(t *testing.T) {
 	if up.Project != "shop" || up.File != filepath.Join(dir, "docker-compose.yml") || up.EnvFile != filepath.Join(dir, ".env.meteorcloud") || up.OverrideFile != "" {
 		t.Errorf("compose.up %+v", up)
 	}
-	if env, _ := os.ReadFile(up.EnvFile); string(env) != "REPLICAS=2\nTAG=1.2.0\n" {
+	if env, _ := os.ReadFile(up.EnvFile); string(env) != "REPLICAS='2'\nTAG='1.2.0'\n" {
 		t.Errorf("env file %q", env)
 	}
 	if st, err := os.Stat(filepath.Join(dir, "config", "app.conf")); err != nil || st.Mode().Perm() != 0o644 {

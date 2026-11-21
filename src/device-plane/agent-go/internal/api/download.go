@@ -72,14 +72,22 @@ func (c *Client) Download(ctx context.Context, deviceToken, artifactID string, w
 		return "", &Error{Code: "network_error", Message: redactURLError(err, base)}
 	}
 	expected := ""
+	fromStorage := false
 	if isRedirect(resp.StatusCode) {
 		resp, expected, err = c.followStorage(ctx, hc, apiURL, resp)
 		if err != nil {
 			return "", err
 		}
+		fromStorage = true
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		if fromStorage {
+			// Storage refusing a presigned URL (an expired link, say) says
+			// nothing about the device token: no Status, so IsAuth is false.
+			// Its body is not read: it may echo the presigned URL.
+			return "", &Error{Code: "storage_error", Message: fmt.Sprintf("Artifact storage answered HTTP %d.", resp.StatusCode)}
+		}
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 		return "", decodeError(resp, data)
 	}

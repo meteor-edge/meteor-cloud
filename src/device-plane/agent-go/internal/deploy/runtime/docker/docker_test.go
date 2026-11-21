@@ -98,6 +98,9 @@ func TestCheck(t *testing.T) {
 		{out: helper.DockerOutput{OK: true, Output: "true|restarting|137|\n"}, status: runtime.Unhealthy, problem: "container app is not running (restarting, exit 137)"},
 		{out: helper.DockerOutput{OK: true, Output: "false|exited|0|\n"}, status: runtime.Unhealthy, problem: "container app is not running (exited, exit 0)"},
 		{out: helper.DockerOutput{OK: false, Output: "No such object"}, status: runtime.Missing, problem: "container app not found"},
+		{out: helper.DockerOutput{OK: false, Output: "Error response from daemon: No such container: app"}, status: runtime.Missing, problem: "container app not found"},
+		{out: helper.DockerOutput{OK: false, Output: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"}, status: runtime.Unhealthy,
+			problem: "container app could not be inspected: Cannot connect to the Docker daemon at unix:///var/run/docker.sock"},
 		{err: errors.New("helper down"), status: runtime.Unhealthy, problem: "container app could not be inspected"},
 	} {
 		h := &scripted{out: map[string]helper.DockerOutput{"docker.health": c.out}, err: map[string]error{"docker.health": c.err}}
@@ -130,6 +133,25 @@ func TestApplyBuildsTheRunRequest(t *testing.T) {
 	}
 	if _, called := h.params["docker.load"]; called {
 		t.Error("loaded a tarball for a pulled image")
+	}
+	if req.PullNever {
+		t.Error("a registry image may not be pulled")
+	}
+}
+
+func TestAnArtifactImageIsNeverPulled(t *testing.T) {
+	h := &scripted{out: map[string]helper.DockerOutput{
+		"docker.load": {OK: true, Output: "Loaded image: demo/app:1.0\n"},
+		"docker.run":  {OK: true}, "docker.health": {OK: true, Output: "true|running|0|"},
+	}}
+	w := runtime.Workload{Key: "app", Artifact: "/var/lib/meteorcli/artifacts/a1", Spec: runtime.Spec{"image": "demo/app:1.0"}}
+	if _, err := (Runtime{Helper: h}).Apply(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	var req helper.DockerRunRequest
+	_ = json.Unmarshal(h.params["docker.run"], &req)
+	if !req.PullNever || req.Image != "demo/app:1.0" {
+		t.Fatalf("request %+v", req)
 	}
 }
 

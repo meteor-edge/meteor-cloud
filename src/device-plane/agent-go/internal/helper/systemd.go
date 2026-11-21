@@ -140,9 +140,16 @@ func (h Host) systemdControl(ctx context.Context, _ localrpc.Peer, raw json.RawM
 		_, err := h.Run(ctx, "systemctl", "restart", "--", req.Unit)
 		return SystemdControlReply{}, err
 	case "remove":
-		_, _ = h.Run(ctx, "systemctl", "disable", "--now", "--", req.Unit) // not loaded is fine
 		dest := filepath.Join(h.UnitDir, req.Unit)
-		if st, err := os.Lstat(dest); err == nil && st.Mode().IsRegular() {
+		st, statErr := os.Lstat(dest)
+		installed := statErr == nil && st.Mode().IsRegular()
+		if _, err := h.Run(ctx, "systemctl", "disable", "--now", "--", req.Unit); err != nil && installed {
+			// The unit may still run (RefuseManualStop=, say): keep its file
+			// so it can be stopped and removed later. A unit we never
+			// installed failing to disable is fine.
+			return nil, err
+		}
+		if installed {
 			if err := os.Remove(dest); err != nil {
 				return nil, err
 			}

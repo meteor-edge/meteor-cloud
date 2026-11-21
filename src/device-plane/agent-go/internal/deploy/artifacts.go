@@ -34,17 +34,26 @@ func (c *cycle) ensureArtifact(ctx context.Context, key, id, expected string) (s
 		return dest, nil
 	}
 	c.progress(ctx, key, 0)
+	if c.refused {
+		return "", errAuth
+	}
+	// A refused token stops the download and any further progress reports.
+	dctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	bucket := -1
 	onProgress := func(received, total int64) {
 		percent := 0
 		if total > 0 {
 			percent = int(min(99, received*100/total))
 		}
-		if percent/10 == bucket {
+		if percent/10 == bucket || c.refused {
 			return
 		}
 		bucket = percent / 10
 		c.progress(ctx, key, percent)
+		if c.refused {
+			cancel()
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
@@ -55,7 +64,10 @@ func (c *cycle) ensureArtifact(ctx context.Context, key, id, expected string) (s
 		return "", fmt.Errorf("artifact %s: %w", id, err)
 	}
 	defer os.Remove(tmp.Name()) // gone after the rename; removes a partial download
-	sum, err := c.r.d.API.Download(ctx, c.token, id, tmp, onProgress)
+	sum, err := c.r.d.API.Download(dctx, c.token, id, tmp, onProgress)
+	if c.refused {
+		return "", errAuth
+	}
 	if err == nil && expected != "" && sum != expected {
 		err = &api.Error{Code: "checksum_mismatch",
 			Message: fmt.Sprintf("Artifact %s does not match the signed checksum; refusing to install it.", id)}
@@ -79,8 +91,9 @@ func (c *cycle) ensureArtifact(ctx context.Context, key, id, expected string) (s
 	return dest, nil
 }
 
-// cached reports whether path holds an earlier download that still matches
-// expected (any download when expected is "").
+// cached reports whether path holds an earlier download whose bytes still
+// match its checksum file and expected (the checksum file alone when expected
+// is "").
 func cached(path, expected string) bool {
 	if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
 		return false
@@ -89,10 +102,11 @@ func cached(path, expected string) bool {
 	if err != nil {
 		return false
 	}
+	saved := strings.ToLower(strings.TrimSpace(string(stored)))
 	if expected == "" {
-		return true
+		expected = saved
 	}
-	if strings.ToLower(strings.TrimSpace(string(stored))) != expected {
+	if len(saved) != 64 || saved != expected {
 		return false
 	}
 	f, err := os.Open(path)

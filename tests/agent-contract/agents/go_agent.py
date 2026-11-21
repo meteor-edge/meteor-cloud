@@ -148,6 +148,8 @@ class FakeHelper:
         elif method == "docker.run":
             device.docker(["docker", "rm", "-f", params["name"]])
             args = ["docker", "run", "-d", "--name", params["name"]]
+            if params.get("pull_never"):
+                args += ["--pull", "never"]
             if params.get("restart"):
                 args += ["--restart", params["restart"]]
             for port in params.get("ports") or []:

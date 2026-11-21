@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,8 +24,16 @@ const (
 var composeNames = []string{"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
 
 // materialize puts the artifact into dir and returns the compose file: a zip
-// is unpacked, anything else is the compose file itself (compose.yaml).
+// is unpacked, anything else is the compose file itself (compose.yaml). The
+// compose files of an earlier release are removed first, so only this
+// artifact's definition can be picked; other files stay (a project may keep
+// data in its directory through a relative bind mount).
 func materialize(artifact, dir string) (string, error) {
+	for _, name := range composeNames {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("compose artifact: %w", err)
+		}
+	}
 	zr, err := zip.OpenReader(artifact)
 	if err != nil {
 		if _, statErr := os.Stat(artifact); statErr != nil {

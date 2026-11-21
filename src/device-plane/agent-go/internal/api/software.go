@@ -19,9 +19,10 @@ func (c *Client) Software(ctx context.Context, deviceToken string) ([]map[string
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var items []any
-	if err := dec.Decode(&items); err != nil {
-		// Not a list: the Python agent treats that as nothing desired.
-		return nil, nil
+	if err := dec.Decode(&items); err != nil || items == nil {
+		// Not a list. Treating it as "nothing desired" would let the cycle
+		// drop stored application credentials, so it is an error.
+		return nil, &Error{Code: "bad_response", Message: "The desired software list is not a JSON array."}
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {

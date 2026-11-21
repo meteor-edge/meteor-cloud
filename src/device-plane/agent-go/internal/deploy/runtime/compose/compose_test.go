@@ -166,3 +166,55 @@ func TestApplyWithoutBindingRemovesAnOldOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDotenvQuoteIsLiteralForCompose(t *testing.T) {
+	// The expected forms were checked with docker compose v2.40 (config --env-file).
+	for v, want := range map[string]string{
+		"plain":                `'plain'`,
+		"abc$MISSING #x \"q\"": `'abc$MISSING #x "q"'`,
+		"multi\nline":          "'multi\nline'",
+		`it's $HOME \ "q" #c`:  `"it's \$HOME \\ \"q\" #c"`,
+		"it's\nlines":          `"it's\nlines"`,
+		"":                     `''`,
+	} {
+		if got := dotenvQuote(v); got != want {
+			t.Errorf("dotenvQuote(%q) = %s, want %s", v, got, want)
+		}
+	}
+}
+
+func TestOnlyTheCurrentBundlesComposeFileIsUsed(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := materialize(zipOf(t, map[string]string{"docker-compose.yml": "a", "data/keep": "d"}, ""), dir); err != nil {
+		t.Fatal(err)
+	}
+	got, err := materialize(zipOf(t, map[string]string{"compose.yaml": "b"}, ""), dir)
+	if err != nil || got != filepath.Join(dir, "compose.yaml") {
+		t.Fatalf("second release: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data", "keep")); err != nil {
+		t.Error("project data was removed")
+	}
+	if _, err := materialize(zipOf(t, map[string]string{"readme": "x"}, ""), dir); err == nil {
+		t.Fatal("a bundle without a compose file passed using an earlier release's")
+	}
+}
+
+func TestCheckFindsAServiceWithoutContainer(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "shop")
+	_ = os.MkdirAll(dir, 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte("x"), 0o600)
+	h := &scripted{out: map[string]helper.DockerOutput{
+		"compose.ps":       {OK: true, Output: `{"Service":"web","State":"running"}`},
+		"compose.services": {OK: true, Output: "web\nworker\n"},
+	}}
+	got := Runtime{Helper: h, Dir: root}.Check(context.Background(), runtime.Workload{Key: "shop", Spec: runtime.Spec{}})
+	if got.Status != runtime.Missing || got.Problem != "compose service worker has no container" {
+		t.Fatalf("Check = %+v", got)
+	}
+	h.out["compose.services"] = helper.DockerOutput{OK: true, Output: "web\n"}
+	if got := (Runtime{Helper: h, Dir: root}).Check(context.Background(), runtime.Workload{Key: "shop", Spec: runtime.Spec{}}); got.Status != runtime.Healthy {
+		t.Fatalf("Check = %+v", got)
+	}
+}

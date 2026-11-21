@@ -98,7 +98,9 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 	return runtime.Result{Health: h}, nil
 }
 
-// envLines writes KEY=VALUE lines in a stable order.
+// envLines writes KEY=VALUE lines in a stable order, each value quoted so
+// Compose's dotenv parser reads it literally: no ${VAR} interpolation, no
+// comment, line breaks kept.
 func envLines(env map[string]string) []byte {
 	keys := make([]string, 0, len(env))
 	for k := range env {
@@ -107,9 +109,20 @@ func envLines(env map[string]string) []byte {
 	sort.Strings(keys)
 	var b bytes.Buffer
 	for _, k := range keys {
-		b.WriteString(k + "=" + env[k] + "\n")
+		b.WriteString(k + "=" + dotenvQuote(env[k]) + "\n")
 	}
 	return b.Bytes()
+}
+
+// dotenvQuote quotes v for Compose's dotenv parser: single quotes are taken
+// literally (also across lines); a value with a single quote goes in double
+// quotes, where \\, \", \$ and \n are the escapes.
+func dotenvQuote(v string) string {
+	if !strings.Contains(v, "'") {
+		return "'" + v + "'"
+	}
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`, "\n", `\n`, "\r", `\r`)
+	return `"` + r.Replace(v) + `"`
 }
 
 // writeOverride adds the app's environment and token mount to every service.
@@ -184,6 +197,10 @@ func (r Runtime) Check(ctx context.Context, w runtime.Workload) runtime.Health {
 	if len(rows) == 0 {
 		return runtime.Health{Status: runtime.Missing, Problem: "compose project " + name + " has no services"}
 	}
+	if gone := r.missing(ctx, name, rows); gone != "" {
+		// Removed containers have no row at all: `up` brings them back.
+		return runtime.Health{Status: runtime.Missing, Problem: "compose service " + gone + " has no container"}
+	}
 	var starting *runtime.Health
 	running := 0
 	for _, s := range rows {
@@ -213,6 +230,40 @@ func (r Runtime) Check(ctx context.Context, w runtime.Workload) runtime.Health {
 		return *starting
 	}
 	return runtime.Health{Status: runtime.Healthy}
+}
+
+// missing returns a service of the project's compose file (active profiles
+// only) without any container, "" when none is missing or the file cannot be
+// read (the rows alone decide then).
+func (r Runtime) missing(ctx context.Context, name string, rows []psRow) string {
+	dir := filepath.Join(r.Dir, name)
+	req := helper.ComposeRequest{Project: name}
+	for _, n := range composeNames {
+		if st, err := os.Lstat(filepath.Join(dir, n)); err == nil && st.Mode().IsRegular() {
+			req.File = filepath.Join(dir, n)
+			break
+		}
+	}
+	if req.File == "" {
+		return ""
+	}
+	if st, err := os.Lstat(filepath.Join(dir, envFile)); err == nil && st.Mode().IsRegular() {
+		req.EnvFile = filepath.Join(dir, envFile)
+	}
+	services, err := r.services(ctx, req)
+	if err != nil {
+		return ""
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.Service] = true
+	}
+	for _, s := range services {
+		if !seen[s] {
+			return s
+		}
+	}
+	return ""
 }
 
 // parsePS reads a JSON array (older Compose) or one object per line.

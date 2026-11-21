@@ -85,13 +85,15 @@ func (g gate) wait(ctx context.Context, check func(context.Context) runtime.Heal
 		return fmt.Sprintf("not healthy within %ds", int(g.Timeout/time.Second))
 	}
 	for {
-		now := clk.Now()
 		h := check(ctx)
 		healthy, why := h.Status == runtime.Healthy, h.Problem
 		if healthy && g.URL != "" {
 			why = probe(ctx, g.URL)
 			healthy = why == ""
 		}
+		// The observation is from when the check finished: a slow check must
+		// not count its own duration as time spent healthy.
+		now := clk.Now()
 		if healthy {
 			if healthySince.IsZero() {
 				healthySince = now

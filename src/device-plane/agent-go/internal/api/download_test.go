@@ -154,3 +154,38 @@ func TestDownloadStallIsCut(t *testing.T) {
 		t.Fatalf("err = %v after %s", err, time.Since(start))
 	}
 }
+
+func TestStorageRefusalIsNotADeviceTokenRefusal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/storage/blob" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`<Error>expired https://bucket/blob?X-Amz-Signature=abc</Error>`))
+			return
+		}
+		w.Header().Set("Location", "/storage/blob?X-Amz-Signature=abc")
+		w.Header().Set(checksumHeader, strings.Repeat("a", 64))
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+	c, _ := New(Options{BaseURL: srv.URL, HTTPClient: srv.Client()})
+	_, err := c.Download(context.Background(), "dev_x", "a1", &bytes.Buffer{}, nil)
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "storage_error" || IsAuth(err) || strings.Contains(err.Error(), "Signature") {
+		t.Fatalf("err = %v (auth %v)", err, IsAuth(err))
+	}
+}
+
+func TestSoftwareListMustBeAnArray(t *testing.T) {
+	for body, wantErr := range map[string]bool{`[]`: false, `{}`: true, `null`: true} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}))
+		c, _ := New(Options{BaseURL: srv.URL, HTTPClient: srv.Client()})
+		items, err := c.Software(context.Background(), "dev_x")
+		srv.Close()
+		if (err != nil) != wantErr || (!wantErr && items == nil) {
+			t.Errorf("%s: items %v, err %v", body, items, err)
+		}
+	}
+}

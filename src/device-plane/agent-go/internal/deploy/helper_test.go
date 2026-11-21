@@ -128,7 +128,7 @@ func (f *fakeHost) Call(ctx context.Context, op string, params, out any) error {
 			result = helper.DockerOutput{OK: true, Output: `{"Service":"web","State":"exited","ExitCode":2}` + "\n"}
 		default:
 			result = helper.DockerOutput{OK: true, Output: `{"Service":"web","State":"running","Health":"healthy"}` + "\n" +
-				`{"Service":"migrate","State":"exited","ExitCode":0}` + "\n"}
+				`{"Service":"worker","State":"running"}` + "\n" + `{"Service":"migrate","State":"exited","ExitCode":0}` + "\n"}
 		}
 	case "systemd.install_unit":
 		var r helper.InstallUnitRequest
@@ -225,19 +225,27 @@ func (e *env) artifact(id string, data []byte) {
 		fakecp.Reply{Status: 200, Raw: data, Header: map[string]string{"X-Checksum-SHA256": sha(data)}})
 }
 
-// cycle reconciles once and returns the latest outbox report per workload.
+// cycle reconciles once and returns the reports of that cycle only, per
+// workload: what it sent to the server (outcomes go at once), overlaid by what
+// it left in the outbox. Reports of earlier cycles are cleared first.
 func (e *env) cycle() map[string]report {
 	e.t.Helper()
+	var ids []string
+	pending, err := e.d.Outbox.Pending(state.KindSoftwareReport)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, r := range pending {
+		ids = append(ids, r.ID)
+	}
+	if err := e.d.Outbox.Ack(ids...); err != nil {
+		e.t.Fatal(err)
+	}
+	sent := len(e.cp.Calls("POST", "/api/v1/agent/heartbeat"))
 	e.m.reconcile(context.Background())
-	return e.reports()
-}
 
-// reports returns the latest report per workload: what the server received
-// (outcomes are sent at once), overlaid by what still waits in the outbox.
-func (e *env) reports() map[string]report {
-	e.t.Helper()
 	out := map[string]report{}
-	for _, c := range e.cp.Calls("POST", "/api/v1/agent/heartbeat") {
+	for _, c := range e.cp.Calls("POST", "/api/v1/agent/heartbeat")[sent:] {
 		list, _ := c.Body["software_report"].([]any)
 		for _, r := range list {
 			if m, ok := r.(map[string]any); ok && m["sync_status"] != statusUpdating {
