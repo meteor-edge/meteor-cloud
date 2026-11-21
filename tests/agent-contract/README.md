@@ -4,7 +4,7 @@ Checks that a device agent speaks [contracts/device-agent-v1.md](../../contracts
 exactly: every HTTP request and answer, every MQTT message, the new headers and capabilities.
 It runs the Python `meteorcli` and the Go `meteorcli` (`src/device-plane/agent-go`), which must
 produce the same recordings. Scenarios need features (`@pytest.mark.requires`); an adapter without
-one skips the scenario (the Go agent lacks Wi-Fi, WireGuard and deploys for now).
+one skips the scenario (the Go agent lacks Wi-Fi and WireGuard for now).
 
 ```bash
 make agent-contract-test          # verify, then replay
@@ -28,8 +28,9 @@ make agent-contract-test          # verify, then replay
   agent keeps working once enrolled, so scenarios pass `finish(routes=...)` to keep only their own
   exchanges in the transcript (the recording is compared on the same routes); every exchange is
   still checked against the contract. Its root helper is a fake on `run/meteorcli/helper.sock` that
-  speaks the helper's socket protocol and hands reboot, users, the observer's docker commands and
-  journal warnings to the simulated device; metrics go out every second
+  speaks the helper's socket protocol and hands reboot, users, the observer's docker commands, the
+  deploy operations (`docker.load`, `docker.run`, `docker.health`, with the real helper's docker
+  arguments) and journal warnings to the simulated device; metrics go out every second
   (`METEORCLI_METRICS_INTERVAL=1`).
 - **Recordings** (`recordings/<scenario>.json`): the normalized transcript of each scenario. Ids,
   secrets, timestamps and host readings are placeholders (`<uuid:1>`, `<device_token>`,
@@ -55,7 +56,7 @@ Re-record only when an exchange changed on purpose, and review the diff like cod
 | `actions` | reboot reported before it runs, set password, add user, an unknown kind reported `failed: Unsupported` |
 | `wifi` | apply with `connect_now` confirmed against `/api/v1/health`, remove, report without passwords |
 | `wireguard` | key registration, tunnel up, SSH CA trusted and reported at once |
-| `docker_deploy` | signed docker release, key pinning, download through a storage redirect without the token, progress and `in_sync` reports |
+| `docker_deploy` | signed docker release, key pinning, download through a storage redirect without the token, progress and `in_sync` reports (Go: compared on register, signing keys, download and storage, since it lists desired software after every heartbeat) |
 | `heartbeat` (Go) | `register`, first heartbeat within 5 s, the server's 5 s interval used for the next, `capabilities.modules` |
 | `enroll_reboot` (Go) | `request-token`, agent restarted while pending, approved meanwhile: enrolled and heartbeating with no command |
 

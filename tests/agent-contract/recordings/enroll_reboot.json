@@ -91,9 +91,18 @@
               "set_password",
               "add_user"
             ],
-            "deploy_kinds": [],
+            "deploy_kinds": [
+              "systemd",
+              "docker",
+              "docker_compose"
+            ],
             "modules": {
               "actions": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "deploy": {
                 "state": "running",
                 "restarts": 0,
                 "since": "<timestamp>"

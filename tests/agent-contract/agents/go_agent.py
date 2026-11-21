@@ -19,7 +19,10 @@ Differences from the Python adapter, all on the device side of the contract:
   commands and journal warnings go to the SimulatedDevice, with the same docker arguments the real
   helper uses. Metrics are published every second (``METEORCLI_METRICS_INTERVAL=1``).
 - Features: background enrollment (approval with no command, across restarts), the server's
-  heartbeat interval, MQTT and actions. Wi-Fi, WireGuard and deploys come in later pull requests.
+  heartbeat interval, MQTT, actions and docker deploys (the fake helper turns ``docker.load``,
+  ``docker.run`` and ``docker.health`` into the real helper's docker commands on the
+  SimulatedDevice). Install outcomes go out at once in a heartbeat that carries only
+  ``software_report``, like the progress reports. Wi-Fi and WireGuard come in later pull requests.
 """
 
 from __future__ import annotations
@@ -58,6 +61,8 @@ INSPECT_TEMPLATE = (
     "{{range .State.Health.Log}}{{.Start.UnixNano}},{{.End.UnixNano}};{{end}}{{end}}"
 )
 STATS_FORMAT = "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}"
+# The real helper's deploy health check (internal/helper/workloads.go).
+HEALTH_TEMPLATE = "{{.State.Running}}|{{.State.Status}}|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}"
 
 _binary: Path | None = None
 
@@ -138,6 +143,22 @@ class FakeHelper:
             result = self._docker(["docker", "inspect", "-f", INSPECT_TEMPLATE, *params["names"]])
         elif method == "docker.stats":
             result = self._docker(["docker", "stats", "--no-stream", "--format", STATS_FORMAT])
+        elif method == "docker.load":
+            result = self._docker(["docker", "load", "-i", params["path"]])
+        elif method == "docker.run":
+            device.docker(["docker", "rm", "-f", params["name"]])
+            args = ["docker", "run", "-d", "--name", params["name"]]
+            if params.get("restart"):
+                args += ["--restart", params["restart"]]
+            for port in params.get("ports") or []:
+                args += ["-p", port]
+            for key, value in (params.get("env") or {}).items():
+                args += ["-e", f"{key}={value}"]  # the real helper uses a private --env-file
+            result = self._docker(args + [params["image"], *(params.get("command") or [])])
+        elif method == "docker.health":
+            result = self._docker(["docker", "inspect", "-f", HEALTH_TEMPLATE, params["name"]])
+        elif method == "docker.remove":
+            result = self._docker(["docker", "rm", "-f", params["name"]])
         elif method == "logs.warnings":
             out = device.journal_helper(["warnings"]).stdout
             result = {"entries": [json.loads(line) for line in out.splitlines() if line.strip()]}
@@ -148,7 +169,7 @@ class FakeHelper:
 
 class GoAgent:
     name = "go"
-    features = frozenset({"background_enrollment", "server_heartbeat_interval", "mqtt", "actions"})
+    features = frozenset({"background_enrollment", "server_heartbeat_interval", "mqtt", "actions", "docker"})
 
     def __init__(self, workdir: Path, device: SimulatedDevice, plane: FakeControlPlane) -> None:
         self.device = device
@@ -253,6 +274,17 @@ class GoAgent:
                 time.sleep(0.02)
             if between is not None:
                 between(beat)
+        return self.stop()
+
+    def run_until(self, done: Callable[[], bool], timeout: float = 90) -> int:
+        """Let the running agent work until ``done()`` is true, then stop it."""
+        deadline = time.monotonic() + timeout
+        while not done():
+            if self._proc is None or self._proc.poll() is not None:
+                pytest.fail(f"the Go agent exited:\n{self.log.read_text(errors='replace')}")
+            if time.monotonic() > deadline:
+                pytest.fail(f"not done within {timeout:.0f} s:\n{self.log.read_text(errors='replace')}")
+            time.sleep(0.02)
         return self.stop()
 
     @property

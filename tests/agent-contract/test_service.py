@@ -173,12 +173,22 @@ def test_docker_deploy(contract, agent, device) -> None:
                     "X-Checksum-SHA256": digest, "Cache-Control": "no-store"}))
     contract.script("GET", f"/storage/{artifact_id}", Reply(200, ARTIFACT))
 
+    def reports() -> list[dict]:
+        return [r for e in contract.plane.calls("POST", "/api/v1/agent/heartbeat")
+                for r in (e.request.body or {}).get("software_report", [])]
+
     assert agent.register(contract.plane.url, contract.secret("registration_token")) == 0
-    assert agent.run(heartbeats=2) == 0
+    if "background_enrollment" in agent.features:
+        # Its heartbeats and deploys run on their own timers: wait for the result, not a count.
+        assert agent.run_until(lambda: any(r["sync_status"] == "in_sync" for r in reports())) == 0
+    else:
+        assert agent.run(heartbeats=2) == 0
 
     assert device.containers == {APP: LOADED_IMAGE}
-    reports = [r for e in contract.plane.calls("POST", "/api/v1/agent/heartbeat")
-               for r in (e.request.body or {}).get("software_report", [])]
-    assert reports[0]["sync_status"] == "updating"
-    assert reports[-1]["sync_status"] == "in_sync" and reports[-1]["installed_version"] == "1.0.0"
-    contract.finish()
+    progress = [r["progress_percent"] for r in reports() if r["sync_status"] == "updating"]
+    assert progress == [0, 99, 100]
+    assert reports()[-1]["sync_status"] == "in_sync" and reports()[-1]["installed_version"] == "1.0.0"
+    # The Go agent lists desired software after every heartbeat, so how often it asks depends on
+    # timing; the exchanges that make the deploy (signing keys, download, storage) are fixed.
+    downloads = [("GET", f"/api/v1/agent/artifacts/{artifact_id}/download"), ("GET", f"/storage/{artifact_id}")]
+    contract.finish(routes=background_routes(agent, REGISTER, ("GET", "/api/v1/agent/signing-keys"), *downloads))

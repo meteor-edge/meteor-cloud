@@ -215,13 +215,16 @@ class Contract:
         contract."""
         problems = list(self.plane.violations)
         exchanges = self.plane.exchanges
+        # Normalize every exchange, kept or not, so ids are numbered (<uuid:N>) in the order the
+        # whole run first used them, as in a recording made with every route.
+        http = recorded_http(exchanges, self.normalizer)
         if routes is not None:
             wanted = set(routes)
-            exchanges = [e for e in exchanges if (e.request.method, e.request.path) in wanted]
+            http = [h for h, e in zip(http, exchanges) if (e.request.method, e.request.path) in wanted]
         result: dict[str, Any] = {
             "scenario": self.scenario,
             "contract": "contracts/device-agent-v1.md",
-            "http": recorded_http(exchanges, self.normalizer),
+            "http": http,
         }
         if observer is not None:
             result["mqtt"] = self.check_mqtt(observer)
@@ -237,9 +240,11 @@ class Contract:
         except FileNotFoundError:
             pytest.fail(f"no recording for {self.scenario}; run with AGENT_CONTRACT_MODE=record")
         if routes is not None:
-            # A recording made with every route (the Python agent) is compared on the same routes.
+            # A recording made with every route (the Python agent) is compared on the same routes,
+            # written as the recording writes them (ids as <uuid:N>).
+            recorded = {(method, self.normalizer.text(path)) for method, path in wanted}
             golden = {**golden, "http": [e for e in golden["http"]
-                                         if (e["request"]["method"], e["request"]["path"]) in wanted]}
+                                         if (e["request"]["method"], e["request"]["path"]) in recorded]}
         if golden != result:
             diff = difflib.unified_diff(
                 json.dumps(golden, indent=2).splitlines(), json.dumps(result, indent=2).splitlines(),
