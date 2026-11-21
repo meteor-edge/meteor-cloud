@@ -19,9 +19,16 @@ import (
 // cpuSample is how long Metrics watches /proc/stat for cpu_percent.
 const cpuSample = 100 * time.Millisecond
 
-// toolsTTL is how long a tool probe is reused. Probing starts the Docker CLI, so
-// the heartbeat must not do it every minute; installing Docker shows up within this.
+// toolsTTL is how long a complete tool probe is reused. Probing starts the
+// Docker CLI, so the heartbeat must not do it every minute.
 const toolsTTL = 10 * time.Minute
+
+// missingTTL is how long a probe without Docker Compose is reused. Docker or
+// the Compose plugin installed after the agent started must reach the control
+// plane by the next heartbeat or so, not 10 minutes later: it skips a
+// deployment whose runtime the device last reported missing. Without Docker a
+// probe starts no process, with Docker it is one `docker compose version`.
+const missingTTL = 30 * time.Second
 
 // Inventory returns every inventory key of the contract, with nil for values
 // this host does not have (the Python agent sent the same keys).
@@ -90,11 +97,17 @@ type Tools struct {
 	got platform.Tools
 }
 
-// Get returns the cached probe, probing again when it is older than toolsTTL.
+// Get returns the cached probe. It probes again when the probe is older than
+// toolsTTL, older than missingTTL while Docker Compose is missing, or when the
+// docker binary appeared or went away.
 func (t *Tools) Get(ctx context.Context) platform.Tools {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.at.IsZero() || time.Since(t.at) > toolsTTL {
+	ttl := toolsTTL
+	if !t.got.DockerCompose {
+		ttl = missingTTL
+	}
+	if t.at.IsZero() || time.Since(t.at) > ttl || (t.Host.DockerBinary() != "") != t.got.Docker {
 		t.got = t.Host.Tools(ctx)
 		t.at = time.Now()
 	}

@@ -307,7 +307,11 @@ all 13 contract keys, `null` when unknown.
 `internal/platform` ports the Python platform adapters: board detection (Raspberry Pi, NVIDIA
 Jetson, generic Linux), `/etc/os-release`, `/proc` and `/sys` readers, thermal zones, and tool
 checks (`docker compose version` with a 10 s timeout). `internal/telemetry` builds the inventory and
-metrics from it; the MQTT bus publishes the metrics in the next pull request.
+metrics from it; the MQTT bus publishes the metrics in the next pull request. A tool probe is reused
+for 10 minutes once Docker Compose is found; while it is missing, the probe runs again after 30 s,
+and at once when the docker binary appears or goes away. Docker installed while the agent runs is
+reported by the next heartbeats (the control plane skips a deployment whose runtime the device last
+reported missing; create the deployment again once the capability shows up).
 
 ### MQTT
 
