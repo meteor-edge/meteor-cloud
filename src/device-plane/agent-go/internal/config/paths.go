@@ -80,6 +80,17 @@ func (p Paths) StagingDir() string { return filepath.Join(p.IdentityDir, ".stagi
 // request the agent makes by itself, so it is not sent again at every start.
 func (p Paths) AutoRequestFile() string { return filepath.Join(p.IdentityDir, "auto-request.json") }
 
+// ComposeDir holds one directory per Docker Compose project the deploy module
+// runs (the compose file, its env file and override). The root helper runs
+// docker compose only on files under it.
+func (p Paths) ComposeDir() string { return filepath.Join(filepath.Dir(p.ArtifactsDir), "compose") }
+
+// AppCredentialsDir holds the application tokens that are mounted read-only
+// into bound containers, one directory per workload.
+func (p Paths) AppCredentialsDir() string {
+	return filepath.Join(filepath.Dir(p.ArtifactsDir), "app-credentials")
+}
+
 // WireGuardDir holds the WireGuard key pair. The private key never leaves the device.
 func (p Paths) WireGuardDir() string { return filepath.Join(p.IdentityDir, "wireguard") }
 

@@ -49,6 +49,23 @@ func (h Host) dockerRun(ctx context.Context, args ...string) (any, error) {
 	return DockerOutput{Output: string(out), OK: err == nil}, nil
 }
 
+// maxStdout caps the machine-readable output of dockerStdout.
+const maxStdout = 1 << 20
+
+// dockerStdout is dockerRun for output the agent parses: Output is stdout
+// only, so warnings on stderr (an obsolete compose `version:`) cannot be read
+// as data. When docker fails, Output is the error with its stderr.
+func (h Host) dockerStdout(ctx context.Context, args ...string) (any, error) {
+	out := &capped{max: maxStdout}
+	if err := h.Stream(ctx, out, "docker", args...); err != nil {
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		return DockerOutput{Output: err.Error(), OK: false}, nil
+	}
+	return DockerOutput{Output: out.String(), OK: true}, nil
+}
+
 func (h Host) dockerPS(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
 	if err := decode(raw, &struct{}{}); err != nil {
 		return nil, err

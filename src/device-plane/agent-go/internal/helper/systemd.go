@@ -97,3 +97,65 @@ func (h Host) installUnit(ctx context.Context, _ localrpc.Peer, raw json.RawMess
 	}
 	return InstallUnitReply{Installed: req.Name, Started: !req.NoStart}, nil
 }
+
+// SystemdControlRequest is the params of systemd.control: act on a unit the
+// deploy module installed. meteorcli units are refused.
+type SystemdControlRequest struct {
+	Unit string `json:"unit"`
+	// Action is is_active, restart or remove (disable, stop, delete the unit file).
+	Action string `json:"action"`
+}
+
+// SystemdControlReply is the answer of systemd.control. Active is set by is_active.
+type SystemdControlReply struct {
+	Active bool `json:"active"`
+}
+
+func auditSystemdControl(raw json.RawMessage) []any {
+	var r SystemdControlRequest
+	_ = json.Unmarshal(raw, &r)
+	return []any{"unit", r.Unit, "action", r.Action}
+}
+
+func (h Host) systemdControl(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
+	var req SystemdControlRequest
+	if err := decode(raw, &req); err != nil {
+		return nil, err
+	}
+	if !validName.MatchString(req.Unit) || !strings.HasSuffix(req.Unit, ".service") {
+		return nil, localrpc.Errorf(localrpc.CodeBadRequest, "unit must be a .service name of a-z, 0-9, '.', '_' or '-'")
+	}
+	if strings.HasPrefix(req.Unit, "meteorcli") {
+		return nil, localrpc.Errorf(localrpc.CodeBadRequest, "meteorcli units cannot be changed through the helper")
+	}
+	switch req.Action {
+	case "is_active":
+		// Any non-zero exit (inactive, failed, unknown unit) is "not active".
+		_, err := h.Run(ctx, "systemctl", "is-active", "--quiet", "--", req.Unit)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return SystemdControlReply{Active: err == nil}, nil
+	case "restart":
+		_, err := h.Run(ctx, "systemctl", "restart", "--", req.Unit)
+		return SystemdControlReply{}, err
+	case "remove":
+		dest := filepath.Join(h.UnitDir, req.Unit)
+		st, statErr := os.Lstat(dest)
+		installed := statErr == nil && st.Mode().IsRegular()
+		if _, err := h.Run(ctx, "systemctl", "disable", "--now", "--", req.Unit); err != nil && installed {
+			// The unit may still run (RefuseManualStop=, say): keep its file
+			// so it can be stopped and removed later. A unit we never
+			// installed failing to disable is fine.
+			return nil, err
+		}
+		if installed {
+			if err := os.Remove(dest); err != nil {
+				return nil, err
+			}
+		}
+		_, err := h.Run(ctx, "systemctl", "daemon-reload")
+		return SystemdControlReply{}, err
+	}
+	return nil, localrpc.Errorf(localrpc.CodeBadRequest, "action must be is_active, restart or remove")
+}

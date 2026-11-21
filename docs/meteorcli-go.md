@@ -14,16 +14,17 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | Core: modules, supervisor, crash-loop breaker, health, signals, systemd notify and watchdog, log redaction | Done |
 | Config: new file layout, import of a Python install | Done |
 | State: versioned state files, persistent outbox | Done |
-| API client: health, enrollment, register, heartbeat, MQTT settings, actions | Done (the other routes come with their modules) |
+| API client: health, enrollment, register, heartbeat, MQTT settings, actions, software, signing keys, artifact downloads, application credentials | Done (the other routes come with their modules) |
 | CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `mqtt-test`, `mqtt-listen`, `helper`, `--version`, `agent` (alias `run`) | Done |
-| Agent socket with a group policy per command; root helper (`power.*`, `logs.read`, `logs.warnings`, `systemd.install_unit`, `users.*`, `docker.ps/inspect/stats`) | Done |
+| Agent socket with a group policy per command; root helper (`power.*`, `logs.read`, `logs.warnings`, `systemd.install_unit`, `systemd.control`, `users.*`, `docker.*`, `compose.*`) | Done |
 | systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done |
 | Board installer (`install-rpi.sh`), CI artifact, `meteorcli-go-edge` prerelease | Done (Raspberry Pi) |
 | Identity: register, request-token and claim run by the agent, background approval polling, credential storage, MQTT credential refresh, 401 handling | Done |
 | Heartbeat module; telemetry (inventory, metrics); platform adapters (Raspberry Pi, Jetson, generic Linux) | Done |
 | MQTT: `bus` (one session, TLS with the stored CA, reconnect with backoff), `mqtt` module (status, ping, `sync_desired`), `metrics` module (60 s metrics, app and journal events) | Done |
 | Actions: `reboot`, `shutdown`, `set_password`, `add_user` through the helper; `update_agent` reported unsupported | Done (the updater comes later) |
-| Modules: deploy, network (Wi-Fi, WireGuard), update | Later pull requests |
+| Deploy: signed desired software, streamed artifact downloads with SHA-256, `systemd`, `docker` and `docker_compose` runtimes through the helper, health gate and rollback, application credentials | Done |
+| Modules: network (Wi-Fi, WireGuard), update | Later pull requests |
 
 ## Files
 
@@ -32,7 +33,10 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | `/etc/meteorcli/config.json` | root:meteor 0640 | Server (`domain`, `api_base`, `server_url`), optional pinned CA (`ca_file`), `enroll_name` (from a meteorenv file). Written by root, read by the agent. |
 | `/var/lib/meteorcli/identity/` | meteor 0700, files 0600 | `device.json` (device id, organization, name, heartbeat interval), `device-token`, `mqtt.json`, `mqtt-ca.crt`, `api-key` (until enrolled), `pending-claim.json` (request id and claim secret while waiting), `wireguard/` keys. Written by the agent only, except `config` (root) storing an API key and removing a server's files. |
 | `/var/lib/meteorcli/state/` | meteor 0700 | Versioned module state (`signing-keys.json`, `applied-software.json`, ...) and `outbox/` |
-| `/var/lib/meteorcli/artifacts/` | meteor 0750 | Downloaded release artifacts |
+| `/var/lib/meteorcli/artifacts/` | meteor 0750 | Downloaded release artifacts (`<artifact id>` and `<artifact id>.sha256`) |
+| `/var/lib/meteorcli/compose/` | meteor 0700 | One directory per Compose project (0755): the compose file or unpacked bundle, `.env.meteorcloud` (0600) and `compose.meteorcloud.json` (0600) |
+| `/var/lib/meteorcli/app-credentials/` | meteor 0700 | Application tokens of bound workloads, one directory per workload: `token` (0644, mounted read-only into the container) and `meta.json` (0600) |
+| `/etc/meteorcli/docker/` | root, optional | Docker registry credentials for deploys (`sudo docker --config /etc/meteorcli/docker login …`); the helper runs docker with `DOCKER_CONFIG` pointing here |
 | `/run/meteorcli/` | meteor:meteorcli 0750 | `agent.sock` (meteor:meteorcli 0660), `helper.sock` (root:meteor 0660) |
 
 Every JSON file has a `version` field and keeps keys this version does not know. Files are written
@@ -72,14 +76,17 @@ Running it again upgrades in place. To roll back to Python, run the Python `inst
 
 To try a pull request before it is merged:
 1. Download the `meteorcli-go-<sha>` artifact from the CI run's Summary page and unzip it on the device.
-2. Run `sudo bash install-rpi.sh --base-url file://$PWD`.
+2. Run `sudo bash install-rpi.sh` in that folder.
 
-`make agent-go-dist` builds the same files locally. You can serve them with
-`python3 -m http.server` and point `--base-url` at your laptop.
+`make agent-go-dist` builds the same files locally (on a laptop or on the device itself, with Go
+1.24+), versioned `0.0.0-dev+<commit>`. Run as a file, the installer installs the files next to
+it when `SHA256SUMS` is there; piped from curl, it downloads the release it came from.
+`--base-url` overrides both, e.g. a laptop serving `dist/` with `python3 -m http.server`.
+`meteorcli --version` shows which build is installed.
 
-Not in the Go agent yet: deploys, Wi-Fi, WireGuard and `update_agent`. An installed device is
-online with its inventory, MQTT status, metrics and events, and runs reboot, shutdown and user
-actions from the console; use a spare device.
+Not in the Go agent yet: Wi-Fi, WireGuard and `update_agent`. An installed device is online with
+its inventory, MQTT status, metrics and events, runs reboot, shutdown and user actions from the
+console, and installs releases (systemd, docker, docker_compose); use a spare device.
 
 ## Moving a device from the Python agent
 
@@ -194,11 +201,22 @@ a minute without requests.
 | `users.add` | `username`, `password` (as above), `sudo`, `authorized_key` (one SSH public key line) | `useradd -m -s /bin/bash`, `chpasswd`, optional `/etc/sudoers.d/90-meteorcli-<user>` (0440, `NOPASSWD:ALL`) and `~/.ssh/authorized_keys`; a failure half way removes the user again |
 | `docker.ps`, `docker.inspect`, `docker.stats` | `inspect`: `names` (1-20 container names) | The Python observer's fixed `docker ps -a`, `docker inspect -f <template>` and `docker stats --no-stream` commands; returns their output, which the agent parses |
 | `logs.warnings` | `after_cursor` (optional journal cursor) | `journalctl --priority=warning --output=json`, at most 200 entries (the last 10 minutes without a cursor); returns message (cut to 1000 characters), priority, unit, source, time and cursor |
+| `systemd.control` | `unit` (as `systemd.install_unit`, never `meteorcli*`), `action` (`is_active`, `restart`, `remove`) | `systemctl is-active --quiet` (answers `active`), `restart`, or `disable --now` plus deleting the unit file |
+| `docker.load` | `path` (a file directly in `/var/lib/meteorcli/artifacts`, symlinks resolved and checked) | `docker load -i` (15 min) |
+| `docker.run` | `name`, `image` (no leading `-`), `restart` (`no`, `always`, `unless-stopped`, `on-failure[:N]`), `ports` (`-p` values), `env` (names `^[A-Za-z_][A-Za-z0-9_.-]*$`, values without line breaks), `token_file` (a `token` under `/var/lib/meteorcli/app-credentials/<dir>/`), `command` (container arguments), `pull_never` | Prepares the environment in a 0600 `--env-file` in the helper's private `/tmp` (never on the command line), then `docker rm -f` and `docker run -d [--pull never]` (15 min, for the pull) |
+| `docker.health`, `docker.remove` | `name` | `docker inspect -f '{{.State.Running}}\|{{.State.Status}}\|{{.State.ExitCode}}\|<health>'` (never env or labels) / `docker rm -f` |
+| `compose.services`, `compose.up`, `compose.ps`, `compose.down` | `project` (`^[a-z0-9][a-z0-9_-]{0,62}$`), `file`, `env_file`, `override_file` (each directly in `/var/lib/meteorcli/compose/<project>/`), `force_recreate` | `docker compose -p <project> -f <file> [--env-file] config --services` / `[-f override] up -d --remove-orphans [--force-recreate]` (15 min) / `ps -a --format json` / `down --remove-orphans`; `services` and `ps` answer stdout only (warnings stay out of the parsed output) |
 
 **Trust boundary.** `systemd.install_unit` checks the unit's name and shape, not what `ExecStart`
-runs, so whoever controls the `meteor` user can run commands as root through it (as with Docker on a
-device). The `meteor` account is unprivileged, not confined: protect it like root. The agent only
-installs units from releases it verified.
+runs, and `docker.run` / `compose.up` start whatever image or compose file they are given, so
+whoever controls the `meteor` user can run commands as root through them (as with Docker on a
+device). The helper builds every docker command itself from typed fields (there is no field for
+`--privileged` or a host mount in `docker.run`) and reads files only from the agent's artifact,
+compose and credential directories, but a compose file can still ask for anything. The `meteor`
+account is unprivileged, not confined: protect it like root. The agent applies only releases whose
+signature it verified, except from an older control plane that does not sign (`/signing-keys`
+answers 404 and no key is pinned yet; see [Deploy](#deploy)). The agent never gets the Docker socket and `meteor` is never in the `docker`
+group.
 
 Tools (`systemctl`, `journalctl`) are looked up only in a fixed root-owned `PATH`, never in the
 helper's environment. `logs.read` streams `journalctl` output into a buffer of the requested
@@ -211,8 +229,7 @@ and never on a command line. The helper unit hides `/root` and `/run/user` with
 (`ProtectHome=tmpfs` with `BindPaths=/home` remounts `/home` read-only on systemd 257;
 `ProtectHome=read-only` with `ReadWritePaths=/home` fails the same way on systemd 252.)
 
-Docker and file logs, `systemd.control` and Wi-Fi follow the Python helpers in later pull
-requests.
+Docker and file logs and Wi-Fi follow the Python helpers in later pull requests.
 
 ### Packaging
 
@@ -293,7 +310,11 @@ all 13 contract keys, `null` when unknown.
 `internal/platform` ports the Python platform adapters: board detection (Raspberry Pi, NVIDIA
 Jetson, generic Linux), `/etc/os-release`, `/proc` and `/sys` readers, thermal zones, and tool
 checks (`docker compose version` with a 10 s timeout). `internal/telemetry` builds the inventory and
-metrics from it; the MQTT bus publishes the metrics in the next pull request.
+metrics from it; the MQTT bus publishes the metrics in the next pull request. A tool probe is reused
+for 10 minutes once Docker Compose is found; while it is missing, the probe runs again after 30 s,
+and at once when the docker binary appears or goes away. Docker installed while the agent runs is
+reported by the next heartbeats (the control plane skips a deployment whose runtime the device last
+reported missing; create the deployment again once the capability shows up).
 
 ### MQTT
 
@@ -332,6 +353,61 @@ error that starts with `Unsupported`. Every result waits in the outbox (`state/o
 `action_report`) until the server accepted it, so a result survives a network outage and the
 reboot itself; reports are retried with backoff, at most 50 per request.
 
+### Deploy
+
+The `deploy` module (`internal/deploy`) installs the desired software. It runs after every
+heartbeat (the heartbeat publishes `WorkWaiting{software}`; so does an MQTT `sync_desired`) in its
+own goroutine, so a slow image pull never delays a heartbeat. One cycle is the Python agent's
+`reconcile_software`, step for step:
+
+1. `GET /software`. An unknown kind is reported `failed: Unsupported release kind: '<kind>'`.
+2. Each item is checked with `internal/signing`: Ed25519 over `meteorcloud-desired-v1\n` plus the
+   canonical JSON of the signed fields (byte for byte Python's `json.dumps(sort_keys=True,
+   separators=(",", ":"), ensure_ascii=False)`), with the organization keys from `GET /signing-keys`
+   pinned on first use in `state/signing-keys.json` (tied to the device token); a new key is pinned
+   only when a pinned key endorsed it. A `404` from `/signing-keys` (an older server) accepts
+   unsigned items until keys exist. A revision older than the applied one is refused.
+3. A workload already at the desired release and revision only reports its health (`in_sync` plus
+   `healthy`, `unhealthy` or `unknown`); one that is gone (`docker rm`) or whose token file was lost
+   is installed again.
+4. Otherwise the artifact is downloaded (`GET /artifacts/{id}/download` with
+   `X-Meteorcli-Redirect: 1`; a redirect to storage is followed without the token and without a
+   `User-Agent`, never `http` after `https`, only with `X-Checksum-SHA256`) into
+   `artifacts/<id>`, streamed with its SHA-256 checked against the server's and the signed
+   `artifact_sha256`, and reused while `<id>.sha256` matches. A download may take 30 minutes but is
+   cut after 5 minutes without data. Progress goes out as `updating` reports (0, every 10 %, 100)
+   in heartbeats that carry only `software_report`.
+5. The runtime applies it through the helper (`systemd.install_unit`, `docker.load` and
+   `docker.run`, `compose.up`) and checks it right after; a container or unit that is not up fails
+   the install. An image from an artifact runs with `--pull never`, so a tag missing from the
+   tarball fails instead of being pulled. A compose release replaces the compose file of the one
+   before it (other files in the project directory stay); `spec.env` goes in `.env.meteorcloud`
+   with every value quoted, so Compose takes it literally (no `${VAR}` interpolation). A compose
+   service without any container, or a container docker says does not exist, is installed again;
+   a Docker daemon that does not answer is reported `unhealthy`, nothing is replaced.
+6. With a `health_check` in the spec, the workload must be healthy (runtime, plus `http_url`
+   answering 2xx/3xx without following redirects) within `timeout_seconds` (60) and stay so for
+   `stable_seconds` (10). If not, and `rollback` is not `false`, the previous release recorded in
+   `state/applied-software.json` is applied again and reported `rolled_back`; the failed release is
+   not tried again until the desired release changes.
+
+Bound workloads (`spec.meteorcloud.application`) get a token from `POST
+/applications/credentials`, kept in `app-credentials/` and mounted read-only at
+`/run/secrets/meteorcloud-token`, with the `METEORCLOUD_*` variables; it is rewritten in place
+(same inode) when due, so the container sees the new token without a restart. A release the device
+rolled back to keeps its token fresh too. The server issues credentials for the desired release's
+binding, so a credential for another application or environment is refused: a rollback to a
+release bound to a different application fails instead of running with the wrong token. Stored
+credentials are deleted only when verified desired software no longer binds the workload.
+
+Each report is kept in the outbox (kind `software_report`, one per workload, latest wins). The
+outcome of an install attempt is also sent at once in a heartbeat with only `software_report` and
+removed from the outbox when the server accepted it; health-only reports go with the next regular
+heartbeat. Install outcomes are also announced on `devices/{id}/events` as `deploy.in_sync`,
+`deploy.failed` or `deploy.rolled_back` (with `workload_key`, `release_version`, `health`,
+`error`), once per change. A runtime is a package under `internal/deploy/runtime/` plus one line in
+`internal/deploy/runtimes.go`.
+
 ### Differences from the Python agent
 
 - The agent, not the CLI, does enrollment; the CLI needs `meteorcli-admin`, not root.
@@ -348,7 +424,30 @@ reboot itself; reports are retried with backoff, at most 50 per request.
   the inventory; the CPU or device tree serial, or a readable `board_serial`, is used instead.
 - `capabilities.actions` lists `reboot`, `shutdown`, `set_password`, `add_user`; `update_agent`
   is left out until the Go updater exists (an `update_agent` action is reported `failed:
-  Unsupported...`). `deploy_kinds` stays empty until the deploy module exists.
+  Unsupported...`). `deploy_kinds` lists `systemd`, `docker`, `docker_compose`.
+- Deploys run through the root helper: the agent never has the Docker socket and is not in the
+  `docker` group. `docker run` gets the release's environment from a private `--env-file`, so an
+  env value may not contain a line break (Python passed `-e KEY=VALUE`, visible in `ps`). Unit,
+  container and project names follow the helper's rules (units `^[a-z0-9][a-z0-9._-]{0,62}$`
+  ending `.service`; Python's helper also took capitals, `@` and `:`). Private registries need
+  credentials in `/etc/meteorcli/docker` (Python used the agent user's `~/.docker`).
+- Failure texts from Docker read `docker run <name> failed: <docker output>` (Python printed the
+  whole command line, which held the environment).
+- Install outcomes are sent at once and kept in the outbox until accepted; health-only reports go
+  with the next heartbeat instead of the same one. Deploy results are also published as
+  `deploy.*` events (new, additive).
+- A compose bundle may not contain entries outside the bundle (Python silently stripped `..`), is
+  limited to 2000 files and 1 GiB unpacked, and its symlinks are not created. Bundle directories
+  are 0755 and files 0644 whatever the agent's umask.
+- A download that stalls for 5 minutes is cut (Python: a 300 s socket timeout per read; no total
+  limit). A storage error after the redirect (an expired link) fails the install; it no longer
+  counts as a refused device token.
+- Compose `spec.env` values are quoted in `.env.meteorcloud` (Python wrote them bare, so Compose
+  interpolated `$VAR` and cut `#` comments). An image from an artifact is never pulled
+  (`--pull never`). A compose service whose container was removed is brought back; a docker
+  inspect error is `unhealthy`, not a reason to recreate the container (Python treated any inspect
+  failure as a missing container). A desired software answer that is not a JSON array is an error,
+  not "nothing desired".
 - MQTT 5 instead of 3.1.1 (same topics, QoS, retain, will and client id; Mosquitto and EMQX speak
   both). `METEORCLI_MQTT_TLS_INSECURE` is gone: TLS is always verified.
 - `mqtt-test` and `mqtt-listen` use the agent's session over `agent.sock` instead of a second

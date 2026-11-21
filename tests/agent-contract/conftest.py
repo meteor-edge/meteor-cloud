@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import difflib
+import fnmatch
 import json
 import os
 import secrets
@@ -209,19 +210,30 @@ class Contract:
         self, observer: Observer | None = None, retained: dict[str, Any] | None = None,
         routes: Iterable[tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
-        """Check and record the transcript. ``routes`` limits it, and the recording it is compared
-        with, to those (method, path) pairs, for an agent that keeps working in the background (the
-        Go agent beats as soon as it is enrolled); every exchange is still checked against the
-        contract."""
+        """Check and record the transcript. ``routes`` limits the comparison with the recording
+        to those (method, path) pairs, for an agent that keeps working in the background (the Go
+        agent beats as soon as it is enrolled); a path may use ``*`` for an id the run does not
+        know (``/storage/*``: a replay answers with the recording's ids). Every exchange is still
+        checked against the contract, and a recording keeps every exchange, so a replay can answer
+        all of them."""
         problems = list(self.plane.violations)
         exchanges = self.plane.exchanges
+        # Normalize every exchange, kept or not, so ids are numbered (<uuid:N>) in the order the
+        # whole run first used them, as in a recording made with every route.
+        everything = recorded_http(exchanges, self.normalizer)
+        http = everything
         if routes is not None:
-            wanted = set(routes)
-            exchanges = [e for e in exchanges if (e.request.method, e.request.path) in wanted]
+            wanted = [(method, path, self.normalizer.text(path)) for method, path in routes]
+
+            def kept(method: str, path: str) -> bool:
+                return any(method == m and (fnmatch.fnmatchcase(path, p) or fnmatch.fnmatchcase(path, n))
+                           for m, p, n in wanted)
+
+            http = [h for h, e in zip(everything, exchanges) if kept(e.request.method, e.request.path)]
         result: dict[str, Any] = {
             "scenario": self.scenario,
             "contract": "contracts/device-agent-v1.md",
-            "http": recorded_http(exchanges, self.normalizer),
+            "http": http,
         }
         if observer is not None:
             result["mqtt"] = self.check_mqtt(observer)
@@ -230,16 +242,16 @@ class Contract:
             result["retained"] = {topic: self.normalizer.mqtt_payload("status", payload) for topic, payload in retained.items()}
         assert not problems, "contract violations:\n  " + "\n  ".join(problems)
         if MODE == "record":
-            transcript.save(self.scenario, result)
+            transcript.save(self.scenario, {**result, "http": everything})
             return result
         try:
             golden = transcript.load(self.scenario)
         except FileNotFoundError:
             pytest.fail(f"no recording for {self.scenario}; run with AGENT_CONTRACT_MODE=record")
         if routes is not None:
-            # A recording made with every route (the Python agent) is compared on the same routes.
-            golden = {**golden, "http": [e for e in golden["http"]
-                                         if (e["request"]["method"], e["request"]["path"]) in wanted]}
+            # The recording (made with every route) is compared on the same routes, written as
+            # the recording writes them (ids as <uuid:N>).
+            golden = {**golden, "http": [e for e in golden["http"] if kept(e["request"]["method"], e["request"]["path"])]}
         if golden != result:
             diff = difflib.unified_diff(
                 json.dumps(golden, indent=2).splitlines(), json.dumps(result, indent=2).splitlines(),

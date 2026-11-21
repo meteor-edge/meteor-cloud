@@ -82,6 +82,10 @@ func call(ctx context.Context, c *Client, ex exchange) (bool, error) {
 		b, _ := json.Marshal(body["results"])
 		_ = json.Unmarshal(b, &results)
 		_, err = c.ReportActions(ctx, "dev_x", results)
+	case "GET /api/v1/agent/software":
+		_, err = c.Software(ctx, "dev_x")
+	case "GET /api/v1/agent/signing-keys":
+		_, err = c.SigningKeys(ctx, "dev_x")
 	default:
 		return false, nil
 	}
@@ -159,6 +163,7 @@ func TestReplayPythonRecordings(t *testing.T) {
 		"POST /api/v1/agent/enroll/poll", "POST /api/v1/agent/register", "POST /api/v1/agent/heartbeat",
 		"GET /api/v1/agent/mqtt", "POST /api/v1/agent/mqtt/credentials",
 		"GET /api/v1/agent/actions", "POST /api/v1/agent/actions/report",
+		"GET /api/v1/agent/software", "GET /api/v1/agent/signing-keys",
 	} {
 		if !covered[route] {
 			t.Errorf("no recording exercised %s", route)

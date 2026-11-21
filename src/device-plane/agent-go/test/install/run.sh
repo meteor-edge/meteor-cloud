@@ -21,7 +21,9 @@ amd64 | x86_64) arch=amd64 ;;
 arm64 | aarch64) arch=arm64 ;;
 *) echo "unsupported Docker platform: $arch" >&2; exit 1 ;;
 esac
-./scripts/dist.sh "$ctx/dist" 0.0.0-installtest file:///dist >/dev/null
+# The default base URL (the GitHub release): run from /dist, the installer must
+# install the files next to it, as after make agent-go-dist on a device.
+./scripts/dist.sh "$ctx/dist" 0.0.0-installtest >/dev/null
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$ctx/fakeserver" ./test/systemd/fakeserver
 cp test/install/Dockerfile "$ctx/"
 docker build -q --platform "linux/$arch" -t meteorcli-install-test "$ctx" >/dev/null

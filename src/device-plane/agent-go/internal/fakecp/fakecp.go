@@ -19,6 +19,8 @@ type Reply struct {
 	Status int
 	Body   any
 	Header map[string]string
+	// Raw, when set, is sent as is instead of Body (artifact downloads).
+	Raw []byte
 }
 
 // OK is a 200 with body.
@@ -129,6 +131,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 	for k, v := range reply.Header {
 		w.Header().Set(k, v)
+	}
+	if reply.Raw != nil {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(reply.Status)
+		_, _ = w.Write(reply.Raw)
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(reply.Status)

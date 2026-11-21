@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"meteorcloud/meteorcli/internal/platform"
 )
@@ -81,23 +82,69 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
+// A complete probe is reused: the Docker CLI starts once per toolsTTL.
 func TestToolsAreCached(t *testing.T) {
 	h := host(t, nil)
-	probes := 0
 	h.LookPath = func(name string) (string, error) {
 		if name == "docker" {
-			probes++
 			return "/usr/bin/docker", nil
 		}
 		return "", errors.New("not found")
 	}
+	runs := 0
+	h.Run = func(context.Context, string, ...string) bool { runs++; return true }
 	tools := &Tools{Host: h}
 	for range 3 {
-		if !tools.Get(context.Background()).Docker {
-			t.Fatal("docker not seen")
+		if got := tools.Get(context.Background()); !got.Docker || !got.DockerCompose {
+			t.Fatalf("docker and compose not seen: %+v", got)
 		}
 	}
-	if probes != 1 {
-		t.Errorf("probed %d times, want 1", probes)
+	if runs != 1 {
+		t.Errorf("docker compose version ran %d times, want 1", runs)
+	}
+}
+
+// Docker and Compose installed while the agent runs are reported within
+// missingTTL, not toolsTTL: the control plane skips a deployment whose runtime
+// the device last reported missing.
+func TestInstallingDockerShowsUpSoon(t *testing.T) {
+	h := host(t, nil)
+	docker := false
+	h.LookPath = func(name string) (string, error) {
+		if name == "docker" && docker {
+			return "/usr/bin/docker", nil
+		}
+		return "", errors.New("not found")
+	}
+	compose := false
+	runs := 0
+	h.Run = func(context.Context, string, ...string) bool { runs++; return compose }
+	tools := &Tools{Host: h}
+	ctx := context.Background()
+	if tools.Get(ctx).Docker {
+		t.Fatal("docker seen before it is installed")
+	}
+
+	docker = true // apt install docker.io: the binary appears
+	if got := tools.Get(ctx); !got.Docker || got.DockerCompose {
+		t.Fatalf("after installing docker: %+v", got)
+	}
+	compose = true // apt install docker-compose-plugin
+	if tools.Get(ctx).DockerCompose {
+		t.Fatal("compose probed again before missingTTL")
+	}
+	tools.at = tools.at.Add(-missingTTL - time.Second)
+	if !tools.Get(ctx).DockerCompose {
+		t.Fatal("compose not seen after missingTTL")
+	}
+	tools.at = tools.at.Add(-missingTTL - time.Second)
+	tools.Get(ctx)
+	if runs != 2 {
+		t.Errorf("docker compose version ran %d times, want 2 (complete probes keep toolsTTL)", runs)
+	}
+
+	docker = false // docker removed
+	if got := tools.Get(ctx); got.Docker || got.DockerCompose {
+		t.Fatalf("after removing docker: %+v", got)
 	}
 }

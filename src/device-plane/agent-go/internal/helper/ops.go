@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/localrpc"
 )
 
@@ -45,15 +46,30 @@ type Host struct {
 	UnitDir string
 	// SudoersDir is where users.add writes a sudo rule.
 	SudoersDir string
+	// ArtifactsDir, ComposeDir and AppCredentialsDir are the agent's directories
+	// the deploy operations may read files from (docker.load, compose.*, docker.run).
+	ArtifactsDir      string
+	ComposeDir        string
+	AppCredentialsDir string
+	// TempDir is where docker.run writes its private env file ("" for the
+	// helper's own PrivateTmp /tmp).
+	TempDir string
 }
 
 // SystemHost runs real tools from safePath and writes to /etc/systemd/system.
 func SystemHost() Host {
+	p := config.DefaultPaths("")
 	return Host{
 		Run: runTool, Stream: streamTool, RunInput: runToolInput, LookupUser: lookupUser,
 		UnitDir: "/etc/systemd/system", SudoersDir: "/etc/sudoers.d",
+		ArtifactsDir: p.ArtifactsDir, ComposeDir: p.ComposeDir(), AppCredentialsDir: p.AppCredentialsDir(),
 	}
 }
+
+// dockerConfigDir is where an operator puts registry credentials for the
+// deploy operations (docker login --config /etc/meteorcli/docker ...): the
+// helper cannot see /root.
+const dockerConfigDir = "/etc/meteorcli/docker"
 
 // lookTool finds name in safePath only, never in the helper's own PATH.
 func lookTool(name string) (string, error) {
@@ -76,6 +92,9 @@ func command(ctx context.Context, name string, args []string) (*exec.Cmd, error)
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = []string{"PATH=" + safePath, "LANG=C.UTF-8"}
+	if name == "docker" {
+		cmd.Env = append(cmd.Env, "DOCKER_CONFIG="+dockerConfigDir)
+	}
 	return cmd, nil
 }
 
@@ -148,6 +167,16 @@ func Ops(h Host) map[string]localrpc.Handler {
 		"docker.inspect":       {Timeout: 30 * time.Second, Run: h.dockerInspect},
 		"docker.stats":         {Timeout: 30 * time.Second, Run: h.dockerStats},
 		"logs.warnings":        {Timeout: 30 * time.Second, Run: h.logsWarnings},
+		// Deploys (internal/deploy). docker.run and compose.up may pull images.
+		"systemd.control":  {Timeout: 2 * time.Minute, Run: h.systemdControl, Audit: auditSystemdControl},
+		"docker.load":      {Timeout: deployTimeout, Run: h.dockerLoad},
+		"docker.run":       {Timeout: deployTimeout, Run: h.dockerRunContainer, Audit: auditDockerRun},
+		"docker.health":    {Timeout: 30 * time.Second, Run: h.dockerHealth},
+		"docker.remove":    {Timeout: 2 * time.Minute, Run: h.dockerRemove, Audit: auditDockerName},
+		"compose.services": {Timeout: time.Minute, Run: h.composeServices, Audit: auditCompose},
+		"compose.up":       {Timeout: deployTimeout, Run: h.composeUp, Audit: auditCompose},
+		"compose.ps":       {Timeout: 30 * time.Second, Run: h.composePS},
+		"compose.down":     {Timeout: 5 * time.Minute, Run: h.composeDown, Audit: auditCompose},
 	}
 }
 
