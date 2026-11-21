@@ -32,7 +32,8 @@ from harness.script import ssh_key
 
 WG_PRIVATE = "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
 WG_PUBLIC = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
-SSH_HOST_KEY = ssh_key("contract host key", "root@device")
+# As local_ssh_host_key reports it: "<type> <base64>", without the file's comment.
+SSH_HOST_KEY = ssh_key("contract host key")
 
 
 class PythonAgent:

@@ -15,7 +15,11 @@ import (
 
 	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/localrpc"
+	"meteorcloud/meteorcli/internal/platform"
 )
+
+// maxFollow bounds a followed log (the console's Logs window).
+const maxFollow = 24 * time.Hour
 
 // safePath is the only PATH the tools run with.
 const safePath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -34,6 +38,9 @@ type Host struct {
 	Run func(ctx context.Context, name string, args ...string) ([]byte, error)
 	// Stream executes a tool like Run but writes its stdout to w as it comes.
 	Stream func(ctx context.Context, w io.Writer, name string, args ...string) error
+	// StreamAll is Stream with stderr in the same writer (docker logs prints
+	// a container's stderr there).
+	StreamAll func(ctx context.Context, w io.Writer, name string, args ...string) error
 	// RunInput is Run with stdin (secrets such as passwords go here, never in args).
 	RunInput func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
 	// LookupUser finds an account; it fails with errNoUser for an unknown one.
@@ -54,14 +61,33 @@ type Host struct {
 	// TempDir is where docker.run writes its private env file ("" for the
 	// helper's own PrivateTmp /tmp).
 	TempDir string
+	// LogGlobs are the log files that may be read (nil: the /var/log defaults).
+	LogGlobs []string
+	// SystemdDir and DockerSocket say whether the journal and Docker exist
+	// ("" for /run/systemd/system and /var/run/docker.sock).
+	SystemdDir, DockerSocket string
+	// StateDir is the helper's own state (root 0700): the Wi-Fi change waiting
+	// for confirm and the WireGuard config.
+	StateDir string
+	// NMConnectionsDir is NetworkManager's keyfile directory.
+	NMConnectionsDir string
+	// SysNetDir is /sys/class/net ("" for the real one).
+	SysNetDir string
+	// ConfigFile is config.json, read for ssh_user ("" for /etc/meteorcli/config.json).
+	ConfigFile string
+	// LookNetplan says netplan is installed; nil means look in the safe PATH.
+	LookNetplan func() bool
+	// Uplink reads the link traffic leaves on; nil means the real machine.
+	Uplink func() platform.Uplink
 }
 
 // SystemHost runs real tools from safePath and writes to /etc/systemd/system.
 func SystemHost() Host {
 	p := config.DefaultPaths("")
 	return Host{
-		Run: runTool, Stream: streamTool, RunInput: runToolInput, LookupUser: lookupUser,
+		Run: runTool, Stream: streamTool, StreamAll: streamToolAll, RunInput: runToolInput, LookupUser: lookupUser,
 		UnitDir: "/etc/systemd/system", SudoersDir: "/etc/sudoers.d",
+		StateDir: "/var/lib/meteorcli-helper", NMConnectionsDir: "/etc/NetworkManager/system-connections",
 		ArtifactsDir: p.ArtifactsDir, ComposeDir: p.ComposeDir(), AppCredentialsDir: p.AppCredentialsDir(),
 	}
 }
@@ -130,6 +156,15 @@ func streamTool(ctx context.Context, w io.Writer, name string, args ...string) e
 	return finish(ctx, cmd.Run(), name, args, stderr.String())
 }
 
+func streamToolAll(ctx context.Context, w io.Writer, name string, args ...string) error {
+	cmd, err := command(ctx, name, args)
+	if err != nil {
+		return err
+	}
+	cmd.Stdout, cmd.Stderr = w, w
+	return finish(ctx, cmd.Run(), name, args, "")
+}
+
 func finish(ctx context.Context, err error, name string, args []string, out string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("%s: %w", name, ctx.Err())
@@ -177,6 +212,20 @@ func Ops(h Host) map[string]localrpc.Handler {
 		"compose.up":       {Timeout: deployTimeout, Run: h.composeUp, Audit: auditCompose},
 		"compose.ps":       {Timeout: 30 * time.Second, Run: h.composePS},
 		"compose.down":     {Timeout: 5 * time.Minute, Run: h.composeDown, Audit: auditCompose},
+		// Logs for `meteorcli logs` and the console (internal/helper/logsources.go).
+		"logs.list": {Timeout: time.Minute, Run: h.logsList},
+		"logs.show": {Timeout: maxFollow, Stream: h.logsShow, Audit: auditShow},
+		// Network (internal/network): Wi-Fi through NetworkManager, wg0, SSH keys.
+		"wifi.status":         {Timeout: time.Minute, Run: h.wifiStatus},
+		"wifi.apply":          {Timeout: 3 * time.Minute, Run: h.wifiApply, Audit: auditWifi},
+		"wifi.confirm":        {Timeout: 30 * time.Second, Run: h.wifiConfirm},
+		"wifi.rollback":       {Timeout: 2 * time.Minute, Run: h.wifiRollback},
+		"wifi.remove":         {Timeout: 2 * time.Minute, Run: h.wifiRemove, Audit: auditWifi},
+		"wireguard.apply":     {Timeout: time.Minute, Run: h.wireguardApply, Audit: auditWireGuard},
+		"wireguard.down":      {Timeout: 30 * time.Second, Run: h.wireguardDown},
+		"wireguard.show":      {Timeout: 30 * time.Second, Run: h.wireguardShow},
+		"wireguard.endpoint":  {Timeout: 30 * time.Second, Run: h.wireguardEndpoint},
+		"ssh.authorized_keys": {Timeout: 30 * time.Second, Run: h.sshAuthorizedKeys, Audit: auditSSHKeys},
 	}
 }
 

@@ -117,14 +117,20 @@ def test_wifi(contract, agent, device) -> None:
     contract.script("POST", "/api/v1/agent/network/wifi/report", accepted(2))
 
     assert agent.register(contract.plane.url, contract.secret("registration_token")) == 0
-    assert agent.run(heartbeats=2) == 0
+    if "background_enrollment" in agent.features:
+        # Wi-Fi runs beside the heartbeat: wait for the report, not a heartbeat count.
+        assert agent.run_until(lambda: bool(contract.plane.calls("POST", "/api/v1/agent/network/wifi/report"))) == 0
+    else:
+        assert agent.run(heartbeats=2) == 0
 
     assert device.wifi_ssid == "warehouse" and "old-lab" not in device.wifi_saved
     assert [c for c, _ in device.wifi_requests if c in ("apply", "confirm", "remove")] == ["apply", "confirm", "remove"]
     report = contract.plane.calls("POST", "/api/v1/agent/network/wifi/report")[0].request.body
     assert [r["state"] for r in report["results"]] == ["applied", "removed"]
     assert "password" not in str(report)
-    contract.finish()
+    contract.finish(routes=background_routes(
+        agent, REGISTER, ("GET", "/api/v1/agent/network/wifi"), ("GET", "/api/v1/health"),
+        ("POST", "/api/v1/agent/network/wifi/report")))
 
 
 @pytest.mark.requires("wireguard")
@@ -142,13 +148,17 @@ def test_wireguard(contract, agent, device) -> None:
     contract.script("POST", "/api/v1/agent/connectivity/wireguard", reply)
 
     assert agent.register(contract.plane.url, contract.secret("registration_token")) == 0
-    assert agent.run(heartbeats=1) == 0
+    if "background_enrollment" in agent.features:
+        # Registration runs on its own timer: wait for the second call, not a heartbeat count.
+        assert agent.run_until(lambda: len(contract.plane.calls("POST", "/api/v1/agent/connectivity/wireguard")) >= 2) == 0
+    else:
+        assert agent.run(heartbeats=1) == 0
 
     first, second = contract.plane.calls("POST", "/api/v1/agent/connectivity/wireguard")
     assert first.request.body.get("ssh_ca_public_key") is None
     assert second.request.body["ssh_ca_public_key"].startswith("ssh-ed25519 ")
     assert ["wg-quick", "up"] == device.wg_commands[-1][:2]
-    contract.finish()
+    contract.finish(routes=background_routes(agent, REGISTER, ("POST", "/api/v1/agent/connectivity/wireguard")))
 
 
 @pytest.mark.requires("docker")

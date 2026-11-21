@@ -17,6 +17,7 @@ import (
 	"meteorcloud/meteorcli/internal/agent"
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/bus"
+	"meteorcloud/meteorcli/internal/credstore"
 	"meteorcloud/meteorcli/internal/deploy/runtime"
 	"meteorcloud/meteorcli/internal/signing"
 	"meteorcloud/meteorcli/internal/state"
@@ -110,7 +111,7 @@ func (m *Module) reconcile(ctx context.Context) {
 		return
 	}
 	c := &cycle{r: m, token: token, applied: applied, tools: m.tools(ctx),
-		creds: credStore{root: d.Paths.AppCredentialsDir(), now: time.Now}}
+		creds: creds{store: credstore.Store{Root: d.Paths.AppCredentialsDir()}}}
 	if id := d.Identity.DeviceID(); id != "" {
 		c.verifier = &signing.Verifier{
 			Store: d.State, DeviceID: id, Fingerprint: signing.CredentialFingerprint(token), Log: d.Log, Stop: api.IsAuth,

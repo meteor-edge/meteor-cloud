@@ -11,9 +11,12 @@ Type=simple
 ExecStart=/usr/local/bin/meteorcli helper
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 UMask=0022
+# Its own state (root 0700): a Wi-Fi change waiting for confirm, wg0's config.
+StateDirectory=meteorcli-helper
+StateDirectoryMode=0700
 
 # Root, but only with what the operations need (units in /etc/systemd/system,
-# users and passwords, the docker CLI; WireGuard and Wi-Fi later).
+# users and passwords, the docker CLI, wg0, NetworkManager keyfiles, logs).
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_ADMIN CAP_AUDIT_WRITE
 NoNewPrivileges=yes
 ProtectSystem=true
@@ -35,7 +38,8 @@ RestrictNamespaces=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 KeyringMode=private
-RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# AF_INET/AF_INET6: wg-quick resolves a WireGuard server given by name.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
 SystemCallFilter=@system-service
 SystemCallFilter=~@resources @mount @swap @raw-io @module @obsolete @cpu-emulation @debug @clock
 SystemCallErrorNumber=EPERM

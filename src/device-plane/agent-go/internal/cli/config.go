@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"strings"
 
 	"meteorcloud/meteorcli/internal/config"
@@ -26,14 +27,19 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if len(args) > 0 && args[0] == "meteorenv" {
 		return runConfigMeteorenv(ctx, env, args[1:])
 	}
-	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--show] | import | meteorenv")
+	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--show] | import | meteorenv")
 	domain := fl.String("domain", "", "Server host or IP (meteorxx.com or 192.168.0.107:8000; or $"+envDomain+").")
 	apiBase := fl.String("api-base", "", "Override the derived API origin (http:// is allowed for local testing).")
 	useHTTP := fl.Bool("http", false, "Use HTTP instead of HTTPS (for local testing).")
 	apiKey := fl.String("api-key", "", "Enrollment API key (or $"+envAPIKey+"). Stored with 0600 permissions.")
+	sshUser := fl.String("ssh-user", "", "Account the console's browser terminal signs in as (the installer sets the user who ran it).")
 	show := fl.Bool("show", false, "Print the stored configuration (never prints secrets).")
 	if code, done := parseFlags(fl, args); done {
 		return code
+	}
+	if *sshUser != "" && !sshUserRe.MatchString(*sshUser) {
+		fmt.Fprintf(env.Stderr, "error: --ssh-user %q is not a user name\n", *sshUser)
+		return 2
 	}
 	p := env.Paths
 	if config.LooksLikePython(p.LegacyDir) {
@@ -50,12 +56,16 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if key == "" {
 		key = normalizeSecret(env.Getenv(envAPIKey))
 	}
-	if *domain == "" && *apiBase == "" && key == "" {
-		fmt.Fprintf(env.Stderr, "error: provide --domain, --api-base, and/or --api-key (or %s/%s).\n", envDomain, envAPIKey)
+	if *domain == "" && *apiBase == "" && key == "" && *sshUser == "" {
+		fmt.Fprintf(env.Stderr, "error: provide --domain, --api-base, --api-key and/or --ssh-user (or %s/%s).\n", envDomain, envAPIKey)
 		return 2
 	}
 
-	c, dropped, err := saveConfig(env, *domain, *apiBase, *useHTTP, key, nil)
+	var edit func(*config.Config)
+	if *sshUser != "" {
+		edit = func(c *config.Config) { c.SSHUser = *sshUser }
+	}
+	c, dropped, err := saveConfig(env, *domain, *apiBase, *useHTTP, key, edit)
 	if err != nil {
 		var bad badValue
 		if errors.As(err, &bad) {
@@ -69,6 +79,9 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	fmt.Fprintf(env.Stdout, "Configuration saved to %s\n", p.ConfigFile)
 	if server != "" {
 		fmt.Fprintf(env.Stdout, "API:            %s\n", server)
+	}
+	if c.SSHUser != "" {
+		fmt.Fprintf(env.Stdout, "SSH user:       %s\n", c.SSHUser)
 	}
 	if server != "" && config.LANHostMissingPort(server) {
 		flagName, value := "--domain", *domain
@@ -84,6 +97,10 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	reloadAgent(ctx, env)
 	return 0
 }
+
+// sshUserRe is the contract's ssh_user (connectivity-wireguard.request.json),
+// limited to names the helper accepts.
+var sshUserRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 // badValue is a setting that cannot be used (exit 2, not a write failure).
 type badValue struct{ error }
@@ -173,6 +190,7 @@ func showConfig(env *Env) int {
 	fmt.Fprintf(env.Stdout, "Domain:         %s\n", orDash(fieldOf(c, func(c *config.Config) string { return c.Domain })))
 	fmt.Fprintf(env.Stdout, "API base:       %s\n", orDash(c.Server()))
 	fmt.Fprintf(env.Stdout, "API key:        %s\n", presence(p.APIKeyFile()))
+	fmt.Fprintf(env.Stdout, "SSH user:       %s\n", orDash(fieldOf(c, func(c *config.Config) string { return c.SSHUser })))
 	fmt.Fprintf(env.Stdout, "Device ID:      %s\n", orDash(deviceField(device, func(d *config.Device) string { return d.DeviceID })))
 	fmt.Fprintf(env.Stdout, "Credential:     %s\n", presence(p.DeviceTokenFile()))
 	if c == nil && presence(p.APIKeyFile()) != present {

@@ -17,32 +17,16 @@ import (
 func Call(ctx context.Context, path, method string, params, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout(ctx))
 	defer cancel()
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", path)
+	conn, err := dial(ctx, path)
 	if err != nil {
-		switch {
-		case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
-			return Errorf(CodeDenied, "cannot open %s: permission denied", path)
-		case errors.Is(err, syscall.ENOENT), errors.Is(err, syscall.ECONNREFUSED):
-			return Errorf(CodeUnavailable, "nothing listens on %s", path)
-		}
-		return Errorf(CodeUnavailable, "%v", err)
+		return err
 	}
 	defer conn.Close()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}
-	req := Request{Method: method}
-	if params != nil {
-		if req.Params, err = json.Marshal(params); err != nil {
-			return fmt.Errorf("%s: %w", method, err)
-		}
-	}
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		if closedEarly(err) {
-			return busy(method)
-		}
-		return fmt.Errorf("%s: send: %w", method, err)
+	if err := send(conn, method, params); err != nil {
+		return err
 	}
 	var resp Response
 	if err := json.NewDecoder(io.LimitReader(conn, 16<<20)).Decode(&resp); err != nil {
@@ -61,6 +45,40 @@ func Call(ctx context.Context, path, method string, params, out any) error {
 		if err := json.Unmarshal(resp.Result, out); err != nil {
 			return fmt.Errorf("%s: decode answer: %w", method, err)
 		}
+	}
+	return nil
+}
+
+// dial connects to the socket at path, mapping the usual failures to codes.
+func dial(ctx context.Context, path string) (net.Conn, error) {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "unix", path)
+	if err != nil {
+		switch {
+		case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
+			return nil, Errorf(CodeDenied, "cannot open %s: permission denied", path)
+		case errors.Is(err, syscall.ENOENT), errors.Is(err, syscall.ECONNREFUSED):
+			return nil, Errorf(CodeUnavailable, "nothing listens on %s", path)
+		}
+		return nil, Errorf(CodeUnavailable, "%v", err)
+	}
+	return conn, nil
+}
+
+// send writes one request.
+func send(conn net.Conn, method string, params any) error {
+	req := Request{Method: method}
+	if params != nil {
+		var err error
+		if req.Params, err = json.Marshal(params); err != nil {
+			return fmt.Errorf("%s: %w", method, err)
+		}
+	}
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		if closedEarly(err) {
+			return busy(method)
+		}
+		return fmt.Errorf("%s: send: %w", method, err)
 	}
 	return nil
 }

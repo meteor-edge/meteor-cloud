@@ -89,6 +89,10 @@ type Peer struct {
 // Handler runs one method. Params are the raw request params.
 type Handler struct {
 	Run func(ctx context.Context, p Peer, params json.RawMessage) (any, error)
+	// Stream, when set instead of Run, answers with lines as they come (logs
+	// that are followed): every line w receives goes to the caller at once, and
+	// ctx ends when the caller hangs up. See CallStream.
+	Stream func(ctx context.Context, p Peer, params json.RawMessage, w io.Writer) error
 	// Timeout bounds Run; zero means Server.Timeout.
 	Timeout time.Duration
 	// Audit returns the few params worth logging (a unit name, a module name).
@@ -243,7 +247,12 @@ func (s *Server) handle(ctx context.Context, c *net.UnixConn, peer Peer) {
 		write(c, nil, Errorf(CodeBadRequest, "%v", err))
 		return
 	}
-	result, err := s.call(ctx, peer, req)
+	var result any
+	if h, ok := s.Handlers[req.Method]; ok && h.Stream != nil {
+		err = s.stream(ctx, c, peer, req)
+	} else {
+		result, err = s.call(ctx, peer, req)
+	}
 	write(c, result, err)
 
 	outcome := "ok"
@@ -267,23 +276,35 @@ func (s *Server) handle(ctx context.Context, c *net.UnixConn, peer Peer) {
 }
 
 func (s *Server) call(ctx context.Context, peer Peer, req Request) (any, error) {
-	if err := s.Authorize(peer, req.Method); err != nil {
+	h, err := s.handler(peer, req.Method)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.handlerTimeout(h))
+	defer cancel()
+	return h.Run(ctx, peer, req.Params)
+}
+
+// handler authorizes the caller and finds the method.
+func (s *Server) handler(peer Peer, method string) (Handler, error) {
+	if err := s.Authorize(peer, method); err != nil {
 		if CodeOf(err) == "" {
 			err = Errorf(CodeDenied, "%v", err)
 		}
-		return nil, err
+		return Handler{}, err
 	}
-	h, ok := s.Handlers[req.Method]
+	h, ok := s.Handlers[method]
 	if !ok {
-		return nil, Errorf(CodeUnknownMethod, "unknown method %q", req.Method)
+		return Handler{}, Errorf(CodeUnknownMethod, "unknown method %q", method)
 	}
-	timeout := h.Timeout
-	if timeout <= 0 {
-		timeout = s.timeout()
+	return h, nil
+}
+
+func (s *Server) handlerTimeout(h Handler) time.Duration {
+	if h.Timeout > 0 {
+		return h.Timeout
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return h.Run(ctx, peer, req.Params)
+	return s.timeout()
 }
 
 func (s *Server) read(c *net.UnixConn) (Request, error) {
@@ -318,10 +339,13 @@ func (s *Server) maxPerUser() int {
 
 // longestTimeout is the longest any handler may run. The connection's write
 // deadline is set before the method is known, so it must allow the longest.
+// Streams are left out: each of their writes gets its own deadline.
 func (s *Server) longestTimeout() time.Duration {
 	longest := s.timeout()
 	for _, h := range s.Handlers {
-		longest = max(longest, h.Timeout)
+		if h.Stream == nil {
+			longest = max(longest, h.Timeout)
+		}
 	}
 	return longest
 }
