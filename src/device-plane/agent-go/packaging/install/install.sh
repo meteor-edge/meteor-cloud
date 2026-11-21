@@ -19,13 +19,24 @@
 #   --api-key KEY                    enroll by approval with an enrollment API key
 #   --name NAME                      device name to ask for
 #   --user USER                      give USER the meteorcli and meteorcli-admin groups (default: $SUDO_USER)
-#   --base-url URL                   where the release files are (also $METEORCLI_BASE_URL; file:// works)
+#   --base-url URL                   where the release files are (also $METEORCLI_BASE_URL; file:// works;
+#                                    default: this script's folder when SHA256SUMS is next to it,
+#                                    else the release it came from)
 #   --force                          install on a board this script is not for
 #   --no-start                       install only
 set -euo pipefail
 
 BOARD="@BOARD@"
 BASE_URL="${METEORCLI_BASE_URL:-@BASE_URL@}"
+# Run as a file from a folder of release files (make agent-go-dist, a CI
+# artifact): install those, not the published release. Piped from curl there
+# is no such folder.
+if [[ -z ${METEORCLI_BASE_URL:-} && -f ${BASH_SOURCE[0]:-} ]]; then
+	here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	if [[ -f $here/SHA256SUMS ]]; then
+		BASE_URL="file://$here"
+	fi
+fi
 BIN=/usr/local/bin/meteorcli
 UNIT_DIR=/etc/systemd/system
 

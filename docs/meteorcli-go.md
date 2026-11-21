@@ -76,10 +76,13 @@ Running it again upgrades in place. To roll back to Python, run the Python `inst
 
 To try a pull request before it is merged:
 1. Download the `meteorcli-go-<sha>` artifact from the CI run's Summary page and unzip it on the device.
-2. Run `sudo bash install-rpi.sh --base-url file://$PWD`.
+2. Run `sudo bash install-rpi.sh` in that folder.
 
-`make agent-go-dist` builds the same files locally. You can serve them with
-`python3 -m http.server` and point `--base-url` at your laptop.
+`make agent-go-dist` builds the same files locally (on a laptop or on the device itself, with Go
+1.24+), versioned `0.0.0-dev+<commit>`. Run as a file, the installer installs the files next to
+it when `SHA256SUMS` is there; piped from curl, it downloads the release it came from.
+`--base-url` overrides both, e.g. a laptop serving `dist/` with `python3 -m http.server`.
+`meteorcli --version` shows which build is installed.
 
 Not in the Go agent yet: Wi-Fi, WireGuard and `update_agent`. An installed device is online with
 its inventory, MQTT status, metrics and events, runs reboot, shutdown and user actions from the

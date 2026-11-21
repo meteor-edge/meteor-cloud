@@ -242,7 +242,7 @@ agent-go-build: ## Go meteorcli: static binaries for linux arm64, arm v6, amd64 
 	cd src/device-plane/agent-go && ./scripts/build.sh bin
 
 agent-go-dist: ## Go meteorcli: release files (binaries, packaging, install-rpi.sh, SHA256SUMS) into src/device-plane/agent-go/dist
-	cd src/device-plane/agent-go && ./scripts/dist.sh dist 0.0.0-dev
+	cd src/device-plane/agent-go && ./scripts/dist.sh dist "0.0.0-dev+$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 agent-go-install-test: ## Go meteorcli: board installer end to end under systemd in a container (Docker, --privileged)
 	cd src/device-plane/agent-go && ./test/install/run.sh
