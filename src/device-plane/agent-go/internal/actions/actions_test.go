@@ -82,7 +82,7 @@ func TestActionsRunInOrderAndReport(t *testing.T) {
 
 	// In the server's order (the contract suite records it), and the reboot's
 	// done report goes out on its own before the reboot starts.
-	if !slices.Equal(h.ops, []string{"power.reboot", "users.set_password", "users.add"}) {
+	if !slices.Equal(h.ops, []string{"power.reboot", "users.set_password", "users.add", "update.start"}) {
 		t.Errorf("helper ops = %v", h.ops)
 	}
 	if reportedBeforeReboot != 1 {
@@ -102,7 +102,8 @@ func TestActionsRunInOrderAndReport(t *testing.T) {
 	for _, c := range reports {
 		all = append(all, results(t, c)...)
 	}
-	if len(all) != 5 {
+	// update_agent is reported later, from the updater's outcome.
+	if len(all) != 4 {
 		t.Fatalf("results = %+v", all)
 	}
 	byID := map[string]api.ActionResult{}
@@ -115,8 +116,8 @@ func TestActionsRunInOrderAndReport(t *testing.T) {
 	if byID["a4"].State != "failed" || !strings.HasPrefix(strings.ToLower(byID["a4"].Error), "unsupported") {
 		t.Errorf("unknown kind = %+v", byID["a4"])
 	}
-	if byID["a5"].State != "failed" || !strings.HasPrefix(strings.ToLower(byID["a5"].Error), "unsupported") {
-		t.Errorf("update_agent stub = %+v", byID["a5"])
+	if _, ok := byID["a5"]; ok {
+		t.Errorf("update_agent reported before the update finished: %+v", byID["a5"])
 	}
 	if reports[0].Header.Get("Authorization") != "Bearer "+agenttest.Token {
 		t.Errorf("report auth = %q", reports[0].Header.Get("Authorization"))
@@ -248,8 +249,8 @@ func TestModuleCollectsOnSignal(t *testing.T) {
 }
 
 func TestKinds(t *testing.T) {
-	if got := Kinds(); !slices.Equal(got, []string{"reboot", "shutdown", "set_password", "add_user"}) {
-		t.Errorf("Kinds = %v (update_agent is a stub and not advertised)", got)
+	if got := Kinds(); !slices.Equal(got, []string{"reboot", "shutdown", "set_password", "add_user", "update_agent"}) {
+		t.Errorf("Kinds = %v", got)
 	}
 }
 

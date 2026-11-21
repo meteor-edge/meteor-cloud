@@ -19,8 +19,32 @@ amd64 | x86_64) arch=amd64 ;;
 arm64 | aarch64) arch=arm64 ;;
 *) echo "unsupported Docker platform: $arch" >&2; exit 1 ;;
 esac
-CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=systemd-test" \
-	-o "$ctx/meteorcli" ./cmd/meteorcli
+# The updater checks use a throwaway release key that only these builds trust.
+keys="$(go run ./tools/release genkey)"
+test_priv="$(sed -n 's/^private //p' <<<"$keys")"
+test_pub="$(sed -n 's/^public //p' <<<"$keys")"
+build() { # build <out> <version>
+	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+		-ldflags "-s -w -X main.version=$2 -X meteorcloud/meteorcli/internal/update.releaseKeys=$test_pub" -o "$1" ./cmd/meteorcli
+}
+sign() { # sign <dir> <version> [private key]
+	METEORCLI_RELEASE_SIGNING_KEY="${3:-$test_priv}" go run ./tools/release sign "$1" "$2" >/dev/null
+}
+build "$ctx/meteorcli" systemd-test
+asset="meteorcli-linux-$arch"
+mkdir -p "$ctx"/releases/{good,broken,unsigned,foreign}
+build "$ctx/releases/good/$asset" 0.2.0-systemd.1
+sign "$ctx/releases/good" 0.2.0-systemd.1
+# Passes the --version check, then exits at start.
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "meteorcli 0.3.0-broken"; exit 0; }\necho "broken build" >&2\nexit 1\n' \
+	>"$ctx/releases/broken/$asset"
+chmod 0755 "$ctx/releases/broken/$asset"
+sign "$ctx/releases/broken" 0.3.0-broken
+build "$ctx/releases/unsigned/$asset" 0.4.0-unsigned
+cp "$ctx/releases/unsigned/$asset" "$ctx/releases/foreign/"
+sign "$ctx/releases/unsigned" 0.4.0-unsigned
+rm "$ctx/releases/unsigned/meteorcli-release.json.sig"
+sign "$ctx/releases/foreign" 0.4.0-unsigned "$(go run ./tools/release genkey | sed -n 's/^private //p')"
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$ctx/holdconn" ./test/systemd/holdconn
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$ctx/fakeserver" ./test/systemd/fakeserver
 cp -r packaging test/systemd/Dockerfile "$ctx/"
@@ -231,7 +255,68 @@ fi
 expect 0 "" "no enrollment secret in any journal" -- \
 	ctr sh -c '! journalctl --no-pager | grep -E -q "systemdtest(devicetoken|regtoken|apikey|bootkey|claimsecret)"'
 
+# ------------------------------------------------------------------ updater
+# update_agent from the console: the agent asks the helper, which starts
+# meteorcli-update.service; the updater checks the signed release, keeps the
+# installed binary as meteorcli.previous, swaps, restarts the agent and waits
+# for its heartbeat, else rolls back. The fake server hands out the action
+# once and logs each result as name=<id>:<state>.
+update_action() { ctr sh -c "printf '{\"id\":\"$1\",\"kind\":\"update_agent\",\"from_version\":\"x\"}' >/var/lib/fakeserver/action"; }
+outcome=/var/lib/meteorcli/state/agent-update-outcome.json
+
+expect 0 "Release URL:    file:///srv/releases/good" "root points the updater at a release" -- \
+	ctr meteorcli config --release-url file:///srv/releases/good
+start="$(now_ms)"
+update_action 0f1e2d3c-0000-4000-8000-00000000000a
+if wait_for "name=0f1e2d3c-0000-4000-8000-00000000000a:done" "$start" 120 >/dev/null; then
+	pass "update_agent to a good build is reported done"
+else
+	fail "no done report for the update to a good build"
+fi
+expect 0 "meteorcli 0.2.0-systemd.1" "the new binary is installed" -- ctr meteorcli --version
+expect 0 "meteorcli systemd-test" "the replaced binary is kept as meteorcli.previous" -- ctr /usr/local/bin/meteorcli.previous --version
+expect 0 "Agent:          running 0.2.0-systemd.1 (enrolled)" "the agent runs the new version" -- as alice status
+expect 0 "new version sent a heartbeat" "the updater waited for the new version's heartbeat" -- \
+	ctr journalctl -u meteorcli-update.service --no-pager
+expect 0 "" "the reported update leaves no pending file" -- ctr test ! -e /var/lib/meteorcli/state/agent-update.json
+
+expect 0 "Release URL:    file:///srv/releases/broken" "root points the updater at a build that exits at start" -- \
+	ctr meteorcli config --release-url file:///srv/releases/broken
+start="$(now_ms)"
+update_action 0f1e2d3c-0000-4000-8000-00000000000b
+if wait_for "name=0f1e2d3c-0000-4000-8000-00000000000b:failed" "$start" 180 >/dev/null; then
+	pass "update_agent to a build that exits at start is reported failed"
+else
+	fail "no failed report for the update to a broken build"
+fi
+expect 0 "meteorcli 0.2.0-systemd.1" "the previous binary is back" -- ctr meteorcli --version
+expect 0 "active" "meteorcli.service runs again" -- ctr systemctl is-active meteorcli.service
+expect 0 "Agent:          running 0.2.0-systemd.1 (enrolled)" "the agent runs the previous version" -- as alice status
+expect 0 "rolled back to 0.2.0-systemd.1" "the console is told why" -- ctr journalctl -u fakeserver.service --no-pager
+
+expect 1 "needs the meteorcli-admin group" "carol (meteorcli) cannot start an update" -- as carol update
+expect 0 "Release URL:    file:///srv/releases/unsigned" "root points the updater at an unsigned release" -- \
+	ctr meteorcli config --release-url file:///srv/releases/unsigned
+ctr rm -f "$outcome"
+expect 0 "Update started (meteorcli-update.service)" "alice (meteorcli-admin) starts an update without sudo" -- as alice update
+for _ in $(seq 60); do ctr test -e "$outcome" && break; sleep 1; done
+expect 0 "not signed by a MeteorCloud release key" "the unsigned release is refused" -- ctr cat "$outcome"
+expect 0 "meteorcli 0.2.0-systemd.1" "nothing was installed from the unsigned release" -- ctr meteorcli --version
+
+expect 0 "Release URL:    file:///srv/releases/foreign" "root points the updater at a release signed by another key" -- \
+	ctr meteorcli config --release-url file:///srv/releases/foreign
+start="$(now_ms)"
+update_action 0f1e2d3c-0000-4000-8000-00000000000c
+if wait_for "name=0f1e2d3c-0000-4000-8000-00000000000c:failed" "$start" 120 >/dev/null; then
+	pass "update_agent to a release signed by another key is reported failed"
+else
+	fail "no failed report for the release signed by another key"
+fi
+expect 0 "meteorcli 0.2.0-systemd.1" "nothing was installed from the foreign release" -- ctr meteorcli --version
+expect 0 "action_id=0f1e2d3c-0000-4000-8000-00000000000c" "the helper journal records update.start with the action" -- ctr journalctl -u meteorcli-helper.service --no-pager
+
 if [[ $failures -gt 0 ]]; then
+	echo "--- updater journal"; ctr journalctl -u meteorcli-update.service --no-pager | tail -40
 	echo "--- meteorcli journal"; ctr journalctl -u meteorcli.service -u meteorcli-helper.service --no-pager | tail -40
 	echo "$failures check(s) failed"
 	exit 1

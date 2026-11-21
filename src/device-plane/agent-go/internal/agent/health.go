@@ -40,6 +40,8 @@ type moduleHealth struct {
 	lastErr  string
 	since    time.Time
 	lastTick time.Time
+	// lastOK is the module's last success (the heartbeat: the server accepted it).
+	lastOK time.Time
 }
 
 // NewHealth returns an empty registry.
@@ -100,6 +102,25 @@ func (h *Health) Tick(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.entry(name).lastTick = h.now()
+}
+
+// Succeeded records that the module's work succeeded just now (the heartbeat:
+// the server accepted it). The updater waits for this on a new version.
+func (h *Health) Succeeded(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.entry(name).lastOK = h.now()
+}
+
+// LastSuccess returns when Succeeded was last called for name (zero: never
+// since this agent started).
+func (h *Health) LastSuccess(name string) time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if e, ok := h.m[name]; ok {
+		return e.lastOK
+	}
+	return time.Time{}
 }
 
 // Get returns one module's health.

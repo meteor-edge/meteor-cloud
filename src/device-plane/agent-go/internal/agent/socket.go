@@ -14,6 +14,7 @@ import (
 
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/bus"
+	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/identity"
 	"meteorcloud/meteorcli/internal/localrpc"
 )
@@ -48,6 +49,7 @@ var socketPolicy = map[string]access{
 	"mqtt.test":      adminAccess,
 	"logs.list":      readAccess,
 	"logs.show":      readAccess,
+	"update.start":   adminAccess,
 }
 
 // StatusReply answers `meteorcli status`. It says whether secrets exist, never
@@ -69,6 +71,9 @@ type StatusReply struct {
 	HeartbeatSeconds int                         `json:"heartbeat_seconds"`
 	MQTTConnection   *bus.State                  `json:"mqtt_connection,omitempty"`
 	Modules          map[string]api.ModuleHealth `json:"modules"`
+	// LastHeartbeat is when the server last accepted a heartbeat from this
+	// agent process (nil: not yet). The updater waits for it on a new version.
+	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 }
 
 // Agent states shown by status (the identity's state).
@@ -198,6 +203,14 @@ func (m *SocketModule) handlers(d Deps) map[string]localrpc.Handler {
 		for name, handler := range logsHandlers(d) {
 			h[name] = handler
 		}
+		// `meteorcli update`: the helper starts the updater in its own unit.
+		h["update.start"] = localrpc.Handler{Timeout: time.Minute, Run: func(ctx context.Context, _ localrpc.Peer, _ json.RawMessage) (any, error) {
+			var reply helper.UpdateStartReply
+			if err := d.Helper.Call(ctx, "update.start", helper.UpdateStartRequest{}, &reply); err != nil {
+				return nil, err
+			}
+			return reply, nil
+		}}
 	}
 	return h
 }
@@ -222,7 +235,18 @@ func status(d Deps) StatusReply {
 		HeartbeatSeconds: st.HeartbeatSeconds,
 		Modules:          d.Health.Snapshot(),
 		MQTTConnection:   mqttState(d),
+		LastHeartbeat:    lastHeartbeat(d.Health),
 	}
+}
+
+// lastHeartbeat is the heartbeat module's last success, nil when none.
+func lastHeartbeat(h *Health) *time.Time {
+	t := h.LastSuccess("heartbeat")
+	if t.IsZero() {
+		return nil
+	}
+	t = t.UTC()
+	return &t
 }
 
 // mqttState is the connection for status; nil when the device has no MQTT.

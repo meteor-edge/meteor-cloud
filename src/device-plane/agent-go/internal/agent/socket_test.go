@@ -290,5 +290,12 @@ func TestStatusStates(t *testing.T) {
 	load()
 	if s := status(d); s.State != StatePendingApproval || s.PendingRequestID != "r-1" || !s.PendingClaim {
 		t.Errorf("status %+v", s)
+	} // The updater waits for last_heartbeat on a new version.
+	if s := status(d); s.LastHeartbeat != nil {
+		t.Errorf("last_heartbeat before any heartbeat: %v", s.LastHeartbeat)
+	}
+	d.Health.Succeeded("heartbeat")
+	if s := status(d); s.LastHeartbeat == nil || time.Since(*s.LastHeartbeat) > time.Minute {
+		t.Errorf("last_heartbeat = %v", s.LastHeartbeat)
 	}
 }

@@ -2,14 +2,25 @@ package actions
 
 import (
 	"context"
+	"time"
 
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/helper"
+	"meteorcloud/meteorcli/internal/state"
 )
 
 // caller is the part of the helper client actions use.
 type caller interface {
 	Call(ctx context.Context, op string, params, out any) error
+}
+
+// env is what an action kind may use.
+type env struct {
+	helper caller
+	// state keeps what must survive the restart an action causes (update_agent).
+	state   *state.Store
+	version string
+	now     func() time.Time
 }
 
 // kind is how one action kind runs.
@@ -19,7 +30,10 @@ type kind struct {
 	reportFirst bool
 	// advertised kinds go into capabilities.actions; a stub is not advertised.
 	advertised bool
-	run        func(ctx context.Context, h caller, a api.Action) error
+	// later kinds report when they have finished, not when run returns
+	// (update_agent: the updater restarts the agent and writes an outcome).
+	later bool
+	run   func(ctx context.Context, e env, a api.Action) error
 }
 
 // registry lists every action kind. Add a kind: a function and one line here.
@@ -28,7 +42,7 @@ var registry = map[string]kind{
 	"shutdown":     {reportFirst: true, advertised: true, run: helperOp("power.shutdown")},
 	"set_password": {advertised: true, run: setPassword},
 	"add_user":     {advertised: true, run: addUser},
-	"update_agent": {run: updateAgent},
+	"update_agent": {advertised: true, later: true, run: startUpdate},
 }
 
 // order is the order of Kinds (the Python agent's capabilities order).
@@ -45,9 +59,9 @@ func Kinds() []string {
 	return out
 }
 
-func helperOp(op string) func(context.Context, caller, api.Action) error {
-	return func(ctx context.Context, h caller, _ api.Action) error {
-		return h.Call(ctx, op, nil, nil)
+func helperOp(op string) func(context.Context, env, api.Action) error {
+	return func(ctx context.Context, e env, _ api.Action) error {
+		return e.helper.Call(ctx, op, nil, nil)
 	}
 }
 
@@ -58,12 +72,12 @@ func str(p *string) string {
 	return *p
 }
 
-func setPassword(ctx context.Context, h caller, a api.Action) error {
-	return h.Call(ctx, "users.set_password", helper.SetPasswordRequest{Username: str(a.Username), Password: str(a.Password)}, nil)
+func setPassword(ctx context.Context, e env, a api.Action) error {
+	return e.helper.Call(ctx, "users.set_password", helper.SetPasswordRequest{Username: str(a.Username), Password: str(a.Password)}, nil)
 }
 
-func addUser(ctx context.Context, h caller, a api.Action) error {
-	return h.Call(ctx, "users.add", helper.AddUserRequest{
+func addUser(ctx context.Context, e env, a api.Action) error {
+	return e.helper.Call(ctx, "users.add", helper.AddUserRequest{
 		Username: str(a.Username), Password: str(a.Password), Sudo: a.Sudo, AuthorizedKey: str(a.AuthorizedKey),
 	}, nil)
 }
@@ -74,8 +88,3 @@ func addUser(ctx context.Context, h caller, a api.Action) error {
 type unsupported string
 
 func (u unsupported) Error() string { return string(u) }
-
-// errUpdateLater is the update_agent stub's answer until the Go updater exists.
-const errUpdateLater = unsupported("Unsupported: update_agent is not available in this agent version yet; update with the installer")
-
-func updateAgent(context.Context, caller, api.Action) error { return errUpdateLater }

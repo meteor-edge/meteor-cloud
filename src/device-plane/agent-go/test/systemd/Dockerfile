@@ -9,6 +9,8 @@ RUN apt-get update \
       systemd-firstboot.service systemd-remount-fs.service
 
 COPY meteorcli holdconn fakeserver /usr/local/bin/
+# Releases for the updater checks (run.sh builds and signs them with a test key).
+COPY releases /srv/releases
 COPY packaging/meteorcli.service packaging/meteorcli-helper.service packaging/meteorcli-helper.socket /etc/systemd/system/
 COPY packaging/sysusers.d/meteorcli.conf /usr/lib/sysusers.d/meteorcli.conf
 COPY packaging/tmpfiles.d/meteorcli.conf /usr/lib/tmpfiles.d/meteorcli.conf
@@ -38,7 +40,7 @@ RUN printf '{"version":1,"domain":"meteor.example"}\n' > /etc/meteorcli/config.j
 # A fake control plane for the enrollment checks (test only), as a unit so it
 # survives the container restart that stands in for a reboot.
 RUN mkdir -p /var/lib/fakeserver \
- && printf '[Unit]\nDescription=fake control plane (test)\nBefore=meteorcli.service\n[Service]\nExecStart=/usr/local/bin/fakeserver\n[Install]\nWantedBy=multi-user.target\n' \
+ && printf '[Unit]\nDescription=fake control plane (test)\nBefore=meteorcli.service\n[Service]\nExecStart=/usr/local/bin/fakeserver -interval 5\n[Install]\nWantedBy=multi-user.target\n' \
       > /etc/systemd/system/fakeserver.service \
  && systemctl enable fakeserver.service
 

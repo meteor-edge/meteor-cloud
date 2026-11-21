@@ -90,7 +90,7 @@ func (c *Client) SetServer(baseURL, caFile string) error {
 	}
 	hc := c.fixed
 	if hc == nil && base != "" {
-		tlsConfig, err := tlsConfig(caFile)
+		tlsConfig, err := TLSConfig(caFile)
 		if err != nil {
 			return err
 		}
@@ -120,7 +120,9 @@ func (c *Client) target() (string, *http.Client) {
 	return c.base, c.http
 }
 
-func tlsConfig(caFile string) (*tls.Config, error) {
+// TLSConfig is the client TLS every outside call uses: TLS 1.2+, the system CAs
+// plus the optional pinned CA (never InsecureSkipVerify).
+func TLSConfig(caFile string) (*tls.Config, error) {
 	pool, err := x509.SystemCertPool()
 	if err != nil || pool == nil {
 		pool = x509.NewCertPool()

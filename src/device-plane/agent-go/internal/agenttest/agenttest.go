@@ -63,6 +63,8 @@ func Deps(t *testing.T, cp *fakecp.Server, mq *MQTT, files map[string]string) ag
 	must(t, err)
 	outbox, err := state.NewOutbox(filepath.Join(p.StateDir, "outbox"), 0)
 	must(t, err)
+	store, err := state.NewStore(p.StateDir)
+	must(t, err)
 	root := t.TempDir()
 	for name, content := range files {
 		path := filepath.Join(root, name)
@@ -72,7 +74,7 @@ func Deps(t *testing.T, cp *fakecp.Server, mq *MQTT, files map[string]string) ag
 	errs := &agent.ErrorCounter{}
 	log := agent.NewCountingLogger(io.Discard, slog.LevelDebug, errs)
 	return agent.Deps{
-		Version: "1.2.3", Paths: p, API: client, Identity: src, Outbox: outbox,
+		Version: "1.2.3", Paths: p, API: client, Identity: src, Outbox: outbox, State: store,
 		Health: agent.NewHealth(), Signals: agent.NewSignals(), Log: log,
 		Bus: bus.NewRouter(log), Errors: errs,
 		Host: &platform.Host{
