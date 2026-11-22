@@ -65,6 +65,8 @@ var commands = []command{
 	{name: "request-token", aliases: []string{"request"}, summary: "Ask an administrator to approve this device (the agent waits for it).", run: runRequest},
 	{name: "status", summary: "Show this device's configuration and enrollment (never secrets).", run: runStatus},
 	{name: "test", summary: "Check that the server answers and the API key is valid.", run: runTest},
+	{name: "update", summary: "Update meteorcli to the newest signed release (rolls back if it does not come up).", run: runUpdate},
+	{name: "updater", summary: "Run the updater as root (meteorcli-update.service runs this).", run: runUpdater},
 }
 
 // Main runs the command line and returns the exit code.

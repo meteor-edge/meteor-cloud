@@ -4,7 +4,8 @@
 // moment a password travels), hands each to the root helper, and reports what
 // happened. Each action is handed out once, so every result is kept in the
 // outbox until the server accepted it, across restarts and reboots. Passwords
-// are never logged or stored.
+// are never logged or stored. update_agent starts the updater through the
+// helper and is reported from the updater's outcome file once it settled.
 package actions
 
 import (
@@ -51,6 +52,10 @@ func (m *Module) Run(ctx context.Context, d agent.Deps) error {
 	if d.Helper == nil {
 		r.helper = noHelper{}
 	}
+	// settled checks a started agent update: at once (the updater restarted
+	// this agent) and every settleEvery while one runs.
+	settled := time.NewTimer(0)
+	defer settled.Stop()
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
 	arm := func(retry time.Duration) {
@@ -67,6 +72,12 @@ func (m *Module) Run(ctx context.Context, d agent.Deps) error {
 		case <-waiting.C():
 			waiting.Take()
 			r.collect(ctx)
+			settled.Reset(settleEvery)
+			arm(r.flush(ctx))
+		case <-settled.C:
+			if r.settle(ctx) {
+				settled.Reset(settleEvery)
+			}
 			arm(r.flush(ctx))
 		case <-timer.C:
 			arm(r.flush(ctx))
@@ -82,6 +93,19 @@ type runner struct {
 	// held are results that could not be written to the outbox yet (disk full).
 	// flush retries them before sending anything to the server.
 	held []api.ActionResult
+	// clock replaces time.Now in tests.
+	clock func() time.Time
+}
+
+func (r *runner) now() time.Time {
+	if r.clock != nil {
+		return r.clock()
+	}
+	return time.Now()
+}
+
+func (r *runner) env() env {
+	return env{helper: r.helper, state: r.d.State, version: r.d.Version, now: r.now}
 }
 
 // collect fetches the waiting actions and runs them in the order the server
@@ -121,12 +145,14 @@ func (r *runner) collect(ctx context.Context) {
 			r.flush(ctx)
 		}
 		actx, cancel := context.WithTimeout(ctx, actionTimeout)
-		err := k.run(actx, r.helper, a)
+		err := k.run(actx, r.env(), a)
 		cancel()
 		switch {
 		case err != nil:
 			d.Log.Error("action failed", "kind", a.Kind, "id", a.ID, "err", err)
 			r.put(ctx, a, err)
+		case k.later:
+			d.Log.Info("action started; reported when it has finished", "kind", a.Kind, "id", a.ID)
 		case !k.reportFirst:
 			d.Log.Info("action done", "kind", a.Kind, "id", a.ID)
 			r.put(ctx, a, nil)
@@ -139,7 +165,19 @@ func (r *runner) collect(ctx context.Context) {
 // put keeps one result in the outbox. On a write failure it retains the result
 // in memory for flush to retry, and returns the persistence error.
 func (r *runner) put(ctx context.Context, a api.Action, err error) error {
-	res := api.ActionResult{ID: a.ID, State: api.ActionDone}
+	res := resultOf(a.ID, err)
+	if perr := r.writeResult(ctx, res); perr != nil {
+		r.held = append(r.held, res)
+		r.d.Log.Error("keep an action result", "id", a.ID, "err", perr)
+		return perr
+	}
+	return nil
+}
+
+// resultOf is the report of one action: done, or failed with the redacted
+// error cut to the contract's length.
+func resultOf(id string, err error) api.ActionResult {
+	res := api.ActionResult{ID: id, State: api.ActionDone}
 	if err != nil {
 		msg := agent.Redact(err.Error())
 		if len(msg) > maxError {
@@ -147,12 +185,7 @@ func (r *runner) put(ctx context.Context, a api.Action, err error) error {
 		}
 		res.State, res.Error = api.ActionFailed, msg
 	}
-	if perr := r.writeResult(ctx, res); perr != nil {
-		r.held = append(r.held, res)
-		r.d.Log.Error("keep an action result", "id", a.ID, "err", perr)
-		return perr
-	}
-	return nil
+	return res
 }
 
 // writeResult stores one result, retrying once after a short wait when the

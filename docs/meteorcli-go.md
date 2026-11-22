@@ -22,19 +22,20 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | Identity: register, request-token and claim run by the agent, background approval polling, credential storage, MQTT credential refresh, 401 handling | Done |
 | Heartbeat module; telemetry (inventory, metrics); platform adapters (Raspberry Pi, Jetson, generic Linux) | Done |
 | MQTT: `bus` (one session, TLS with the stored CA, reconnect with backoff), `mqtt` module (status, ping, `sync_desired`), `metrics` module (60 s metrics, app and journal events) | Done |
-| Actions: `reboot`, `shutdown`, `set_password`, `add_user` through the helper; `update_agent` reported unsupported | Done (the updater comes later) |
+| Actions: `reboot`, `shutdown`, `set_password`, `add_user` through the helper | Done |
 | Deploy: signed desired software, streamed artifact downloads with SHA-256, `systemd`, `docker` and `docker_compose` runtimes through the helper, health gate and rollback | Done |
 | `appcreds` module: SDK tokens of bound workloads rotated in place | Done |
 | Network: `wifi` module (changes with commit-confirm, status reports), `wireguard` module (device tunnel, SSH keys for the browser terminal); `logs` for the console's Logs window | Done |
-| Module: update | Later pull request |
+| Updater: `update_agent` and `meteorcli update` start `meteorcli updater` (signed release manifest, SHA-256, `meteorcli.previous`, heartbeat health gate, automatic rollback); the edge release job signs the manifest | Done |
 
 ## Files
 
 | Path | Owner, mode | Holds |
 | --- | --- | --- |
-| `/etc/meteorcli/config.json` | root:meteor 0640 | Server (`domain`, `api_base`, `server_url`), optional pinned CA (`ca_file`), `enroll_name` (from a meteorenv file), `ssh_user` (the account the console's browser terminal signs in as; the installer sets the user who ran it). Written by root, read by the agent and the helper. |
+| `/etc/meteorcli/config.json` | root:meteor 0640 | Server (`domain`, `api_base`, `server_url`), optional pinned CA (`ca_file`), `enroll_name` (from a meteorenv file), `ssh_user` (the account the console's browser terminal signs in as; the installer sets the user who ran it), `release_url` (where the updater reads releases; empty for the `meteorcli-go-edge` release). Written by root, read by the agent, the helper and the updater. |
 | `/var/lib/meteorcli/identity/` | meteor 0700, files 0600 | `device.json` (device id, organization, name, heartbeat interval), `device-token`, `mqtt.json`, `mqtt-ca.crt`, `api-key` (until enrolled), `pending-claim.json` (request id and claim secret while waiting), `wireguard/` keys. Written by the agent only, except `config` (root) storing an API key and removing a server's files. |
-| `/var/lib/meteorcli/state/` | meteor 0700 | Versioned module state (`signing-keys.json`, `applied-software.json`, `wireguard.json` (the last tunnel settings, no private key), ...) and `outbox/` |
+| `/var/lib/meteorcli/state/` | meteor 0700 | Versioned module state (`signing-keys.json`, `applied-software.json`, `wireguard.json` (the last tunnel settings, no private key), `agent-update.json` (an `update_agent` action waiting for the updater), `agent-update-outcome.json` (what the last update did; written by the updater as root, handed to meteor), ...) and `outbox/` |
+| `/usr/local/bin/meteorcli.previous` | root 0755 | The binary the last update replaced (a hard link); the updater puts it back when the new one does not come up |
 | `/var/lib/meteorcli/artifacts/` | meteor 0750 | Downloaded release artifacts (`<artifact id>` and `<artifact id>.sha256`) |
 | `/var/lib/meteorcli/compose/` | meteor 0700 | One directory per Compose project (0755): the compose file or unpacked bundle, `.env.meteorcloud` (0600) and `compose.meteorcloud.json` (0600) |
 | `/var/lib/meteorcli/app-credentials/` | meteor 0700 | Application tokens of bound workloads, one directory per workload: `token` (0644, mounted read-only into the container) and `meta.json` (0600) |
@@ -88,9 +89,8 @@ it when `SHA256SUMS` is there; piped from curl, it downloads the release it came
 `--base-url` overrides both, e.g. a laptop serving `dist/` with `python3 -m http.server`.
 `meteorcli --version` shows which build is installed.
 
-Not in the Go agent yet: Wi-Fi, WireGuard and `update_agent`. An installed device is online with
-its inventory, MQTT status, metrics and events, runs reboot, shutdown and user actions from the
-console, and installs releases (systemd, docker, docker_compose); use a spare device.
+Once installed, a device updates itself from the console (**Update meteorcli**) or with
+`meteorcli update`; see [Updating](#updating). Running the installer again also upgrades.
 
 ## Moving a device from the Python agent
 
@@ -130,7 +130,7 @@ The modules that own them recreate them.
 
 | Command | Same as Python | Notes |
 | --- | --- | --- |
-| `meteorcli config --domain HOST [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME]` | Yes | Same URL rules (IPs and localhost use HTTP, `api.<ip>` is stripped). Changing the server removes the old server's credentials. `--ssh-user` is new (Python used the user that ran the installer). Needs root. |
+| `meteorcli config --domain HOST [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--release-url URL]` | Yes | Same URL rules (IPs and localhost use HTTP, `api.<ip>` is stripped). Changing the server removes the old server's credentials. `--ssh-user` is new (Python used the user that ran the installer). `--release-url` (`https://`, `http://` or `file://`; `default` resets it) is where the updater reads releases. Needs root. |
 | `meteorcli config --show` | Yes | Never prints secrets. |
 | `meteorcli config import [--from DIR] [--force]` | New | See above. |
 | `meteorcli config meteorenv` | Python service did it at start | Applies a first-boot `meteorenv` file; `meteorcli.service` runs it as root before the agent. See [Enrollment](#enrollment). |
@@ -143,6 +143,8 @@ The modules that own them recreate them.
 | `meteorcli logs [SOURCE] [--json] [-n N] [--since S] [--grep T] [-f]` | Yes, same arguments | Without a source lists the sources (journal, systemd units, Docker containers, `/var/log` files); `SOURCE` is `journal`, `systemd:UNIT`, `docker:NAME` or `file:PATH`. Also takes the Python helper's `logs list` and `logs show KIND [NAME] [--project P] [--lines N] [--since S] [--grep T] [--follow]`, which the console runs. Members of `meteorcli` read through the agent and the helper; root reads in-process (works with the agent stopped). |
 | `meteorcli mqtt-test [TOPIC] [MESSAGE]` | Yes, same arguments | The agent publishes through its own session (client id `device-<id>`), not retained; default a small JSON object on `status`. Fails with the last connection error while the agent is not connected. Needs `meteorcli-admin` (it speaks as the device). |
 | `meteorcli mqtt-listen [TOPIC] [--timeout S]` | Yes, same arguments | Prints `<topic> <payload>` for each command the agent's session receives (only `commands` is subscribed). Needs `meteorcli`. |
+| `meteorcli update` | Mostly | Asks the agent to start the updater and returns; follow it with `journalctl -u meteorcli-update -f`. Python's `--check`, `--to` and `--rollback` are not there yet. Needs `meteorcli-admin`. |
+| `meteorcli updater [--action ID] [--health-timeout 3m]` | New | The updater itself (root); `meteorcli-update.service` runs it. Root may run it by hand to update at once and watch it. Exit 0 updated or already current, 1 otherwise. |
 | `meteorcli helper` | Service entry point | The root helper behind `meteorcli-helper.socket`. |
 | `meteorcli helper call OP [JSON]` | New | Sends one request to the helper; only the meteor user is served. For debugging and tests. |
 | `meteorcli -V`, `--version` | Yes | |
@@ -164,8 +166,8 @@ policy per command (`socketPolicy` in `internal/agent/socket.go`):
 | root | everything |
 
 Today the socket serves `status`, `test`, `register`, `enroll.request`, `enroll.claim`,
-`config.reload`, `module restart`, `mqtt.test` (admin), `mqtt.listen`, `logs.list` and `logs.show`
-(read); the other
+`config.reload`, `module restart`, `mqtt.test`, `update.start` (admin), `mqtt.listen`, `logs.list`
+and `logs.show` (read); the other
 commands arrive with their modules. The agent's own
 user (`meteor`) is always allowed, like root. `agent.sock` belongs to the `meteorcli` group, so an
 administrator is in **both** groups:
@@ -221,6 +223,7 @@ from the agent, which follows at most 8 logs at once.
 | `wireguard.apply` | `address`, `private_key`, `public_key`, `endpoint` (`host:port`), `allowed_ips` (single private hosts), `keepalive` | Renders `wg0.conf` (no hooks, every value checked), refuses tunnel hosts that route to the local network (`ip route get`), writes it 0600 and runs `wg-quick up`; does nothing when wg0 already runs the same config |
 | `wireguard.down`, `wireguard.show` | none | `wg-quick down` (or `ip link delete wg0`) / `wg show wg0 latest-handshakes` and `endpoints` |
 | `wireguard.endpoint` | `public_key`, `endpoint` (IP literal and port) | `wg set wg0 peer K endpoint E` (the agent resolved the server's name again) |
+| `update.start` | `action_id` (optional, letters, digits and `-`) | `systemd-run --unit=meteorcli-update --collect --no-block` with a sandbox (`ProtectSystem=strict`, writable only `/usr/local/bin` and `/var/lib/meteorcli`, `NoNewPrivileges`, `RuntimeMaxSec=30min`) running `/usr/local/bin/meteorcli updater [--action ID]`. One fixed unit name, so a second update is refused while one runs. Answers at once |
 | `ssh.authorized_keys` | `gateway_key`, `gateway_key_retired`, `ca_key`, `principal` | Keeps the managed lines in the `ssh_user`'s `~/.ssh/authorized_keys` (the gateway key, `cert-authority,principals="…" <ca> meteorcloud-ca`); the user comes from `config.json`, never the request, and is never root or a system account. Answers the CA the user trusts. An empty request changes nothing |
 | `compose.services`, `compose.up`, `compose.ps`, `compose.down` | `project` (`^[a-z0-9][a-z0-9_-]{0,62}$`), `file`, `env_file`, `override_file` (each directly in `/var/lib/meteorcli/compose/<project>/`), `force_recreate` | `docker compose -p <project> -f <file> [--env-file] config --services` / `[-f override] up -d --remove-orphans [--force-recreate]` (15 min) / `ps -a --format json` / `down --remove-orphans`; `services` and `ps` answer stdout only (warnings stay out of the parsed output) |
 
@@ -374,11 +377,75 @@ does not depend on it.
 
 When the heartbeat answer says `actions_pending`, the `actions` module collects the actions
 (`GET /actions`, the only time a password travels) and runs them in order through the helper.
-`reboot` and `shutdown` are reported `done` before they run. The other results are reported
-together afterwards; an unknown kind, and `update_agent` for now, are reported `failed` with an
-error that starts with `Unsupported`. Every result waits in the outbox (`state/outbox`, kind
+`reboot` and `shutdown` are reported `done` before they run. `update_agent` is reported once the
+update has settled (see [Updating](#updating)). The other results are reported together
+afterwards; an unknown kind is reported `failed` with an error that starts with `Unsupported`. Every result waits in the outbox (`state/outbox`, kind
 `action_report`) until the server accepted it, so a result survives a network outage and the
 reboot itself; reports are retried with backoff, at most 50 per request.
+
+### Updating
+
+`update_agent` from the console, or `meteorcli update` by a `meteorcli-admin`, goes through the
+root helper (`update.start`), which starts `meteorcli updater` as the transient unit
+`meteorcli-update.service`. It runs outside the agent's and the helper's units, so restarting them
+cannot stop it. For an action the agent first writes `state/agent-update.json`.
+
+1. **Release.** The updater reads `meteorcli-release.json` and `meteorcli-release.json.sig` from
+   `release_url` (default: the `meteorcli-go-edge` release). The manifest has the version and the
+   SHA-256 and size of each binary; the signature is ed25519 over its exact bytes, checked against
+   the release public key compiled into the binary (`internal/update/key.go`). An unsigned manifest,
+   or one signed by any other key, is refused before anything is downloaded. A redirect is followed
+   (GitHub release files redirect to their storage) but never from `https` to `http` on any hop and
+   never to a URL with credentials; no credential is sent. `release_url` is a folder URL without a
+   user name, password, query or fragment. `http://` and `file://` URLs are allowed because the signature, not the transport,
+   is what the updater trusts.
+2. **Version.** A release at the installed version, or older, ends with `already_current` (like the
+   Python updater). Versions compare as semver; build metadata (`+commit`) is ignored; edge builds
+   are `0.0.0-edge.<run number>+<commit>`.
+3. **Stage.** The binary for this CPU (`meteorcli-linux-arm64`, `-armv6`, `-amd64`) is downloaded to
+   `/usr/local/bin/.meteorcli.new` (the same filesystem, and `/tmp` is often `noexec`), checked
+   against the signed size and SHA-256, and run once with `--version`, which must print the
+   manifest's version. It needs the binary's size plus 16 MB free.
+4. **Swap.** The installed binary is kept as `/usr/local/bin/meteorcli.previous` (a hard link) and
+   the new one is renamed over `/usr/local/bin/meteorcli`, so the path is never missing.
+5. **Start.** `systemctl restart meteorcli.service` (it waits for the agent's `READY=1`), then the
+   running helper is stopped so its socket starts the new binary at the next request.
+6. **Health.** Within `--health-timeout` (3 minutes) the agent must report the new version on
+   `agent.sock` and, when enrolled, a heartbeat the server accepted since it started
+   (`last_heartbeat` in `status`); a refused credential (`credential_rejected`) is never healthy.
+   Not enrolled, it must keep answering for 10 s without a break. The check is tied to the
+   activation the restart created: systemd resets `NRestarts` on a manual restart, so any
+   automatic restart, or another `InvocationID`, means the new version crashed. That, a unit that
+   is no longer active, a failed start or the timeout count as unhealthy.
+7. **Rollback.** Then `meteorcli.previous` is put back (it stays as `.previous` too), the agent is
+   restarted on it and the helper stopped.
+
+The result goes to `state/agent-update-outcome.json`: `updated`, `already_current`, `failed`
+(nothing changed) or `rolled_back`, with the error. The `actions` module checks it every 10 s while
+an update runs, reports the action `done` (updated, already current) or `failed` with the
+updater's error (for example `meteorcli 0.3.0 did not start: …; rolled back to 0.2.0`), and removes
+both files once the result is in the outbox. Without an outcome after 30 minutes the action is
+reported failed. A lock (`/run/meteorcli-update/lock`) keeps a second updater from running.
+While an `update_agent` action waits for its outcome, a second `update_agent` is reported failed
+and `meteorcli update` (or `sudo meteorcli updater`) is refused, so the one outcome file is never
+replaced before the action is reported.
+
+Only the binary is replaced: unit files, sysusers.d and tmpfiles.d stay as the installer wrote
+them. A release that changes them needs the installer (`install-rpi.sh`) once.
+
+**Release signing.** `scripts/dist.sh` signs the manifest with `$METEORCLI_RELEASE_SIGNING_KEY`
+(`go run ./tools/release sign <dir> <version>`); the edge release job takes it from the repository
+secret of that name and uploads the binaries before the manifest. Without the secret the release is
+unsigned and devices refuse it. A new key pair comes from `go run ./tools/release genkey`: the
+private key goes into the secret, the public key into `internal/update/key.go` (several keys,
+comma separated, allow a rotation: ship a build that trusts both before signing with the new one).
+Test builds trust another key with `METEORCLI_RELEASE_KEYS=<public key> scripts/build.sh` (or
+`-ldflags -X meteorcloud/meteorcli/internal/update.releaseKeys=<key>`).
+
+Changed from the Python updater: one static binary is swapped instead of a virtualenv tree; the
+release is verified with an ed25519 signature as well as a checksum; health means a heartbeat from
+the new version, not only an active unit; `--check`, `--to`, `--allow-downgrade` and `--rollback`
+are not there yet.
 
 ### Deploy
 

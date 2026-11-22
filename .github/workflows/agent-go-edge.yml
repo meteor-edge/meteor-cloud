@@ -45,8 +45,16 @@ jobs:
           cache: false
       - name: Test
         run: go test -race ./...
-      - name: Release files
-        run: ./scripts/dist.sh "$RUNNER_TEMP/dist" "0.0.0-edge.${GITHUB_RUN_NUMBER}+${GITHUB_SHA::7}"
+      # The run number orders edge builds for the updater (0.0.0-edge.<run>).
+      # The manifest is signed with the release key; devices refuse an unsigned one.
+      - name: Release files (signed)
+        env:
+          METEORCLI_RELEASE_SIGNING_KEY: ${{ secrets.METEORCLI_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$METEORCLI_RELEASE_SIGNING_KEY" ]; then
+            echo "::warning::secret METEORCLI_RELEASE_SIGNING_KEY is not set: this edge release is unsigned and devices will not update to it"
+          fi
+          ./scripts/dist.sh "$RUNNER_TEMP/dist" "0.0.0-edge.${GITHUB_RUN_NUMBER}+${GITHUB_SHA::7}"
       - name: Installer under systemd
         run: ./test/install/run.sh
       - name: Publish the meteorcli-go-edge prerelease
@@ -65,8 +73,21 @@ jobs:
             # Move the tag to this commit, then replace the files.
             gh api -X PATCH "repos/$REPO/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
             gh release edit "$TAG" -R "$REPO" --prerelease --latest=false --notes "$notes"
-            # SHA256SUMS last: an install during the upload fails its checksum instead of mixing builds.
-            find "$RUNNER_TEMP/dist" -type f ! -name SHA256SUMS -print0 | xargs -0 gh release upload "$TAG" -R "$REPO" --clobber
+            # Unsigned (no secret): drop the previous signed manifest first, or a
+            # device would verify it and then fail on the new binaries.
+            if [ ! -f "$RUNNER_TEMP/dist/meteorcli-release.json.sig" ]; then
+              for asset in meteorcli-release.json meteorcli-release.json.sig; do
+                gh release delete-asset "$TAG" "$asset" -R "$REPO" --yes 2>/dev/null || true
+              done
+            fi
+            # Binaries first, then the signed manifest (an updater never sees a
+            # manifest for binaries not uploaded yet), SHA256SUMS last: an install or
+            # update during the upload fails its checksum instead of mixing builds.
+            find "$RUNNER_TEMP/dist" -type f ! -name SHA256SUMS ! -name 'meteorcli-release.json*' -print0 |
+              xargs -0 gh release upload "$TAG" -R "$REPO" --clobber
+            if [ -f "$RUNNER_TEMP/dist/meteorcli-release.json.sig" ]; then
+              gh release upload "$TAG" -R "$REPO" --clobber "$RUNNER_TEMP/dist/meteorcli-release.json" "$RUNNER_TEMP/dist/meteorcli-release.json.sig"
+            fi
             gh release upload "$TAG" -R "$REPO" --clobber "$RUNNER_TEMP/dist/SHA256SUMS"
           else
             gh release create "$TAG" -R "$REPO" --target "$GITHUB_SHA" --prerelease --latest=false \

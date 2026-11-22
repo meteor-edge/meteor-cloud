@@ -10,6 +10,7 @@ import (
 	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/localrpc"
+	"meteorcloud/meteorcli/internal/update"
 )
 
 // Environment variables the Python CLI read; kept so scripts keep working.
@@ -27,15 +28,22 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if len(args) > 0 && args[0] == "meteorenv" {
 		return runConfigMeteorenv(ctx, env, args[1:])
 	}
-	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--show] | import | meteorenv")
+	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--release-url URL] [--show] | import | meteorenv")
 	domain := fl.String("domain", "", "Server host or IP (meteorxx.com or 192.168.0.107:8000; or $"+envDomain+").")
 	apiBase := fl.String("api-base", "", "Override the derived API origin (http:// is allowed for local testing).")
 	useHTTP := fl.Bool("http", false, "Use HTTP instead of HTTPS (for local testing).")
 	apiKey := fl.String("api-key", "", "Enrollment API key (or $"+envAPIKey+"). Stored with 0600 permissions.")
 	sshUser := fl.String("ssh-user", "", "Account the console's browser terminal signs in as (the installer sets the user who ran it).")
+	releaseURL := fl.String("release-url", "", "Where 'meteorcli updater' reads releases ('default' for "+config.DefaultReleaseURL+").")
 	show := fl.Bool("show", false, "Print the stored configuration (never prints secrets).")
 	if code, done := parseFlags(fl, args); done {
 		return code
+	}
+	if *releaseURL != "" && *releaseURL != "default" {
+		if _, err := update.NewHTTPFetcher(*releaseURL, "", nil); err != nil {
+			fmt.Fprintf(env.Stderr, "error: --release-url: %v\n", err)
+			return 2
+		}
 	}
 	if *sshUser != "" {
 		if err := helper.ValidSSHUser(*sshUser); err != nil {
@@ -58,14 +66,22 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if key == "" {
 		key = normalizeSecret(env.Getenv(envAPIKey))
 	}
-	if *domain == "" && *apiBase == "" && key == "" && *sshUser == "" {
-		fmt.Fprintf(env.Stderr, "error: provide --domain, --api-base, --api-key and/or --ssh-user (or %s/%s).\n", envDomain, envAPIKey)
+	if *domain == "" && *apiBase == "" && key == "" && *sshUser == "" && *releaseURL == "" {
+		fmt.Fprintf(env.Stderr, "error: provide --domain, --api-base, --api-key, --ssh-user and/or --release-url (or %s/%s).\n", envDomain, envAPIKey)
 		return 2
 	}
 
-	var edit func(*config.Config)
-	if *sshUser != "" {
-		edit = func(c *config.Config) { c.SSHUser = *sshUser }
+	edit := func(c *config.Config) {
+		if *sshUser != "" {
+			c.SSHUser = *sshUser
+		}
+		switch *releaseURL {
+		case "":
+		case "default":
+			c.ReleaseURL = ""
+		default:
+			c.ReleaseURL = *releaseURL
+		}
 	}
 	c, dropped, err := saveConfig(env, *domain, *apiBase, *useHTTP, key, edit)
 	if err != nil {
@@ -84,6 +100,9 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	}
 	if c.SSHUser != "" {
 		fmt.Fprintf(env.Stdout, "SSH user:       %s\n", c.SSHUser)
+	}
+	if *releaseURL != "" {
+		fmt.Fprintf(env.Stdout, "Release URL:    %s\n", c.Release())
 	}
 	if server != "" && config.LANHostMissingPort(server) {
 		flagName, value := "--domain", *domain
@@ -189,6 +208,7 @@ func showConfig(env *Env) int {
 	fmt.Fprintf(env.Stdout, "API base:       %s\n", orDash(c.Server()))
 	fmt.Fprintf(env.Stdout, "API key:        %s\n", presence(p.APIKeyFile()))
 	fmt.Fprintf(env.Stdout, "SSH user:       %s\n", orDash(fieldOf(c, func(c *config.Config) string { return c.SSHUser })))
+	fmt.Fprintf(env.Stdout, "Release URL:    %s\n", c.Release())
 	fmt.Fprintf(env.Stdout, "Device ID:      %s\n", orDash(deviceField(device, func(d *config.Device) string { return d.DeviceID })))
 	fmt.Fprintf(env.Stdout, "Credential:     %s\n", presence(p.DeviceTokenFile()))
 	if c == nil && presence(p.APIKeyFile()) != present {

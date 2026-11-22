@@ -19,6 +19,11 @@ from the console without logging into the device.
    the system goes down. An agent update starts `update-meteorcli.sh` as its own
    process and reports done or failed on a later heartbeat once the version that
    is running has changed (or the updater finished without changing it).
+   The Go meteorcli starts `meteorcli updater` through its root helper instead:
+   it installs only a release whose manifest carries the MeteorCloud release
+   signature, keeps the previous binary, and puts it back when the new version
+   sends no heartbeat within 3 minutes; the action is then reported failed with
+   the reason. See [meteorcli in Go: Updating](../meteorcli-go.md#updating).
 
 An action the device never collects is cancelled after
 `DEVICE_ACTION_TTL_SECONDS` (default 1 hour).

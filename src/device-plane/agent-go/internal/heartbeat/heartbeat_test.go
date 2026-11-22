@@ -157,6 +157,9 @@ func TestHeartbeatBodyAndWorkSignals(t *testing.T) {
 	// The server's interval is stored for the next start.
 	if dev, _ := config.LoadDevice(d.Paths.DeviceFile()); dev.HeartbeatIntervalSeconds != 5 {
 		t.Errorf("interval %d", dev.HeartbeatIntervalSeconds)
+	} // The updater waits for this on a new version.
+	if d.Health.LastSuccess(name).IsZero() {
+		t.Error("an accepted heartbeat was not recorded")
 	}
 }
 
@@ -179,6 +182,9 @@ func TestRefusedTokenGoesToIdentity(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if n := len(cp.Calls("POST", route)); n != 1 {
 		t.Errorf("heartbeats with a refused token: %d", n)
+	}
+	if !d.Health.LastSuccess(name).IsZero() {
+		t.Error("a refused heartbeat was recorded as a success")
 	}
 	h, _ := d.Health.Get(name)
 	if h.State != string(agent.StateWaiting) {

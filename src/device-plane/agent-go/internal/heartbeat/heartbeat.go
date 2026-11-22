@@ -123,6 +123,7 @@ func (l *loop) beat(ctx context.Context) time.Duration {
 		return wait
 	}
 	l.backoff.Reset()
+	d.Health.Succeeded(name)
 	if !l.online {
 		d.Log.Info("heartbeat ok; device online", "device_id", resp.DeviceID, "status", resp.Status)
 		l.online = true

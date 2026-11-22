@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Release files for the Go meteorcli: binaries, the packaging files, one
-# installer per board, and SHA256SUMS. CI publishes them as the
+# Release files for the Go meteorcli: binaries, the signed release manifest
+# (meteorcli-release.json + .sig, read by `meteorcli updater`), the packaging
+# files, one installer per board, and SHA256SUMS. CI publishes them as the
 # meteorcli-go-edge prerelease; you can also serve the directory yourself and
 # point an installer at it (--base-url http://laptop:8000 or file:///path).
 #
 #   scripts/dist.sh <out-dir> <version> [base-url]
 #
 # base-url defaults to the meteorcli-go-edge release of meteor-edge/meteor-cloud.
+# The manifest is signed with $METEORCLI_RELEASE_SIGNING_KEY (go run ./tools/release
+# genkey); without it the release is unsigned and devices refuse to update to it.
 set -euo pipefail
 
 out="${1:?usage: dist.sh <out-dir> <version> [base-url]}"
@@ -18,6 +21,12 @@ mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 
 ./scripts/build.sh "$out" "$version"
+rm -f "$out/meteorcli-release.json" "$out/meteorcli-release.json.sig"
+if [ -n "${METEORCLI_RELEASE_SIGNING_KEY:-}" ]; then
+	go run ./tools/release sign "$out" "$version"
+else
+	echo "warning: METEORCLI_RELEASE_SIGNING_KEY is not set; the release is unsigned and 'meteorcli updater' refuses it" >&2
+fi
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT

@@ -79,6 +79,9 @@ type Host struct {
 	LookNetplan func() bool
 	// Uplink reads the link traffic leaves on; nil means the real machine.
 	Uplink func() platform.Uplink
+	// UpdaterBin is the meteorcli update.start runs as the updater ("" for
+	// /usr/local/bin/meteorcli).
+	UpdaterBin string
 }
 
 // SystemHost runs real tools from safePath and writes to /etc/systemd/system.
@@ -226,6 +229,8 @@ func Ops(h Host) map[string]localrpc.Handler {
 		"wireguard.show":      {Timeout: 30 * time.Second, Run: h.wireguardShow},
 		"wireguard.endpoint":  {Timeout: 30 * time.Second, Run: h.wireguardEndpoint},
 		"ssh.authorized_keys": {Timeout: 30 * time.Second, Run: h.sshAuthorizedKeys, Audit: auditSSHKeys},
+		// The updater (internal/update) in its own transient unit.
+		"update.start": {Timeout: 30 * time.Second, Run: h.updateStart, Audit: auditUpdate},
 	}
 }
 

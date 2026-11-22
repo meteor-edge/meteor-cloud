@@ -2,9 +2,11 @@
 // plane on 127.0.0.1:8099 that enrolls the device and accepts heartbeats, so
 // the container test can check register and approval end to end under real
 // systemd. An enrollment request stays pending until the file named by
-// -approve exists (an operator approving in the console). Every request is
-// appended to -log as "<unix ms> <METHOD> <path> auth=<yes|no> name=<name>";
-// secrets are never written.
+// -approve exists (an operator approving in the console). A one-off action
+// written to -action (JSON, e.g. an update_agent) is handed out once; its
+// results are logged as name=<id>:<state>. Every request is appended to -log
+// as "<unix ms> <METHOD> <path> auth=<yes|no> name=<name>"; secrets are never
+// written.
 package main
 
 import (
@@ -22,6 +24,8 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8099", "listen address")
 	logPath := flag.String("log", "/var/log/fakeserver.log", "request log")
 	approve := flag.String("approve", "/var/lib/fakeserver/approve", "requests are approved once this file exists")
+	actionFile := flag.String("action", "/var/lib/fakeserver/action", "a one-off action (JSON) handed out once")
+	interval := flag.Int("interval", 60, "heartbeat interval the server asks for")
 	flag.Parse()
 
 	out, err := os.OpenFile(*logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -46,7 +50,7 @@ func main() {
 	enrollment := map[string]any{
 		"device_id": "11111111-2222-4333-8444-555555555555", "device_token": "dev_systemdtestdevicetoken",
 		"organization_id": "66666666-7777-4888-9999-000000000000", "name": "edge-test",
-		"heartbeat_interval_seconds": 60, "mqtt": nil,
+		"heartbeat_interval_seconds": *interval, "mqtt": nil,
 	}
 
 	mux := http.NewServeMux()
@@ -77,9 +81,32 @@ func main() {
 	})
 	mux.HandleFunc("POST /api/v1/agent/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		record(r, "")
+		_, err := os.Stat(*actionFile)
 		reply(w, http.StatusOK, map[string]any{"device_id": enrollment["device_id"], "status": "online",
-			"heartbeat_interval_seconds": 60, "server_time": time.Now().UTC().Format(time.RFC3339),
-			"desired_software": []any{}, "wifi_pending": false, "actions_pending": false})
+			"heartbeat_interval_seconds": *interval, "server_time": time.Now().UTC().Format(time.RFC3339),
+			"desired_software": []any{}, "wifi_pending": false, "actions_pending": err == nil})
+	})
+	mux.HandleFunc("GET /api/v1/agent/actions", func(w http.ResponseWriter, r *http.Request) {
+		record(r, "")
+		actions := []json.RawMessage{}
+		// Handed out once, like the real server.
+		if b, err := os.ReadFile(*actionFile); err == nil && os.Remove(*actionFile) == nil {
+			actions = append(actions, b)
+		}
+		reply(w, http.StatusOK, map[string]any{"actions": actions})
+	})
+	mux.HandleFunc("POST /api/v1/agent/actions/report", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Results []struct{ ID, State, Error string }
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, res := range body.Results {
+			record(r, res.ID+":"+res.State)
+			if res.Error != "" {
+				log.Printf("action %s failed: %s", res.ID, res.Error)
+			}
+		}
+		reply(w, http.StatusOK, map[string]any{"accepted": len(body.Results)})
 	})
 	mux.HandleFunc("GET /api/v1/agent/mqtt", func(w http.ResponseWriter, r *http.Request) {
 		record(r, "")

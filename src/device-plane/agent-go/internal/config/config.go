@@ -39,8 +39,23 @@ type Config struct {
 	// (reported with WireGuard; the helper keeps its authorized_keys lines).
 	// The installer sets it to the user who ran it.
 	SSHUser string `json:"ssh_user"`
+	// ReleaseURL is where `meteorcli updater` reads releases (the folder of
+	// meteorcli-release.json and the binaries); "" means DefaultReleaseURL.
+	ReleaseURL string `json:"release_url"`
 
 	extra Object
+}
+
+// DefaultReleaseURL is the moving meteorcli-go-edge prerelease, the only Go
+// release channel today.
+const DefaultReleaseURL = "https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge"
+
+// Release returns the release URL to update from.
+func (c *Config) Release() string {
+	if c == nil || strings.TrimSpace(c.ReleaseURL) == "" {
+		return DefaultReleaseURL
+	}
+	return strings.TrimSpace(c.ReleaseURL)
 }
 
 // Load reads config.json. A missing file returns an error matching fs.ErrNotExist.
