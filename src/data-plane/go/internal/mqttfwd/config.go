@@ -1,9 +1,9 @@
 // Package mqttfwd is the MQTT forwarder: it takes device messages from the
 // broker (shared subscription) and hands each one to the control plane at
 // POST /internal/mqtt/ingest, and it serves the small HTTP API the control plane
-// uses to publish and watch topics (contracts/mqtt-http.md). It replaces the
-// Python service in src/data-plane/data_plane and keeps its environment
-// variables, request bodies and metric names.
+// uses to publish and watch topics (contracts/mqtt-http.md). It replaced the
+// earlier Python service and kept its environment variables, request bodies
+// and metric names.
 package mqttfwd
 
 import (

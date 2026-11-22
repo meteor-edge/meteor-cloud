@@ -3,8 +3,8 @@
 // control plane at POST /internal/mqtt/ingest. It also serves the HTTP API the
 // control plane uses to publish and watch topics (contracts/mqtt-http.md).
 //
-// It replaces the Python data-plane service (src/data-plane/data_plane) and
-// reads the same environment variables; see docs/data-plane/mqtt-forwarder.md.
+// It replaced the earlier Python data-plane service and reads the same
+// environment variables; see docs/data-plane/mqtt-forwarder.md.
 package main
 
 import (
