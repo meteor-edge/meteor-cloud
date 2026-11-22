@@ -24,8 +24,6 @@ backend:
   image: { repository: meteorcloud/backend, tag: dev, pullPolicy: IfNotPresent }
 console:
   image: { repository: meteorcloud/console, tag: dev, pullPolicy: IfNotPresent }
-dataPlane:
-  image: { repository: meteorcloud/data-plane, tag: dev, pullPolicy: IfNotPresent }
 
 dataApi:
   enabled: true

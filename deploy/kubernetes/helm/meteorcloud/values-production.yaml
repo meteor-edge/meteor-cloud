@@ -28,9 +28,7 @@ backend:
 console:
   image: { repository: ghcr.io/meteor-edge/meteorcloud-console, tag: "0.2.0" }
   replicaCount: 2
-dataPlane:
-  image: { repository: ghcr.io/meteor-edge/meteorcloud-data-plane, tag: "0.2.0" }
-# The MQTT forwarder (dataPlane.gateway: go) runs from the data API image.
+# The MQTT forwarder (dataPlane) runs from the data API image.
 dataApi:
   image: { repository: ghcr.io/meteor-edge/meteorcloud-data-api, tag: "0.2.0" }
 

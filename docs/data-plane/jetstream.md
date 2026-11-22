@@ -26,7 +26,7 @@ JetStream is internal messaging between data-plane services. **Devices never con
                   alerts / actions                  ClickHouse `events` table (+ `device_metrics` view)
 ```
 
-The existing path from the Python data plane to the control plane (`POST /internal/mqtt/ingest`, last known status and metrics shown in the console) is unchanged; both subscribe to the same device topics.
+The existing path from the MQTT forwarder to the control plane (`POST /internal/mqtt/ingest`, last known status and metrics shown in the console) is unchanged; both subscribe to the same device topics.
 
 Each box is its own process and can be scaled on its own. All three ship in the `data-api` image (`src/data-plane/go`) with different entrypoints.
 

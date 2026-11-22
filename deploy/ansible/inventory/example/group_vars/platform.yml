@@ -11,7 +11,6 @@ image_source: git
 git_ref: master
 # image_source: registry   # signed release images, see docs/release-images.md
 # backend_image: ghcr.io/meteor-edge/meteorcloud-backend:0.2.0
-# data_plane_image: ghcr.io/meteor-edge/meteorcloud-data-plane:0.2.0
 # data_api_image: ghcr.io/meteor-edge/meteorcloud-data-api:0.2.0   # also runs the MQTT forwarder
 # mosquitto_image: ghcr.io/meteor-edge/meteorcloud-mosquitto:0.2.0
 # frontend_image: ghcr.io/meteor-edge/meteorcloud-console:0.2.0
@@ -38,7 +37,6 @@ object_storage_provider: filesystem
 # Device MQTT (TLS 8883): bundled Mosquitto broker with a self-signed CA by default.
 # mqtt_provider: mosquitto   # or emqx / vernemq (docs/fleet/mqtt.md, docs/licensing.md)
 mqtt_enabled: false
-# data_plane_gateway: go   # MQTT gateway; python = the previous gateway (one release)
 # mqtt_broker: external
 # mqtt_broker_host: mqtt.example.com
 # mqtt_certs_src_dir: /path/on/controller/with/ca.crt,server.crt,server.key

@@ -60,7 +60,6 @@ jobs:
       matrix:
         include:
           - { name: backend, context: src/control-plane }
-          - { name: data-plane, context: src/data-plane }
           - { name: data-api, context: src/data-plane/go }
           - { name: mosquitto, context: src/data-plane/broker/mosquitto }
           - { name: console, context: console }

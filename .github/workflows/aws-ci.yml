@@ -39,7 +39,6 @@ jobs:
           cache: pip
           cache-dependency-path: |
             src/control-plane/pyproject.toml
-            src/data-plane/pyproject.toml
             infrastructure/installer/pyproject.toml
       - name: Install dependencies
         run: make install

@@ -70,9 +70,9 @@ jobs:
       - name: Python services and SDK
         run: |
           python -m venv /tmp/licences
-          /tmp/licences/bin/pip install --quiet ./src/control-plane ./src/data-plane ./sdk/python
+          /tmp/licences/bin/pip install --quiet ./src/control-plane ./sdk/python
           /tmp/licences/bin/python scripts/check_licenses.py --python \
-            edge-platform-backend meteorcloud-data-plane meteorcloud
+            edge-platform-backend meteorcloud
       - name: Go data plane
         working-directory: src/data-plane/go
         run: |

@@ -62,7 +62,6 @@ Commands from the [Makefile](Makefile). Do not invent others.
 ```bash
 make test                  # installer, control-plane, data-plane, agent, console
 make backend-test
-make data-plane-test
 make agent-test
 make agent-contract-test   # device agent vs contracts/device-agent-v1.md (needs Docker)
 make agent-dist            # Go meteorcli release files (same as make agent-go-dist)
@@ -89,6 +88,6 @@ make ansible-check ansible-lint
 - Update [docs/](docs/README.md) when install, CLI, APIs, contracts, or operator flows change.
 - Do not commit secrets, `.env` files with real passwords, private keys, or tokens. `deploy/compose/.env` is local; `~/.meteorcloud/secrets.env` is generated on the host.
 - Keep HTTP/MQTT compatibility unless the PR is an explicit breaking change.
-- Planes talk over HTTP/MQTT only. Do not import `app` from the data plane, or `data_plane` from the control plane.
+- Planes talk over HTTP/MQTT only. Do not import `app` (the control plane's package) from other planes.
 
 Architecture and allowed dependencies: [docs/architecture.md](docs/architecture.md).

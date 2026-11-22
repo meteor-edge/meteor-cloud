@@ -1,7 +1,5 @@
 # Data plane: MQTT gateway, application data API, plus one optional bundled broker.
 #   mqtt        data-plane service: the Go MQTT forwarder (needed whenever MQTT_ENABLED=true)
-#   mqtt-python the previous Python gateway, kept for one release. Use it INSTEAD of
-#               mqtt (never both): COMPOSE_PROFILES=...,mqtt-python
 #   data-api    application data plane (Go): publish, subscribe, query, commands for
 #               applications that use the MeteorCloud SDK (contracts/data-plane-v1.md)
 # Pick ONE broker profile and set MQTT_PROVIDER to the same name
@@ -208,31 +206,6 @@ services:
       retries: 10
     networks:
       - meteorcloud
-
-  # The Python gateway, for one release as a fallback (profile mqtt-python instead of
-  # mqtt). It answers to "data-plane" too, so DATA_PLANE_URL does not change.
-  data-plane-python:
-    image: ${DATA_PLANE_IMAGE:-meteorcloud/data-plane:dev}
-    build:
-      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane
-    profiles: [mqtt-python]
-    env_file:
-      - ${METEORCLOUD_ENV_FILE:-.env}
-    environment: *data-plane-env
-    volumes:
-      - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
-    ports:
-      - "8081:8081"
-    depends_on: *data-plane-depends
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      meteorcloud:
-        aliases:
-          - data-plane
 
   data-api:
     image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}

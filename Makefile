@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-dist agent-go-systemd-test agent-go-install-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-console install-website install-installer clean migrate seed backend-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-dist agent-go-systemd-test agent-go-install-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
 # Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
@@ -20,7 +20,6 @@ CP_COMPOSE := docker compose -p meteorcloud-cp -f $(COMPOSE_DIR)/control-plane.y
 DP_COMPOSE := docker compose -p meteorcloud-dp -f $(COMPOSE_DIR)/data-plane.yml
 CONSOLE_COMPOSE := docker compose -p meteorcloud-console -f $(COMPOSE_DIR)/console.yml
 BACKEND_DIR := src/control-plane
-DATA_PLANE_DIR := src/data-plane
 DATA_API_DIR := src/data-plane/go
 SDK_DIR := sdk/python
 CONSOLE_DIR := console
@@ -192,9 +191,6 @@ seed: ## Seed development users and organization
 install-backend: ## Install control-plane Python dependencies
 	cd $(BACKEND_DIR) && python -m pip install -e ".[dev]"
 
-install-data-plane: ## Install data-plane Python dependencies
-	cd $(DATA_PLANE_DIR) && python -m pip install -e ".[dev]"
-
 install-console: ## Install console Node dependencies
 	cd $(CONSOLE_DIR) && npm install
 
@@ -205,15 +201,11 @@ install-website: ## Website lives in meteor-ui, not this tree
 install-installer: ## Install installer Python dependencies
 	cd $(INSTALLER_DIR) && python -m pip install -e ".[dev]"
 
-install: install-backend install-data-plane install-installer install-console ## Install local dependencies
+install: install-backend install-installer install-console ## Install local dependencies
 
 backend-test: ## Run control-plane tests (dedicated *_test database, never the app DB)
 	@python -c "import sqlalchemy" >/dev/null 2>&1 || (echo "Control-plane deps missing. Run: make install-backend" && exit 1)
 	cd $(BACKEND_DIR) && python -m pytest -q
-
-data-plane-test: ## Run data-plane tests
-	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
-	cd $(DATA_PLANE_DIR) && python -m pytest -q
 
 data-api-test: ## Run application data plane (Go) tests; DATAPLANE_TEST_DATABASE_URL and DATAPLANE_TEST_CLICKHOUSE_URL add the PostgreSQL and ClickHouse suites
 	cd $(DATA_API_DIR) && go vet ./... && go test -race ./...
@@ -262,9 +254,6 @@ test: ## Run all tests
 	@echo "==> Control-plane tests"
 	@python -c "import sqlalchemy" >/dev/null 2>&1 || (echo "Control-plane deps missing. Run: make install-backend" && exit 1)
 	cd $(BACKEND_DIR) && python -m pytest -q
-	@echo "==> Data-plane tests"
-	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
-	cd $(DATA_PLANE_DIR) && python -m pytest -q
 	@echo "==> Console tests"
 	@test -d $(CONSOLE_DIR)/node_modules || (echo "Console deps missing. Run: make install-console" && exit 1)
 	cd $(CONSOLE_DIR) && npm test -- --run
@@ -274,8 +263,6 @@ lint: ## Lint all projects
 	cd $(INSTALLER_DIR) && python -m ruff check .
 	@echo "==> Control-plane lint"
 	cd $(BACKEND_DIR) && python -m ruff check .
-	@echo "==> Data-plane lint"
-	cd $(DATA_PLANE_DIR) && python -m ruff check .
 	@echo "==> SDK lint"
 	cd $(SDK_DIR) && python -m ruff check .
 	@echo "==> Console lint"
@@ -286,16 +273,12 @@ format: ## Format all projects
 	cd $(INSTALLER_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Control-plane format"
 	cd $(BACKEND_DIR) && python -m ruff format . && python -m ruff check --fix .
-	@echo "==> Data-plane format"
-	cd $(DATA_PLANE_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Console format"
 	cd $(CONSOLE_DIR) && npm run format
 
 typecheck: ## Run static type checks where configured
 	@echo "==> Control-plane typecheck (compileall)"
 	cd $(BACKEND_DIR) && python -m compileall app tests scripts
-	@echo "==> Data-plane typecheck (compileall)"
-	cd $(DATA_PLANE_DIR) && python -m compileall data_plane tests
 	@echo "==> Installer typecheck (compileall)"
 	cd $(INSTALLER_DIR) && python -m compileall edge_installer tests
 
@@ -399,11 +382,10 @@ helm-lint: ## Lint the Helm chart and render it with every values file
 		--set mqtt.enabled=true,mqtt.tls.existingSecret=ci,mqtt.publicHost=mqtt.example.com \
 		--set dataApi.bus=mqtt,dataApi.mqtt.direct=true > /dev/null 2>&1
 
-images: ## Build the backend, data-plane, MQTT broker, and console images (IMAGE_TAG=dev)
+images: ## Build the backend, data API (also the MQTT forwarder), MQTT broker, and console images (IMAGE_TAG=dev)
 	docker build -t meteorcloud/backend:$(IMAGE_TAG) $(BACKEND_DIR)
-	docker build -t meteorcloud/data-plane:$(IMAGE_TAG) $(DATA_PLANE_DIR)
 	docker build -t meteorcloud/data-api:$(IMAGE_TAG) $(DATA_API_DIR)
-	docker build -t meteorcloud/mosquitto:$(IMAGE_TAG) $(DATA_PLANE_DIR)/broker/mosquitto
+	docker build -t meteorcloud/mosquitto:$(IMAGE_TAG) src/data-plane/broker/mosquitto
 	docker build -t meteorcloud/console:$(IMAGE_TAG) $(CONSOLE_DIR)
 
 smoke: ## End-to-end HTTP smoke test (URL=http://localhost:8088)
@@ -417,7 +399,7 @@ k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
 	kubectl config use-context k3d-$(K8S_CLUSTER)
 
 k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (OBS=1 adds Prometheus, Grafana)
-	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/data-api:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
+	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-api:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
 	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
 	@# Re-issue the server certificate (same CA) when it lacks any broker Service name.
 	@sans=$$(openssl x509 -in $(K8S_CERTS_DIR)/server.crt -noout -ext subjectAltName 2>/dev/null | tr -d ' ' | tr ',' '\n'); \
@@ -437,7 +419,7 @@ ifeq ($(OBS),1)
 endif
 	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
 		-f $(CHART)/values-dev.yaml $(if $(filter 1,$(OBS)),-f $(CHART)/values-monitoring.yaml) --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
-		--set dataPlane.image.tag=$(IMAGE_TAG) --set dataApi.image.tag=$(IMAGE_TAG) --set mqtt.mosquitto.image.tag=$(IMAGE_TAG) \
+		--set dataApi.image.tag=$(IMAGE_TAG) --set mqtt.mosquitto.image.tag=$(IMAGE_TAG) \
 		--set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
 		--wait --timeout 10m
 	# Restart so pods pick up images re-imported under the same tag.
