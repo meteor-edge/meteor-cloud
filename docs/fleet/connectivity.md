@@ -246,16 +246,6 @@ installs the CA (and, until it is retired, the gateway key); see
 [SSH certificates](#ssh-certificates-instead-of-the-shared-key). Tests use `SHELL_PROVIDER=echo`. Set
 `shell_provider: none` in inventory if you want the tunnel without the terminal.
 
-On a laptop (`make dev`), the dev Compose file mounts `SHELL_SSH_DIR` (default
-`deploy/compose/shell`) at `/run/meteorcloud/shell`. Put `id_ed25519` there,
-mode `0600`, and set `SHELL_PROVIDER=ssh_gateway`,
-`SHELL_SSH_IDENTITY_FILE=/run/meteorcloud/shell/id_ed25519`, and
-`SHELL_GATEWAY_PUBLIC_KEY` to that key's public line. Recreate the backend.
-Do not add `docker-compose.vpn.yml` for this: it publishes the API on
-`127.0.0.1` only, so a device on the LAN can no longer reach it. The device
-installs the gateway key on its next WireGuard registration (within about 15
-minutes, or restart `meteorcli`).
-
 ## Test locally (no real tunnel)
 
 Control-plane tests enable WireGuard IPAM with `CONNECTIVITY_PROVIDER=wireguard`
