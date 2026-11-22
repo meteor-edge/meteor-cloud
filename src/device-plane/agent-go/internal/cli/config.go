@@ -28,11 +28,12 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if len(args) > 0 && args[0] == "meteorenv" {
 		return runConfigMeteorenv(ctx, env, args[1:])
 	}
-	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--release-url URL] [--show] | import | meteorenv")
+	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--enroll-name NAME] [--ssh-user NAME] [--release-url URL] [--show] | import | meteorenv")
 	domain := fl.String("domain", "", "Server host or IP (meteorxx.com or 192.168.0.107:8000; or $"+envDomain+").")
 	apiBase := fl.String("api-base", "", "Override the derived API origin (http:// is allowed for local testing).")
 	useHTTP := fl.Bool("http", false, "Use HTTP instead of HTTPS (for local testing).")
 	apiKey := fl.String("api-key", "", "Enrollment API key (or $"+envAPIKey+"). Stored with 0600 permissions.")
+	enrollName := fl.String("enroll-name", "", "Device name to ask for when enrolling by approval.")
 	sshUser := fl.String("ssh-user", "", "Account the console's browser terminal signs in as (the installer sets the user who ran it).")
 	releaseURL := fl.String("release-url", "", "Where 'meteorcli updater' reads releases ('default' for "+config.DefaultReleaseURL+").")
 	show := fl.Bool("show", false, "Print the stored configuration (never prints secrets).")
@@ -66,12 +67,15 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	if key == "" {
 		key = normalizeSecret(env.Getenv(envAPIKey))
 	}
-	if *domain == "" && *apiBase == "" && key == "" && *sshUser == "" && *releaseURL == "" {
-		fmt.Fprintf(env.Stderr, "error: provide --domain, --api-base, --api-key, --ssh-user and/or --release-url (or %s/%s).\n", envDomain, envAPIKey)
+	if *domain == "" && *apiBase == "" && key == "" && *enrollName == "" && *sshUser == "" && *releaseURL == "" {
+		fmt.Fprintf(env.Stderr, "error: provide --domain, --api-base, --api-key, --enroll-name, --ssh-user and/or --release-url (or %s/%s).\n", envDomain, envAPIKey)
 		return 2
 	}
 
 	edit := func(c *config.Config) {
+		if *enrollName != "" {
+			c.EnrollName = *enrollName
+		}
 		if *sshUser != "" {
 			c.SSHUser = *sshUser
 		}
@@ -97,6 +101,9 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	fmt.Fprintf(env.Stdout, "Configuration saved to %s\n", p.ConfigFile)
 	if server != "" {
 		fmt.Fprintf(env.Stdout, "API:            %s\n", server)
+	}
+	if c.EnrollName != "" {
+		fmt.Fprintf(env.Stdout, "Enroll name:    %s\n", c.EnrollName)
 	}
 	if c.SSHUser != "" {
 		fmt.Fprintf(env.Stdout, "SSH user:       %s\n", c.SSHUser)
@@ -207,6 +214,7 @@ func showConfig(env *Env) int {
 	fmt.Fprintf(env.Stdout, "Domain:         %s\n", orDash(fieldOf(c, func(c *config.Config) string { return c.Domain })))
 	fmt.Fprintf(env.Stdout, "API base:       %s\n", orDash(c.Server()))
 	fmt.Fprintf(env.Stdout, "API key:        %s\n", presence(p.APIKeyFile()))
+	fmt.Fprintf(env.Stdout, "Enroll name:    %s\n", orDash(fieldOf(c, func(c *config.Config) string { return c.EnrollName })))
 	fmt.Fprintf(env.Stdout, "SSH user:       %s\n", orDash(fieldOf(c, func(c *config.Config) string { return c.SSHUser })))
 	fmt.Fprintf(env.Stdout, "Release URL:    %s\n", c.Release())
 	fmt.Fprintf(env.Stdout, "Device ID:      %s\n", orDash(deviceField(device, func(d *config.Device) string { return d.DeviceID })))

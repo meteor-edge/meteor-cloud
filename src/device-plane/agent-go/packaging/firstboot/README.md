@@ -47,9 +47,10 @@ Meteor Imager does this for you (`meteor-firstrun.sh`). By hand, on a current Ra
    `packages:` and `runcmd:` block from `cloud-init-user-data.yaml`.
 3. Boot the Pi, wait for the network, and approve the pending device in the console.
 
-On the first boot, cloud-init installs meteorcli. `meteorcli.service` then reads `.meteorenv`
-from the boot partition and deletes it. The settings service applies Wi-Fi, user and SSH from
-the next boot on.
+On the first boot, cloud-init runs `install-meteorcli-firstboot.sh`, which installs the agent
+without starting it, enables `meteorcli-settings.service`, runs that service once so Wi-Fi,
+user and SSH settings apply and enrollment moves to `/etc/meteorcli/meteorenv`, then starts
+the agent.
 
 `METEOR_DOMAIN` is the control-plane host (`cloud.example.com`, or `192.168.0.118:8000` for a
 laptop `make dev`).

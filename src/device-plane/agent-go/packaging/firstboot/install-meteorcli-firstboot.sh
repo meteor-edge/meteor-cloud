@@ -33,7 +33,7 @@ Usage:
 Options:
   --image      Install and enable only, do not start or enroll: each card written
                from this image brings its own settings (meteorcli-prepare-image.sh)
-  --now        Accepted for older instructions; the agent always starts at once
+  --now        Accepted for older instructions; the agent starts after settings
   -h, --help   Show this help
 EOF
 }
@@ -72,15 +72,17 @@ fetch() {
 
 echo "== MeteorCloud first boot =="
 echo "[1/3] meteorcli"
-args=()
-if [[ "${IMAGE}" -eq 1 ]]; then
-  args+=(--no-start)
-else
-  [[ -n "${METEOR_DOMAIN:-}" ]] && args+=(--domain "${METEOR_DOMAIN}")
-  [[ -n "${METEOR_API_KEY:-}" ]] && args+=(--api-key "${METEOR_API_KEY}")
-  [[ -n "${METEOR_NAME:-}" ]] && args+=(--name "${METEOR_NAME}")
+# Never start the agent here: install-meteorcli.sh would restart meteorcli.service,
+# whose ExecStartPre runs `meteorcli config meteorenv` and can delete the card's
+# .meteorenv (Wi-Fi password included) before meteorcli-settings.service applies it.
+args=(--no-start)
+enroll_args=0
+if [[ "${IMAGE}" -eq 0 ]]; then
+  [[ -n "${METEOR_DOMAIN:-}" ]] && args+=(--domain "${METEOR_DOMAIN}") && enroll_args=1
+  [[ -n "${METEOR_API_KEY:-}" ]] && args+=(--api-key "${METEOR_API_KEY}") && enroll_args=1
+  [[ -n "${METEOR_NAME:-}" ]] && args+=(--name "${METEOR_NAME}") && enroll_args=1
 fi
-if command -v meteorcli >/dev/null 2>&1 && meteorcli agent --help >/dev/null 2>&1 && [[ ${#args[@]} -eq 0 ]]; then
+if command -v meteorcli >/dev/null 2>&1 && meteorcli agent --help >/dev/null 2>&1 && [[ "${enroll_args}" -eq 0 ]]; then
   echo "  installed: $(meteorcli --version)"
 else
   fetch install-meteorcli.sh
@@ -152,6 +154,10 @@ if [[ "${IMAGE}" -eq 1 ]]; then
   systemctl enable meteorcli-helper.socket meteorcli.service >/dev/null
   echo "Ready for an image: meteorcli starts on each card's first boot and enrolls with its .meteorenv."
 else
+  # Apply any card settings now (no-op when none), then start the agent so
+  # ExecStartPre reads /etc/meteorcli/meteorenv instead of deleting the card file.
+  systemctl start meteorcli-settings.service >/dev/null 2>&1 || true
+  systemctl enable --now meteorcli-helper.socket meteorcli.service >/dev/null
   echo "Done. Without a key here, put .meteorenv (METEOR_DOMAIN, METEOR_API_KEY) on the boot partition"
   echo "and reboot. Approve the device in the console when the request appears: journalctl -u meteorcli -f"
 fi

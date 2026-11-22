@@ -552,6 +552,11 @@ def test_settings_unit_runs_before_network_and_the_agent() -> None:
     assert "meteorcli-settings.sh" in installer
     assert "systemctl enable meteorcli-settings.service" in installer
     assert ".meteor-settings" in installer
+    # Agent must not start during install-meteorcli.sh: that would delete the card's
+    # .meteorenv before meteorcli-settings.service applies Wi-Fi and user settings.
+    assert 'args=(--no-start)' in installer
+    assert "systemctl start meteorcli-settings.service" in installer
+    assert "systemctl enable --now meteorcli-helper.socket meteorcli.service" in installer
 
 
 # ---------------------------------------------------------------- request flooding

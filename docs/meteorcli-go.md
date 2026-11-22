@@ -124,7 +124,7 @@ The modules that own them recreate them.
 
 | Command | Same as Python | Notes |
 | --- | --- | --- |
-| `meteorcli config --domain HOST [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--release-url URL]` | Yes | Same URL rules (IPs and localhost use HTTP, `api.<ip>` is stripped). Changing the server removes the old server's credentials. `--ssh-user` is new (Python used the user that ran the installer). `--release-url` (`https://`, `http://` or `file://`; `default` resets it) is where the updater reads releases. Needs root. |
+| `meteorcli config --domain HOST [--api-base URL] [--http] [--api-key KEY] [--enroll-name NAME] [--ssh-user NAME] [--release-url URL]` | Yes | Same URL rules (IPs and localhost use HTTP, `api.<ip>` is stripped). Changing the server removes the old server's credentials. `--enroll-name` is the device name asked for on approval enrollment (the installer passes `--name` as this). `--ssh-user` is new (Python used the user that ran the installer). `--release-url` (`https://`, `http://` or `file://`; `default` resets it) is where the updater reads releases. Needs root. |
 | `meteorcli config --show` | Yes | Never prints secrets. |
 | `meteorcli config import [--from DIR] [--force]` | New | See above. |
 | `meteorcli config meteorenv` | Python service did it at start | Applies a first-boot `meteorenv` file; `meteorcli.service` runs it as root before the agent. See [Enrollment](#enrollment). |
