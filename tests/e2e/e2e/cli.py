@@ -161,7 +161,8 @@ def configure(cfg: Config, state: State, hosts: list[Host], secrets: dict[str, s
     key = state.ensure_ssh_key(cfg)
     platform_archive = build_archive(state.build_dir / "platform-source.tar.gz")
     say("[build] meteorcli release files (scripts/dist.sh)")
-    device_archive = build_meteorcli(state.build_dir / "meteorcli-dist.tar.gz", state.build_dir / "meteorcli-dist")
+    device_archive = build_meteorcli(state.build_dir / "meteorcli-dist.tar.gz", state.build_dir / "meteorcli-dist",
+                                     state.dir / "release-test-key")
     render_inventory(cfg, state, hosts, platform_archive=platform_archive, device_archive=device_archive,
                      ssh_key=key)
     ansible = Ansible(cfg, state, secrets)
@@ -180,6 +181,7 @@ def run_suite(cfg: Config, state: State, secrets: dict[str, str], *, only: set[s
         s2_dns_tls,
         s3_artifacts,
         s4_onboarding,
+        s4b_agent,
         s5_wireguard,
         s6_shell,
         s7_apps,

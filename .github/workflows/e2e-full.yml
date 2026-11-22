@@ -2,7 +2,8 @@ name: Full-stack E2E
 
 # Manual: one real environment (control plane, WireGuard gateway, devices) on AWS,
 # built from this commit by tests/e2e/meteorcloud-testenv, then the full acceptance
-# suite: DNS + HTTPS, MinIO artifacts, meteorcli onboarding, WireGuard, browser SSH,
+# suite: DNS + HTTPS, MinIO artifacts, meteorcli onboarding, the Go agent itself (privilege
+# split, doctor, signed self-update and rollback, approval enrollment), WireGuard, browser SSH,
 # release -> Docker deploy -> public app, update, fleet/tenancy, progressive rollouts
 # (needs 5 devices), systemd/compose rollout kinds, cleanup.
 # Separate from the EC2 smoke test (aws-ci.yml). See docs/e2e.md.
@@ -118,7 +119,8 @@ jobs:
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
-      # The devices get meteorcli built from this commit (scripts/dist.sh).
+      # The devices get meteorcli built from this commit (scripts/dist.sh), trusting a release key
+      # made for this run, plus two signed test releases for the updater checks (stage 4b).
       - uses: actions/setup-go@v5
         with:
           go-version-file: src/device-plane/agent-go/go.mod
