@@ -515,7 +515,7 @@ export function DeviceDetailPage() {
               organizationId={organizationId}
               deviceId={deviceId}
               device={device}
-              canRepair={canManage && canUpdateAgent}
+              canRepair={canUpdateAgent}
             />
           ) : null}
           <DeviceResourceMeters

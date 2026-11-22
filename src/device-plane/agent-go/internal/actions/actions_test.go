@@ -317,3 +317,45 @@ func TestRestartModuleAndRunDiagnostics(t *testing.T) {
 		t.Errorf("diagnostics did not ping the helper: %v", h.ops)
 	}
 }
+
+// restart_module restarts only once its report is in the outbox: restarting
+// the actions module cancels the Run, and a held result would be lost with it.
+func TestRestartModuleWaitsForADurableReport(t *testing.T) {
+	cp := fakecp.New(t)
+	cp.On("GET", listRoute, fakecp.OK(map[string]any{"actions": []map[string]any{
+		{"id": "r1", "kind": "restart_module", "module": "actions"},
+	}}))
+	cp.On("POST", reportRoute, fakecp.OK(map[string]any{"accepted": 1}))
+	d := agenttest.Deps(t, cp, nil, nil)
+	d.Health.Set("actions", agent.StateRunning, nil)
+	restarts := d.Signals.Subscribe(func(s agent.Signal) bool { _, ok := s.(agent.RestartModule); return ok })
+	defer restarts.Close()
+	outbox := filepath.Join(d.Paths.StateDir, "outbox")
+	if err := os.Chmod(outbox, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(outbox, 0o700) })
+	r := &runner{d: d, helper: &fakeHelper{}, backoff: api.NewBackoff()}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	r.collect(ctx)
+	if wait := r.flush(ctx); wait <= 0 {
+		t.Fatal("a held result must ask for a retry")
+	}
+	if got := restarts.Take(); len(got) != 0 {
+		t.Fatalf("restarted before the report was kept: %+v", got)
+	}
+	if err := os.Chmod(outbox, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if wait := r.flush(ctx); wait != 0 {
+		t.Fatalf("flush left results (retry in %v)", wait)
+	}
+	if got := restarts.Take(); len(got) != 1 || got[0] != (agent.RestartModule{Name: "actions"}) {
+		t.Errorf("restart signals = %+v", got)
+	}
+	if calls := cp.Calls("POST", reportRoute); len(calls) != 1 || results(t, calls[0])[0].State != "done" {
+		t.Errorf("reports = %d", len(calls))
+	}
+}

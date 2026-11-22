@@ -99,8 +99,9 @@ func addUser(ctx context.Context, e env, a api.Action) error {
 var moduleName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 // restartModule restarts one module through the supervisor; a parked module
-// runs again. The supervisor restarts it after this action is reported, so
-// restarting the actions module itself is safe.
+// runs again. The restart is only queued here: the runner asks the supervisor
+// once the result is in the outbox, so restarting the actions module itself
+// cannot lose the report.
 func restartModule(_ context.Context, e env, a api.Action) error {
 	name := str(a.Module)
 	if !moduleName.MatchString(name) {

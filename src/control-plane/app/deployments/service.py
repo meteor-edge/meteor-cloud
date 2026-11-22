@@ -404,12 +404,14 @@ class DeploymentService:
                 "endpoint_requires_container",
                 "Only Single container and Compose releases can be published on the internet.",
             )
-        self._reject_kind_change(release=release, workload_key=workload_key, devices=devices)
-        # Devices without the release's runtime are skipped and bind nothing.
+        # Devices without the release's runtime (or whose agent cannot install
+        # the kind) are skipped: they change no workload and bind nothing.
+        capable = [device for device in devices if self.device_supports_kind(device, release.kind)]
+        self._reject_kind_change(release=release, workload_key=workload_key, devices=capable)
         self._reject_port_conflicts(
             release=release,
             workload_key=workload_key,
-            devices=[device for device in devices if self.device_supports_kind(device, release.kind)],
+            devices=capable,
             endpoint_port=payload.endpoint.port if payload.endpoint is not None else None,
         )
 

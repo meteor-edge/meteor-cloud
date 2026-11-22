@@ -94,6 +94,10 @@ type runner struct {
 	// held are results that could not be written to the outbox yet (disk full).
 	// flush retries them before sending anything to the server.
 	held []api.ActionResult
+	// restarts are modules restart_module asked for. flush publishes them
+	// once every result is in the outbox: restarting the actions module
+	// cancels this Run, and its report must not be lost with it.
+	restarts []string
 	// clock replaces time.Now in tests.
 	clock func() time.Time
 }
@@ -112,7 +116,7 @@ func (r *runner) env() env {
 			if _, ok := r.d.Health.Get(name); !ok {
 				return fmt.Errorf("restart_module: this agent has no module %q", name)
 			}
-			r.d.Signals.Publish(agent.RestartModule{Name: name})
+			r.restarts = append(r.restarts, name)
 			return nil
 		},
 		diagnose: func(ctx context.Context) string { return agent.Diagnose(ctx, r.d, r.helper).Text() },
@@ -252,6 +256,10 @@ func (r *runner) flush(ctx context.Context) time.Duration {
 		}
 		r.held = r.held[1:]
 	}
+	for _, name := range r.restarts {
+		d.Signals.Publish(agent.RestartModule{Name: name})
+	}
+	r.restarts = nil
 	for {
 		pending, err := d.Outbox.Pending(KindReport)
 		if err != nil {

@@ -34,7 +34,7 @@ def _module(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     state = value.get("state")
-    if state not in MODULE_STATES:
+    if not isinstance(state, str) or state not in MODULE_STATES:
         return None
     out: dict[str, Any] = {"state": state}
     restarts = value.get("restarts")

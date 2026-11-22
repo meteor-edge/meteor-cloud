@@ -289,9 +289,17 @@ export function DeployWizard({
         skippedDevices.length === 1 &&
         skippedDevices[0]?.id === deviceIds[0]
       ) {
+        const device = skippedDevices[0];
+        if (selectedRelease && !supportsDeployKind(agentCapabilities(device), selectedRelease.kind)) {
+          // The runtime may be there; the agent itself cannot install this kind.
+          setError(
+            `The agent on ${device.name} cannot install this kind of release. Update meteorcli on the device (Manage device), then deploy again.`,
+          );
+          return;
+        }
         const need = selectedRelease ? KIND_CAPABILITY[selectedRelease.kind] : "runtime";
         setError(
-          `${skippedDevices[0].name} reported no ${need} support. Install that runtime on the device, wait for a heartbeat, then deploy again.`,
+          `${device.name} reported no ${need} support. Install that runtime on the device, wait for a heartbeat, then deploy again.`,
         );
         return;
       }

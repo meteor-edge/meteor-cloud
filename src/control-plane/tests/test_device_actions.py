@@ -220,6 +220,9 @@ def test_heartbeat_stores_module_health_cleaned(client: TestClient, db_session: 
         "modules": {
             **GO_CAPABILITIES["modules"],
             "weird": {"state": "exploded"},
+            "listy": {"state": []},
+            "dicty": {"state": {"x": 1}},
+            "nully": None,
             "metrics": {"state": "failed", "restarts": -1, "last_error": "x" * 900},
         },
         "deploy_kinds": "docker",
@@ -232,7 +235,8 @@ def test_heartbeat_stores_module_health_cleaned(client: TestClient, db_session: 
     assert stored["gpio"] == {"pins": 40}  # unknown keys kept as sent
     assert "deploy_kinds" not in stored  # wrong type dropped
     assert stored["modules"]["deploy"] == {"state": "parked", "restarts": 5, "last_error": "panic: boom"}
-    assert "weird" not in stored["modules"]
+    for dropped in ("weird", "listy", "dicty", "nully"):
+        assert dropped not in stored["modules"]
     assert stored["modules"]["metrics"] == {"state": "failed", "last_error": "x" * 500}
     assert device["metadata"]["capabilities_reported_at"]
 
