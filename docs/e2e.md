@@ -11,7 +11,7 @@ meteorcloud-testenv up
   terraform   control plane EC2 (+ dedicated WireGuard gateway), N device EC2s,
               DNS <env>.<domain> and *.<env>.<domain>, Traefik DNS-01 role
   ansible     site.yml (cloud_app + vpn) and device.yml, run twice (2nd: changed=0)
-  suite       74 checks in 13 stages -> report.json + summary.txt
+  suite       82 checks in 14 stages -> report.json + summary.txt
 ```
 
 | Command | What it does |
@@ -79,6 +79,7 @@ dependent check is `not_supported` too.
 | 2 dns and tls | `<env>.<domain>`, a custom and an `app.device.org` name resolve to the ingress; `/health` over a verified Let's Encrypt certificate; HTTP redirects to HTTPS; `/internal/*` not served publicly |
 | 3 api and artifacts | Admin login + organization; MinIO healthy, bucket exists, no host ports; upload records size + SHA-256; the object in MinIO matches; ticket download matches; missing artifact is 404; MinIO rejects a wrong secret |
 | 4 onboarding | `meteorcli register` with a one-time token; device listed; token reuse rejected; `meteorcli.service` heartbeats -> online; restart keeps the identity |
+| 4b meteorcli agent | The device runs the meteorcli built from this commit (`--version` and the reported `agent_version`); the agent runs as `meteor` with a 0600 credential, only the helper is root; the SSH user runs `status` and `doctor` (no failed checks) without sudo, but not `config`; **Run diagnostics** in the console returns the doctor report; the updater refuses a release without a signature; **Update meteorcli** installs a newer signed release and keeps `meteorcli.previous`; a signed release that never starts is rolled back and the action fails; device 2 enrolls by approval with an enrollment API key (`request-token`, approve, online), then is deleted for stage 9. The device build trusts only a release key made for the environment (`.state/<env>/release-test-key`), and the device archive carries the two test releases (`e2e-updates/`) |
 | 5 wireguard | Address + handshake; route via `wg0`; handshake reported by the gateway agent; counters grow; API container reaches the device; gateway restart recovers; wrong server key gets no tunnel; device cannot open connections to the gateway |
 | 6 browser ssh | Shell ticket -> WebSocket -> command runs on the device; reused and wrong tickets rejected |
 | 7 application delivery | Test app built and uploaded as a `docker` artifact; release v1 deployed with an endpoint; container runs; upstream over WireGuard; endpoint `ready`; public HTTPS with the wildcard certificate; app port closed on the device's public address |
