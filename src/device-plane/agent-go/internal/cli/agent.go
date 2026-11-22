@@ -39,9 +39,6 @@ func runAgent(ctx context.Context, env *Env, args []string) int {
 	core := log.With("module", "agent")
 	p := env.Paths
 
-	if config.LooksLikePython(p.LegacyDir) {
-		core.Warn("a Python meteorcli layout is still in place; run 'sudo meteorcli config import'", "dir", p.LegacyDir)
-	}
 	c, err := config.Load(p.ConfigFile)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {

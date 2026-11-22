@@ -47,11 +47,11 @@ meteorcli logs systemd:meteorcli.service -f
 Only `meteorcli config` (it writes `/etc/meteorcli`) needs root. See
 [Who may do what](meteorcli-go.md#who-may-do-what).
 
-**From the Python meteorcli (0.4.x and older).** Run the installer above without enrollment
-options. It stops the Python service, imports its identity (`meteorcli config import`), and leaves
-`/opt/meteorcli` for a rollback. The device stays enrolled. The Python agent's
-`meteorcli update` cannot install the Go release by itself. See
-[Moving a device from the Python agent](meteorcli-go.md#moving-a-device-from-the-python-agent).
+**From the Python meteorcli (0.4.x and older).** The Python agent is gone, and the installer no
+longer imports its identity. Wipe the device (or remove `/opt/meteorcli`, `/etc/meteorcli` and the
+old `meteorcli.service`), install as above, and enroll it again. Its hardware is already a device,
+so first click **Allow re-registration** on that device's page, or delete the device
+([Device registration](fleet/device-registration.md)).
 
 **Local build.** `make agent-dist` (or `make agent-go-dist`) writes the same release files into
 `src/device-plane/agent-go/dist`. Run the installer as a file from that folder: it installs the
@@ -119,7 +119,7 @@ A device without the settings service still reads `meteorenv.txt` or `.meteorenv
 
 | Command | Purpose | Who |
 | --- | --- | --- |
-| `config` | Server domain / API base, enrollment API key, `--ssh-user`, `--release-url`; `--show`; `config import` (from a Python install) | root |
+| `config` | Server domain / API base, enrollment API key, `--ssh-user`, `--release-url`; `--show` | root |
 | `test` | Server reachable, API key valid | `meteorcli` |
 | `register` | Enroll with a registration token | `meteorcli-admin` |
 | `request-token` | Ask for approval; the agent keeps polling | `meteorcli-admin` |

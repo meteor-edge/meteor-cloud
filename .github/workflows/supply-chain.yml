@@ -67,12 +67,12 @@ jobs:
           cache-dependency-path: src/data-plane/go/go.sum
       - name: Console (npm production packages)
         run: python scripts/check_licenses.py --npm console/package-lock.json
-      - name: Python services, agent and SDK
+      - name: Python services and SDK
         run: |
           python -m venv /tmp/licences
-          /tmp/licences/bin/pip install --quiet ./src/control-plane ./src/data-plane ./src/device-plane/agent ./sdk/python
+          /tmp/licences/bin/pip install --quiet ./src/control-plane ./src/data-plane ./sdk/python
           /tmp/licences/bin/python scripts/check_licenses.py --python \
-            edge-platform-backend meteorcloud-data-plane edge-agent meteorcloud
+            edge-platform-backend meteorcloud-data-plane meteorcloud
       - name: Go data plane
         working-directory: src/data-plane/go
         run: |

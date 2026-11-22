@@ -89,6 +89,6 @@ make ansible-check ansible-lint
 - Update [docs/](docs/README.md) when install, CLI, APIs, contracts, or operator flows change.
 - Do not commit secrets, `.env` files with real passwords, private keys, or tokens. `deploy/compose/.env` is local; `~/.meteorcloud/secrets.env` is generated on the host.
 - Keep HTTP/MQTT compatibility unless the PR is an explicit breaking change.
-- Planes talk over HTTP/MQTT only. Do not import `app` from the data plane or agent, or `data_plane` / `edge_agent` from the control plane.
+- Planes talk over HTTP/MQTT only. Do not import `app` from the data plane, or `data_plane` from the control plane.
 
 Architecture and allowed dependencies: [docs/architecture.md](docs/architecture.md).

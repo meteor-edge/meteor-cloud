@@ -78,5 +78,5 @@ Commands and APIs you look up while working.
 
 ## Related code docs
 
-- Device agent package: [`src/device-plane/agent/README.md`](../src/device-plane/agent/README.md)
+- Device agent package: [`src/device-plane/agent-go/README.md`](../src/device-plane/agent-go/README.md)
 - Installer package: [`infrastructure/installer/README.md`](../infrastructure/installer/README.md)

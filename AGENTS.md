@@ -27,7 +27,7 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 ## Architecture (must follow)
 
 - **Control plane** stays Python (`src/control-plane/`, package `app`).
-- **Data plane** and **device plane** may use other languages later. Do not start another migration here; the only approved one is the device agent to Go (`src/device-plane/agent-go/`). The **application data plane** in `src/data-plane/go/` is Go by design; the Python data plane beside it stays Python.
+- **Data plane** and **device plane** may use other languages later. Do not start another migration here. The device agent is Go (`src/device-plane/agent-go/`); the Python agent was removed. The **application data plane** in `src/data-plane/go/` is Go by design; the Python data plane beside it stays Python.
 - Planes must not import one another’s private Python packages. Talk over HTTP, MQTT, and documented contracts ([`contracts/mqtt-http.md`](contracts/mqtt-http.md)).
 - PostgreSQL is the control-plane database. Vendor clients stay behind ports/adapters.
 - Kubernetes, Terraform, Ansible, and WireGuard belong under `deploy/` / `infrastructure/`, not domain modules.
@@ -46,7 +46,6 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 | `src/data-plane/go/` | Application data plane (Go): `meteor/v1/...` topics, `/v1` API. Reads control-plane state only through the policy snapshot. Contract: `contracts/data-plane-v1.md`. |
 | `sdk/python/` | Public SDK. Talks to the data plane API only; no imports from `src/`. |
 | `src/device-plane/agent-go/` | `meteorcli` on the device (Go, the released agent from 0.5.0). Contract: `contracts/device-agent-v1.md`. Standard library first; no imports from `src/data-plane/go/internal`. First-boot and OS image scripts in `packaging/firstboot/`. See `docs/meteorcli.md` and `docs/meteorcli-go.md`. |
-| `src/device-plane/agent/` | The Python `meteorcli` (0.4.x and older), no longer released; being removed. Do not add features here. |
 | `src/device-plane/gateway/` | Host process: poll `/internal/connectivity/*`, `wg set`. HTTP only. |
 | `deploy/` | Images, Compose, Ansible, Helm, env. Not business logic. |
 

@@ -410,7 +410,7 @@
           "additionalProperties": {
             "$ref": "#/$defs/module_health"
           },
-          "description": "Module name to health. Optional; the Python agent has no modules."
+          "description": "Module name to health. Optional; older agents have no modules."
         }
       }
     }

@@ -138,8 +138,8 @@ make backend-test
 make data-plane-test
 make data-api-test       # Go data plane: go vet + go test -race (set DATAPLANE_TEST_DATABASE_URL for the PostgreSQL suite)
 make sdk-test            # Python SDK against the real data plane binary (needs Go)
-make agent-test
-make agent-contract-test # Python meteorcli against contracts/device-agent-v1.md (needs Docker for Mosquitto)
+make agent-test          # Go meteorcli: gofmt, vet, go test -race (same as agent-go-test)
+make agent-contract-test # Go meteorcli against contracts/device-agent-v1.md (needs Go, and Docker for Mosquitto)
 make console-test
 make check-plane-imports
 ```

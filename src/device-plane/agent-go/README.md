@@ -1,11 +1,10 @@
 # meteorcli (Go)
 
-The Go rewrite of the MeteorCloud device agent. One binary: the always-on service
-(`meteorcli agent`) and the command line. It speaks
-[`contracts/device-agent-v1.md`](../../../contracts/device-agent-v1.md), the same contract as the
-Python agent in [`../agent`](../agent/), which devices still install until this one is complete.
+The MeteorCloud device agent. One binary: the always-on service (`meteorcli agent`) and the
+command line. It speaks [`contracts/device-agent-v1.md`](../../../contracts/device-agent-v1.md).
 
-Design, file layout, import of a Python install and status: [docs/meteorcli-go.md](../../../docs/meteorcli-go.md).
+Install and use: [docs/meteorcli.md](../../../docs/meteorcli.md). Design, file layout and status:
+[docs/meteorcli-go.md](../../../docs/meteorcli-go.md).
 
 ```text
 cmd/meteorcli/      main: version + cli.Main

@@ -115,12 +115,11 @@ See [`deploy/ansible/README.md`](../../deploy/ansible/README.md#wireguard-gatewa
 
 ## Device side
 
-`sudo ./installcli.sh` (and the release installer with `sudo`) installs
-`wireguard-tools` on Debian/Raspberry Pi OS when `wg` / `wg-quick` are missing.
-`meteorcli run` (as the device user; `installcli.sh` also installs passwordless
-`sudo` for the `meteorcli-wg` helper):
+The installer (`install-meteorcli.sh`, with `sudo`) installs `wireguard-tools` on
+Debian/Raspberry Pi OS when `wg` / `wg-quick` are missing. The agent's `wireguard` module
+(the root helper writes `wg0` for it; [WireGuard](../meteorcli-go.md#wireguard)):
 
-1. Generates a keypair under `~/.config/meteorcli/wireguard/` (or `/etc/meteorcli` for the service)
+1. Generates a keypair under `/var/lib/meteorcli/identity/wireguard/`
 2. POSTs the **public** key, this login (`pi`, `ubuntu`, …) and the sshd **public** host key
    (`/etc/ssh/ssh_host_ed25519_key.pub`) to `/api/v1/agent/connectivity/wireguard`
 3. Writes `wg0.conf` and runs `wg-quick up`

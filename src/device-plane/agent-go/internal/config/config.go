@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// Version is the config.json format this agent writes. Files without a version
-// field come from the Python agent and are converted by ImportPython.
+// Version is the config.json format this agent writes.
 const Version = 1
 
 // DefaultHeartbeatSeconds is used until the server says otherwise.

@@ -12,9 +12,8 @@ from the console without logging into the device.
    again, so a restart ordered while the device was offline does not run hours
    later after an unrelated reboot.
 4. On the device `meteorcli.service` (`meteorcli run`) collects the action after
-   the heartbeat. The Linux platform adapter calls the root-owned helper
-   `/usr/local/libexec/meteorcli-action` (installed by `sudo ./installcli.sh`).
-   Other boards/OS images can swap that adapter; the action kinds stay the same.
+   the heartbeat. Privileged actions go to meteorcli's root helper
+   (`meteorcli-helper.socket`, [Root helper](../meteorcli-go.md#root-helper)).
 5. The device reports what happened. Restart and shut-down are reported before
    the system goes down. An agent update starts `update-meteorcli.sh` as its own
    process and reports done or failed on a later heartbeat once the version that

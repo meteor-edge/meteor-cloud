@@ -4,20 +4,37 @@ from __future__ import annotations
 
 import re
 
+from e2e.http import Api
 from e2e.redact import redact
+from e2e.suite.context import DEVICE_TOKEN, WG_CONF
 from e2e.suite.framework import Fail, check, expect, wait_for
 
 STAGE = "4 onboarding"
 TOKEN_FILE = "/root/.meteorcloud-e2e-token"
 REGISTERED_RE = re.compile(r"Registered device ([0-9a-f-]{36})")
 
-# Start from a clean device: no agent, no tunnel, no credentials, no workload from an earlier run.
+# Start from a clean device: no tunnel, no credentials, no workload from an earlier run. The
+# agent is started again afterwards: `meteorcli register` asks the running agent to enroll.
 RESET = (
     "systemctl stop meteorcli 2>/dev/null || true; "
-    "wg-quick down /etc/meteorcli/wireguard/wg0.conf 2>/dev/null || ip link del wg0 2>/dev/null || true; "
+    f"wg-quick down {WG_CONF} 2>/dev/null || ip link del wg0 2>/dev/null || true; "
     "docker rm -f e2e-app demo-app >/dev/null 2>&1 || true; "
-    "find /etc/meteorcli -mindepth 1 -delete 2>/dev/null || true"
+    "find /var/lib/meteorcli/identity /var/lib/meteorcli/state /var/lib/meteorcli/artifacts "
+    "-mindepth 1 -delete 2>/dev/null || true; "
+    "rm -f /etc/meteorcli/config.json; "
+    "systemctl start meteorcli-helper.socket meteorcli"
 )
+
+
+def register(ctx, device, name: str) -> str:
+    """Point meteorcli at this run's API and register with the token in TOKEN_FILE (meteorcli
+    removes the file once registered). Returns the device id."""
+    ctx.meteorcli(device, f"config --api-base {ctx.api_url}")
+    result = ctx.meteorcli(device, f"register --token-file {TOKEN_FILE} --name {name}")
+    match = REGISTERED_RE.search(result.stdout)
+    if not match:
+        raise Fail(f"meteorcli register printed no device id: {result.text()[-500:]}")
+    return match.group(1)
 
 
 def create_token(ctx, name: str) -> str:
@@ -75,11 +92,7 @@ def onboard(ctx, index: int) -> dict:
     ctx.sh(device, RESET)
     ctx.put_secret_file(device, TOKEN_FILE, token)
     name = f"e2e-{ctx.run_id}-device-{index + 1}"
-    result = ctx.meteorcli(device, f"register --server {ctx.api_url} --token-file {TOKEN_FILE} --name {name}")
-    match = REGISTERED_RE.search(result.stdout)
-    if not match:
-        raise Fail(f"meteorcli register printed no device id: {result.text()[-500:]}")
-    device_id = match.group(1)
+    device_id = register(ctx, device, name)
     ctx.data.setdefault("devices", {})[index] = {"id": device_id, "name": name, "token": token}
     return {"device_id": device_id, "name": name, "host": device.name}
 
@@ -113,14 +126,15 @@ def device_listed(ctx):
 @check("device.token_single_use", STAGE, "A used registration token cannot register another device",
        needs=("device.register",))
 def token_single_use(ctx):
-    device = ctx.device(0)
-    result = ctx.sh(device, f"d=$(mktemp -d) && METEORCLI_CONFIG_DIR=$d /usr/local/bin/meteorcli register "
-                            f"--server {ctx.api_url} --token-file {TOKEN_FILE} --name e2e-reuse; rc=$?; "
-                            f"rm -rf $d {TOKEN_FILE}; exit $rc", check=False)
-    expect(result.returncode != 0, "reusing the token succeeded")
+    # The device is enrolled now, so this registers as other hardware straight against the agent API.
+    token = ctx.data["devices"][0]["token"]
+    body = {"token": token, "name": "e2e-reuse", "serial_number": f"e2e-reuse-{ctx.run_id}",
+            "mac_addresses": ["02:00:00:00:e2:e2"]}
+    status = Api(ctx.api_url, ctx.cfg.ca_file).status("POST", "/api/v1/agent/register", json_body=body)
+    expect(400 <= status < 500 and status != 422, f"reusing the token answered HTTP {status}")
     total = ctx.admin().call("GET", ctx.org_path("/devices"))["total"]
     expect(total == 1, f"organization has {total} devices after the reuse attempt")
-    return {"exit_code": result.returncode, "message": result.text()[-300:]}
+    return {"status": status}
 
 
 @check("device.online", STAGE, "meteorcli.service heartbeats and the device goes online",
@@ -134,13 +148,13 @@ def device_online(ctx):
 def identity_survives_restart(ctx):
     device = ctx.device(0)
     info = ctx.data["devices"][0]
-    before = ctx.sh(device, "sha256sum /etc/meteorcli/device-token").stdout.split()[0]
+    before = ctx.sh(device, f"sha256sum {DEVICE_TOKEN}").stdout.split()[0]
     api = ctx.admin()
     seen = api.call("GET", ctx.org_path(f"/devices/{info['id']}"))["last_seen_at"]
     ctx.sh(device, "systemctl restart meteorcli")
     row = wait_for(lambda: (d := api.call("GET", ctx.org_path(f"/devices/{info['id']}")))["last_seen_at"] != seen
                    and d["status"] == "online" and d, timeout=120, what="a heartbeat after the restart")
-    after = ctx.sh(device, "sha256sum /etc/meteorcli/device-token").stdout.split()[0]
+    after = ctx.sh(device, f"sha256sum {DEVICE_TOKEN}").stdout.split()[0]
     expect(before == after, "the device credential changed across a restart")
     total = api.call("GET", ctx.org_path("/devices"))["total"]
     expect(total == 1, f"restart created another device (total={total})")

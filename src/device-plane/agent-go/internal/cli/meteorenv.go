@@ -10,7 +10,7 @@ import (
 
 // runConfigMeteorenv is `meteorcli config meteorenv`: apply a first-boot
 // settings file (meteorenv.txt or .meteorenv on the boot partition) and remove
-// it, as the Python service did. meteorcli.service runs it as root before the
+// it. meteorcli.service runs it as root before the
 // agent starts (ExecStartPre=+), because the agent may neither write
 // /etc/meteorcli nor delete files on /boot. The agent then sees the saved API
 // key at start and submits an enrollment request by itself.
@@ -28,10 +28,6 @@ func runConfigMeteorenv(ctx context.Context, env *Env, args []string) int {
 		return 0
 	}
 	path := files[0]
-	if config.LooksLikePython(p.LegacyDir) {
-		fmt.Fprintf(env.Stderr, "meteorenv: %s found, but a Python meteorcli layout is in place; run 'meteorcli config import' first\n", path)
-		return 0
-	}
 	if _, err := os.Stat(p.DeviceTokenFile()); err == nil {
 		fmt.Fprintf(env.Stderr, "meteorenv: this device is already enrolled; %s is ignored\n", path)
 		return 0

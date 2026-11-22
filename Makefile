@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-dist agent-go-systemd-test agent-go-install-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-dist agent-go-systemd-test agent-go-install-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
 # Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
@@ -25,7 +25,6 @@ DATA_API_DIR := src/data-plane/go
 SDK_DIR := sdk/python
 CONSOLE_DIR := console
 INSTALLER_DIR := infrastructure/installer
-AGENT_DIR := src/device-plane/agent
 INFRA_DIR := infrastructure
 # Terraform-compatible CLI: terraform, or OpenTofu (MPL-2.0) when only tofu is installed.
 TERRAFORM ?= $(shell command -v terraform >/dev/null 2>&1 && echo terraform || (command -v tofu >/dev/null 2>&1 && echo tofu) || echo terraform)
@@ -206,10 +205,7 @@ install-website: ## Website lives in meteor-ui, not this tree
 install-installer: ## Install installer Python dependencies
 	cd $(INSTALLER_DIR) && python -m pip install -e ".[dev]"
 
-install-agent: ## Install reference agent Python dependencies
-	cd $(AGENT_DIR) && python -m pip install -e ".[dev]"
-
-install: install-backend install-data-plane install-installer install-agent install-console ## Install local dependencies
+install: install-backend install-data-plane install-installer install-console ## Install local dependencies
 
 backend-test: ## Run control-plane tests (dedicated *_test database, never the app DB)
 	@python -c "import sqlalchemy" >/dev/null 2>&1 || (echo "Control-plane deps missing. Run: make install-backend" && exit 1)
@@ -229,8 +225,7 @@ console-test: ## Run console tests
 	@test -d $(CONSOLE_DIR)/node_modules || (echo "Console deps missing. Run: make install-console" && exit 1)
 	cd $(CONSOLE_DIR) && npm test -- --run
 
-agent-test: ## Run reference agent tests
-	cd $(AGENT_DIR) && python -m pytest -q
+agent-test: agent-go-test ## Same as agent-go-test (the device agent is the Go meteorcli)
 
 # The race detector needs 48-bit virtual addresses: Raspberry Pi kernels (39-bit)
 # and 32-bit ARM cannot run it. There: make agent-go-test GO_RACE=
@@ -250,9 +245,8 @@ agent-go-install-test: ## Go meteorcli: board installer end to end under systemd
 agent-go-systemd-test: ## Go meteorcli: units, sockets and group policy under systemd in a container (Docker, --privileged)
 	cd src/device-plane/agent-go && ./test/systemd/run.sh
 
-agent-contract-test: ## Device agent contract suite (Python and Go meteorcli vs contracts/device-agent-v1.md; needs Docker for Mosquitto, Go)
+agent-contract-test: ## Device agent contract suite (Go meteorcli vs contracts/device-agent-v1.md; needs Go and Docker for Mosquitto)
 	cd tests/agent-contract && python -m pytest -q && AGENT_CONTRACT_MODE=replay python -m pytest -q
-	cd tests/agent-contract && AGENT_CONTRACT_AGENT=go python -m pytest -q -rs && AGENT_CONTRACT_AGENT=go AGENT_CONTRACT_MODE=replay python -m pytest -q
 
 agent-dist: agent-go-dist ## Same as agent-go-dist (the agent-v* release is the Go meteorcli)
 
@@ -271,8 +265,6 @@ test: ## Run all tests
 	@echo "==> Data-plane tests"
 	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
 	cd $(DATA_PLANE_DIR) && python -m pytest -q
-	@echo "==> Agent tests"
-	cd $(AGENT_DIR) && python -m pytest -q
 	@echo "==> Console tests"
 	@test -d $(CONSOLE_DIR)/node_modules || (echo "Console deps missing. Run: make install-console" && exit 1)
 	cd $(CONSOLE_DIR) && npm test -- --run
@@ -284,8 +276,6 @@ lint: ## Lint all projects
 	cd $(BACKEND_DIR) && python -m ruff check .
 	@echo "==> Data-plane lint"
 	cd $(DATA_PLANE_DIR) && python -m ruff check .
-	@echo "==> Agent lint"
-	cd $(AGENT_DIR) && python -m ruff check .
 	@echo "==> SDK lint"
 	cd $(SDK_DIR) && python -m ruff check .
 	@echo "==> Console lint"
@@ -298,8 +288,6 @@ format: ## Format all projects
 	cd $(BACKEND_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Data-plane format"
 	cd $(DATA_PLANE_DIR) && python -m ruff format . && python -m ruff check --fix .
-	@echo "==> Agent format"
-	cd $(AGENT_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Console format"
 	cd $(CONSOLE_DIR) && npm run format
 
@@ -310,8 +298,6 @@ typecheck: ## Run static type checks where configured
 	cd $(DATA_PLANE_DIR) && python -m compileall data_plane tests
 	@echo "==> Installer typecheck (compileall)"
 	cd $(INSTALLER_DIR) && python -m compileall edge_installer tests
-	@echo "==> Agent typecheck (compileall)"
-	cd $(AGENT_DIR) && python -m compileall meteorcli edge_agent tests
 
 installer-test: ## Run installer tests only
 	cd $(INSTALLER_DIR) && python -m pytest -q

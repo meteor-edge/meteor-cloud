@@ -8,10 +8,8 @@
 #   curl -fsSL …/install-meteorcli.sh | sudo bash -s -- --domain meteor.example.com --api-key key_XXXX --name lobby-cam
 #
 # It downloads the binary for this CPU, the systemd units, sysusers.d and
-# tmpfiles.d files, checks them against SHA256SUMS, installs them, takes over
-# from the Python meteorcli when it is installed (its service is stopped and
-# its files imported; /opt/meteorcli is left for a rollback), and starts the
-# agent. With --token it enrolls at once; with --api-key the agent asks for
+# tmpfiles.d files, checks them against SHA256SUMS, installs them, and starts
+# the agent. With --token it enrolls at once; with --api-key the agent asks for
 # approval by itself.
 #
 # Options:
@@ -57,7 +55,7 @@ while [[ $# -gt 0 ]]; do
 	--force) force=1; shift ;;
 	--no-wireguard) wireguard=0; shift ;;
 	--no-start) start=0; shift ;;
-	--with-service) shift ;; # the Python installer's flag (Meteor Imager passes it); the service is always installed
+	--with-service) shift ;; # older Meteor Imager versions pass it; the service is always installed
 	-h | --help) sed -n '2,/^set -euo/p' "$0" 2>/dev/null | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
 	*) echo "error: unknown option $1 (see --help)" >&2; exit 2 ;;
 	esac
@@ -107,14 +105,6 @@ install -m 0755 "$work/meteorcli-linux-$arch" "$BIN.new"
 trap 'rm -rf "$work" "$BIN.new"' EXIT
 "$BIN.new" --version >/dev/null || die "the downloaded binary does not run on this device"
 
-# ----------------------------------------------------------- the Python agent
-python_layout=0
-if [[ -L $BIN ]] && [[ "$(readlink -f "$BIN")" == /opt/meteorcli/* ]]; then
-	say "the Python meteorcli is installed; stopping it (kept in /opt/meteorcli for a rollback)"
-	systemctl disable --now meteorcli.service 2>/dev/null || true
-	python_layout=1
-fi
-
 # -------------------------------------------------------------------- install
 say "installing $BIN, units, users and directories"
 rm -f "$BIN"
@@ -139,25 +129,6 @@ if [[ -d /etc/sudoers.d ]]; then
 		say "warning: the sudo rule for meteorcli-logs did not validate; the console cannot read logs"
 	fi
 fi
-# A Wi-Fi change the Python agent had not confirmed yet: roll it back with the
-# Python helper while it still exists (the Go agent does not read its record).
-# If that fails, its record and backups stay in /var/lib/meteorcli-wifi.
-keep_wifi_record=0
-if [[ -f /var/lib/meteorcli-wifi/pending.json ]]; then
-	if [[ -x /usr/local/libexec/meteorcli-wifi ]] && /usr/local/libexec/meteorcli-wifi rollback >/dev/null 2>&1; then
-		say "rolled back a Wi-Fi change the Python agent had not confirmed"
-	else
-		keep_wifi_record=1
-		say "warning: an unconfirmed Wi-Fi change could not be rolled back; its backups stay in /var/lib/meteorcli-wifi"
-	fi
-fi
-# The Python agent's other root helpers and their sudo rules: the Go helper does
-# their work now (wg0 is taken over at the first WireGuard registration).
-rm -f /usr/local/libexec/meteorcli-wg /usr/local/libexec/meteorcli-wifi /usr/local/libexec/meteorcli-systemd \
-	/usr/local/libexec/meteorcli-action /etc/sudoers.d/meteorcli-wireguard /etc/sudoers.d/meteorcli-wifi \
-	/etc/sudoers.d/meteorcli-systemd /etc/sudoers.d/meteorcli-action
-[[ $keep_wifi_record -eq 1 ]] || rm -rf /var/lib/meteorcli-wifi
-
 # WireGuard tools for the device tunnel (the console's browser terminal).
 if [[ $wireguard -eq 1 ]] && ! { command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1; }; then
 	if command -v apt-get >/dev/null 2>&1; then
@@ -168,11 +139,6 @@ if [[ $wireguard -eq 1 ]] && ! { command -v wg >/dev/null 2>&1 && command -v wg-
 	else
 		say "warning: install wireguard-tools (wg, wg-quick) for the device tunnel"
 	fi
-fi
-
-if [[ $python_layout -eq 1 ]] || [[ -f /etc/meteorcli/device-token ]]; then
-	say "importing the Python agent's settings and identity"
-	"$BIN" config import || die "'meteorcli config import' failed; the Python install in /opt/meteorcli is untouched"
 fi
 
 # Settings before the agent starts: a saved API key makes it ask for approval by itself.

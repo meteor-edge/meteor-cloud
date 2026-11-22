@@ -4,11 +4,8 @@ AGENT_CONTRACT_MODE:
   verify (default)  scripted fake control plane; the transcript must equal recordings/<scenario>.json
   record            same, but (re)write recordings/<scenario>.json
   replay            the fake control plane answers from the recording instead of the script
-AGENT_CONTRACT_AGENT: which adapter drives the agent: ``python`` (default) or ``go``.
 
-A scenario marked ``@pytest.mark.requires("feature", ...)`` is skipped for an adapter whose
-``features`` lack one of them (the Go agent gains MQTT, actions, Wi-Fi, WireGuard and deploys
-in later pull requests).
+The agent under test is the Go meteorcli (``agents/go_agent.py``).
 """
 
 from __future__ import annotations
@@ -23,10 +20,11 @@ import uuid
 from collections import deque
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 
+from agents.go_agent import GoAgent
 from harness import schemas, transcript
 from harness.broker import Broker, BrokerUnavailable, Observer
 from harness.broker import start as start_broker
@@ -34,32 +32,7 @@ from harness.device import SimulatedDevice
 from harness.ed25519 import sign_desired
 from harness.fake_cp import FakeControlPlane, Reply, Request, recorded_http
 
-if TYPE_CHECKING:
-    from agents.python_agent import PythonAgent
-
 MODE = os.environ.get("AGENT_CONTRACT_MODE", "verify")
-AGENT = os.environ.get("AGENT_CONTRACT_AGENT", "python")
-
-
-def adapter_class() -> Any:
-    if AGENT == "python":
-        from agents.python_agent import PythonAgent
-
-        return PythonAgent
-    if AGENT == "go":
-        from agents.go_agent import GoAgent
-
-        return GoAgent
-    pytest.fail(f"no adapter for agent {AGENT!r}")
-
-
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    features = adapter_class().features
-    for item in items:
-        for mark in item.iter_markers("requires"):
-            missing = [f for f in mark.args if f not in features]
-            if missing:
-                item.add_marker(pytest.mark.skip(reason=f"the {AGENT} agent lacks {', '.join(missing)}"))
 SIGNING_SEED = bytes(range(32))  # test-only organization signing key
 
 
@@ -69,18 +42,11 @@ def device() -> SimulatedDevice:
 
 
 @pytest.fixture
-def agent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, device: SimulatedDevice, contract: Contract
-) -> Iterator[PythonAgent]:
-    cls = adapter_class()
-    if AGENT == "go":
-        adapter = cls(tmp_path, device, contract.plane)
-    else:
-        adapter = cls(monkeypatch, tmp_path, device)
+def agent(tmp_path: Path, device: SimulatedDevice, contract: Contract) -> Iterator[GoAgent]:
+    adapter = GoAgent(tmp_path, device, contract.plane)
     contract.bind(adapter)  # replay re-signs desired software for this agent's device id
     yield adapter
-    if hasattr(adapter, "close"):
-        adapter.close()
+    adapter.close()
 
 
 @pytest.fixture(scope="session")

@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-# Root-owned helper installed by the agent's installcli.sh, behind a sudo rule for the device user.
+# Wrapper installed by the agent's installer, behind a sudo rule for members of the meteorcli group.
 LOGS_HELPER = "/usr/local/libexec/meteorcli-logs"
 LIST_COMMAND = ["sudo", "-n", LOGS_HELPER, "list"]
 MAX_LINES = 10000

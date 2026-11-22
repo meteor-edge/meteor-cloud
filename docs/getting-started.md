@@ -63,8 +63,9 @@ Pick one path.
 
 ```bash
 curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
-# from a cloud checkout instead: cd src/device-plane/agent && sudo ./installcli.sh
-sudo meteorcli register --server http://localhost:8000 --token reg_... --name edge-01
+# from a cloud checkout instead: make agent-go-dist, then sudo bash src/device-plane/agent-go/dist/install-meteorcli.sh
+sudo meteorcli config --api-base http://localhost:8000
+sudo meteorcli register --token reg_... --name edge-01
 # meteorcli.service (started by the installer) connects within a few seconds:
 journalctl -u meteorcli -f
 # without root / systemd there is no service: meteorcli run   (foreground; Ctrl+C to stop)

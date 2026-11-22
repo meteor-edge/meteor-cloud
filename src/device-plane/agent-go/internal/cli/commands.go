@@ -55,7 +55,7 @@ type command struct {
 var commands = []command{
 	{name: "agent", aliases: []string{"run"}, summary: "Run the always-on device agent (meteorcli.service runs this).", run: runAgent},
 	{name: "claim", summary: "Report (or --wait for) the approval of a pending enrollment request.", run: runClaim},
-	{name: "config", summary: "Store the server domain and API key, or import a Python install.", run: runConfig},
+	{name: "config", summary: "Store the server domain and API key.", run: runConfig},
 	{name: "helper", summary: "Run the root helper (meteorcli-helper.service), or 'helper call' one operation.", run: runHelper},
 	{name: "logs", summary: "List or print this device's logs (journal, systemd, Docker, /var/log).", run: runLogs},
 	{name: "mqtt-listen", summary: "Print the MQTT commands this device receives (default: devices/{id}/commands).", run: runMQTTListen},

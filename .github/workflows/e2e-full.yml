@@ -66,7 +66,6 @@ jobs:
             src/control-plane/pyproject.toml
             src/data-plane/pyproject.toml
             infrastructure/installer/pyproject.toml
-            src/device-plane/agent/pyproject.toml
       - name: Install dependencies
         run: make install
       - name: Test
@@ -120,6 +119,11 @@ jobs:
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
+      # The devices get meteorcli built from this commit (scripts/dist.sh).
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/device-plane/agent-go/go.mod
+          cache: false
       - name: Install Ansible
         run: |
           python -m pip install ansible

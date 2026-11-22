@@ -10,10 +10,10 @@ operators are in [meteorcli](meteorcli.md). This page covers the internals.
 | Part | State |
 | --- | --- |
 | Core: modules, supervisor, crash-loop breaker, health, signals, systemd notify and watchdog, log redaction | Done |
-| Config: new file layout, import of a Python install | Done |
+| Config: new file layout | Done |
 | State: versioned state files, persistent outbox | Done |
 | API client: health, enrollment, register, heartbeat, MQTT settings, actions, software, signing keys, artifact downloads, application credentials | Done (the other routes come with their modules) |
-| CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `logs`, `mqtt-test`, `mqtt-listen`, `helper`, `--version`, `agent` (alias `run`) | Done |
+| CLI: `config`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `logs`, `mqtt-test`, `mqtt-listen`, `helper`, `--version`, `agent` (alias `run`) | Done |
 | Agent socket with a group policy per command; root helper (`power.*`, `logs.*`, `systemd.install_unit`, `systemd.control`, `users.*`, `docker.*`, `compose.*`, `wifi.*`, `wireguard.*`, `ssh.authorized_keys`) | Done |
 | systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done |
 | Installers (`install-meteorcli.sh` for any board, `install-rpi.sh`), first-boot and OS image scripts, CI artifact, `agent-v*` release, `meteorcli-go-edge` prerelease | Done |
@@ -67,11 +67,10 @@ The installer:
 - downloads and verifies against `SHA256SUMS`
 - installs `/usr/local/bin/meteorcli`, the units, sysusers.d and tmpfiles.d files
 - adds `$SUDO_USER` (or `--user`) to `meteorcli` and `meteorcli-admin`
-- if the Python agent is installed: stops its service, runs `meteorcli config import` and leaves `/opt/meteorcli` for a rollback
 - applies `--domain`/`--api-base`/`--api-key`, starts the agent and runs `register` when given a token
 
-Running it again upgrades in place. To roll back to Python, run the installer of a Python release
-(`agent-v0.4.0`).
+Running it again upgrades in place. A device still on the Python agent (0.4.x, removed from
+this repository) cannot be moved with its identity: wipe it and enroll it again.
 
 To try a pull request before it is merged:
 1. Download the `meteorcli-go-<sha>` artifact from the CI run's Summary page and unzip it on the device.
@@ -86,47 +85,12 @@ it when `SHA256SUMS` is there; piped from curl, it downloads the release it came
 Once installed, a device updates itself from the console (**Update meteorcli**) or with
 `meteorcli update`; see [Updating](#updating). Running the installer again also upgrades.
 
-## Moving a device from the Python agent
-
-The Python agent kept settings and secrets together in `/etc/meteorcli`. Stop it first: the Python
-service rotates the device token and MQTT password, and a rotation between the copy and the clean-up
-would be lost. As root:
-
-```bash
-sudo systemctl stop meteorcli           # the Python service
-sudo meteorcli config import            # reads /etc/meteorcli
-sudo meteorcli config import --from ~/.config/meteorcli --force
-meteorcli status
-```
-
-The import refuses when the new config already points at a different server than the Python
-install (enrollment files belong to one server); `--force` replaces it. If a token is lost anyway,
-enroll again: `meteorcli config --api-key …` and request a token as on a new device.
-
-The import:
-
-- keeps the server settings in `/etc/meteorcli/config.json` (adds `version: 1`, keeps unknown keys)
-  and saves the old file as `config.json.python`;
-- moves `device_id`, `organization_id`, `name` and `heartbeat_interval_seconds` to `identity/device.json`;
-- moves `device-token`, `api-key`, `mqtt.json` (its `ca_cert_path` is rewritten), `mqtt-ca.crt`,
-  `claim-secret` (as `pending-claim.json`) and the WireGuard key pair to `identity/`;
-- moves `signing-keys.json` and `applied-software.json` to `state/`;
-- uses a finished `.device-secrets-staging` journal (one with `DONE`) and drops an unfinished one;
-- removes the old copies only after every new file is written, and skips files that already exist
-  unless `--force`. Running it again does nothing.
-
-Not imported: `artifacts/`, `app-credentials/`, `compose/`, `agent-update*.json` and `wg0.conf`.
-The modules that own them recreate them.
-
-`status`, `config` and `agent` point at `meteorcli config import` while a Python layout is in place.
-
 ## Commands
 
 | Command | Same as Python | Notes |
 | --- | --- | --- |
 | `meteorcli config --domain HOST [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--release-url URL]` | Yes | Same URL rules (IPs and localhost use HTTP, `api.<ip>` is stripped). Changing the server removes the old server's credentials. `--ssh-user` is new (Python used the user that ran the installer). `--release-url` (`https://`, `http://` or `file://`; `default` resets it) is where the updater reads releases. Needs root. |
 | `meteorcli config --show` | Yes | Never prints secrets. |
-| `meteorcli config import [--from DIR] [--force]` | New | See above. |
 | `meteorcli config meteorenv` | Python service did it at start | Applies a first-boot `meteorenv` file; `meteorcli.service` runs it as root before the agent. See [Enrollment](#enrollment). |
 | `meteorcli status` | Yes, same lines | Asks the running agent over `agent.sock` (adds an `Agent:` line, the pending request id, and one line per module). When the agent is not running it reads the files and checks secrets by `stat` only. Never shows secrets. Exits 1 until enrolled. |
 | `meteorcli register [--token T \| --token-file F] [--name N]` | Yes, without `--server` | The agent registers. `$METEORCLI_TOKEN` works too; `--token-file` is removed after success; the two flags cannot be combined. Uses the configured server. Needs `meteorcli-admin`. |
@@ -263,10 +227,7 @@ and `AF_INET6` (wg-quick resolves a server given by name) and keeps its state in
   Exposure about 2.9 on systemd 257.
 - The installer adds `/usr/local/libexec/meteorcli-logs` and its sudo rule (checked with
   `visudo -c`), installs `wireguard-tools` with apt unless `--no-wireguard`, sets `--ssh-user`
-  from `--user`/`$SUDO_USER`, and removes the Python agent's other root helpers and their sudo rules
-  (`meteorcli-wg`, `meteorcli-wifi`, `meteorcli-systemd`, `meteorcli-action`). A Wi-Fi change the
-  Python agent had not confirmed is rolled back with its helper first; if that fails,
-  `/var/lib/meteorcli-wifi` is kept. A `--user` that cannot be the SSH user (root, system
+  from `--user`/`$SUDO_USER`. A `--user` that cannot be the SSH user (root, system
   accounts, names outside `^[a-z_][a-z0-9_-]{0,31}$`) only skips `--ssh-user`.
 - `/run/meteorcli` comes from tmpfiles.d instead of `RuntimeDirectory=`: systemd would delete it,
   with `helper.sock`, whenever the agent stops, and would give it to `meteor:meteor`, locking the
@@ -647,8 +608,8 @@ make agent-go-install-test   # the same container: install-rpi.sh, install-meteo
 ```
 
 The install test refuses a board that is not a Pi. It then:
-- takes over a fake Python install (service stopped, identity imported, the device online with the imported token, `pi` running `status` without sudo, `/opt/meteorcli` kept)
-- runs the installer again as an upgrade
+- installs with `--force` and `--token` (the device online right away, `pi` running `status` without sudo)
+- runs the installer again as an upgrade (identity kept)
 - installs on a fresh device with `--token` and checks it is online right away
 - checks that no secret reaches the journal
 
@@ -666,12 +627,11 @@ while the agent is stopped, the container restarts, and the device must come onl
 command; a `meteorenv.txt` on `/boot/firmware` is applied at start, removed, and the agent asks for
 approval by itself. Today's binaries are about 7.1-7.5 MB (arm64, armv6, amd64; stripped).
 
-The API client tests replay the Python agent's recorded exchanges in
-[`tests/agent-contract/recordings/`](../tests/agent-contract/recordings/): same routes, headers,
-body keys, and the answers decode. The contract suite also drives the Go agent
-(`AGENT_CONTRACT_AGENT=go`, part of `make agent-contract-test` and CI): it must produce the
-Python agent's `register` and `enroll` transcripts exactly, plus the Go-only `heartbeat` and
-`enroll_reboot` scenarios. Scenarios for modules that do not exist yet are skipped.
+The API client tests replay the recorded exchanges in
+[`tests/agent-contract/recordings/`](../tests/agent-contract/recordings/) (first recorded from the
+Python agent): same routes, headers, body keys, and the answers decode. The contract suite
+(`make agent-contract-test`, CI job *Agent contract*) drives the Go agent through every scenario;
+its transcripts must equal the recordings.
 
 One third-party Go module: `github.com/eclipse/paho.golang` v0.22.0 (EPL-2.0 or EDL-1.0, used
 under EDL-1.0; the same version the data plane uses). Only its `paho` and `packets` packages are

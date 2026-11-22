@@ -19,16 +19,13 @@ const (
 	envAPIKey = "METEORCLI_API_KEY"
 )
 
-// runConfig is `meteorcli config`: store the server and API key (as root), show
-// them, or import a Python install with `meteorcli config import`.
+// runConfig is `meteorcli config`: store the server and API key (as root), or
+// show them.
 func runConfig(ctx context.Context, env *Env, args []string) int {
-	if len(args) > 0 && args[0] == "import" {
-		return runConfigImport(env, args[1:])
-	}
 	if len(args) > 0 && args[0] == "meteorenv" {
 		return runConfigMeteorenv(ctx, env, args[1:])
 	}
-	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--release-url URL] [--show] | import | meteorenv")
+	fl := newFlags(env, "config", "[--domain HOST] [--api-base URL] [--http] [--api-key KEY] [--ssh-user NAME] [--release-url URL] [--show] | meteorenv")
 	domain := fl.String("domain", "", "Server host or IP (meteorxx.com or 192.168.0.107:8000; or $"+envDomain+").")
 	apiBase := fl.String("api-base", "", "Override the derived API origin (http:// is allowed for local testing).")
 	useHTTP := fl.Bool("http", false, "Use HTTP instead of HTTPS (for local testing).")
@@ -52,10 +49,6 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 		}
 	}
 	p := env.Paths
-	if config.LooksLikePython(p.LegacyDir) {
-		fmt.Fprintln(env.Stderr, "error: this device still has a Python meteorcli layout. Run 'sudo meteorcli config import' first.")
-		return 1
-	}
 	if *show {
 		return showConfig(env)
 	}
@@ -213,35 +206,6 @@ func showConfig(env *Env) int {
 	fmt.Fprintf(env.Stdout, "Credential:     %s\n", presence(p.DeviceTokenFile()))
 	if c == nil && presence(p.APIKeyFile()) != present {
 		return 1
-	}
-	return 0
-}
-
-func runConfigImport(env *Env, args []string) int {
-	fl := newFlags(env, "config import", "[--from DIR] [--force]")
-	from := fl.String("from", env.Paths.LegacyDir, "Directory of the Python meteorcli install.")
-	force := fl.Bool("force", false, "Overwrite files that already exist in the new layout.")
-	if code, done := parseFlags(fl, args); done {
-		return code
-	}
-	rep, err := config.ImportPython(*from, env.Paths, config.ImportOptions{Force: *force, Owner: env.Owner})
-	for _, name := range rep.Imported {
-		fmt.Fprintf(env.Stdout, "imported  %s\n", name)
-	}
-	for _, name := range rep.Skipped {
-		fmt.Fprintf(env.Stdout, "skipped   %s\n", name)
-	}
-	if rep.Backup != "" {
-		fmt.Fprintf(env.Stdout, "The Python config is kept as %s\n", rep.Backup)
-	}
-	if err != nil {
-		return failWrite(env, err)
-	}
-	if len(rep.Skipped) > 0 && !*force {
-		fmt.Fprintln(env.Stdout, "Skipped files stay where they were. Run again with --force to replace the existing ones.")
-	}
-	if len(rep.Imported) == 0 && len(rep.Skipped) == 0 {
-		fmt.Fprintf(env.Stdout, "Nothing to import from %s\n", *from)
 	}
 	return 0
 }

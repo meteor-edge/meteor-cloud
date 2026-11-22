@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"path/filepath"
 
-	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/state"
 )
 
@@ -91,8 +89,7 @@ type appliedState struct {
 }
 
 // load returns every recorded workload. A missing or damaged file is empty
-// (a damaged one was moved aside by the store). The Python agent's file
-// (version 0) has the workloads at the top level.
+// (a damaged one was moved aside by the store).
 func (a appliedState) load() (map[string]workload, error) {
 	var raw map[string]json.RawMessage
 	version, err := a.store.Read(appliedFile, &raw)
@@ -103,18 +100,12 @@ func (a appliedState) load() (map[string]workload, error) {
 		return nil, err
 	}
 	out := map[string]workload{}
-	if version >= 1 {
-		if w, ok := raw["workloads"]; ok {
-			if err := json.Unmarshal(w, &out); err != nil {
-				return map[string]workload{}, nil
-			}
-		}
+	if version < 1 {
 		return out, nil
 	}
-	for key, value := range raw {
-		var w workload
-		if key != "version" && json.Unmarshal(value, &w) == nil {
-			out[key] = w
+	if w, ok := raw["workloads"]; ok {
+		if err := json.Unmarshal(w, &out); err != nil {
+			return map[string]workload{}, nil
 		}
 	}
 	return out, nil
@@ -133,8 +124,8 @@ type record struct {
 	reapply bool
 }
 
-// save applies r to the file, like the Python agent: the revision is a
-// high-water mark that only a rollback may lower.
+// save applies r to the file: the revision is a high-water mark that only a
+// rollback may lower.
 func (a appliedState) save(r record) error {
 	all, err := a.load()
 	if err != nil {
@@ -158,22 +149,6 @@ func (a appliedState) save(r record) error {
 }
 
 func (a appliedState) write(all map[string]workload) error {
-	var head struct{}
-	version, err := a.store.Read(appliedFile, &head)
-	if err == nil && version < appliedVersion {
-		// The Python layout has the workloads at the top level, all of them
-		// read into all. Replace the file in one atomic write instead of
-		// merging (the store keeps unknown keys, and these would be stale
-		// copies); until it succeeds the old file stays.
-		path := filepath.Join(a.store.Dir(), appliedFile)
-		if err := config.WriteJSON(path, struct {
-			Version   int                 `json:"version"`
-			Workloads map[string]workload `json:"workloads"`
-		}{appliedVersion, all}, nil, 0o600); err != nil {
-			return fmt.Errorf("applied software: %w", err)
-		}
-		return nil
-	}
 	if err := a.store.Write(appliedFile, appliedVersion, struct {
 		Workloads map[string]workload `json:"workloads"`
 	}{all}); err != nil {

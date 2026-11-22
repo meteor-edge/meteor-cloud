@@ -7,7 +7,7 @@ Python or Go, must speak exactly this.
 - **Schemas:** [`schemas/agent/`](schemas/agent/) (JSON Schema 2020-12). The map of
   route or topic to schema is [`schemas/agent/index.json`](schemas/agent/index.json).
 - **Examples:** [`tests/agent-contract/recordings/`](../tests/agent-contract/recordings/)
-  hold real exchanges of the Python agent, with ids and secrets replaced by placeholders.
+  hold real exchanges of the agent, with ids and secrets replaced by placeholders.
 - **Checked by:** the control-plane tests (every `/api/v1/agent/*` answer in
   `src/control-plane/tests` is validated against the schemas) and the agent contract
   suite ([`tests/agent-contract/`](../tests/agent-contract/README.md)).
@@ -23,7 +23,7 @@ Python or Go, must speak exactly this.
 | Errors | Every non-2xx JSON answer is `{"error": {"code": "...", "message": "..."}}`. Agents branch on `code`, never on `message`. |
 | Auth | Device routes take `Authorization: Bearer <device token>`. Enrollment-key routes take `Authorization: Bearer <API key>`. Credentials travel only in headers, never in a URL. |
 | 401 / 403 | On a device route: the credential is invalid or revoked. The agent stops using it and waits to be enrolled again; it does not hammer the server. |
-| Retries | A failed heartbeat (network error, 429, 5xx) is retried with exponential backoff and jitter: 1 s doubling to 60 s, each delay multiplied by a random factor 0.5 to 1.0. Other calls are tried again on the next cycle. Agents should honour `Retry-After` (seconds) on 429/503; the Python agent does so for enrollment polling only. |
+| Retries | A failed heartbeat (network error, 429, 5xx) is retried with exponential backoff and jitter: 1 s doubling to 60 s, each delay multiplied by a random factor 0.5 to 1.0. Other calls are tried again on the next cycle. Agents should honour `Retry-After` (seconds) on 429/503. |
 | Transport | HTTPS with TLS 1.2+ in production, system CAs plus an optional pinned CA. MQTT always uses TLS. |
 | Secrets | Device token, MQTT password, claim secret, API key, Wi-Fi and user passwords are never logged. |
 
@@ -74,7 +74,7 @@ and `actions_pending` (collect from `GET /actions`). Desired software is listed 
   whose runtime is reported `false`.
 - `actions`, `deploy_kinds` (new in v1, additive): what this agent's code can do.
 - `modules` (new in v1, additive, optional): module name to health (`running`, `starting`,
-  `waiting`, `failed`, `parked`, `stopped`). The Go agent sends it; the Python agent has no modules.
+  `waiting`, `failed`, `parked`, `stopped`). The Go agent sends it; older agents may omit it.
 
 The server stores the object as sent.
 
