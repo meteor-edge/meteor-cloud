@@ -2,6 +2,8 @@ package actions
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 	"time"
 
 	"meteorcloud/meteorcli/internal/api"
@@ -21,6 +23,10 @@ type env struct {
 	state   *state.Store
 	version string
 	now     func() time.Time
+	// restart asks the supervisor to restart (unpark) a module (restart_module).
+	restart func(name string) error
+	// diagnose returns the doctor report as text (run_diagnostics).
+	diagnose func(ctx context.Context) string
 }
 
 // kind is how one action kind runs.
@@ -34,6 +40,9 @@ type kind struct {
 	// (update_agent: the updater restarts the agent and writes an outcome).
 	later bool
 	run   func(ctx context.Context, e env, a api.Action) error
+	// output, when set, runs instead of run and its text goes into the
+	// result's output (run_diagnostics).
+	output func(ctx context.Context, e env, a api.Action) (string, error)
 }
 
 // registry lists every action kind. Add a kind: a function and one line here.
@@ -43,10 +52,14 @@ var registry = map[string]kind{
 	"set_password": {advertised: true, run: setPassword},
 	"add_user":     {advertised: true, run: addUser},
 	"update_agent": {advertised: true, later: true, run: startUpdate},
+	// Remote repair from the console's module health panel.
+	"restart_module":  {advertised: true, run: restartModule},
+	"run_diagnostics": {advertised: true, output: runDiagnostics},
 }
 
-// order is the order of Kinds (the Python agent's capabilities order).
-var order = []string{"reboot", "shutdown", "set_password", "add_user", "update_agent"}
+// order is the order of Kinds (the Python agent's capabilities order, then
+// the kinds only this agent has).
+var order = []string{"reboot", "shutdown", "set_password", "add_user", "update_agent", "restart_module", "run_diagnostics"}
 
 // Kinds returns the action kinds this agent can run, for capabilities.actions.
 func Kinds() []string {
@@ -80,6 +93,26 @@ func addUser(ctx context.Context, e env, a api.Action) error {
 	return e.helper.Call(ctx, "users.add", helper.AddUserRequest{
 		Username: str(a.Username), Password: str(a.Password), Sudo: a.Sudo, AuthorizedKey: str(a.AuthorizedKey),
 	}, nil)
+}
+
+// moduleName is what a module name may look like (the server checks the same).
+var moduleName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+
+// restartModule restarts one module through the supervisor; a parked module
+// runs again. The supervisor restarts it after this action is reported, so
+// restarting the actions module itself is safe.
+func restartModule(_ context.Context, e env, a api.Action) error {
+	name := str(a.Module)
+	if !moduleName.MatchString(name) {
+		return fmt.Errorf("restart_module: invalid module name %q", name)
+	}
+	return e.restart(name)
+}
+
+// runDiagnostics returns the doctor report; checks that fail are part of the
+// report, not a failure of the action.
+func runDiagnostics(ctx context.Context, e env, _ api.Action) (string, error) {
+	return e.diagnose(ctx), nil
 }
 
 // unsupported is the error of a kind this agent cannot run. The contract wants

@@ -29,6 +29,7 @@ const KindReport = "action_report"
 const (
 	actionTimeout = 2 * time.Minute
 	maxError      = 500
+	maxOutput     = 16000
 	// putRetryEvery is how long put waits between outbox write attempts.
 	putRetryEvery = time.Second
 )
@@ -105,7 +106,17 @@ func (r *runner) now() time.Time {
 }
 
 func (r *runner) env() env {
-	return env{helper: r.helper, state: r.d.State, version: r.d.Version, now: r.now}
+	return env{
+		helper: r.helper, state: r.d.State, version: r.d.Version, now: r.now,
+		restart: func(name string) error {
+			if _, ok := r.d.Health.Get(name); !ok {
+				return fmt.Errorf("restart_module: this agent has no module %q", name)
+			}
+			r.d.Signals.Publish(agent.RestartModule{Name: name})
+			return nil
+		},
+		diagnose: func(ctx context.Context) string { return agent.Diagnose(ctx, r.d, r.helper).Text() },
+	}
 }
 
 // collect fetches the waiting actions and runs them in the order the server
@@ -145,7 +156,13 @@ func (r *runner) collect(ctx context.Context) {
 			r.flush(ctx)
 		}
 		actx, cancel := context.WithTimeout(ctx, actionTimeout)
-		err := k.run(actx, r.env(), a)
+		var output string
+		var err error
+		if k.output != nil {
+			output, err = k.output(actx, r.env(), a)
+		} else {
+			err = k.run(actx, r.env(), a)
+		}
 		cancel()
 		switch {
 		case err != nil:
@@ -155,7 +172,7 @@ func (r *runner) collect(ctx context.Context) {
 			d.Log.Info("action started; reported when it has finished", "kind", a.Kind, "id", a.ID)
 		case !k.reportFirst:
 			d.Log.Info("action done", "kind", a.Kind, "id", a.ID)
-			r.put(ctx, a, nil)
+			r.putOutput(ctx, a, output)
 		default:
 			d.Log.Info("action started", "kind", a.Kind, "id", a.ID)
 		}
@@ -165,7 +182,23 @@ func (r *runner) collect(ctx context.Context) {
 // put keeps one result in the outbox. On a write failure it retains the result
 // in memory for flush to retry, and returns the persistence error.
 func (r *runner) put(ctx context.Context, a api.Action, err error) error {
-	res := resultOf(a.ID, err)
+	return r.keep(ctx, a, resultOf(a.ID, err))
+}
+
+// putOutput keeps a "done" result that carries text (run_diagnostics),
+// redacted and cut to the contract's length.
+func (r *runner) putOutput(ctx context.Context, a api.Action, output string) error {
+	res := resultOf(a.ID, nil)
+	if output != "" {
+		res.Output = agent.Redact(output)
+		if len(res.Output) > maxOutput {
+			res.Output = res.Output[:maxOutput]
+		}
+	}
+	return r.keep(ctx, a, res)
+}
+
+func (r *runner) keep(ctx context.Context, a api.Action, res api.ActionResult) error {
 	if perr := r.writeResult(ctx, res); perr != nil {
 		r.held = append(r.held, res)
 		r.d.Log.Error("keep an action result", "id", a.ID, "err", perr)

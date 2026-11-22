@@ -5,7 +5,9 @@ export type DeviceActionKind =
   | "shutdown"
   | "set_password"
   | "add_user"
-  | "update_agent";
+  | "update_agent"
+  | "restart_module"
+  | "run_diagnostics";
 export type DeviceActionState = "pending" | "sent" | "done" | "failed";
 
 export type DeviceAction = {
@@ -15,7 +17,11 @@ export type DeviceAction = {
   username: string | null;
   sudo: boolean;
   from_version?: string | null;
+  /** restart_module: the agent module. */
+  module?: string | null;
   last_error: string | null;
+  /** run_diagnostics: the device's doctor report. */
+  output?: string | null;
   created_at: string;
   sent_at: string | null;
   reported_at: string | null;
@@ -89,5 +95,28 @@ export function addDeviceUser(
   return apiRequest<DeviceActions>(path(organizationId, deviceId, "/add-user"), {
     token,
     body: payload,
+  });
+}
+
+export function restartDeviceModule(
+  token: string,
+  organizationId: string,
+  deviceId: string,
+  module: string,
+): Promise<DeviceActions> {
+  return apiRequest<DeviceActions>(path(organizationId, deviceId, "/restart-module"), {
+    token,
+    body: { module },
+  });
+}
+
+export function runDeviceDiagnostics(
+  token: string,
+  organizationId: string,
+  deviceId: string,
+): Promise<DeviceActions> {
+  return apiRequest<DeviceActions>(path(organizationId, deviceId, "/run-diagnostics"), {
+    token,
+    method: "POST",
   });
 }

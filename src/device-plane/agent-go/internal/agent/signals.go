@@ -32,6 +32,16 @@ type ConfigChanged struct{}
 // Key implements Signal.
 func (ConfigChanged) Key() string { return "config_changed" }
 
+// RestartModule asks the supervisor to restart one module, or run it again
+// when the crash-loop breaker parked it (the restart_module action). Each
+// module name coalesces on its own.
+type RestartModule struct{ Name string }
+
+// Key implements Signal.
+func (r RestartModule) Key() string { return restartModulePrefix + r.Name }
+
+const restartModulePrefix = "restart_module:"
+
 // Signals is the hub modules use to cooperate without calling each other.
 // Publish never blocks: a slow subscriber only loses older signals of a key.
 type Signals struct {

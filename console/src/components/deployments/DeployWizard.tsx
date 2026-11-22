@@ -20,6 +20,7 @@ import {
   existingEndpointFor,
   suggestedEndpointPort,
 } from "@/components/deployments/ports";
+import { agentCapabilities, supportsDeployKind } from "@/lib/agentCapabilities";
 import { parseYamlObject, toYaml } from "@/lib/yaml";
 
 const KIND_LABELS: Record<string, string> = {
@@ -157,12 +158,19 @@ export function DeployWizard({
   const groups = groupsQuery.data ?? [];
 
   const skippedDevices = useMemo(() => {
-    const capKey = selectedRelease ? KIND_CAPABILITY[selectedRelease.kind] : undefined;
-    if (!capKey || deviceIds.length === 0) {
+    if (!selectedRelease || deviceIds.length === 0) {
       return [];
     }
+    const capKey = KIND_CAPABILITY[selectedRelease.kind];
     return devices.filter((device) => {
       if (!deviceIds.includes(device.id)) {
+        return false;
+      }
+      // The agent's code cannot install this kind (the API skips it too).
+      if (!supportsDeployKind(agentCapabilities(device), selectedRelease.kind)) {
+        return true;
+      }
+      if (!capKey) {
         return false;
       }
       const caps = device.metadata?.capabilities;
@@ -201,7 +209,9 @@ export function DeployWizard({
   function buildRollout(): DeploymentCreatePayload["rollout"] {
     if (strategy === "batched") {
       const size = batchSize.trim() ? Number(batchSize) : null;
-      return size && size > 0 ? { strategy: "batched", batch_size: size } : { strategy: "immediate" };
+      return size && size > 0
+        ? { strategy: "batched", batch_size: size }
+        : { strategy: "immediate" };
     }
     if (strategy === "phased") {
       return {
@@ -295,7 +305,9 @@ export function DeployWizard({
       const target = (raw.target as Record<string, unknown> | undefined) ?? {};
       const rolloutRaw = (raw.rollout as Record<string, unknown> | undefined) ?? {};
       // The API trims and lowercases the strategy; match it so phased fields are kept.
-      const yamlStrategy = String(rolloutRaw.strategy ?? "immediate").trim().toLowerCase();
+      const yamlStrategy = String(rolloutRaw.strategy ?? "immediate")
+        .trim()
+        .toLowerCase();
       const payload: DeploymentCreatePayload = {
         release_id: String(raw.release_id ?? ""),
         name: raw.name == null ? null : String(raw.name),
@@ -312,7 +324,9 @@ export function DeployWizard({
           delay_seconds: NUMBER_OR_NULL(rolloutRaw.delay_seconds),
           ...(yamlStrategy === "phased"
             ? {
-                phases: Array.isArray(rolloutRaw.phases) ? (rolloutRaw.phases as RolloutPhase[]) : null,
+                phases: Array.isArray(rolloutRaw.phases)
+                  ? (rolloutRaw.phases as RolloutPhase[])
+                  : null,
                 max_concurrent: NUMBER_OR_NULL(rolloutRaw.max_concurrent),
                 failure_threshold_percent: NUMBER_OR_NULL(rolloutRaw.failure_threshold_percent),
                 pending_timeout_seconds: NUMBER_OR_NULL(rolloutRaw.pending_timeout_seconds),
@@ -571,7 +585,8 @@ export function DeployWizard({
                       <p className="text-xs text-muted-foreground">
                         The next batch starts when every device in the current one has finished.
                         Default {DEFAULT_BATCH_SIZE}
-                        {singleDevice || (groupIds.length === 0 && deviceIds.length <= Number(batchSize))
+                        {singleDevice ||
+                        (groupIds.length === 0 && deviceIds.length <= Number(batchSize))
                           ? "; with this few devices it behaves like Immediate."
                           : "."}
                       </p>
@@ -728,9 +743,10 @@ export function DeployWizard({
                 {skippedDevices.length > 0 && (
                   <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
                     {skippedDevices.length} selected device
-                    {skippedDevices.length === 1 ? "" : "s"} reported no{" "}
-                    {selectedRelease ? KIND_CAPABILITY[selectedRelease.kind] : "runtime"} support
-                    and will be skipped: {skippedDevices.map((d) => d.name).join(", ")}.
+                    {skippedDevices.length === 1 ? "" : "s"} cannot install{" "}
+                    {selectedRelease?.kind ?? "this"} releases (no runtime, or an agent without that
+                    deploy kind) and will be skipped: {skippedDevices.map((d) => d.name).join(", ")}
+                    .
                   </p>
                 )}
                 {error && <p className="text-sm text-destructive">{error}</p>}

@@ -184,17 +184,26 @@ class DeploymentService:
             )
 
     def device_supports_kind(self, device: Device, kind: ReleaseKind | str) -> bool:
-        """False only when the device has reported capabilities and lacks the kind's runtime."""
+        """False only when the device has reported capabilities and cannot install the kind."""
+        return self.unsupported_reason(device, kind) is None
+
+    def unsupported_reason(self, device: Device, kind: ReleaseKind | str) -> str | None:
+        """Why the device cannot install releases of ``kind``, or None when it can (or never said).
+
+        Its agent lists ``deploy_kinds`` without this kind (the agent's code cannot install
+        it), or it reports the kind's runtime as missing (``docker: false``).
+        """
         kind_value = kind.value if isinstance(kind, ReleaseKind) else str(kind)
-        required = _KIND_CAPABILITY.get(kind_value)
-        if required is None:
-            return True
         caps = (device.metadata_ or {}).get("capabilities")
         if not isinstance(caps, dict) or not caps:
-            return True
-        if required not in caps:
-            return True
-        return bool(caps.get(required))
+            return None
+        deploy_kinds = caps.get("deploy_kinds")
+        if isinstance(deploy_kinds, list) and kind_value not in deploy_kinds:
+            return f"The device's agent cannot install {kind_value} releases."
+        required = _KIND_CAPABILITY.get(kind_value)
+        if required is None or required not in caps or caps.get(required):
+            return None
+        return f"Device lacks {required} capability."
 
     def expand_targets(
         self,
@@ -430,9 +439,10 @@ class DeploymentService:
                 device_id=device.id, workload_key=workload_key
             )
             previous_desired = existing.desired_release_id if existing else None
-            if not self.device_supports_kind(device, release.kind):
+            unsupported = self.unsupported_reason(device, release.kind)
+            if unsupported is not None:
                 status = DeploymentDeviceStatus.SKIPPED.value
-                last_error = f"Device lacks {cap_name} capability."
+                last_error = unsupported
             elif not payload.force and _already_installed(existing, release):
                 status = DeploymentDeviceStatus.SKIPPED.value
                 last_error = ALREADY_INSTALLED_REASON

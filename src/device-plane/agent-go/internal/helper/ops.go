@@ -195,6 +195,8 @@ func (c *capped) Write(p []byte) (int, error) {
 // a function in its own file and one line here.
 func Ops(h Host) map[string]localrpc.Handler {
 	return map[string]localrpc.Handler{
+		// `meteorcli doctor`: the helper is reachable and accepts the agent.
+		"ping":                 {Timeout: 5 * time.Second, Run: h.ping},
 		"power.reboot":         {Timeout: 30 * time.Second, Run: h.powerReboot},
 		"power.shutdown":       {Timeout: 30 * time.Second, Run: h.powerShutdown},
 		"logs.read":            {Timeout: 30 * time.Second, Run: h.logsRead, Audit: auditLogs},
@@ -251,6 +253,14 @@ func decode(raw json.RawMessage, v any) error {
 // Started is the answer of operations that only start something.
 type Started struct {
 	Started bool `json:"started"`
+}
+
+// ping answers that the helper runs and accepted the caller; it does nothing else.
+func (h Host) ping(_ context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
+	if err := decode(raw, &struct{}{}); err != nil {
+		return nil, err
+	}
+	return map[string]bool{"ok": true}, nil
 }
 
 func (h Host) powerReboot(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {

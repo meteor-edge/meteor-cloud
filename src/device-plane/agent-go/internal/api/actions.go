@@ -15,6 +15,8 @@ type Action struct {
 	Sudo          bool    `json:"sudo"`
 	AuthorizedKey *string `json:"authorized_key"`
 	FromVersion   *string `json:"from_version"`
+	// Module is the module restart_module restarts.
+	Module *string `json:"module"`
 }
 
 // Action result states.
@@ -27,11 +29,13 @@ const (
 const MaxActionResults = 50
 
 // ActionResult says what happened to one action (actions-report.request.json).
-// Error is at most 500 characters.
+// Error is at most 500 characters; Output (run_diagnostics: the doctor report)
+// at most 16000.
 type ActionResult struct {
-	ID    string `json:"id"`
-	State string `json:"state"`
-	Error string `json:"error,omitempty"`
+	ID     string `json:"id"`
+	State  string `json:"state"`
+	Error  string `json:"error,omitempty"`
+	Output string `json:"output,omitempty"`
 }
 
 // Actions collects the actions waiting for this device. The server hands each

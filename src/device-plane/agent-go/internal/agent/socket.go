@@ -41,6 +41,7 @@ const (
 var socketPolicy = map[string]access{
 	"status":         readAccess,
 	"test":           readAccess,
+	"doctor":         readAccess,
 	"module.restart": adminAccess,
 	"register":       adminAccess,
 	"enroll.request": adminAccess,
@@ -173,6 +174,13 @@ func (m *SocketModule) handlers(d Deps) map[string]localrpc.Handler {
 	h := map[string]localrpc.Handler{
 		"status": {Run: func(context.Context, localrpc.Peer, json.RawMessage) (any, error) {
 			return status(d), nil
+		}},
+		"doctor": {Timeout: 3 * diagnoseTimeout, Run: func(ctx context.Context, _ localrpc.Peer, _ json.RawMessage) (any, error) {
+			var h HelperPinger
+			if d.Helper != nil {
+				h = d.Helper
+			}
+			return Diagnose(ctx, d, h), nil
 		}},
 		"module.restart": {Audit: func(raw json.RawMessage) []any {
 			var p ModuleRestartParams

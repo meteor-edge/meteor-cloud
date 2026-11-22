@@ -16,7 +16,7 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | State: versioned state files, persistent outbox | Done |
 | API client: health, enrollment, register, heartbeat, MQTT settings, actions, software, signing keys, artifact downloads, application credentials | Done (the other routes come with their modules) |
 | CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `logs`, `mqtt-test`, `mqtt-listen`, `helper`, `--version`, `agent` (alias `run`) | Done |
-| Agent socket with a group policy per command; root helper (`power.*`, `logs.*`, `systemd.install_unit`, `systemd.control`, `users.*`, `docker.*`, `compose.*`, `wifi.*`, `wireguard.*`, `ssh.authorized_keys`) | Done |
+| Agent socket with a group policy per command; root helper (`ping`, `power.*`, `logs.*`, `systemd.install_unit`, `systemd.control`, `users.*`, `docker.*`, `compose.*`, `wifi.*`, `wireguard.*`, `ssh.authorized_keys`) | Done |
 | systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done |
 | Board installer (`install-rpi.sh`), CI artifact, `meteorcli-go-edge` prerelease | Done (Raspberry Pi) |
 | Identity: register, request-token and claim run by the agent, background approval polling, credential storage, MQTT credential refresh, 401 handling | Done |
@@ -140,6 +140,7 @@ The modules that own them recreate them.
 | `meteorcli claim [--wait S]` | Mostly | Reports the pending request (exit 0 enrolled, 2 still pending, 1 ended); the agent collects the approval by itself, so this is optional. Needs `meteorcli-admin`. |
 | `meteorcli test` | Yes | The agent checks `/api/v1/health` and the saved API key. Only a 401/403 reports the key as rejected; other failures are errors. |
 | `meteorcli module restart NAME` | New | Restarts (or unparks) one module of the running agent. Needs `meteorcli-admin`. |
+| `meteorcli doctor [--json]` | New | The agent checks the server (`/api/v1/health`), enrollment, the last heartbeat, MQTT, the root helper (`ping`), free disk space and every module, and prints a hint for each problem. Exit 1 when a check failed. The console's **Run diagnostics** shows the same report. Needs `meteorcli`. |
 | `meteorcli logs [SOURCE] [--json] [-n N] [--since S] [--grep T] [-f]` | Yes, same arguments | Without a source lists the sources (journal, systemd units, Docker containers, `/var/log` files); `SOURCE` is `journal`, `systemd:UNIT`, `docker:NAME` or `file:PATH`. Also takes the Python helper's `logs list` and `logs show KIND [NAME] [--project P] [--lines N] [--since S] [--grep T] [--follow]`, which the console runs. Members of `meteorcli` read through the agent and the helper; root reads in-process (works with the agent stopped). |
 | `meteorcli mqtt-test [TOPIC] [MESSAGE]` | Yes, same arguments | The agent publishes through its own session (client id `device-<id>`), not retained; default a small JSON object on `status`. Fails with the last connection error while the agent is not connected. Needs `meteorcli-admin` (it speaks as the device). |
 | `meteorcli mqtt-listen [TOPIC] [--timeout S]` | Yes, same arguments | Prints `<topic> <payload>` for each command the agent's session receives (only `commands` is subscribed). Needs `meteorcli`. |
@@ -165,7 +166,7 @@ policy per command (`socketPolicy` in `internal/agent/socket.go`):
 | `meteorcli-admin` | the above, plus `register`, `request-token`, `claim`, `config set`, `update`, `module restart` |
 | root | everything |
 
-Today the socket serves `status`, `test`, `register`, `enroll.request`, `enroll.claim`,
+Today the socket serves `status`, `test`, `doctor`, `register`, `enroll.request`, `enroll.claim`,
 `config.reload`, `module restart`, `mqtt.test`, `update.start` (admin), `mqtt.listen`, `logs.list`
 and `logs.show` (read); the other
 commands arrive with their modules. The agent's own
@@ -203,6 +204,7 @@ from the agent, which follows at most 8 logs at once.
 
 | Operation | Params | Does |
 | --- | --- | --- |
+| `ping` | none | Answers `{"ok": true}`; `meteorcli doctor` checks that the helper runs and accepts the agent |
 | `power.reboot`, `power.shutdown` | none | `systemctl --no-block reboot` / `poweroff` (answers first) |
 | `logs.read` | `source` (`journal` or `systemd`), `unit`, `lines` (1-10000, default 200), `since` (`15m`, `1h`, `7d`), `grep` (up to 200 printable characters) | `journalctl` with fixed options; returns `lines` |
 | `systemd.install_unit` | `name` (`^[a-z0-9][a-z0-9._-]{0,62}$`, ending `.service`, never `meteorcli*`), `content` (needs `[Service]`, at most 256 KiB), `no_start` | Atomic write to `/etc/systemd/system`, `daemon-reload`, `enable`, `restart` |
@@ -378,7 +380,10 @@ does not depend on it.
 When the heartbeat answer says `actions_pending`, the `actions` module collects the actions
 (`GET /actions`, the only time a password travels) and runs them in order through the helper.
 `reboot` and `shutdown` are reported `done` before they run. `update_agent` is reported once the
-update has settled (see [Updating](#updating)). The other results are reported together
+update has settled (see [Updating](#updating)). `restart_module` asks the supervisor (signal
+`RestartModule`) to restart that module, so a parked one runs again; an unknown module is reported
+failed. `run_diagnostics` reports `done` with the `meteorcli doctor` report as `output` (redacted,
+at most 16000 characters). See [Device actions](fleet/device-actions.md#module-health-and-remote-repair). The other results are reported together
 afterwards; an unknown kind is reported `failed` with an error that starts with `Unsupported`. Every result waits in the outbox (`state/outbox`, kind
 `action_report`) until the server accepted it, so a result survives a network outage and the
 reboot itself; reports are retried with backoff, at most 50 per request.
@@ -568,8 +573,8 @@ Without `wg` and `wg-quick` the module waits and looks again every 10 minutes.
 - The heartbeat follows the server's `heartbeat_interval_seconds` (Python kept its own interval).
 - The agent runs unprivileged, so a root-only DMI serial (`product_serial`) may be missing from
   the inventory; the CPU or device tree serial, or a readable `board_serial`, is used instead.
-- `capabilities.actions` lists `reboot`, `shutdown`, `set_password`, `add_user`; `update_agent`
-  is left out until the Go updater exists (an `update_agent` action is reported `failed:
+- `capabilities.actions` lists `reboot`, `shutdown`, `set_password`, `add_user`, `update_agent`
+  and the new `restart_module` and `run_diagnostics` (Python reported those two `failed:
   Unsupported...`). `deploy_kinds` lists `systemd`, `docker`, `docker_compose`.
 - Deploys run through the root helper: the agent never has the Docker socket and is not in the
   `docker` group. `docker run` gets the release's environment from a private `--env-file`, so an

@@ -249,7 +249,8 @@ func TestModuleCollectsOnSignal(t *testing.T) {
 }
 
 func TestKinds(t *testing.T) {
-	if got := Kinds(); !slices.Equal(got, []string{"reboot", "shutdown", "set_password", "add_user", "update_agent"}) {
+	want := []string{"reboot", "shutdown", "set_password", "add_user", "update_agent", "restart_module", "run_diagnostics"}
+	if got := Kinds(); !slices.Equal(got, want) {
 		t.Errorf("Kinds = %v", got)
 	}
 }
@@ -259,5 +260,60 @@ func TestPyRepr(t *testing.T) {
 		if got := pyRepr(in); got != want {
 			t.Errorf("pyRepr(%q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+func TestRestartModuleAndRunDiagnostics(t *testing.T) {
+	cp := fakecp.New(t)
+	cp.On("GET", listRoute, fakecp.OK(map[string]any{"actions": []map[string]any{
+		{"id": "r1", "kind": "restart_module", "module": "deploy"},
+		{"id": "r2", "kind": "restart_module", "module": "printer"},
+		{"id": "r3", "kind": "restart_module", "module": "-rf"},
+		{"id": "r4", "kind": "run_diagnostics"},
+	}}))
+	cp.On("GET", "/api/v1/health", fakecp.OK(map[string]any{"status": "ok"}))
+	cp.On("POST", reportRoute, fakecp.OK(map[string]any{"accepted": 4}))
+	d := agenttest.Deps(t, cp, nil, nil)
+	d.Health.Set("deploy", agent.StateParked, errors.New("artifacts directory not writable"))
+	restarts := d.Signals.Subscribe(func(s agent.Signal) bool { _, ok := s.(agent.RestartModule); return ok })
+	defer restarts.Close()
+	h := &fakeHelper{}
+	r := &runner{d: d, helper: h, backoff: api.NewBackoff()}
+
+	r.collect(context.Background())
+	if wait := r.flush(context.Background()); wait != 0 {
+		t.Fatalf("flush left results (retry in %v)", wait)
+	}
+
+	got := restarts.Take()
+	if len(got) != 1 || got[0] != (agent.RestartModule{Name: "deploy"}) {
+		t.Errorf("restart signals = %+v, want only deploy", got)
+	}
+	byID := map[string]api.ActionResult{}
+	for _, c := range cp.Calls("POST", reportRoute) {
+		for _, res := range results(t, c) {
+			byID[res.ID] = res
+		}
+	}
+	if byID["r1"].State != "done" || byID["r1"].Output != "" {
+		t.Errorf("restart deploy = %+v", byID["r1"])
+	}
+	if byID["r2"].State != "failed" || !strings.Contains(byID["r2"].Error, `no module "printer"`) {
+		t.Errorf("restart unknown module = %+v", byID["r2"])
+	}
+	if byID["r3"].State != "failed" || !strings.Contains(byID["r3"].Error, "invalid module name") {
+		t.Errorf("restart bad name = %+v", byID["r3"])
+	}
+	diag := byID["r4"]
+	if diag.State != "done" {
+		t.Fatalf("run_diagnostics = %+v", diag)
+	}
+	for _, want := range []string{"[ok  ] root helper", "[fail] module deploy", "parked: artifacts directory not writable"} {
+		if !strings.Contains(diag.Output, want) {
+			t.Errorf("diagnostics output lacks %q:\n%s", want, diag.Output)
+		}
+	}
+	if !slices.Contains(h.ops, "ping") {
+		t.Errorf("diagnostics did not ping the helper: %v", h.ops)
 	}
 }
