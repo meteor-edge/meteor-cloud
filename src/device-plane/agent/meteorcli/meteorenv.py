@@ -1,6 +1,6 @@
 """Read a first-boot settings file (meteorenv) from the boot partition.
 
-Same file names and locations as ``meteorcli-firstboot.sh`` / ``meteorcli-settings.sh``.
+Same file names and locations as ``meteorcli-settings.sh`` (agent-go/packaging/firstboot).
 Used by ``meteorcli.service`` so a card with ``meteorenv.txt`` can enroll without the
 separate first-boot units (stock OS + installed meteorcli).
 """

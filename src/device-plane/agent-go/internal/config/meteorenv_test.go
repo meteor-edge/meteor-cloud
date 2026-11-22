@@ -57,6 +57,11 @@ func TestFindAndReadMeteorenv(t *testing.T) {
 			t.Errorf("[%d] = %s, want %s", i, got[i], want[i])
 		}
 	}
+	// The image's settings service hands the enrollment lines over in /etc/meteorcli.
+	put("etc/meteorcli/meteorenv", "METEOR_DOMAIN=card.example\n")
+	if got := FindMeteorenv(root, ""); len(got) != 3 || got[0] != filepath.Join(root, "etc/meteorcli/meteorenv") {
+		t.Errorf("hand-off file not first: %v", got)
+	}
 	m, err := ReadMeteorenv(got[1])
 	if err != nil || m != (Meteorenv{Domain: "meteor.example", APIKey: "key_1", Name: "cam"}) || m.Empty() {
 		t.Errorf("read %+v %v", m, err)

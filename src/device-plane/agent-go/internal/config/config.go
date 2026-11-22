@@ -46,9 +46,10 @@ type Config struct {
 	extra Object
 }
 
-// DefaultReleaseURL is the moving meteorcli-go-edge prerelease, the only Go
-// release channel today.
-const DefaultReleaseURL = "https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge"
+// DefaultReleaseURL is the newest agent-v* release of MeteorCloud: GitHub
+// redirects releases/latest/download/<file> to it. The meteorcli-go-edge
+// prerelease is never "latest"; point release_url at it to follow master.
+const DefaultReleaseURL = "https://github.com/meteor-edge/meteor-cloud/releases/latest/download"
 
 // Release returns the release URL to update from.
 func (c *Config) Release() string {

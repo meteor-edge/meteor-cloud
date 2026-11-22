@@ -34,7 +34,7 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 - VPN is an optional deploy service, not a reason to restructure the repo.
 - Console talks only to the control-plane API. Production uses same-origin (`window.location.origin`).
 - Device types are catalog rows, not separate codebases.
-- The device agent source stays in this repo. Devices install from a GitHub Release (`install-meteorcli.sh`), not by cloning the cloud. Publish with tag `agent-v<pyproject-version>`.
+- The device agent source stays in this repo. Devices install from a GitHub Release (`install-meteorcli.sh`), not by cloning the cloud. A release is the Go `meteorcli`: bump `src/device-plane/agent-go/VERSION` and the `agent-v<version>` tag and release follow (`.github/workflows/agent-release.yml`); its manifest must be signed with the release key.
 
 ## Directory notes
 
@@ -45,8 +45,8 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 | `src/data-plane/` | MQTT ingest; HTTP to the control plane only. Do not import `app`. |
 | `src/data-plane/go/` | Application data plane (Go): `meteor/v1/...` topics, `/v1` API. Reads control-plane state only through the policy snapshot. Contract: `contracts/data-plane-v1.md`. |
 | `sdk/python/` | Public SDK. Talks to the data plane API only; no imports from `src/`. |
-| `src/device-plane/agent/` | `meteorcli` on the device. HTTP/MQTT to the API. Needs sibling `src/device-plane/runtime/` at install time. |
-| `src/device-plane/agent-go/` | Go rewrite of `meteorcli` (approved migration). Same contract as the Python agent (`contracts/device-agent-v1.md`). Standard library first; no imports from `src/data-plane/go/internal`. See `docs/meteorcli-go.md`. |
+| `src/device-plane/agent-go/` | `meteorcli` on the device (Go, the released agent from 0.5.0). Contract: `contracts/device-agent-v1.md`. Standard library first; no imports from `src/data-plane/go/internal`. First-boot and OS image scripts in `packaging/firstboot/`. See `docs/meteorcli.md` and `docs/meteorcli-go.md`. |
+| `src/device-plane/agent/` | The Python `meteorcli` (0.4.x and older), no longer released; being removed. Do not add features here. |
 | `src/device-plane/gateway/` | Host process: poll `/internal/connectivity/*`, `wg set`. HTTP only. |
 | `deploy/` | Images, Compose, Ansible, Helm, env. Not business logic. |
 

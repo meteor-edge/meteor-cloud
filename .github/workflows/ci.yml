@@ -209,6 +209,22 @@ jobs:
       - name: Test (pytest)
         run: python -m pytest -q
 
+  firstboot:
+    name: First-boot scripts (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install pytest
+        run: python -m pip install pytest
+      - name: Syntax
+        run: |
+          for f in src/device-plane/agent-go/packaging/firstboot/*.sh; do bash -n "$f"; done
+      - name: Test (pytest)
+        run: python -m pytest -q tests/firstboot
+
   agent-go:
     name: Agent (Go meteorcli)
     runs-on: ubuntu-latest
@@ -239,10 +255,17 @@ jobs:
           go test -race -cover ./... | tee "$RUNNER_TEMP/cover.txt"
       - name: Coverage at least 70% on core packages
         run: ./scripts/check-coverage.sh "$RUNNER_TEMP/cover.txt" 70 agent api config state identity deploy update helper
-      - name: Release files (static binaries for linux arm64, arm v6, amd64 under 15 MB; board installers)
-        run: ./scripts/dist.sh "$RUNNER_TEMP/dist" "0.0.0-ci.${GITHUB_SHA::7}"
+      - name: Release files (static binaries for linux arm64, arm v6, amd64 under 15 MB; installers, first-boot scripts)
+        run: |
+          ./scripts/dist.sh "$RUNNER_TEMP/dist" "0.0.0-ci.${GITHUB_SHA::7}"
+          cd "$RUNNER_TEMP/dist"
+          for f in meteorcli-linux-arm64 meteorcli-linux-armv6 meteorcli-linux-amd64 meteorcli-packaging.tar.gz \
+            install-meteorcli.sh install-rpi.sh install-meteorcli-firstboot.sh meteorcli-settings.sh \
+            meteorcli-settings.service meteorcli-prepare-image.sh; do
+            grep -q " $f\$" SHA256SUMS || { echo "missing from SHA256SUMS: $f" >&2; exit 1; }
+          done
       # Download from the run's Summary page to try a PR on a device:
-      #   sudo bash install-rpi.sh --base-url file:///path/to/unzipped/dir
+      #   sudo bash install-meteorcli.sh --base-url file:///path/to/unzipped/dir
       - name: Upload release files
         uses: actions/upload-artifact@v4
         with:
@@ -259,7 +282,7 @@ jobs:
           systemd-analyze security --offline=true --threshold=59 meteorcli-helper.service
       - name: Socket and helper permissions under systemd (Debian 12 container)
         run: ./test/systemd/run.sh
-      - name: Board installer under systemd (Python takeover, upgrade, --token)
+      - name: Installers under systemd (Python takeover, upgrade, --token, first boot from .meteorenv)
         run: ./test/install/run.sh
 
   agent-contract:

@@ -16,14 +16,14 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 ## Rules
 
 1. The control plane remains Python.
-2. Data-plane and device-plane implementations may use other languages. The device agent is moving to Go in `src/device-plane/agent-go/` (approved; see [meteorcli in Go](meteorcli-go.md)); the Python agent stays the installed one until that is complete.
+2. Data-plane and device-plane implementations may use other languages. The released device agent is Go in `src/device-plane/agent-go/` (see [meteorcli](meteorcli.md)); the Python agent remains in-tree for older devices until it is removed.
 3. Planes must not import one another’s private Python packages (`app`, `data_plane`, `edge_agent`, `meteorcli`).
 4. Cross-plane traffic uses documented HTTP/MQTT contracts ([`contracts/mqtt-http.md`](../contracts/mqtt-http.md), control-plane `/internal/*`). The device agent speaks [`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md), checked by JSON Schemas on both sides.
 5. PostgreSQL is the control-plane database. Other stores stay behind existing ports.
 6. Deployment infrastructure stays under `deploy/` and `infrastructure/`, not domain modules.
 7. VPN is an optional deploy capability (Compose + Ansible). It is not a reason to split the repo.
 8. The console keeps same-origin API access in production (`window.location.origin`). Locally it uses `VITE_API_BASE_URL`.
-9. The device agent must be installable without cloning this repository. Publish by merging a version bump to `master` (CI tags `agent-v<pyproject-version>`), or push that tag. Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `./installcli.sh` in `src/device-plane/agent/` (needs sibling `runtime/`).
+9. The device agent must be installable without cloning this repository. Publish by bumping [`src/device-plane/agent-go/VERSION`](../src/device-plane/agent-go/VERSION) on `master` (CI tags `agent-v<version>`), or push that tag. Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `make agent-dist`, then run the installer from `src/device-plane/agent-go/dist`.
 10. Device types are configuration, not automatically separate codebases.
 
 `make check-plane-imports` enforces rule 3 on `src/`.
@@ -125,16 +125,27 @@ The **device event path** (optional, Compose profile `nats`) uses **NATS JetStre
 
 ## Device agent (`meteorcli`)
 
-Source: [`src/device-plane/agent/`](../src/device-plane/agent/). Runtime adapters (systemd, docker, compose) live in sibling [`src/device-plane/runtime/`](../src/device-plane/runtime/) and are force-included in the wheel.
+Source: [`src/device-plane/agent-go/`](../src/device-plane/agent-go/), one static Go binary
+(arm64, ARMv6, amd64). It runs as the unprivileged `meteor` user; a socket-activated root helper
+does the few privileged operations (systemd units, Docker, Wi-Fi, WireGuard, users, power) from
+an allowlist. Local users talk to the agent over `/run/meteorcli/agent.sock`, with a policy per
+group (`meteorcli`, `meteorcli-admin`). See [meteorcli internals](meteorcli-go.md).
 
-**Platform ports** (inventory, metrics, capabilities, host actions) live under
-`edge_agent/platform/`. Raspberry Pi, NUC, and Jetson share one agent binary and
-the same field names / action kinds; a board-specific OS only swaps the Linux
-default adapters. See [Device platform](fleet/device-platform.md).
+**Platform adapters** (Raspberry Pi, Jetson, generic Linux) report inventory, metrics and
+capabilities with the same field names and action kinds on every board. See
+[Device platform](fleet/device-platform.md).
 
-**On a device:** `curl` `install-meteorcli.sh` from GitHub Releases (`latest` or `METEORCLI_VERSION=`). The tarball is agent + `runtime` + `installcli.sh` only (`make agent-dist`). SHA256SUMS is checked when `sha256sum` is present. To move an existing device to a newer agent release, run `update-meteorcli.sh` from that release (or `meteorcli update` on 0.3.4+): the checksum is required, the previous install is kept, and the service is restored if the new one does not stay up. See [meteorcli](meteorcli.md#update). First-boot enroll (request-token + poll until approved): `install-meteorcli-firstboot.sh` from the same release or [packaging/firstboot](../src/device-plane/agent/packaging/firstboot/README.md).
+**On a device:** `curl` `install-meteorcli.sh` from the newest GitHub Release. It picks the binary
+by `uname -m`, checks `SHA256SUMS`, installs the units, sysusers.d and tmpfiles.d files, and adds
+the installing user to `meteorcli-admin`. The agent updates itself from the newest release
+(`meteorcli updater`): signed manifest, previous binary kept, automatic rollback when the new
+version sends no heartbeat. For first boot from a card's `.meteorenv` and OS images, see
+[packaging/firstboot](../src/device-plane/agent-go/packaging/firstboot/README.md) and
+[meteorcli](meteorcli.md#first-boot-and-os-images).
 
-**Publish:** tag `agent-v<version>` matching [`pyproject.toml`](../src/device-plane/agent/pyproject.toml); workflow [`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml). From a checkout: `./installcli.sh` in the agent directory.
+**Publish:** bump [`VERSION`](../src/device-plane/agent-go/VERSION); workflow
+[`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml) tags
+`agent-v<version>` and publishes the signed release.
 
 ## Provider selection
 

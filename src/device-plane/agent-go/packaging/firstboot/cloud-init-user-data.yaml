@@ -9,4 +9,4 @@ packages:
   - ca-certificates
 runcmd:
   - |
-    curl -fsSL https://raw.githubusercontent.com/meteor-edge/meteor-cloud/master/src/device-plane/agent/packaging/firstboot/install-meteorcli-firstboot.sh | bash -s -- --now
+    curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli-firstboot.sh | bash

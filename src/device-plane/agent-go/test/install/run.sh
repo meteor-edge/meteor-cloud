@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The board installer (scripts/dist.sh → install-rpi.sh) end to end under real
+# The installers (scripts/dist.sh → install-rpi.sh, install-meteorcli.sh) end to end under real
 # systemd: it refuses another board, takes over a Python install (service
 # stopped, identity imported, device online with the imported token), can run
 # again as an upgrade, and enrolls a fresh device with --token.
@@ -57,6 +57,8 @@ wait_heartbeat_after() {
 	return 1
 }
 install() { ctr env SUDO_USER=pi bash /dist/install-rpi.sh "$@"; }
+# The generic installer from the agent-v* release: any board, binary by uname -m.
+install_any() { ctr env SUDO_USER=pi bash /dist/install-meteorcli.sh "$@"; }
 
 for _ in $(seq 60); do
 	state="$(ctr systemctl is-system-running 2>/dev/null || true)"
@@ -88,7 +90,8 @@ expect 0 "0.0.0-installtest" "meteorcli is the Go binary, not the Python link" -
 expect 0 "srw-rw---- 1 meteor meteorcli" "agent.sock is meteor:meteorcli 0660" -- ctr ls -l /run/meteorcli/agent.sock
 
 before="$(heartbeats)"
-expect 0 "done." "runs again as an upgrade" -- install --force
+expect 0 "meteorcli-admin" "the installing user is in meteorcli-admin (no sudo for meteorcli)" -- ctr id -nG pi
+expect 0 "done." "install-meteorcli.sh runs again as an upgrade on any board" -- install_any
 if wait_heartbeat_after "$before"; then pass "still online after the upgrade"; else fail "no heartbeat after the upgrade"; fi
 expect 0 "11111111-2222-4333-8444-555555555555" "identity kept across the upgrade" -- ctr meteorcli status
 
@@ -96,10 +99,32 @@ expect 0 "11111111-2222-4333-8444-555555555555" "identity kept across the upgrad
 ctr sh -c 'systemctl stop meteorcli.service; rm -rf /var/lib/meteorcli/identity/* /etc/meteorcli/config.json*'
 before="$(heartbeats)"
 expect 0 "Registered device 11111111" "installs and registers with --token" -- \
-	install --force --api-base http://127.0.0.1:8099 --token reg_installtesttoken --name edge-test
+	install_any --api-base http://127.0.0.1:8099 --token reg_installtesttoken --name edge-test
 if wait_heartbeat_after "$before"; then pass "online right after the installer finished"; else fail "no heartbeat after --token install"; fi
 expect 0 "name=edge-test" "the requested name was sent" -- ctr grep "POST /api/v1/agent/register" /var/log/fakeserver.log
 expect 0 "" "no secret in the journal" -- ctr sh -c '! journalctl --no-pager | grep -E -q "installtest(token|pythontoken)"'
+
+# An OS image: install-meteorcli-firstboot.sh --image, then a card with
+# .meteorenv. meteorcli-settings.sh (early in boot) hands the enrollment lines
+# to /etc/meteorcli/meteorenv; meteorcli.service applies them as root and the
+# agent asks for approval by itself.
+ctr sh -c 'systemctl stop meteorcli.service; rm -rf /var/lib/meteorcli/identity/* /etc/meteorcli/config.json*'
+expect 0 "Ready for an image" "install-meteorcli-firstboot.sh --image (from the release folder)" -- \
+	ctr bash /dist/install-meteorcli-firstboot.sh --image
+expect 0 "enabled" "meteorcli-settings.service is enabled" -- ctr systemctl is-enabled meteorcli-settings.service
+ctr sh -c 'mkdir -p /boot/firmware && printf "METEOR_ENV_VERSION=2\nMETEOR_API_BASE=http://127.0.0.1:8099\nMETEOR_API_KEY=key_installtestkey\nMETEOR_NAME=card-01\n" > /boot/firmware/.meteorenv'
+expect 0 "" "meteorcli-settings.sh takes the card's settings" -- ctr /usr/local/sbin/meteorcli-settings.sh
+expect 0 "" "the key left the card" -- ctr test ! -e /boot/firmware/.meteorenv
+expect 0 "-rw-------" "the hand-off file is root-only" -- ctr ls -l /etc/meteorcli/meteorenv
+ctr systemctl restart meteorcli.service
+for _ in $(seq 100); do
+	ctr grep -q "POST /api/v1/agent/enroll/request auth=yes name=card-01" /var/log/fakeserver.log && break
+	sleep 0.1
+done
+expect 0 "name=card-01" "the agent asked for approval with the card's key and name" -- \
+	ctr grep "POST /api/v1/agent/enroll/request" /var/log/fakeserver.log
+expect 0 "" "the hand-off file was applied and removed" -- ctr test ! -e /etc/meteorcli/meteorenv
+expect 0 "" "no secret in the journal" -- ctr sh -c '! journalctl --no-pager | grep -q installtestkey'
 
 if [[ $failures -gt 0 ]]; then
 	echo "--- meteorcli journal"; ctr journalctl -u meteorcli.service --no-pager | tail -40

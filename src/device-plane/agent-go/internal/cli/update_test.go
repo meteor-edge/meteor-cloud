@@ -56,7 +56,7 @@ func TestConfigReleaseURL(t *testing.T) {
 		t.Fatalf("show = %+v", r)
 	}
 	r = meteorcli(t, root, nil, "config", "--release-url", "default")
-	if r.code != 0 || !strings.Contains(r.stdout, "releases/download/meteorcli-go-edge") {
+	if r.code != 0 || !strings.Contains(r.stdout, "releases/latest/download") {
 		t.Fatalf("reset release URL = %+v", r)
 	}
 }

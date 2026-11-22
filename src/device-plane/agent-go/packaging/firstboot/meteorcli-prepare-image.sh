@@ -8,9 +8,11 @@
 #   3. sudo meteorcli-prepare-image.sh      (powers off when done)
 #   4. Back the card up with Meteor Imager, upload it as an os_image artifact.
 #
-# Removes this device's identity: meteorcli enrollment and keys, the first-boot
-# env file, saved Wi-Fi networks, SSH host keys, machine-id, cloud-init state,
-# shell history and logs. Installed software and Docker images stay.
+# Removes this device's identity: meteorcli enrollment, keys and state (the
+# agent stays installed and enabled, so each card enrolls by itself from the
+# key on its card), saved Wi-Fi networks, SSH host keys, machine-id,
+# cloud-init state, shell history and logs. Installed software and Docker
+# images stay.
 #
 # Source: https://github.com/meteor-edge/meteor-cloud
 set -euo pipefail
@@ -80,13 +82,13 @@ BOOT="$(boot_dir || true)"
 echo "MeteorCloud: prepare this device to become an OS image"
 echo
 echo "This removes, from this device:"
-echo "  - meteorcli enrollment, device token, keys and VPN config (/etc/meteorcli)"
-echo "  - first-boot enrollment settings (/etc/meteorcli-firstboot.env)"
+echo "  - meteorcli enrollment, device token, keys, state and VPN config"
+echo "    (/var/lib/meteorcli, the server settings in /etc/meteorcli)"
 [[ "${KEEP_WIFI}" -eq 1 ]] || echo "  - saved Wi-Fi networks and their passwords"
 echo "  - SSH host keys (each card creates new ones), machine-id, cloud-init state"
 echo "  - shell history, logs, apt caches"
 echo "Installed software, users and Docker images stay."
-if [[ -s "${ROOT}/etc/meteorcli/device-token" ]]; then
+if [[ -s "${ROOT}/var/lib/meteorcli/identity/device-token" || -s "${ROOT}/etc/meteorcli/device-token" ]]; then
   echo
   echo "Note: this device is enrolled in MeteorCloud. Its record stays in the console;"
   echo "delete it there. Cards written from this image enroll as new devices."
@@ -106,10 +108,10 @@ if [[ "${YES}" -ne 1 ]]; then
   [[ "${answer}" == prepare ]] || { echo "cancelled"; exit 1; }
 fi
 
-step "First-boot services (settings from the card, enrollment)"
-if [[ ! -f "${ROOT}/usr/local/sbin/meteorcli-settings.sh" || ! -f "${ROOT}/usr/local/sbin/meteorcli-firstboot.sh" \
-  || ! -f "${ROOT}/etc/systemd/system/meteorcli-firstboot.service" ]]; then
-  live || { echo "error: first-boot services are not installed under ${ROOT}" >&2; exit 1; }
+step "First-boot settings service and meteorcli"
+if [[ ! -f "${ROOT}/usr/local/sbin/meteorcli-settings.sh" || ! -x "${ROOT}/usr/local/bin/meteorcli" \
+  || ! -f "${ROOT}/etc/systemd/system/meteorcli.service" ]]; then
+  live || { echo "error: meteorcli and meteorcli-settings are not installed under ${ROOT}" >&2; exit 1; }
   if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/install-meteorcli-firstboot.sh" ]]; then
     bash "${SCRIPT_DIR}/install-meteorcli-firstboot.sh" --image
   else
@@ -117,8 +119,14 @@ if [[ ! -f "${ROOT}/usr/local/sbin/meteorcli-settings.sh" || ! -f "${ROOT}/usr/l
     curl -fsSL "${INSTALLER_URL}" | bash -s -- --image
   fi
 elif live; then
-  systemctl enable meteorcli-firstboot.service meteorcli-settings.service >/dev/null
+  systemctl enable meteorcli-settings.service meteorcli-helper.socket meteorcli.service >/dev/null
   note "already installed; enabled"
+fi
+# The Python agent's first-boot service, on an image prepared before meteorcli 0.5.
+if [[ -f "${ROOT}/etc/systemd/system/meteorcli-firstboot.service" ]]; then
+  live && systemctl disable meteorcli-firstboot.service >/dev/null 2>&1 || true
+  rm -f "${ROOT}/etc/systemd/system/meteorcli-firstboot.service" "${ROOT}/usr/local/sbin/meteorcli-firstboot.sh"
+  note "removed the old meteorcli-firstboot service (the agent enrolls by itself now)"
 fi
 if [[ -n "${BOOT}" ]]; then
   if [[ -f "${BOOT}/.meteor-settings" ]] || printf 'meteor_settings=2\n' 2>/dev/null >"${BOOT}/.meteor-settings"; then
@@ -127,25 +135,45 @@ if [[ -n "${BOOT}" ]]; then
     note "warning: could not write ${BOOT}/.meteor-settings (read-only?); Meteor Imager will treat cards like a stock image"
   fi
 fi
-if live && ! command -v meteorcli >/dev/null 2>&1; then
-  note "meteorcli is not installed; each card installs it on first boot (needs internet)"
-fi
 
 step "meteorcli identity"
 if live; then
-  systemctl stop meteorcli.service meteorcli-firstboot.service 2>/dev/null || true
+  systemctl stop meteorcli.service meteorcli-helper.service 2>/dev/null || true
   ip link delete wg0 2>/dev/null || true
 fi
-if [[ -d "${ROOT}/etc/meteorcli" ]]; then
-  find "${ROOT}/etc/meteorcli" -mindepth 1 -delete
-  note "emptied /etc/meteorcli"
+# Keep the browser terminal's account; the server comes from each card.
+ssh_user=""
+if [[ -f "${ROOT}/etc/meteorcli/config.json" ]]; then
+  ssh_user="$(sed -n 's/.*"ssh_user"[[:space:]]*:[[:space:]]*"\([a-z_][a-z0-9_-]*\)".*/\1/p' "${ROOT}/etc/meteorcli/config.json" | head -n 1)"
 fi
-rm -f "${ROOT}/etc/meteorcli-firstboot.env"
+if [[ -d "${ROOT}/etc/meteorcli" ]]; then
+  find "${ROOT}/etc/meteorcli" -mindepth 1 ! -path "${ROOT}/etc/meteorcli/docker" ! -path "${ROOT}/etc/meteorcli/docker/*" -delete
+  note "removed the server settings in /etc/meteorcli (registry logins in /etc/meteorcli/docker stay)"
+fi
+if [[ -n "${ssh_user}" ]]; then
+  install -d -m 0755 "${ROOT}/etc/meteorcli"
+  printf '{\n  "version": 1,\n  "ssh_user": "%s"\n}\n' "${ssh_user}" >"${ROOT}/etc/meteorcli/config.json"
+  chmod 0640 "${ROOT}/etc/meteorcli/config.json"
+  live && chgrp meteor "${ROOT}/etc/meteorcli/config.json" 2>/dev/null || true
+  note "kept ssh_user ${ssh_user} for the console's browser terminal"
+fi
+for dir in identity state artifacts app-credentials; do
+  if [[ -d "${ROOT}/var/lib/meteorcli/${dir}" ]]; then
+    find "${ROOT}/var/lib/meteorcli/${dir}" -mindepth 1 -delete
+    note "emptied /var/lib/meteorcli/${dir}"
+  fi
+done
+# The helper's WireGuard config (holds the tunnel's private key) and any Wi-Fi change it kept.
+rm -rf "${ROOT}/var/lib/meteorcli-helper/wireguard" "${ROOT}/var/lib/meteorcli-helper/wifi"
+rm -f "${ROOT}/etc/meteorcli-firstboot.env" "${ROOT}/usr/local/bin/meteorcli.previous"
 for home in "${ROOT}/root" "${ROOT}"/home/*; do
   [[ -d "${home}/.config/meteorcli" ]] && rm -rf "${home}/.config/meteorcli" && note "removed ${home#"${ROOT}"}/.config/meteorcli"
 done
 if [[ -n "$(ls -A "${ROOT}/var/lib/meteorcli/compose" 2>/dev/null || true)" ]]; then
   note "warning: apps deployed by MeteorCloud are still in /var/lib/meteorcli/compose; remove them first if cards must start empty"
+fi
+if live && ! command -v meteorcli >/dev/null 2>&1; then
+  note "warning: meteorcli is not installed; cards from this image cannot enroll"
 fi
 
 step "Network"
