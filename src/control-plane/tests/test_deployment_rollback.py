@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import io
+import uuid
 import zipfile
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.devices.models import Device
 from tests.test_deployments import UNIT, _docker_web_release, _register_device, _report, _setup_release
 
 
@@ -180,3 +182,23 @@ def test_release_of_another_kind_cannot_replace_a_workload(client: TestClient, d
     assert "rb-kind (Single container)" in refused.json()["error"]["message"]
     listed = client.get(f"/api/v1/organizations/{org.id}/deployments", headers=headers).json()
     assert listed["total"] == 1  # nothing recorded for the refused Deploy
+
+    # A device that will be skipped (its agent cannot install Compose) changes no
+    # workload, so its container no longer blocks the Deploy for capable devices.
+    row = db_session.get(Device, uuid.UUID(device["device_id"]))
+    assert row is not None
+    row.metadata_ = {**(row.metadata_ or {}), "capabilities": {"docker": True, "deploy_kinds": ["docker", "systemd"]}}
+    db_session.commit()
+    other = _register_device(client, token, name="rb-kind-2", mac="aa:bb:cc:dd:50:21")
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={
+            "release_id": compose.json()["id"],
+            "target": {"device_ids": [device["device_id"], other["device_id"]]},
+        },
+    )
+    assert created.status_code == 201, created.text
+    by_device = {row["device_id"]: row for row in created.json()["devices"]}
+    assert by_device[device["device_id"]]["status"] == "skipped"
+    assert by_device[other["device_id"]]["status"] == "pending"

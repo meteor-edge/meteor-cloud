@@ -97,6 +97,8 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 	sub := s.deps.Signals.Subscribe(Is(ConfigChanged{}))
 	defer sub.Close()
+	restarts := s.deps.Signals.Subscribe(func(sig Signal) bool { _, ok := sig.(RestartModule); return ok })
+	defer restarts.Close()
 	// Subscribe before asking Enrolled, so an enrollment in between is not missed.
 	enrolled := s.deps.Signals.Subscribe(Is(Enrolled{}))
 	defer enrolled.Close()
@@ -150,6 +152,15 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		case <-sub.C():
 			sub.Take()
 			s.wakeAll()
+		case <-restarts.C():
+			for _, sig := range restarts.Take() {
+				name := sig.(RestartModule).Name
+				if err := s.Restart(name); err != nil {
+					log.Warn("restart requested for a module the agent does not have", "name", name)
+				} else {
+					log.Info("module restart requested", "name", name)
+				}
+			}
 		case <-enrolled.C():
 			enrolled.Take()
 			select {

@@ -179,3 +179,24 @@ func TestModuleAndHelperCallWithoutServers(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorThroughAgentForReadGroup(t *testing.T) {
+	root := runningAgent(t, groupsOf{agent.GroupRead})
+	// Nothing answers on 127.0.0.1:9 and no helper runs: both are reported, with hints.
+	r := meteorcli(t, root, nil, "doctor")
+	if r.code != 1 {
+		t.Fatalf("doctor = %+v, want exit 1 (server down)", r)
+	}
+	for _, want := range []string{"[fail] server", "does not answer", "[ok  ] enrollment", "[fail] root helper", "module socket", "Problems found"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("doctor lacks %q:\n%s", want, r.stdout)
+		}
+	}
+	if strings.Contains(r.stdout, "dev_secret") {
+		t.Error("doctor printed the token")
+	}
+	j := meteorcli(t, root, nil, "doctor", "--json")
+	if !strings.Contains(j.stdout, `"level": "fail"`) {
+		t.Errorf("doctor --json = %+v", j)
+	}
+}

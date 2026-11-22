@@ -16,6 +16,7 @@ from app.device_actions.schemas import (
     AgentActionReportResponse,
     AgentDeviceActionsResponse,
     DeviceActionsResponse,
+    RestartModuleRequest,
     SetPasswordRequest,
 )
 from app.device_actions.service import DeviceActionService
@@ -40,7 +41,7 @@ _DEVICE = "/api/v1/organizations/{organization_id}/devices/{device_id}/actions"
 def list_device_actions(
     organization_id: uuid.UUID, device_id: uuid.UUID, current_user: CurrentUser, service: ActionSvc
 ) -> DeviceActionsResponse:
-    """Recent restart, shut-down and SSH-user actions. Never a password."""
+    """Recent restart, shut-down, SSH-user, update and repair actions. Never a password."""
     return service.list_actions(actor=current_user, organization_id=organization_id, device_id=device_id)
 
 
@@ -66,6 +67,28 @@ def update_device_agent(
 ) -> DeviceActionsResponse:
     """Install the latest published meteorcli on the device's next heartbeat."""
     return service.update_agent(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.post(f"{_DEVICE}/restart-module", response_model=DeviceActionsResponse)
+def restart_device_module(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    payload: RestartModuleRequest,
+    current_user: CurrentUser,
+    service: ActionSvc,
+) -> DeviceActionsResponse:
+    """Restart one meteorcli module on the device's next heartbeat (unparks a crash-looping one)."""
+    return service.restart_module(
+        actor=current_user, organization_id=organization_id, device_id=device_id, payload=payload
+    )
+
+
+@router.post(f"{_DEVICE}/run-diagnostics", response_model=DeviceActionsResponse)
+def run_device_diagnostics(
+    organization_id: uuid.UUID, device_id: uuid.UUID, current_user: CurrentUser, service: ActionSvc
+) -> DeviceActionsResponse:
+    """Ask meteorcli for its doctor report on the device's next heartbeat."""
+    return service.run_diagnostics(actor=current_user, organization_id=organization_id, device_id=device_id)
 
 
 @router.post(f"{_DEVICE}/set-password", response_model=DeviceActionsResponse)
