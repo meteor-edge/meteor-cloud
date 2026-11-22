@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 
 import { listDeviceActions, updateDeviceAgent, type DeviceAction } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
+import { explainUpdateError } from "@/lib/agentUpdateErrors";
 import { cn, formatDateTime } from "@/lib/utils";
 
 type Props = {
@@ -24,24 +25,32 @@ function latestUpdate(actions: DeviceAction[]): DeviceAction | null {
   return actions.find((action) => action.kind === "update_agent") ?? null;
 }
 
-function statusNote(action: DeviceAction): { text: string; tone: string } {
+type UpdateNote = {
+  tone: "info" | "success" | "error";
+  title: string;
+  hint?: string;
+  /** The device's own error text, shown small under the explanation. */
+  detail?: string;
+  /** When the failed attempt was reported. */
+  when?: string;
+};
+
+function statusNote(action: DeviceAction): UpdateNote {
   if (action.state === "pending") {
-    return { text: "Waiting for the device (its next heartbeat).", tone: "text-muted-foreground" };
+    return { tone: "info", title: "Waiting for the device (its next heartbeat)." };
   }
   if (action.state === "sent") {
-    return {
-      text: "The device is installing the latest meteorcli.",
-      tone: "text-muted-foreground",
-    };
+    return { tone: "info", title: "The device is installing the latest meteorcli." };
   }
   if (action.state === "failed") {
     return {
-      text: action.last_error ?? "The device could not update meteorcli.",
-      tone: "text-destructive",
+      tone: "error",
+      ...explainUpdateError(action.last_error),
+      when: formatDateTime(action.reported_at ?? action.created_at),
     };
   }
   const when = action.reported_at ? ` ${formatDateTime(action.reported_at)}` : "";
-  return { text: `Updated to the latest release${when}.`, tone: "text-muted-foreground" };
+  return { tone: "success", title: `Updated to the latest release${when}.` };
 }
 
 /** Order meteorcli on this device to install the latest published release. */
@@ -154,7 +163,36 @@ export function AgentUpdatePanel({
       {error && (
         <p className="rounded-md bg-ember px-2 py-1 text-sm font-medium text-midnight">{error}</p>
       )}
-      {note && <p className={`text-sm ${note.tone}`}>{note.text}</p>}
+      {note && note.tone === "error" && (
+        <div
+          role="alert"
+          className="flex gap-3 rounded-md border border-ember/60 bg-ember/10 p-3 text-sm"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-ember" aria-hidden />
+          <div className="min-w-0 space-y-1">
+            <p className="font-medium">
+              {note.title}
+              {note.when && (
+                <span className="ml-2 font-normal text-muted-foreground">{note.when}</span>
+              )}
+            </p>
+            {note.hint && <p className="text-muted-foreground">{note.hint}</p>}
+            {note.detail && (
+              <p className="break-all font-mono text-xs text-muted-foreground">{note.detail}</p>
+            )}
+          </div>
+        </div>
+      )}
+      {note && note.tone !== "error" && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          {note.tone === "success" ? (
+            <CheckCircle2 className="h-4 w-4 text-aurora" aria-hidden />
+          ) : (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          )}
+          {note.title}
+        </p>
+      )}
     </div>
   );
 }

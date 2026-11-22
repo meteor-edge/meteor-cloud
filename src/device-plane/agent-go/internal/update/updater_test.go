@@ -489,3 +489,21 @@ func mustURL(t *testing.T, s string) *url.URL {
 	}
 	return u
 }
+
+// A release folder without the Go meteorcli manifest (GitHub's "latest" before
+// a Go release) says so, not only "HTTP 404".
+func TestHTTPFetcherMissingManifestExplains(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	f, err := NewHTTPFetcher(srv.URL+"/releases/latest/download", "meteorcli/test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Get(context.Background(), ManifestName, 1<<16)
+	if err == nil || !strings.Contains(err.Error(), "meteorcli-release.json: HTTP 404 (no meteorcli release at the release URL") {
+		t.Fatalf("missing manifest: %v", err)
+	}
+	if _, err := f.Get(context.Background(), SignatureName, 1<<16); err == nil || strings.Contains(err.Error(), "no meteorcli release") {
+		t.Fatalf("missing signature: %v", err)
+	}
+}

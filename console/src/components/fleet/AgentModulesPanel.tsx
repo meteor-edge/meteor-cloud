@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RotateCcw } from "lucide-react";
 
 import {
   listDeviceActions,
@@ -11,6 +12,7 @@ import {
 import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { agentCapabilities, supportsAction, type ModuleHealth } from "@/lib/agentCapabilities";
+import { agentModuleDescription } from "@/lib/agentModules";
 import { cn, formatDateTime } from "@/lib/utils";
 
 type Props = {
@@ -39,6 +41,21 @@ const STATE_LABELS: Record<string, string> = {
   failed: "Failed (restarting)",
   parked: "Failed (stopped)",
 };
+
+/** A module's description, shown above it on hover or keyboard focus (parent needs `group relative`). */
+function ModuleTooltip({ id, name }: { id: string; name: string }) {
+  const text = agentModuleDescription(name);
+  if (!text) return null;
+  return (
+    <span
+      id={id}
+      role="tooltip"
+      className="pointer-events-none invisible absolute bottom-full left-1/2 z-20 mb-2 w-72 max-w-[80vw] -translate-x-1/2 rounded-md border border-border bg-card px-3 py-2 text-xs font-normal leading-relaxed text-foreground opacity-0 shadow-lg transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
+    >
+      {text}
+    </span>
+  );
+}
 
 function isBroken(health: ModuleHealth): boolean {
   return health.state === "failed" || health.state === "parked";
@@ -116,16 +133,45 @@ export function AgentModulesPanel({ token, organizationId, deviceId, device, can
   const diagnostics = repairs.find((a) => a.kind === "run_diagnostics") ?? null;
   const busy = restartMutation.isPending || diagnoseMutation.isPending;
 
+  const modules = caps.modules === null ? null : sortedModules(caps.modules);
+  // Rows: modules that need attention (broken, or a restart waiting or failed). Tiles: the rest.
+  const needsRow = ([name, health]: [string, ModuleHealth]) =>
+    isBroken(health) || Boolean(pendingRestart(name)) || lastRestart(name)?.state === "failed";
+  const problemRows = modules?.filter(needsRow) ?? [];
+  const tiles = modules?.filter((entry) => !needsRow(entry)) ?? [];
+  const running = modules?.filter(([, h]) => h.state === "running").length ?? 0;
+  const broken = modules?.filter(([, h]) => isBroken(h)).length ?? 0;
+
   return (
     <div className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-glow">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Agent modules</h2>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold">Agent modules</h2>
+            {modules && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
+                  broken > 0 ? "bg-ember text-midnight" : "bg-aurora/15 text-aurora",
+                )}
+              >
+                {broken > 0
+                  ? `${broken} need${broken === 1 ? "s" : ""} attention`
+                  : running === modules.length
+                    ? `All ${modules.length} running`
+                    : `${running} of ${modules.length} running`}
+              </span>
+            )}
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Each part of meteorcli runs on its own; a crashing module is restarted automatically and
-            stopped after crashing five times in ten minutes, while the others keep working.
-            {caps.reportedAt ? ` Reported ${formatDateTime(caps.reportedAt)}.` : ""}
+            A crashing module restarts on its own; after five crashes in ten minutes it stays
+            stopped until you restart it. The other modules keep working.
           </p>
+          {caps.reportedAt && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Reported {formatDateTime(caps.reportedAt)}
+            </p>
+          )}
         </div>
         {canDiagnose && (
           <Button
@@ -138,65 +184,130 @@ export function AgentModulesPanel({ token, organizationId, deviceId, device, can
         )}
       </div>
 
-      {caps.modules === null ? (
+      {modules === null ? (
         <p className="text-sm text-muted-foreground">
           This device&apos;s agent does not report module health. Update meteorcli to see it.
         </p>
       ) : (
-        <ul className="divide-y divide-border rounded-md border border-border">
-          {sortedModules(caps.modules).map(([name, health]) => {
-            const pending = pendingRestart(name);
-            const last = lastRestart(name);
-            return (
-              <li
-                key={name}
-                className="flex flex-wrap items-center justify-between gap-3 p-3"
-                data-testid={`module-${name}`}
-              >
-                <div className="min-w-0 space-y-1">
-                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                    {name}
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
-                        STATE_STYLES[health.state] ?? STATE_STYLES.stopped,
-                      )}
-                    >
-                      {STATE_LABELS[health.state] ?? health.state}
-                    </span>
-                    {health.restarts ? (
-                      <span className="text-xs text-muted-foreground">
-                        {health.restarts} restart{health.restarts === 1 ? "" : "s"}
-                      </span>
-                    ) : null}
-                  </p>
-                  {isBroken(health) && health.last_error && (
-                    <p className="break-all text-xs text-destructive">{health.last_error}</p>
-                  )}
-                  {pending && (
-                    <p className="text-xs text-muted-foreground">
-                      Restart waiting for the device (its next heartbeat).
-                    </p>
-                  )}
-                  {!pending && last?.state === "failed" && (
-                    <p className="text-xs text-destructive">
-                      Restart failed: {last.last_error ?? "the device could not restart it."}
-                    </p>
-                  )}
-                </div>
-                {canRestart && (
-                  <Button
-                    variant={isBroken(health) ? "default" : "outline"}
-                    disabled={busy || Boolean(pending)}
-                    onClick={() => restartMutation.mutate(name)}
+        <>
+          {problemRows.length > 0 && (
+            <ul className="space-y-2">
+              {problemRows.map(([name, health]) => {
+                const pending = pendingRestart(name);
+                const last = lastRestart(name);
+                return (
+                  <li
+                    key={name}
+                    className={cn(
+                      "flex flex-wrap items-center justify-between gap-3 rounded-md border p-3",
+                      isBroken(health) ? "border-ember/60 bg-ember/10" : "border-border",
+                    )}
+                    data-testid={`module-${name}`}
                   >
-                    Restart
-                  </Button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                    <div className="min-w-0 space-y-1">
+                      <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                        <span className="font-mono">{name}</span>
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+                            STATE_STYLES[health.state] ?? STATE_STYLES.stopped,
+                          )}
+                        >
+                          {STATE_LABELS[health.state] ?? health.state}
+                        </span>
+                        {health.restarts ? (
+                          <span className="text-xs text-muted-foreground">
+                            {health.restarts} restart{health.restarts === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
+                      </p>
+                      {agentModuleDescription(name) && (
+                        <p className="text-xs text-muted-foreground">
+                          {agentModuleDescription(name)}
+                        </p>
+                      )}
+                      {isBroken(health) && health.last_error && (
+                        <p className="break-all font-mono text-xs text-destructive">
+                          {health.last_error}
+                        </p>
+                      )}
+                      {pending && (
+                        <p className="text-xs text-muted-foreground">
+                          Restart waiting for the device (its next heartbeat).
+                        </p>
+                      )}
+                      {!pending && last?.state === "failed" && (
+                        <p className="text-xs text-destructive">
+                          Restart failed: {last.last_error ?? "the device could not restart it."}
+                        </p>
+                      )}
+                    </div>
+                    {canRestart && (
+                      <Button
+                        variant={isBroken(health) ? "default" : "outline"}
+                        disabled={busy || Boolean(pending)}
+                        onClick={() => restartMutation.mutate(name)}
+                      >
+                        Restart
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {tiles.length > 0 && (
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              {tiles.map(([name, health]) => (
+                <li
+                  key={name}
+                  className="group relative flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2"
+                  data-testid={`module-${name}`}
+                >
+                  <ModuleTooltip id={`module-tip-${name}`} name={name} />
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "h-2 w-2 shrink-0 rounded-full",
+                      health.state === "running"
+                        ? "bg-aurora"
+                        : health.state === "stopped"
+                          ? "bg-muted-foreground"
+                          : "bg-horizon",
+                    )}
+                  />
+                  <div
+                    className="min-w-0 flex-1 cursor-help rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    tabIndex={agentModuleDescription(name) ? 0 : undefined}
+                    aria-describedby={
+                      agentModuleDescription(name) ? `module-tip-${name}` : undefined
+                    }
+                  >
+                    <p className="truncate font-mono text-sm">{name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {STATE_LABELS[health.state] ?? health.state}
+                      {health.restarts
+                        ? ` · ${health.restarts} restart${health.restarts === 1 ? "" : "s"}`
+                        : ""}
+                    </p>
+                  </div>
+                  {canRestart && (
+                    <Button
+                      variant="ghost"
+                      className="h-7 w-7 shrink-0 p-0 text-muted-foreground opacity-60 hover:opacity-100 group-hover:opacity-100"
+                      aria-label="Restart"
+                      title={`Restart ${name}`}
+                      disabled={busy}
+                      onClick={() => restartMutation.mutate(name)}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       {error && (
