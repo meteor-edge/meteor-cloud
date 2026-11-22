@@ -82,6 +82,26 @@ class AddUserRequest(BaseModel):
         return value
 
 
+# The agent's module names (internal/modules in the Go agent): lowercase words.
+_MODULE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+# Longest doctor report the server keeps (the agent cuts it to this).
+MAX_ACTION_OUTPUT = 16000
+
+
+class RestartModuleRequest(BaseModel):
+    """Restart one agent module; a module the crash-loop breaker parked runs again."""
+
+    module: str
+
+    @field_validator("module")
+    @classmethod
+    def _valid_module(cls, value: str) -> str:
+        value = value.strip()
+        if not _MODULE.match(value):
+            raise ValueError("The module name must be a lowercase word such as 'deploy'")
+        return value
+
+
 class DeviceActionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -91,27 +111,32 @@ class DeviceActionResponse(BaseModel):
     username: str | None
     sudo: bool
     from_version: str | None = None
+    module: str | None = None
     last_error: str | None
+    # run_diagnostics: the device's doctor report.
+    output: str | None = None
     created_at: datetime
     sent_at: datetime | None
     reported_at: datetime | None
 
 
 class DeviceActionsResponse(BaseModel):
-    # Only the kinds the caller may order (power, users, update_agent).
+    # Only the kinds the caller may order (power, users, update_agent and repair).
     actions: list[DeviceActionResponse]
 
 
 # ------------------------------------------------------------------ agent side
 class AgentDeviceAction(BaseModel):
     id: uuid.UUID
-    kind: Literal["reboot", "shutdown", "set_password", "add_user", "update_agent"]
+    kind: Literal["reboot", "shutdown", "set_password", "add_user", "update_agent", "restart_module", "run_diagnostics"]
     username: str | None = None
     password: str | None = None
     sudo: bool = False
     authorized_key: str | None = None
     # Version stored when update_agent was ordered (agent reports done when newer).
     from_version: str | None = None
+    # restart_module: which module.
+    module: str | None = None
 
 
 class AgentDeviceActionsResponse(BaseModel):
@@ -122,6 +147,8 @@ class AgentActionResult(BaseModel):
     id: uuid.UUID
     state: Literal["done", "failed"]
     error: str | None = Field(default=None, max_length=500)
+    # run_diagnostics: the doctor report. Added in v1 (additive); other kinds leave it out.
+    output: str | None = Field(default=None, max_length=MAX_ACTION_OUTPUT)
 
 
 class AgentActionReportRequest(BaseModel):

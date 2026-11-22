@@ -196,7 +196,9 @@
         "shutdown",
         "set_password",
         "add_user",
-        "update_agent"
+        "update_agent",
+        "restart_module",
+        "run_diagnostics"
       ],
       "description": "One-off action kinds the server hands out today. A new kind is an additive change; an agent that does not know it reports the action failed with an error that starts with 'Unsupported'."
     },

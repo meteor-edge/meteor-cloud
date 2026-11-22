@@ -341,14 +341,21 @@ class DeviceSoftwareService:
         )
 
     def apply_capabilities(self, *, device_id: uuid.UUID, capabilities: dict[str, Any]) -> None:
-        """Store agent-reported capabilities on the device metadata (best-effort)."""
+        """Store agent-reported capabilities (and module health) on the device metadata.
+
+        The latest report replaces the previous one; ``capabilities_reported_at`` says when
+        it arrived, so the console can tell stale module health from current.
+        """
         from sqlalchemy.orm.attributes import flag_modified
+
+        from app.devices.capabilities import normalize_capabilities
 
         device = self.session.get(Device, device_id)
         if device is None:
             return
         meta = dict(device.metadata_ or {})
-        meta["capabilities"] = capabilities
+        meta["capabilities"] = normalize_capabilities(capabilities)
+        meta["capabilities_reported_at"] = datetime.now(UTC).isoformat()
         device.metadata_ = meta
         # JSONB: force dirty so a heartbeat that only flips booleans always persists.
         flag_modified(device, "metadata_")

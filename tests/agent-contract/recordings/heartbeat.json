@@ -109,7 +109,9 @@
               "shutdown",
               "set_password",
               "add_user",
-              "update_agent"
+              "update_agent",
+              "restart_module",
+              "run_diagnostics"
             ],
             "deploy_kinds": [
               "systemd",
@@ -267,7 +269,9 @@
               "shutdown",
               "set_password",
               "add_user",
-              "update_agent"
+              "update_agent",
+              "restart_module",
+              "run_diagnostics"
             ],
             "deploy_kinds": [
               "systemd",

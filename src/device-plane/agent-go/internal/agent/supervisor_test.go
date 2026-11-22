@@ -338,3 +338,29 @@ func TestEnrolledAtStartOpensTheGate(t *testing.T) {
 	defer start(t, s)()
 	eventually(t, "feature running", func() bool { return feature.Load() > 0 })
 }
+
+func TestRestartModuleSignalUnparks(t *testing.T) {
+	var broken atomic.Bool
+	broken.Store(true)
+	deploy := &fakeModule{name: "deploy", run: func(ctx context.Context, d Deps, _ int32) error {
+		if broken.Load() {
+			return errors.New("artifacts directory not writable")
+		}
+		d.Health.Set("deploy", StateRunning, nil)
+		<-ctx.Done()
+		return nil
+	}}
+	d := testDeps(nil)
+	s := fast(NewSupervisor([]Module{deploy}, d))
+	s.ParkFor = time.Hour
+	stop := start(t, s)
+	defer stop()
+
+	state := func() string { h, _ := d.Health.Get("deploy"); return h.State }
+	eventually(t, "parked", func() bool { return state() == string(StateParked) })
+
+	broken.Store(false) // the operator fixed the cause
+	d.Signals.Publish(RestartModule{Name: "nope"})
+	d.Signals.Publish(RestartModule{Name: "deploy"})
+	eventually(t, "running after restart_module", func() bool { return state() == string(StateRunning) })
+}

@@ -49,6 +49,13 @@
               "string",
               "null"
             ]
+          },
+          "module": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "restart_module: the agent module to restart (a parked module runs again). Added in v1 (additive)."
           }
         }
       }

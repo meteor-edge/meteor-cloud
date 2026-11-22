@@ -32,6 +32,7 @@ import {
   DeviceLogHistory,
 } from "@/components/fleet/DeviceHistoryPanels";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
+import { AgentModulesPanel } from "@/components/fleet/AgentModulesPanel";
 import { AgentUpdatePanel } from "@/components/fleet/AgentUpdatePanel";
 import { DeviceActionsPanel } from "@/components/fleet/DeviceActionsPanel";
 import { DeviceWifiPanel } from "@/components/fleet/DeviceWifiPanel";
@@ -53,6 +54,7 @@ import {
   canUpdateDeviceAgent,
   canViewDeviceLogs,
 } from "@/lib/permissions";
+import { agentCapabilities, supportsAction } from "@/lib/agentCapabilities";
 import { formatDateTime } from "@/lib/utils";
 
 function Detail({ label, value }: { label: string; value: string | null | undefined }) {
@@ -507,6 +509,15 @@ export function DeviceDetailPage() {
             />
             <Detail label="Credential prefix" value={device.credential_prefix} />
           </div>
+          {token ? (
+            <AgentModulesPanel
+              token={token}
+              organizationId={organizationId}
+              deviceId={deviceId}
+              device={device}
+              canRepair={canUpdateAgent}
+            />
+          ) : null}
           <DeviceResourceMeters
             metrics={device.mqtt_metrics}
             updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
@@ -625,6 +636,7 @@ export function DeviceDetailPage() {
           organizationId={organizationId}
           deviceId={deviceId}
           agentVersion={device.agent_version}
+          supported={supportsAction(agentCapabilities(device), "update_agent")}
         />
       )}
 
@@ -635,6 +647,7 @@ export function DeviceDetailPage() {
           deviceId={deviceId}
           canPower={canPower}
           canUsers={canUsers}
+          supportedActions={agentCapabilities(device).actions}
         />
       )}
 
