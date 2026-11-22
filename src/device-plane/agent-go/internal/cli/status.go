@@ -59,11 +59,6 @@ func runStatus(ctx context.Context, env *Env, args []string) int {
 	}
 	fmt.Fprintln(out, "Agent:          not running (details read from files)")
 
-	// The Python config.json sits where the new one goes; look for it first.
-	if config.LooksLikePython(p.LegacyDir) {
-		fmt.Fprintf(out, "Found a Python meteorcli install in %s. Run 'sudo meteorcli config import'.\n", p.LegacyDir)
-		return 1
-	}
 	c, err := config.Load(p.ConfigFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		fmt.Fprintf(env.Stderr, "error: %v\n", err)

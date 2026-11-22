@@ -187,28 +187,6 @@ jobs:
       - name: Test (pytest)
         run: python -m pytest -q
 
-  agent:
-    name: Agent (pytest)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/device-plane/agent
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: src/device-plane/agent/pyproject.toml
-      - name: Install dependencies
-        run: python -m pip install -e ".[dev]"
-      - name: Lint (ruff)
-        run: python -m ruff check .
-      - name: Typecheck (compileall)
-        run: python -m compileall meteorcli edge_agent tests
-      - name: Test (pytest)
-        run: python -m pytest -q
-
   firstboot:
     name: First-boot scripts (pytest)
     runs-on: ubuntu-latest
@@ -282,11 +260,11 @@ jobs:
           systemd-analyze security --offline=true --threshold=59 meteorcli-helper.service
       - name: Socket and helper permissions under systemd (Debian 12 container)
         run: ./test/systemd/run.sh
-      - name: Installers under systemd (Python takeover, upgrade, --token, first boot from .meteorenv)
+      - name: Installers under systemd (--token, upgrade, first boot from .meteorenv)
         run: ./test/install/run.sh
 
   agent-contract:
-    name: Agent contract (Python and Go meteorcli)
+    name: Agent contract (Go meteorcli)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -299,33 +277,20 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: |
-            src/device-plane/agent/pyproject.toml
-            tests/agent-contract/requirements.txt
-      - name: Install dependencies
-        run: python -m pip install -e ../../src/device-plane/agent -r requirements.txt ruff
-      - name: Lint (ruff)
-        run: python -m ruff check --line-length 120 .
-      # Mosquitto (eclipse-mosquitto:2) is started by the suite with a throwaway TLS CA.
-      - name: Verify against the recordings
-        run: python -m pytest -q
-      - name: Replay the recordings
-        env:
-          AGENT_CONTRACT_MODE: replay
-        run: python -m pytest -q
-      # The Go agent must produce the same transcripts; scenarios for features it does not
-      # have yet are skipped (see the requires marker in conftest.py).
+          cache-dependency-path: tests/agent-contract/requirements.txt
       - uses: actions/setup-go@v5
         with:
           go-version-file: src/device-plane/agent-go/go.mod
           cache: false
-      - name: Verify the Go agent against the recordings
-        env:
-          AGENT_CONTRACT_AGENT: go
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt ruff
+      - name: Lint (ruff)
+        run: python -m ruff check --line-length 120 .
+      # Mosquitto (eclipse-mosquitto:2) is started by the suite with a throwaway TLS CA.
+      - name: Verify against the recordings
         run: python -m pytest -q -rs
-      - name: Replay the recordings to the Go agent
+      - name: Replay the recordings
         env:
-          AGENT_CONTRACT_AGENT: go
           AGENT_CONTRACT_MODE: replay
         run: python -m pytest -q
 

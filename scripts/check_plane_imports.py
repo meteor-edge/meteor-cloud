@@ -7,12 +7,11 @@ generated/cache dirs. Relative imports are ignored (they stay in-package).
 
 Forbidden top-level packages:
 
-- control-plane must not import ``data_plane``, ``edge_agent``, ``meteorcli``
-- data-plane must not import ``app``, ``edge_agent``, ``meteorcli``
-- device-plane (agent, gateway, runtime) must not import ``app``, ``data_plane``
+- control-plane must not import ``data_plane``
+- data-plane must not import ``app``
+- device-plane (the WireGuard gateway; the agent is Go) must not import ``app``, ``data_plane``
 
-Same-plane packages (``app``, ``data_plane``, ``edge_agent``, ``meteorcli``,
-``runtime``) are allowed where they belong.
+Same-plane packages (``app``, ``data_plane``) are allowed where they belong.
 """
 
 from __future__ import annotations
@@ -37,8 +36,8 @@ SKIP_DIR_NAMES = frozenset(
 
 # plane root relative to repo → forbidden top-level module names
 PLANES: dict[str, frozenset[str]] = {
-    "src/control-plane": frozenset({"data_plane", "edge_agent", "meteorcli"}),
-    "src/data-plane": frozenset({"app", "edge_agent", "meteorcli"}),
+    "src/control-plane": frozenset({"data_plane"}),
+    "src/data-plane": frozenset({"app"}),
     "src/device-plane": frozenset({"app", "data_plane"}),
 }
 

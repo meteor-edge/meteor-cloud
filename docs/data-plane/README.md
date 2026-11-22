@@ -28,8 +28,6 @@ make dev        # the data-api profile is on in deploy/compose/.env.example
    pip install ./sdk/python && python sdk/python/examples/quickstart.py
    ```
 
-To check a whole installation, `python scripts/data-plane-e2e.py` runs the full developer workflow: it registers a device and two applications, deploys a Docker release bound to an application, runs the real agent, and verifies publish, subscribe, history, commands, token rotation, revocation, tenant isolation and the audit trail.
-
 ## Architecture
 
 ```

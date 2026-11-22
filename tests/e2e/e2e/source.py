@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import shutil
 import subprocess
 import tarfile
 from pathlib import Path
@@ -30,13 +31,34 @@ def tracked_files(subdir: str = "") -> list[str]:
     return files
 
 
+AGENT_GO = REPO_ROOT / "src" / "device-plane" / "agent-go"
+
+
+def build_meteorcli(dest: Path, out_dir: Path) -> Path:
+    """Build the Go meteorcli release files (scripts/dist.sh) into ``out_dir`` and write them to
+    ``dest`` as a .tar.gz. The version names the commit; the same build gives the same archive."""
+    commit = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+                            capture_output=True, text=True, check=True).stdout.strip()
+    shutil.rmtree(out_dir, ignore_errors=True)
+    subprocess.run(["./scripts/dist.sh", str(out_dir), f"0.0.0-e2e+{commit}"], cwd=AGENT_GO, check=True,
+                   stdout=subprocess.DEVNULL)
+    files = sorted(p for p in out_dir.rglob("*") if p.is_file())
+    return _write_archive(dest, [(p, str(p.relative_to(out_dir))) for p in files])
+
+
 def build_archive(dest: Path, *, subdir: str = "") -> Path:
     """Write a .tar.gz of the repository (or ``subdir``, with paths relative to it)."""
+    entries = []
+    for name in tracked_files(subdir):
+        arcname = name[len(subdir.rstrip("/")) + 1 :] if subdir else name
+        entries.append((REPO_ROOT / name, arcname))
+    return _write_archive(dest, entries)
+
+
+def _write_archive(dest: Path, entries: list[tuple[Path, str]]) -> Path:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as tar:
-        for name in tracked_files(subdir):
-            path = REPO_ROOT / name
-            arcname = name[len(subdir.rstrip("/")) + 1 :] if subdir else name
+        for path, arcname in entries:
             info = tarfile.TarInfo(arcname)
             data = path.read_bytes()
             info.size = len(data)

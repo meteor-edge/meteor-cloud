@@ -75,7 +75,7 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 ## Automated check
 
 CI job **Supply chain → Licences of shipped dependencies** (`.github/workflows/supply-chain.yml`) runs
-`scripts/check_licenses.py` on the console's production npm packages, the Python services, agent
+`scripts/check_licenses.py` on the console's production npm packages, the Python services
 and SDK (with all their dependencies), and the Go binaries (`go-licenses`). GPL, AGPL, LGPL, SSPL,
 BSL/BUSL, Commons Clause, Elastic and unknown licences fail the job unless the package is listed in
 `ALLOWED` in that script with a reason (today: `psycopg`, LGPL-3.0, used unmodified). Dev tooling

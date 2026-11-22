@@ -1,7 +1,7 @@
 """Load contracts/schemas/agent and check messages against it.
 
 Kept separate from the control-plane test helper on purpose: this suite must not
-import any plane's code (it also has to run against the Go agent later).
+import any plane's code (it drives the agent as a separate process).
 """
 
 from __future__ import annotations

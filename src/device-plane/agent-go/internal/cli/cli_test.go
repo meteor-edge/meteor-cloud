@@ -42,64 +42,6 @@ func write(t *testing.T, path, body string) {
 	}
 }
 
-// pythonLayout is /etc/meteorcli as the Python agent leaves it after enrolling.
-func pythonLayout(t *testing.T, root string) {
-	t.Helper()
-	etc := filepath.Join(root, "etc", "meteorcli")
-	write(t, filepath.Join(etc, "config.json"), `{"server_url": "https://meteor.example", "device_id": "dev-uuid-1",
- "organization_id": "org-uuid-2", "name": "edge-01", "heartbeat_interval_seconds": 30,
- "domain": "meteor.example", "api_base": null}`)
-	write(t, filepath.Join(etc, "device-token"), "dev_token_secret_value")
-	write(t, filepath.Join(etc, "mqtt.json"), `{"host":"mqtt.example","port":8883,"username":"u","password":"mqtt_pw","tls":true,"ca_cert_path":null}`)
-	write(t, filepath.Join(etc, "wireguard", "public.key"), "pub")
-	write(t, filepath.Join(etc, "wireguard", "private.key"), "priv")
-}
-
-func TestStatusReadsConfigImportedFromPython(t *testing.T) {
-	root := t.TempDir()
-	pythonLayout(t, root)
-
-	before := meteorcli(t, root, nil, "status")
-	if before.code != 1 || !strings.Contains(before.stdout, "meteorcli config import") {
-		t.Fatalf("status before import = %+v", before)
-	}
-
-	imp := meteorcli(t, root, nil, "config", "import")
-	if imp.code != 0 || !strings.Contains(imp.stdout, "imported  device-token") {
-		t.Fatalf("import = %+v", imp)
-	}
-
-	st := meteorcli(t, root, nil, "status")
-	if st.code != 0 {
-		t.Fatalf("status = %+v", st)
-	}
-	for _, want := range []string{
-		"Domain:         meteor.example",
-		"API base:       https://meteor.example",
-		"API key:        MISSING",
-		"Device ID:      dev-uuid-1",
-		"Organization:   org-uuid-2",
-		"Name:           edge-01",
-		"Heartbeat:      every 30s",
-		"Credential:     present",
-		"Service:        meteorcli.service is active",
-		"MQTT:           configured",
-		"WireGuard:      key pair present",
-	} {
-		if !strings.Contains(st.stdout, want+"\n") {
-			t.Errorf("status lacks %q:\n%s", want, st.stdout)
-		}
-	}
-	if strings.Contains(st.stdout+st.stderr, "dev_token_secret_value") || strings.Contains(st.stdout, "mqtt_pw") {
-		t.Error("status printed a secret")
-	}
-
-	again := meteorcli(t, root, nil, "config", "import")
-	if again.code != 0 || !strings.Contains(again.stdout, "Nothing to import") {
-		t.Errorf("second import = %+v", again)
-	}
-}
-
 func TestStatusNotConfigured(t *testing.T) {
 	r := meteorcli(t, t.TempDir(), nil, "status")
 	if r.code != 1 || !strings.Contains(r.stdout, "Not configured") {
@@ -148,19 +90,12 @@ func TestConfigErrors(t *testing.T) {
 	if r := meteorcli(t, root, nil, "config", "--nope"); r.code != 2 {
 		t.Errorf("bad flag: %+v", r)
 	}
-	pythonLayout(t, root)
-	if r := meteorcli(t, root, nil, "config", "--domain", "x.example"); r.code != 1 || !strings.Contains(r.stderr, "config import") {
-		t.Errorf("config over a Python layout: %+v", r)
-	}
-	if r := meteorcli(t, root, nil, "config", "--show"); r.code != 1 || !strings.Contains(r.stderr, "config import") {
-		t.Errorf("config --show over a Python layout: %+v", r)
-	}
 }
 
 func TestConfigDropsEnrollmentOfUnknownServer(t *testing.T) {
 	root := t.TempDir()
 	p := config.DefaultPaths(root)
-	// A token survived an import whose config.json was damaged: its server is unknown.
+	// A token survived a damaged config.json: its server is unknown.
 	write(t, p.DeviceTokenFile(), "dev_old")
 	r := meteorcli(t, root, nil, "config", "--domain", "new.example")
 	if r.code != 0 || !strings.Contains(r.stdout, "Cleared previous enrollment (device-token)") {

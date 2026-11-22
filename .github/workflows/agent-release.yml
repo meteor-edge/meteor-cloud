@@ -118,7 +118,7 @@ jobs:
           curl -fsSLO https://github.com/$REPO/releases/latest/download/meteorcli-prepare-image.sh && sudo bash meteorcli-prepare-image.sh
           \`\`\`
           Devices update themselves from the newest release (console: Update meteorcli, or \`meteorcli update\`).
-          The installer takes over a Python meteorcli (0.4.x) and keeps its identity. See docs/meteorcli.md."
+          See docs/meteorcli.md."
           gh release create "$TAG" -R "$REPO" --target "$GITHUB_SHA" --latest \
             --title "meteorcli $VER" --notes "$notes" "$RUNNER_TEMP"/dist/*
           echo "Install URL: https://github.com/$REPO/releases/latest/download/install-meteorcli.sh" >> "$GITHUB_STEP_SUMMARY"

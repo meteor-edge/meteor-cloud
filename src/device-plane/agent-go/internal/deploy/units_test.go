@@ -84,37 +84,6 @@ func newApplied(t *testing.T) (appliedState, string) {
 	return appliedState{store: st}, dir
 }
 
-func TestAppliedStateReadsThePythonFile(t *testing.T) {
-	a, dir := newApplied(t)
-	py := `{"demo-app": {"release_id": "r1", "revision": 3, "item": {"workload_key": "demo-app", "kind": "docker",
-		"release_id": "r1", "revision": 3, "spec": {"image": "nginx"}}},
-		"other": {"release_id": "r9", "revision": 1, "reapply": true}}`
-	if err := os.WriteFile(filepath.Join(dir, appliedFile), []byte(py), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	all, err := a.load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if all["demo-app"].Revision != 3 || all["demo-app"].Item.spec().Text("image", "") != "nginx" || !all["other"].Reapply {
-		t.Fatalf("loaded %+v", all)
-	}
-	// Writing converts it, without keeping the old top-level copies.
-	if err := a.save(record{key: "demo-app", release: "r2", revision: 4}); err != nil {
-		t.Fatal(err)
-	}
-	var raw map[string]json.RawMessage
-	data, _ := os.ReadFile(filepath.Join(dir, appliedFile))
-	_ = json.Unmarshal(data, &raw)
-	if _, stale := raw["demo-app"]; stale || string(raw["version"]) != "1" {
-		t.Fatalf("file after write: %s", data)
-	}
-	all, _ = a.load()
-	if all["demo-app"].ReleaseID != "r2" || all["demo-app"].Item == nil || all["other"].ReleaseID != "r9" {
-		t.Fatalf("after write %+v", all)
-	}
-}
-
 func TestAppliedRevisionIsAHighWaterMark(t *testing.T) {
 	a, _ := newApplied(t)
 	must := func(err error) {
@@ -222,27 +191,5 @@ func TestAppliedStateKeepsUnknownWorkloadFields(t *testing.T) {
 	if compact(got.Workloads["w"]["future"]) != `{"x":1}` || compact(got.Workloads["other"]["note"]) != `"kept"` ||
 		compact(got.Workloads["w"]["release_id"]) != `"r2"` {
 		t.Fatalf("file after save: %s", data)
-	}
-}
-
-func TestPythonAppliedStateStaysWhenTheMigrationFails(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory permissions")
-	}
-	a, dir := newApplied(t)
-	py := `{"demo-app": {"release_id": "r1", "revision": 3}}`
-	path := filepath.Join(dir, appliedFile)
-	if err := os.WriteFile(path, []byte(py), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(dir, 0o700)
-	if err := a.save(record{key: "demo-app", release: "r2", revision: 4}); err == nil {
-		t.Fatal("save succeeded in a read-only directory")
-	}
-	if data, _ := os.ReadFile(path); string(data) != py {
-		t.Fatalf("Python file changed: %s", data)
 	}
 }

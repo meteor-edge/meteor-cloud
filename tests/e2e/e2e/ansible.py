@@ -80,7 +80,7 @@ def render_inventory(cfg: Config, state: State, hosts: list[Host], *, platform_a
                 },
                 "devices": {
                     "hosts": {h.name: entry(h) for h in devices},
-                    "vars": {"device_source_archive": str(device_archive)},
+                    "vars": {"device_dist_archive": str(device_archive)},
                 },
             },
         }

@@ -41,7 +41,6 @@ jobs:
             src/control-plane/pyproject.toml
             src/data-plane/pyproject.toml
             infrastructure/installer/pyproject.toml
-            src/device-plane/agent/pyproject.toml
       - name: Install dependencies
         run: make install
       - name: Test

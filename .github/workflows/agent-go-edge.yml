@@ -72,7 +72,7 @@ jobs:
           \`\`\`bash
           curl -fsSL https://github.com/$REPO/releases/download/$TAG/install-meteorcli.sh | sudo bash -s -- --domain <server> --token <registration token>
           \`\`\`
-          Takes over a Python meteorcli install (identity kept). See docs/meteorcli-go.md."
+          See docs/meteorcli.md."
           if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
             # Move the tag to this commit, then replace the files.
             gh api -X PATCH "repos/$REPO/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null

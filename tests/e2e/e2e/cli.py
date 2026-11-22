@@ -17,9 +17,10 @@ from e2e.logs import collect
 from e2e.proc import CommandError
 from e2e.redact import redact
 from e2e.report import Report
-from e2e.source import build_archive
+from e2e.source import build_archive, build_meteorcli
 from e2e.ssh import Ssh
 from e2e.state import Host, State
+from e2e.suite.context import WG_CONF
 from e2e.terraform import Terraform
 
 EXIT_OK, EXIT_FAILED, EXIT_CONFIG, EXIT_INFRA = 0, 1, 2, 3
@@ -159,7 +160,8 @@ def say_dns_records(cfg: Config, hosts: list[Host]) -> None:
 def configure(cfg: Config, state: State, hosts: list[Host], secrets: dict[str, str]) -> None:
     key = state.ensure_ssh_key(cfg)
     platform_archive = build_archive(state.build_dir / "platform-source.tar.gz")
-    device_archive = build_archive(state.build_dir / "device-plane.tar.gz", subdir="src/device-plane")
+    say("[build] meteorcli release files (scripts/dist.sh)")
+    device_archive = build_meteorcli(state.build_dir / "meteorcli-dist.tar.gz", state.build_dir / "meteorcli-dist")
     render_inventory(cfg, state, hosts, platform_archive=platform_archive, device_archive=device_archive,
                      ssh_key=key)
     ansible = Ansible(cfg, state, secrets)
@@ -328,8 +330,8 @@ def cmd_down(cfg: Config, state: State, args: argparse.Namespace) -> int:
             Ansible(cfg, state, state.secrets(cfg)).playbook("destroy.yml", label="destroy")
             ssh = Ssh(state.ensure_ssh_key(cfg), state.known_hosts)
             for device in (h for h in hosts if h.role == "device"):
-                ssh.run(device, "systemctl disable --now meteorcli; "
-                                "wg-quick down /etc/meteorcli/wireguard/wg0.conf; docker rm -f e2e-app demo-app", sudo=True)
+                ssh.run(device, "systemctl disable --now meteorcli meteorcli-helper.socket; "
+                                f"wg-quick down {WG_CONF}; docker rm -f e2e-app demo-app", sudo=True)
     if state.tfstate.is_file():
         say(f"[terraform] destroying resources tracked in {state.tfstate}")
         tf.init()

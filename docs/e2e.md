@@ -40,7 +40,8 @@ tests/e2e/meteorcloud-testenv down
 ```
 
 Needs Python 3.10+ (standard library only), Terraform 1.7+, Ansible core 2.15+
-with `community.general`, OpenSSH and git. AWS credentials come from the usual
+with `community.general`, OpenSSH, git and Go (it builds `meteorcli` from the working tree with
+`scripts/dist.sh`; the devices install those files). AWS credentials come from the usual
 `AWS_*` variables or `AWS_PROFILE`; the IAM user needs EC2, Route53 (the test
 zone) and IAM (role + instance profile for DNS-01).
 
@@ -120,7 +121,7 @@ E2E_SSH_KEY_FILE=~/.ssh/meteorcloud-lab
 E2E_ONPREM_INGRESS_IP=203.0.113.10                   # public address for DNS (port-forward 80/443)
 ```
 
-Hosts must be Ubuntu 22.04+/Debian 12+ or RHEL/Rocky/Alma 9+ with sudo; devices need Python 3.11+.
+Hosts must be Ubuntu 22.04+/Debian 12+ or RHEL/Rocky/Alma 9+ with sudo and systemd (and the Python Ansible needs).
 Terraform manages only the DNS records. Ansible and the suite are the same as on
 AWS. For the wildcard certificate off AWS, export a scoped IAM key as
 `EDGE_PLATFORM_TRAEFIK_AWS_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY`. `down` removes

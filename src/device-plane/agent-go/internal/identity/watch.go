@@ -10,8 +10,8 @@ import (
 )
 
 // Watching is a fallback: the CLI asks the agent to reload over the socket
-// after it writes, but a file written by another tool (an image builder, a
-// `config import`, an editor) must be picked up too. Without inotify the files
+// after it writes, but a file written by another tool (an image builder, an
+// editor) must be picked up too. Without inotify the files
 // are checked every fallbackPoll instead.
 const (
 	watchMask    = syscall.IN_CLOSE_WRITE | syscall.IN_MOVED_TO | syscall.IN_MOVED_FROM | syscall.IN_DELETE | syscall.IN_CREATE

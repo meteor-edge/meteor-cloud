@@ -61,9 +61,8 @@ sensitive, so other roles do not see the Wi-Fi section or the Connection card, a
 
 ## On the device
 
-`/usr/local/libexec/meteorcli-wifi` is installed by `sudo ./installcli.sh` with a sudo
-rule for that one file, like the other meteorcli helpers. It accepts a network name, a
-password, "hidden" and "connect now", validates them, writes
+meteorcli's root helper ([Wi-Fi](../meteorcli-go.md#wi-fi)) applies the change. It accepts a
+network name, a password, "hidden" and "connect now", validates them, writes
 `/etc/NetworkManager/system-connections/meteor-wifi-<hash>.nmconnection` and runs fixed
 `nmcli` commands. It cannot run other commands or write other files.
 

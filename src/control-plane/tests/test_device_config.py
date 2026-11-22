@@ -22,8 +22,8 @@ FULL = {
     "ssh": {"enabled": True, "password_authentication": False, "authorized_key": SSH_KEY},
 }
 
-# Byte for byte what the agent's first-boot test applies (CONSOLE_SETTINGS_FILE in
-# src/device-plane/agent/tests/test_firstboot_packaging.py) and Meteor Imager's MeteorEnvV2 writes.
+# Byte for byte what the first-boot tests apply (tests/firstboot/test_firstboot_scripts.py)
+# and Meteor Imager's MeteorEnvV2 writes.
 EXPECTED = (
     "METEOR_ENV_VERSION=2\n"
     "METEOR_DOMAIN=fleet.example.com:8443\n"

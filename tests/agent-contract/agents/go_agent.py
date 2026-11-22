@@ -5,7 +5,7 @@ scenario, and the commands are the real CLI talking to it over its Unix socket, 
 device. The CLI runs as the same user as the agent, so the socket's group policy lets it
 through (the agent's own user is trusted).
 
-Differences from the Python adapter, all on the device side of the contract:
+How the device side is simulated:
 
 - ``register`` stores the server with ``meteorcli config --api-base`` first: the Go CLI has no
   ``--server`` flag, the agent uses the configured server.
@@ -18,14 +18,14 @@ Differences from the Python adapter, all on the device side of the contract:
   device. Here a fake helper (:class:`FakeHelper`) answers it: reboot, users, the Docker observer's
   commands and journal warnings go to the SimulatedDevice, with the same docker arguments the real
   helper uses. Metrics are published every second (``METEORCLI_METRICS_INTERVAL=1``).
-- Features: background enrollment (approval with no command, across restarts), the server's
+- Covered: background enrollment (approval with no command, across restarts), the server's
   heartbeat interval, MQTT, actions, docker deploys (the fake helper turns ``docker.load``,
   ``docker.run`` and ``docker.health`` into the real helper's docker commands on the
-  SimulatedDevice), Wi-Fi (``wifi.*`` become the Python helper's commands on the
+  SimulatedDevice), Wi-Fi (``wifi.*`` become ``meteorcli-wifi`` commands on the
   SimulatedDevice) and WireGuard (``wireguard.*`` become ``wg-quick``/``wg`` calls there;
   ``ssh.authorized_keys`` keeps the managed lines in memory). Install outcomes go out at once in
   a heartbeat that carries only ``software_report``, like the progress reports.
-- WireGuard and SSH facts are the Python adapter's: the same key pair in
+- WireGuard and SSH facts are fixed so the recordings stay stable: one key pair in
   ``identity/wireguard``, the SSH user ``pi`` (``meteorcli config --ssh-user``) and the same host
   key in ``<root>/etc/ssh``.
 """
@@ -70,7 +70,7 @@ STATS_FORMAT = "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}"
 # The real helper's deploy health check (internal/helper/workloads.go).
 HEALTH_TEMPLATE = "{{.State.Running}}|{{.State.Status}}|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}"
 
-# The Python adapter's WireGuard key pair and SSH host key (same recordings).
+# Fixed WireGuard key pair and SSH host key (the recordings expect them).
 WG_PRIVATE = "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
 WG_PUBLIC = "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw="  # X25519 public key of WG_PRIVATE
 SSH_HOST_KEY_FILE = ssh_key("contract host key", "root@device") + "\n"
@@ -87,7 +87,7 @@ def binary() -> Path:
         go = shutil.which("go")
         if go is None:
             if os.environ.get("CI"):
-                pytest.fail("Go is required for AGENT_CONTRACT_AGENT=go in CI")
+                pytest.fail("Go is required for the contract suite in CI")
             pytest.skip("Go is not installed")
         out = Path(tempfile.mkdtemp(prefix="meteorcli-go-")) / "meteorcli"
         subprocess.run(
@@ -199,7 +199,7 @@ class FakeHelper:
 
 
     def _wifi(self, command: str, params: dict) -> dict:
-        """The Python meteorcli-wifi commands on the SimulatedDevice (the request on stdin)."""
+        """The meteorcli-wifi commands on the SimulatedDevice (the request on stdin)."""
         stdin = json.dumps(params) if command in ("apply", "remove") else None
         done = self.device.wifi_helper([command], stdin)
         answer = json.loads(done.stdout or "{}")
@@ -222,8 +222,6 @@ class FakeHelper:
 
 class GoAgent:
     name = "go"
-    features = frozenset({"background_enrollment", "server_heartbeat_interval", "mqtt", "actions", "docker", "wifi",
-                          "wireguard"})
 
     def __init__(self, workdir: Path, device: SimulatedDevice, plane: FakeControlPlane) -> None:
         self.device = device
@@ -242,7 +240,7 @@ class GoAgent:
         }
         for key in ("METEORCLI_TOKEN", "METEORCLI_API_KEY", "METEOR_BOOT_DIR"):
             self.env.pop(key, None)
-        # The Python adapter's WireGuard keys and SSH host key.
+        # Fixed WireGuard keys and SSH host key (the recordings expect them).
         wg_dir = self.root / "var" / "lib" / "meteorcli" / "identity" / "wireguard"
         wg_dir.mkdir(parents=True)
         (wg_dir / "private.key").write_text(WG_PRIVATE + "\n", encoding="utf-8")

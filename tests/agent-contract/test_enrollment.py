@@ -1,7 +1,7 @@
 """Getting an identity: registration token, and enrollment API key with approval.
 
 The transcripts are limited to the enrollment routes: an agent that starts working in the
-background once enrolled (the Go agent) sends heartbeats meanwhile, which are checked against
+background once enrolled sends heartbeats meanwhile, which are checked against
 the contract but are not part of these scenarios.
 """
 
@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import time
 import uuid
-
-import pytest
 
 from harness.fake_cp import Reply
 from harness.script import ORG_ID, error, heartbeat, registered
@@ -80,7 +78,6 @@ def test_enroll(contract, agent) -> None:
     contract.finish(routes=ENROLL)
 
 
-@pytest.mark.requires("server_heartbeat_interval")
 def test_heartbeat(contract, agent) -> None:
     """register, online within 5 s, then the server's heartbeat interval (5 s) is used."""
     device_id = str(uuid.uuid4())
@@ -104,7 +101,6 @@ def test_heartbeat(contract, agent) -> None:
     contract.finish(routes=[*REGISTER, HEARTBEAT])
 
 
-@pytest.mark.requires("background_enrollment")
 def test_enroll_reboot(contract, agent) -> None:
     """request-token, reboot while pending, approved meanwhile: online with no command run."""
     device_id = str(uuid.uuid4())

@@ -25,7 +25,7 @@ MeteorCloud is split into three planes. The **console** is the operator UI; it t
 
 | Plane | Path | Role |
 | --- | --- | --- |
-| **Device plane** | `src/device-plane/agent/` | `meteorcli` on the device: enroll, heartbeat, inventory, MQTT client |
+| **Device plane** | `src/device-plane/agent-go/` | `meteorcli` on the device (Go): enroll, heartbeat, inventory, MQTT client, deploys |
 | **Data plane** | `src/data-plane/` | Platform MQTT gateway: subscribe/publish via the MQTT broker, forward ingest to the control plane |
 | **Control plane** | `src/control-plane/` | Identity, tenancy, device registry, artifacts, MQTT policy, operator API, persistence |
 
@@ -138,7 +138,7 @@ The smallest install runs PostgreSQL, the API, the console, and a reverse proxy 
 ├── src/
 │   ├── control-plane/          # FastAPI (app.*), Dockerfile
 │   ├── data-plane/             # MQTT gateway (data_plane.*), Dockerfile
-│   └── device-plane/agent/     # meteorcli
+│   └── device-plane/agent-go/  # meteorcli (Go)
 ├── console/                    # operator UI, Dockerfile (nginx)
 ├── deploy/
 │   ├── compose/                # Docker Compose files, .env.example

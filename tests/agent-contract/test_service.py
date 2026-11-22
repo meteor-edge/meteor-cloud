@@ -5,8 +5,6 @@ from __future__ import annotations
 import hashlib
 import uuid
 
-import pytest
-
 from harness.broker import Observer
 from harness.device import APP, LOADED_IMAGE
 from harness.ed25519 import b64url, public_key
@@ -17,18 +15,16 @@ ARTIFACT = b"docker save tarball of demo/app:1.0 (simulated)\n"
 REGISTER = ("POST", "/api/v1/agent/register")
 
 
-def background_routes(agent, *routes: tuple[str, str]) -> list[tuple[str, str]] | None:
-    """Routes to keep in the transcript of an agent that works in the background (the Go agent).
+def background_routes(*routes: tuple[str, str]) -> list[tuple[str, str]]:
+    """Routes to keep in the transcript: the agent works in the background.
 
     Its modules run side by side on their own timers, so the order across routes, how often it
-    rechecks the MQTT config, and its heartbeat bodies (``capabilities.modules``, the kinds it
-    implements so far) are not those of the Python agent's single loop. The transcript keeps the
+    rechecks the MQTT config, and its heartbeat bodies are not fixed. The transcript keeps the
     routes whose exchanges are fixed; every exchange is still checked against the contract.
     """
-    return list(routes) if "background_enrollment" in agent.features else None
+    return list(routes)
 
 
-@pytest.mark.requires("mqtt")
 def test_heartbeat_mqtt(contract, agent, device, broker) -> None:
     """Two heartbeats with MQTT on: credentials refresh, status, metrics, events, ping."""
     connect = contract.broker(broker)
@@ -72,10 +68,9 @@ def test_heartbeat_mqtt(contract, agent, device, broker) -> None:
     observer.stop()
     assert retained == {"status": "offline"}
     contract.finish(observer, retained={"status": retained},
-                    routes=background_routes(agent, REGISTER, ("POST", "/api/v1/agent/mqtt/credentials")))
+                    routes=background_routes(REGISTER, ("POST", "/api/v1/agent/mqtt/credentials")))
 
 
-@pytest.mark.requires("actions")
 def test_actions(contract, agent, device) -> None:
     """Restart is reported before it runs; an unknown action kind is reported failed: unsupported."""
     device_id = register_and_basics(contract)
@@ -99,10 +94,9 @@ def test_actions(contract, agent, device) -> None:
     unknown = reports[1].request.body["results"][-1]
     assert unknown["state"] == "failed" and unknown["error"].lower().startswith("unsupported")
     contract.finish(routes=background_routes(
-        agent, REGISTER, ("GET", "/api/v1/agent/actions"), ("POST", "/api/v1/agent/actions/report")))
+        REGISTER, ("GET", "/api/v1/agent/actions"), ("POST", "/api/v1/agent/actions/report")))
 
 
-@pytest.mark.requires("wifi")
 def test_wifi(contract, agent, device) -> None:
     """Join a new network (checked against the server before it is kept) and forget another."""
     device.wifi_saved.append("old-lab")
@@ -117,11 +111,8 @@ def test_wifi(contract, agent, device) -> None:
     contract.script("POST", "/api/v1/agent/network/wifi/report", accepted(2))
 
     assert agent.register(contract.plane.url, contract.secret("registration_token")) == 0
-    if "background_enrollment" in agent.features:
-        # Wi-Fi runs beside the heartbeat: wait for the report, not a heartbeat count.
-        assert agent.run_until(lambda: bool(contract.plane.calls("POST", "/api/v1/agent/network/wifi/report"))) == 0
-    else:
-        assert agent.run(heartbeats=2) == 0
+    # Wi-Fi runs beside the heartbeat: wait for the report, not a heartbeat count.
+    assert agent.run_until(lambda: bool(contract.plane.calls("POST", "/api/v1/agent/network/wifi/report"))) == 0
 
     assert device.wifi_ssid == "warehouse" and "old-lab" not in device.wifi_saved
     assert [c for c, _ in device.wifi_requests if c in ("apply", "confirm", "remove")] == ["apply", "confirm", "remove"]
@@ -129,11 +120,10 @@ def test_wifi(contract, agent, device) -> None:
     assert [r["state"] for r in report["results"]] == ["applied", "removed"]
     assert "password" not in str(report)
     contract.finish(routes=background_routes(
-        agent, REGISTER, ("GET", "/api/v1/agent/network/wifi"), ("GET", "/api/v1/health"),
+        REGISTER, ("GET", "/api/v1/agent/network/wifi"), ("GET", "/api/v1/health"),
         ("POST", "/api/v1/agent/network/wifi/report")))
 
 
-@pytest.mark.requires("wireguard")
 def test_wireguard(contract, agent, device) -> None:
     """Register the public key, bring the tunnel up, trust the SSH CA, and say so at once."""
     device_id = register_and_basics(contract)
@@ -148,20 +138,16 @@ def test_wireguard(contract, agent, device) -> None:
     contract.script("POST", "/api/v1/agent/connectivity/wireguard", reply)
 
     assert agent.register(contract.plane.url, contract.secret("registration_token")) == 0
-    if "background_enrollment" in agent.features:
-        # Registration runs on its own timer: wait for the second call, not a heartbeat count.
-        assert agent.run_until(lambda: len(contract.plane.calls("POST", "/api/v1/agent/connectivity/wireguard")) >= 2) == 0
-    else:
-        assert agent.run(heartbeats=1) == 0
+    # Registration runs on its own timer: wait for the second call, not a heartbeat count.
+    assert agent.run_until(lambda: len(contract.plane.calls("POST", "/api/v1/agent/connectivity/wireguard")) >= 2) == 0
 
     first, second = contract.plane.calls("POST", "/api/v1/agent/connectivity/wireguard")
     assert first.request.body.get("ssh_ca_public_key") is None
     assert second.request.body["ssh_ca_public_key"].startswith("ssh-ed25519 ")
     assert ["wg-quick", "up"] == device.wg_commands[-1][:2]
-    contract.finish(routes=background_routes(agent, REGISTER, ("POST", "/api/v1/agent/connectivity/wireguard")))
+    contract.finish(routes=background_routes(REGISTER, ("POST", "/api/v1/agent/connectivity/wireguard")))
 
 
-@pytest.mark.requires("docker")
 def test_docker_deploy(contract, agent, device) -> None:
     """A signed docker release: pin the key, download through a storage redirect, load, run, report."""
     register_and_basics(contract)
@@ -188,20 +174,17 @@ def test_docker_deploy(contract, agent, device) -> None:
                 for r in (e.request.body or {}).get("software_report", [])]
 
     assert agent.register(contract.plane.url, contract.secret("registration_token")) == 0
-    if "background_enrollment" in agent.features:
-        # Its heartbeats and deploys run on their own timers: wait for the result, not a count.
-        assert agent.run_until(lambda: any(r["sync_status"] == "in_sync" for r in reports())) == 0
-    else:
-        assert agent.run(heartbeats=2) == 0
+    # Its heartbeats and deploys run on their own timers: wait for the result, not a count.
+    assert agent.run_until(lambda: any(r["sync_status"] == "in_sync" for r in reports())) == 0
 
     assert device.containers == {APP: LOADED_IMAGE}
     progress = [r["progress_percent"] for r in reports() if r["sync_status"] == "updating"]
     assert progress == [0, 99, 100]
     assert reports()[-1]["sync_status"] == "in_sync" and reports()[-1]["installed_version"] == "1.0.0"
-    # The Go agent lists desired software after every heartbeat, so how often it asks depends on
+    # The agent lists desired software after every heartbeat, so how often it asks depends on
     # timing; the exchanges that make the deploy (signing keys, download, storage) are fixed. The
     # ids are globs: a replay answers with the recording's artifact id, not this run's.
     downloads = [("GET", "/api/v1/agent/artifacts/*/download"), ("GET", "/storage/*")]
-    compared = contract.finish(routes=background_routes(agent, REGISTER, ("GET", "/api/v1/agent/signing-keys"), *downloads))
+    compared = contract.finish(routes=background_routes(REGISTER, ("GET", "/api/v1/agent/signing-keys"), *downloads))
     paths = [e["request"]["path"] for e in compared["http"]]
     assert any(p.endswith("/download") for p in paths) and any(p.startswith("/storage/") for p in paths), paths

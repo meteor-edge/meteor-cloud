@@ -19,8 +19,6 @@ type Paths struct {
 	Root string
 	// ConfigFile holds non-secret settings (server, pinned CA). root:meteor 0640.
 	ConfigFile string
-	// LegacyDir is where the Python agent kept config and secrets together.
-	LegacyDir string
 	// IdentityDir holds the device token, MQTT credentials and enrollment secrets. meteor 0700.
 	IdentityDir string
 	// StateDir holds versioned module state and the outbox. meteor 0700.
@@ -37,7 +35,6 @@ func DefaultPaths(root string) Paths {
 	return Paths{
 		Root:         root,
 		ConfigFile:   at("/etc/meteorcli/config.json"),
-		LegacyDir:    at("/etc/meteorcli"),
 		IdentityDir:  at("/var/lib/meteorcli/identity"),
 		StateDir:     at("/var/lib/meteorcli/state"),
 		ArtifactsDir: at("/var/lib/meteorcli/artifacts"),

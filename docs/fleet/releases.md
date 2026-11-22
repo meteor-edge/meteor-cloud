@@ -63,14 +63,9 @@ Releases and artifacts link both ways in the console:
 
 ## Apply notes
 
-- **systemd** — agent installs the unit under `/etc/systemd/system`, then
-  `daemon-reload` / `enable` / `restart` when `start` is true. Unprivileged
-  `meteorcli run` uses the `meteorcli-systemd` helper, which the installer adds
-  only when it runs as root (passwordless sudo for that file only):
-  `curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash`
-  (from a cloud checkout: `sudo ./installcli.sh` in `src/device-plane/agent`).
-  `meteorcli.service` already runs as root. Re-run the installer with `sudo`
-  after upgrading if Deploy fails with permission denied on the unit file.
+- **systemd** — the agent's root helper installs the unit under
+  `/etc/systemd/system`, then `daemon-reload` / `enable` / `restart` when `start`
+  is true ([Deploy](../meteorcli-go.md#deploy)).
 - **docker** — pull `spec.image` and/or `docker load` a tarball, then
   `docker run`. When the release is saved, MeteorCloud resolves the image tag on a
   public registry to its digest and stores it as `spec.image_digest`; devices then run

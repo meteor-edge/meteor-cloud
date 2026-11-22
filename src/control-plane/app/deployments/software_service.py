@@ -29,7 +29,7 @@ from app.signing.service import SigningService
 
 
 def signed_desired_payload(device_id: uuid.UUID, item: DesiredSoftwareItem) -> dict[str, Any]:
-    """The fields a signature covers. Must match ``edge_agent.signing.desired_payload``."""
+    """The fields a signature covers. Must match ``signing.DesiredPayload`` in the Go agent."""
     return {
         "device_id": str(device_id),
         "workload_key": item.workload_key,

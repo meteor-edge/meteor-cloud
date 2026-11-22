@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The installers (scripts/dist.sh → install-rpi.sh, install-meteorcli.sh) end to end under real
-# systemd: it refuses another board, takes over a Python install (service
-# stopped, identity imported, device online with the imported token), can run
-# again as an upgrade, and enrolls a fresh device with --token.
+# systemd: it refuses another board, installs and enrolls with --token, can run
+# again as an upgrade that keeps the identity, enrolls a fresh device, and
+# prepares an OS image whose card enrolls by approval.
 # Needs Docker with --privileged. Usage: test/install/run.sh  (from agent-go/)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -69,24 +69,13 @@ done
 expect 1 "this installer is for raspberry-pi" "refuses a board that is not a Raspberry Pi" -- install
 expect 2 "No such file" "nothing was installed" -- ctr ls /usr/local/bin/meteorcli
 
-# A device running the Python agent: /opt/meteorcli, the /usr/local/bin link,
-# its service, and its enrolled /etc/meteorcli layout (pointing at the fake server).
-ctr sh -c 'mkdir -p /opt/meteorcli/bin /etc/meteorcli \
- && printf "#!/bin/sh\necho python meteorcli\n" > /opt/meteorcli/bin/meteorcli && chmod 755 /opt/meteorcli/bin/meteorcli \
- && ln -s /opt/meteorcli/bin/meteorcli /usr/local/bin/meteorcli \
- && printf "[Service]\nExecStart=/bin/sleep infinity\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/meteorcli.service \
- && systemctl daemon-reload && systemctl enable --now meteorcli.service \
- && printf "{\"server_url\":\"http://127.0.0.1:8099\",\"device_id\":\"11111111-2222-4333-8444-555555555555\",\"organization_id\":\"org-1\",\"name\":\"edge-py\",\"heartbeat_interval_seconds\":60,\"domain\":null,\"api_base\":\"http://127.0.0.1:8099\"}\n" > /etc/meteorcli/config.json \
- && printf "dev_installtestpythontoken\n" > /etc/meteorcli/device-token && chmod 600 /etc/meteorcli/device-token'
-
 before="$(heartbeats)"
-expect 0 "importing the Python agent" "takes over the Python install (--force: not a Pi)" -- install --force
-if wait_heartbeat_after "$before"; then pass "online with the imported identity, no enrollment"; else fail "no heartbeat after the takeover"; fi
-expect 0 "Device ID:      11111111-2222-4333-8444-555555555555" "pi runs status without sudo (imported device id)" -- \
+expect 0 "Registered device 11111111" "installs (--force: not a Pi) and registers with --token" -- \
+	install --force --api-base http://127.0.0.1:8099 --token reg_installtesttoken
+if wait_heartbeat_after "$before"; then pass "online right after the installer finished"; else fail "no heartbeat after the install"; fi
+expect 0 "Device ID:      11111111-2222-4333-8444-555555555555" "pi runs status without sudo" -- \
 	ctr setpriv --reuid=pi --regid=pi --init-groups /usr/local/bin/meteorcli status
-expect 0 "/opt/meteorcli/bin/meteorcli" "the Python install is kept for a rollback" -- ctr ls /opt/meteorcli/bin/meteorcli
-expect 0 "0.0.0-installtest" "meteorcli is the Go binary, not the Python link" -- \
-	ctr sh -c 'test ! -L /usr/local/bin/meteorcli && /usr/local/bin/meteorcli --version'
+expect 0 "0.0.0-installtest" "meteorcli is the Go binary" -- ctr /usr/local/bin/meteorcli --version
 expect 0 "srw-rw---- 1 meteor meteorcli" "agent.sock is meteor:meteorcli 0660" -- ctr ls -l /run/meteorcli/agent.sock
 
 before="$(heartbeats)"
@@ -102,7 +91,7 @@ expect 0 "Registered device 11111111" "installs and registers with --token" -- \
 	install_any --api-base http://127.0.0.1:8099 --token reg_installtesttoken --name edge-test
 if wait_heartbeat_after "$before"; then pass "online right after the installer finished"; else fail "no heartbeat after --token install"; fi
 expect 0 "name=edge-test" "the requested name was sent" -- ctr grep "POST /api/v1/agent/register" /var/log/fakeserver.log
-expect 0 "" "no secret in the journal" -- ctr sh -c '! journalctl --no-pager | grep -E -q "installtest(token|pythontoken)"'
+expect 0 "" "no secret in the journal" -- ctr sh -c '! journalctl --no-pager | grep -q "installtesttoken"'
 
 # An OS image: install-meteorcli-firstboot.sh --image, then a card with
 # .meteorenv. meteorcli-settings.sh (early in boot) hands the enrollment lines

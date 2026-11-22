@@ -7,7 +7,7 @@ MeteorCloud is modular. Planes do not import each other’s internals; they talk
 | Kind | What | In this product |
 | --- | --- | --- |
 | **Git repository** | Where source is edited | One repo (`meteor-cloud`) |
-| **Code / module** | Folders and packages | `console/`, `src/control-plane/` (`app`), `src/data-plane/` (`data_plane`), `src/device-plane/agent/` (`meteorcli`, `edge_agent`), `src/device-plane/gateway/`, `src/device-plane/runtime/` |
+| **Code / module** | Folders and packages | `console/`, `src/control-plane/` (`app`), `src/data-plane/` (`data_plane`), `src/device-plane/agent-go/` (`meteorcli`, Go), `src/device-plane/gateway/` |
 | **Deployable service** | What Compose/Helm start | API, console, optional data-plane + MQTT broker, optional VPN on the **host** |
 | **Published artifact** | What a machine downloads | Container images; `meteorcli` GitHub Release (`agent-v*`) |
 
@@ -16,8 +16,8 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 ## Rules
 
 1. The control plane remains Python.
-2. Data-plane and device-plane implementations may use other languages. The released device agent is Go in `src/device-plane/agent-go/` (see [meteorcli](meteorcli.md)); the Python agent remains in-tree for older devices until it is removed.
-3. Planes must not import one another’s private Python packages (`app`, `data_plane`, `edge_agent`, `meteorcli`).
+2. Data-plane and device-plane implementations may use other languages. The device agent is Go, in `src/device-plane/agent-go/` ([meteorcli](meteorcli.md), [internals](meteorcli-go.md)).
+3. Planes must not import one another’s private Python packages (`app`, `data_plane`).
 4. Cross-plane traffic uses documented HTTP/MQTT contracts ([`contracts/mqtt-http.md`](../contracts/mqtt-http.md), control-plane `/internal/*`). The device agent speaks [`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md), checked by JSON Schemas on both sides.
 5. PostgreSQL is the control-plane database. Other stores stay behind existing ports.
 6. Deployment infrastructure stays under `deploy/` and `infrastructure/`, not domain modules.
