@@ -34,8 +34,9 @@ Running it again upgrades in place. `--no-start` installs only. `install-rpi.sh`
 release is the same installer, but it refuses a board that is not a Raspberry Pi.
 
 **No sudo after the install.** The agent runs as the unprivileged `meteor` user, and members of
-`meteorcli-admin` talk to it over `/run/meteorcli/agent.sock`. Log in again (or run `newgrp
-meteorcli-admin`) after the install so the new groups apply, then:
+`meteorcli-admin` talk to it over `/run/meteorcli/agent.sock`. Log in again after the install so
+both the `meteorcli` and `meteorcli-admin` groups apply (a single `newgrp` adds only one group),
+then:
 
 ```bash
 meteorcli status
@@ -83,8 +84,20 @@ sudo meteorcli config --release-url https://github.com/meteor-edge/meteor-cloud/
 sudo meteorcli config --release-url default       # back to the newest agent-v* release
 ```
 
-`meteorcli-go-edge` is a prerelease built from every merge to master (versions
-`0.0.0-edge.<run>`). Details: [Updating](meteorcli-go.md#updating).
+The updater installs only a **higher** version. Edge builds are `0.0.0-edge.<run>`, which order
+below a released version such as `0.5.0`, so setting `release_url` to `meteorcli-go-edge` alone
+leaves a stable device on its current binary (`already_current`). To move a stable device onto
+edge builds, re-run the edge installer, then point `release_url` at the edge folder so later
+updates follow it:
+
+```bash
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge/install-meteorcli.sh \
+  | sudo bash
+sudo meteorcli config --release-url https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge
+```
+
+`meteorcli-go-edge` is a prerelease built from every merge to master. Details:
+[Updating](meteorcli-go.md#updating).
 
 ## First boot and OS images
 
@@ -119,7 +132,7 @@ A device without the settings service still reads `meteorenv.txt` or `.meteorenv
 
 | Command | Purpose | Who |
 | --- | --- | --- |
-| `config` | Server domain / API base, enrollment API key, `--ssh-user`, `--release-url`; `--show` | root |
+| `config` | Server domain / API base, enrollment API key, `--enroll-name`, `--ssh-user`, `--release-url`; `--show` | root |
 | `test` | Server reachable, API key valid | `meteorcli` |
 | `register` | Enroll with a registration token | `meteorcli-admin` |
 | `request-token` | Ask for approval; the agent keeps polling | `meteorcli-admin` |
