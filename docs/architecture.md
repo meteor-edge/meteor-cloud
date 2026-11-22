@@ -23,7 +23,7 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 6. Deployment infrastructure stays under `deploy/` and `infrastructure/`, not domain modules.
 7. VPN is an optional deploy capability (Compose + Ansible). It is not a reason to split the repo.
 8. The console keeps same-origin API access in production (`window.location.origin`). Locally it uses `VITE_API_BASE_URL`.
-9. The device agent must be installable without cloning this repository. Publish by bumping [`src/device-plane/agent-go/VERSION`](../src/device-plane/agent-go/VERSION) on `master` (CI tags `agent-v<version>`), or push that tag. Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `make agent-dist`, then run the installer from `src/device-plane/agent-go/dist`.
+9. The device agent must be installable without cloning this repository. Every merge to `master` that changes the agent is released by CI (tag `agent-v<version>`, patch + 1; [`src/device-plane/agent-go/VERSION`](../src/device-plane/agent-go/VERSION) is the minimum, bumped for a new minor or major version). Devices: `curl` `install-meteorcli.sh` from GitHub Releases. From a checkout: `make agent-dist`, then run the installer from `src/device-plane/agent-go/dist`.
 10. Device types are configuration, not automatically separate codebases.
 
 `make check-plane-imports` enforces rule 3 on `src/`.
@@ -143,9 +143,10 @@ version sends no heartbeat. For first boot from a card's `.meteorenv` and OS ima
 [packaging/firstboot](../src/device-plane/agent-go/packaging/firstboot/README.md) and
 [meteorcli](meteorcli.md#first-boot-and-os-images).
 
-**Publish:** bump [`VERSION`](../src/device-plane/agent-go/VERSION); workflow
-[`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml) tags
-`agent-v<version>` and publishes the signed release.
+**Publish:** automatic. Each merge to `master` that changes the agent runs
+[`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml): it tags the next
+`agent-v<version>` (newest release, patch + 1; [`VERSION`](../src/device-plane/agent-go/VERSION)
+is the minimum, bump it for a new minor or major version) and publishes the signed release.
 
 ## Provider selection
 
