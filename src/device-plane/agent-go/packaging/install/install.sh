@@ -146,6 +146,11 @@ cfg=()
 [[ -n $domain ]] && cfg+=(--domain "$domain")
 [[ -n $api_base ]] && cfg+=(--api-base "$api_base")
 [[ -n $api_key ]] && cfg+=(--api-key "$api_key")
+# Approval enrollment: persist --name so the agent asks for that device name.
+# Token enrollment passes --name to `meteorcli register` instead.
+if [[ -n $name && -z $token && -z $token_file ]]; then
+	cfg+=(--enroll-name "$name")
+fi
 # The browser terminal's account: the agent's rule for ssh_user (no root or
 # system accounts). Another name only skips this setting.
 if [[ -n $user ]] && id "$user" >/dev/null 2>&1; then
@@ -162,9 +167,6 @@ if [[ -n $user ]] && id "$user" >/dev/null 2>&1; then
 fi
 if [[ ${#cfg[@]} -gt 0 ]]; then
 	"$BIN" config "${cfg[@]}"
-fi
-if [[ -n $name && -z $token && -z $token_file ]]; then
-	say "--name is used with --token; with --api-key run 'meteorcli request-token --name $name' to change it"
 fi
 
 if [[ -n $user ]] && id "$user" >/dev/null 2>&1; then

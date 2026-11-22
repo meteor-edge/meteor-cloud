@@ -145,3 +145,19 @@ func TestConfigSSHUser(t *testing.T) {
 		t.Errorf("show = %+v", show)
 	}
 }
+
+func TestConfigEnrollName(t *testing.T) {
+	root := t.TempDir()
+	r := meteorcli(t, root, nil, "config", "--domain", "a.example", "--api-key", "key_x", "--enroll-name", "lobby-cam")
+	if r.code != 0 || !strings.Contains(r.stdout, "Enroll name:    lobby-cam") {
+		t.Fatalf("config = %+v", r)
+	}
+	p := config.DefaultPaths(root)
+	c, err := config.Load(p.ConfigFile)
+	if err != nil || c.EnrollName != "lobby-cam" || c.Server() != "https://a.example" {
+		t.Errorf("config %+v %v", c, err)
+	}
+	if show := meteorcli(t, root, nil, "config", "--show"); !strings.Contains(show.stdout, "Enroll name:    lobby-cam") {
+		t.Errorf("show = %+v", show)
+	}
+}
