@@ -509,6 +509,10 @@ export function DeviceDetailPage() {
             />
             <Detail label="Credential prefix" value={device.credential_prefix} />
           </div>
+          <DeviceResourceMeters
+            metrics={device.mqtt_metrics}
+            updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
+          />
           {token ? (
             <AgentModulesPanel
               token={token}
@@ -518,10 +522,6 @@ export function DeviceDetailPage() {
               canRepair={canUpdateAgent}
             />
           ) : null}
-          <DeviceResourceMeters
-            metrics={device.mqtt_metrics}
-            updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
-          />
           {token ? (
             <DeviceTelemetryCharts
               token={token}

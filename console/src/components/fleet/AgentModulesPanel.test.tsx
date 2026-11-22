@@ -128,6 +128,34 @@ describe("AgentModulesPanel", () => {
     expect(listDeviceActions).not.toHaveBeenCalled();
   });
 
+  it("sums up module health and shows healthy modules as compact tiles", () => {
+    setup({
+      ...goCapabilities,
+      modules: { heartbeat: { state: "running" }, mqtt: { state: "running" } },
+    });
+    expect(screen.getByText("All 2 running")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("module-mqtt")).getByRole("button", { name: "Restart" }),
+    ).toHaveAttribute("title", "Restart mqtt");
+  });
+
+  it("describes each known module: a tooltip on tiles, a line on problem rows", () => {
+    setup(goCapabilities);
+    const tip = within(screen.getByTestId("module-heartbeat")).getByRole("tooltip", {
+      hidden: true,
+    });
+    expect(tip).toHaveTextContent(/alive/);
+    expect(screen.getByText(/alive/).id).toBe("module-tip-heartbeat");
+    expect(
+      within(screen.getByTestId("module-deploy")).getByText(/Installs the software/),
+    ).toBeInTheDocument();
+  });
+
+  it("counts broken modules in the summary", () => {
+    setup(goCapabilities);
+    expect(screen.getByText("1 needs attention")).toBeInTheDocument();
+  });
+
   it("explains when the agent reports no modules", () => {
     setup({ docker: true });
     expect(screen.getByText(/does not report module health/)).toBeInTheDocument();

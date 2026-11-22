@@ -9,6 +9,7 @@ import {
   type DeviceActions,
 } from "@/api/fleet";
 import { AgentUpdatePanel } from "@/components/fleet/AgentUpdatePanel";
+import { explainUpdateError } from "@/lib/agentUpdateErrors";
 
 vi.mock("@/api/fleet", async () => {
   const actual = await vi.importActual<typeof import("@/api/fleet")>("@/api/fleet");
@@ -90,5 +91,44 @@ describe("AgentUpdatePanel", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Updating…" })).toBeInTheDocument());
     resolveList?.(empty);
     await waitFor(() => expect(screen.getByRole("button", { name: "Updating…" })).toBeInTheDocument());
+  });
+
+  it("explains a release server without a Go release and keeps the device's text", async () => {
+    vi.mocked(listDeviceActions).mockResolvedValue({
+      actions: [
+        {
+          id: "u-1",
+          kind: "update_agent",
+          state: "failed",
+          username: null,
+          sudo: false,
+          last_error: "download meteorcli-release.json: HTTP 404",
+          created_at: "2026-11-22T10:00:00Z",
+          sent_at: "2026-11-22T10:00:30Z",
+          reported_at: "2026-11-22T10:01:00Z",
+        },
+      ],
+    });
+    setup();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("No meteorcli release to install");
+    expect(alert).toHaveTextContent("download meteorcli-release.json: HTTP 404");
+  });
+});
+
+describe("explainUpdateError", () => {
+  it.each([
+    ["download meteorcli-release.json: HTTP 404", "No meteorcli release to install"],
+    [
+      "download meteorcli-release.json: HTTP 404 (no meteorcli release at the release URL; check it with 'meteorcli config --show')",
+      "No meteorcli release to install",
+    ],
+    ["release is unsigned", "The release is not signed"],
+    ["meteorcli 1.0 was not healthy; rolled back to 0.9", "The new version did not start; the previous one is back"],
+    ['Get "https://x": dial tcp: lookup x: no such host', "The device could not reach the release server"],
+    ["something odd", "The device could not update meteorcli"],
+  ])("%s", (raw, title) => {
+    expect(explainUpdateError(raw).title).toBe(title);
+    expect(explainUpdateError(raw).detail).toBe(raw);
   });
 });

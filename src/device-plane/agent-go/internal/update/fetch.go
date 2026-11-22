@@ -111,6 +111,10 @@ func (f *HTTPFetcher) open(ctx context.Context, name string) (io.ReadCloser, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound && name == ManifestName {
+			// The common case: the release (often GitHub's "latest") has no Go meteorcli files.
+			return nil, fmt.Errorf("download %s: HTTP 404 (no meteorcli release at the release URL; check it with 'meteorcli config --show')", name)
+		}
 		return nil, fmt.Errorf("download %s: HTTP %d", name, resp.StatusCode)
 	}
 	return resp.Body, nil
