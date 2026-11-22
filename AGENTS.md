@@ -34,7 +34,7 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 - VPN is an optional deploy service, not a reason to restructure the repo.
 - Console talks only to the control-plane API. Production uses same-origin (`window.location.origin`).
 - Device types are catalog rows, not separate codebases.
-- The device agent source stays in this repo. Devices install from a GitHub Release (`install-meteorcli.sh`), not by cloning the cloud. A release is the Go `meteorcli`: bump `src/device-plane/agent-go/VERSION` and the `agent-v<version>` tag and release follow (`.github/workflows/agent-release.yml`); its manifest must be signed with the release key.
+- The device agent source stays in this repo. Devices install from a GitHub Release (`install-meteorcli.sh`), not by cloning the cloud. A release is the Go `meteorcli`: every merge to `master` that changes the agent is tagged `agent-v<version>` and released by `.github/workflows/agent-release.yml` (patch + 1 by itself; bump `src/device-plane/agent-go/VERSION` only for a new minor or major version); its manifest must be signed with the release key.
 
 ## Directory notes
 

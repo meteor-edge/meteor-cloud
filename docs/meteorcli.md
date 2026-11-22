@@ -151,14 +151,18 @@ device enrolls again on the new one.
 
 ## Publish a release (maintainers)
 
-Bump `src/device-plane/agent-go/VERSION` in a PR. When it merges to `master`, the
-**meteorcli release** workflow (`agent-release.yml`):
+Releases are automatic. Every merge to `master` that changes the agent
+(`src/device-plane/agent-go`, not its docs or tests) runs the **meteorcli release** workflow
+(`agent-release.yml`). It picks the version: the newest `agent-v*` release with the patch number
+plus one, or `src/device-plane/agent-go/VERSION` when that is higher. Bump `VERSION` in a PR only
+for a new minor or major version (`0.6.0`; later merges release `0.6.1`, `0.6.2`, …). To release
+`master` now, run the workflow by hand (**Run workflow**). The workflow:
 
 1. runs the Go tests and the installer test under systemd;
 2. builds `meteorcli-linux-{arm64,armv6,amd64}`;
 3. signs the manifest with the `METEORCLI_RELEASE_SIGNING_KEY` secret (without it, the workflow
    fails instead of publishing an unsigned release);
-4. publishes `agent-v<version>` as the latest release, with the installers, the first-boot
+4. creates the `agent-v<version>` tag and publishes it as the latest release, with the installers, the first-boot
    scripts and `SHA256SUMS`.
 
 If the release already exists, nothing happens. A hand-pushed tag works too and must match

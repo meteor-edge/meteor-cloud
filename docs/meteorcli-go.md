@@ -52,7 +52,8 @@ atomically (temp file, fsync, rename). A file that does not parse is moved to
 
 [meteorcli: Install](meteorcli.md#install) has the commands. Releases:
 
-- **`agent-v<version>`** (workflow `meteorcli release`, from `src/device-plane/agent-go/VERSION`):
+- **`agent-v<version>`** (workflow `meteorcli release`, on every merge to master that changes the
+  agent; the patch number goes up by itself, `src/device-plane/agent-go/VERSION` sets the minimum):
   the "latest" release that devices install and update from.
 - **`meteorcli-go-edge`** (workflow `meteorcli (Go) edge build`): a prerelease rebuilt from every
   merge to master that touches the agent.

@@ -1,7 +1,14 @@
 # Publish the Go meteorcli as a GitHub Release (agent-v<version>, "latest").
-# Happens by itself when a merge to master changes src/device-plane/agent-go/VERSION
-# (the workflow creates the tag). A hand-pushed tag still works:
-#   git tag agent-v0.5.1 && git push origin agent-v0.5.1   (must match VERSION)
+# Happens by itself on every merge to master that changes the agent
+# (src/device-plane/agent-go, not docs or tests): the workflow picks the next
+# version, creates the tag and the release. Nothing is committed back.
+#
+# Version: the newest agent-v* release with the patch number + 1, unless
+# src/device-plane/agent-go/VERSION is higher (bump it in a PR for a new minor or
+# major version: 0.6.0 releases as 0.6.0, the next merge as 0.6.1). A commit that
+# already has a release is not released again. Run it by hand (workflow_dispatch)
+# to release master now. A hand-pushed tag still works and must be >= VERSION:
+#   git tag agent-v0.5.3 && git push origin agent-v0.5.3
 #
 # Release files: meteorcli-linux-{arm64,armv6,amd64}, the signed manifest
 # (meteorcli-release.json + .sig, what `meteorcli updater` installs from),
@@ -17,7 +24,13 @@ on:
       - "agent-v*"
     branches: [master]
     paths:
-      - src/device-plane/agent-go/VERSION
+      - src/device-plane/agent-go/**
+      - "!src/device-plane/agent-go/**/*.md"
+      - "!src/device-plane/agent-go/**/*_test.go"
+      - "!src/device-plane/agent-go/test/**"
+      - "!src/device-plane/agent-go/internal/agenttest/**"
+      - "!src/device-plane/agent-go/internal/fakebroker/**"
+      - "!src/device-plane/agent-go/internal/fakecp/**"
   workflow_dispatch:
 
 permissions:
@@ -51,18 +64,41 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          ver="$(tr -d '[:space:]' < VERSION)"
-          if ! [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "error: VERSION must be MAJOR.MINOR.PATCH, got '$ver'" >&2
+          floor="$(tr -d '[:space:]' < VERSION)"
+          semver='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if ! [[ "$floor" =~ $semver ]]; then
+            echo "error: VERSION must be MAJOR.MINOR.PATCH, got '$floor'" >&2
             exit 1
           fi
+          # agent-v* tags on the server as "<commit> <version>".
+          tags="$(git ls-remote --tags --refs "https://github.com/$REPO" 'agent-v*' \
+            | awk '{sub("refs/tags/agent-v", "", $2); print $1, $2}')"
+          newest="$(awk '{print $2}' <<<"$tags" | grep -E "$semver" | sort -V | tail -n1 || true)"
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             tag="$GITHUB_REF_NAME"
-            if [[ "${tag#agent-v}" != "$ver" ]]; then
-              echo "error: tag $tag does not match VERSION $ver" >&2
+            ver="${tag#agent-v}"
+            if ! [[ "$ver" =~ $semver ]]; then
+              echo "error: tag $tag is not agent-vMAJOR.MINOR.PATCH" >&2
+              exit 1
+            fi
+            if [[ "$(printf '%s\n%s\n' "$floor" "$ver" | sort -V | head -n1)" != "$floor" ]]; then
+              echo "error: tag $tag is lower than VERSION $floor" >&2
               exit 1
             fi
           else
+            released="$(awk -v sha="$GITHUB_SHA" '$1 == sha {print $2}' <<<"$tags" | head -n1)"
+            if [[ -n "$released" ]]; then
+              echo "This commit is already released as agent-v$released; nothing to publish."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            ver="$floor"
+            if [[ -n "$newest" ]]; then
+              IFS=. read -r major minor patch <<<"$newest"
+              next="$major.$minor.$((patch + 1))"
+              # VERSION wins when it is higher (a new minor or major version).
+              ver="$(printf '%s\n%s\n' "$floor" "$next" | sort -V | tail -n1)"
+            fi
             tag="agent-v$ver"
           fi
           if gh release view "$tag" -R "$REPO" >/dev/null 2>&1; then
@@ -71,6 +107,7 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "Releasing $tag (newest release: ${newest:-none}, VERSION: $floor)"
           echo "name=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
       - name: Test
