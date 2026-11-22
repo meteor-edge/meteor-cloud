@@ -40,12 +40,8 @@ if [[ "$BROKER" == "vernemq" && "${VERNEMQ_ACCEPT_EULA:-}" != "yes" ]]; then
   exit 1
 fi
 export MQTT_ALLOW_BROKER_RESTART="${MQTT_ALLOW_BROKER_RESTART:-1}"
-# data-plane: the Go MQTT forwarder (default). data-plane-python: the previous Python gateway.
-DATA_PLANE_SERVICE="${DATA_PLANE_SERVICE:-data-plane}"
-case "$DATA_PLANE_SERVICE" in
-  data-plane|data-plane-python) ;;
-  *) echo "error: DATA_PLANE_SERVICE must be data-plane or data-plane-python" >&2; exit 1 ;;
-esac
+# The Go MQTT forwarder (Compose service data-plane).
+DATA_PLANE_SERVICE=data-plane
 # The suite registers many devices from one address within a minute.
 export REGISTRATION_RATE_LIMIT_REQUESTS="${REGISTRATION_RATE_LIMIT_REQUESTS:-1000}"
 export ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS="${ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS:-1000}"

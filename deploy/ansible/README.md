@@ -72,7 +72,6 @@ Infrastructure options:
 | `cache_provider` | `memory`, `redis` (`redis_provider`: `bundled` / `external`) | `memory` |
 | `object_storage_provider` | `filesystem`, `s3` (AWS S3, any S3-compatible API, GCS interoperability, or bundled MinIO with `minio_enabled`) | `filesystem` |
 | `mqtt_enabled` / `mqtt_broker` | `false`, or `true` with `bundled` / `external` | `false` |
-| `data_plane_gateway` | MQTT gateway: `go` (MQTT forwarder from `data_api_image`) or `python` (previous gateway from `data_plane_image`, one release; [docs](../../docs/data-plane/mqtt-forwarder.md)) | `go` |
 | `mqtt_provider` | Broker software: `mosquitto`, `emqx`, or `vernemq` (needs `vernemq_accept_eula: "yes"`) | `mosquitto` |
 | `data_api_enabled` / `dataplane_bus` | `false`, or `true` with `memory` / `mqtt` (mqtt needs `mqtt_enabled`) | `false` / `memory` |
 | `dataplane_storage` | `postgres` (default) or `clickhouse` (`EDGE_PLATFORM_CLICKHOUSE_PASSWORD`, Compose profile `clickhouse`) | `postgres` |

@@ -27,7 +27,7 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 ## Architecture (must follow)
 
 - **Control plane** stays Python (`src/control-plane/`, package `app`).
-- **Data plane** and **device plane** may use other languages later. Do not start another migration here. The device agent is Go (`src/device-plane/agent-go/`); the Python agent was removed. The **application data plane** in `src/data-plane/go/` is Go by design; the Python data plane beside it stays Python.
+- **Data plane** and **device plane** may use other languages later. Do not start another migration here. The device agent is Go (`src/device-plane/agent-go/`); the Python agent was removed. The data plane in `src/data-plane/go/` (MQTT forwarder and application data API) is Go.
 - Planes must not import one another’s private Python packages. Talk over HTTP, MQTT, and documented contracts ([`contracts/mqtt-http.md`](contracts/mqtt-http.md)).
 - PostgreSQL is the control-plane database. Vendor clients stay behind ports/adapters.
 - Kubernetes, Terraform, Ansible, and WireGuard belong under `deploy/` / `infrastructure/`, not domain modules.
@@ -42,7 +42,7 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 | --- | --- |
 | `console/` | Browser → control-plane HTTP only. Never call the data plane or import device code. |
 | `src/control-plane/` | No vendor SDKs in domain services. Data plane is HTTP (`DATA_PLANE_URL`). |
-| `src/data-plane/` | MQTT ingest; HTTP to the control plane only. Do not import `app`. |
+| `src/data-plane/` | MQTT ingest (Go MQTT forwarder, `go/cmd/mqtt-forwarder`) and the Mosquitto image; HTTP to the control plane only. |
 | `src/data-plane/go/` | Application data plane (Go): `meteor/v1/...` topics, `/v1` API. Reads control-plane state only through the policy snapshot. Contract: `contracts/data-plane-v1.md`. |
 | `sdk/python/` | Public SDK. Talks to the data plane API only; no imports from `src/`. |
 | `src/device-plane/agent-go/` | `meteorcli` on the device (Go, the released agent from 0.5.0). Contract: `contracts/device-agent-v1.md`. Standard library first; no imports from `src/data-plane/go/internal`. First-boot and OS image scripts in `packaging/firstboot/`. See `docs/meteorcli.md` and `docs/meteorcli-go.md`. |
@@ -55,7 +55,7 @@ Shortcuts: pin Redis to **7.2**; Mosquitto is the default MQTT broker; EMQX **5.
 - Preserve existing HTTP/MQTT compatibility unless a breaking change is explicitly requested.
 - Add or update tests for behavior changes.
 - When install, config, contracts, or operator workflows change, update the matching page under `docs/` ([docs/README.md](docs/README.md)).
-- Run the relevant tests (`make test`, or `make backend-test` / `data-plane-test` / `data-api-test` / `sdk-test` / `agent-test` / `agent-contract-test` / `console-test` / `make check-plane-imports`). Report exactly what ran and what did not.
+- Run the relevant tests (`make test`, or `make backend-test` / `data-api-test` / `sdk-test` / `agent-test` / `agent-contract-test` / `console-test` / `make check-plane-imports`). Report exactly what ran and what did not.
 - Do not claim tests, deploys, or installs succeeded unless they actually ran and passed.
 
 ## Cursor Cloud

@@ -68,7 +68,7 @@ These differ from the first plan. Each was chosen to keep the system simple to r
 | Small publishes are grouped by ClickHouse, and still confirmed | ClickHouse dislikes many tiny inserts. The data API uses its asynchronous inserts and waits for the flush, so a publish still answers only when the data is stored |
 | No Kafka | The ingestion queue is bounded and in process, with backpressure to the caller, and MQTT shared subscriptions split MQTT load between replicas. Kafka becomes worthwhile for replaying streams into several independent consumers or ingestion that must outlive long storage outages. Neither is needed yet |
 | Direct MQTT uses a short-lived signed token with the topic list inside | EMQX 5.8 allows one HTTP authorization source, which the device fleet uses. A signed token needs no call from the broker to the data API and expires on its own |
-| The Go service lives beside the Python data plane | `src/data-plane/data_plane` keeps serving device management topics (`devices/...`). The Go service owns `meteor/v1/...`. Nothing was migrated or broken |
+| Two Go services | The MQTT forwarder (`cmd/mqtt-forwarder`) serves the device management topics (`devices/...`); the data API owns `meteor/v1/...` |
 
 ## Guarantees in short
 

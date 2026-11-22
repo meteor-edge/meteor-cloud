@@ -1,13 +1,8 @@
 {{- if .Values.mqtt.enabled }}
 {{- $fullname := include "meteorcloud.fullname" . }}
 {{- $secretName := include "meteorcloud.secretName" . }}
-{{- $gateway := .Values.dataPlane.gateway | default "go" }}
-{{- if not (has $gateway (list "go" "python")) }}
-{{- fail "dataPlane.gateway must be go or python" }}
-{{- end }}
-{{- $go := eq $gateway "go" }}
-{{- /* go: the MQTT forwarder binary from the data API image. python: the previous gateway. */}}
-{{- $image := ternary .Values.dataApi.image .Values.dataPlane.image $go }}
+{{- /* The MQTT forwarder binary from the data API image. */}}
+{{- $image := .Values.dataApi.image }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,8 +13,7 @@ spec:
   # One forwarder at a time, and never two during a rollout (Recreate):
   # per-device order holds inside one process only, and the Go forwarder
   # resumes its broker session (fixed client ID) with the messages that
-  # arrived while it restarted. The Python gateway processes every message
-  # once per replica, so it needs one too.
+  # arrived while it restarted.
   replicas: 1
   strategy:
     type: Recreate
@@ -47,9 +41,7 @@ spec:
         - name: data-plane
           image: {{ include "meteorcloud.image" (dict "ctx" . "image" $image) }}
           imagePullPolicy: {{ $image.pullPolicy }}
-          {{- if $go }}
           command: ["mqtt-forwarder"]
-          {{- end }}
           ports:
             - name: http
               containerPort: 8081
@@ -82,11 +74,9 @@ spec:
             - name: MQTT_INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef: { name: {{ $secretName }}, key: MQTT_INTERNAL_TOKEN }
-            {{- if $go }}
             {{- range $k, $v := .Values.dataPlane.forwarder }}
             - name: {{ printf "MQTT_FORWARDER_%s" ($k | snakecase | upper) }}
               value: {{ $v | toString | quote }}
-            {{- end }}
             {{- end }}
           readinessProbe:
             httpGet: { path: /health, port: http }
@@ -105,10 +95,8 @@ spec:
             - name: mqtt-ca
               mountPath: /certs
               readOnly: true
-      {{- if $go }}
       # Queued messages are forwarded before exit (drainTimeout, 20 s by default).
       terminationGracePeriodSeconds: 40
-      {{- end }}
       volumes:
         - name: mqtt-ca
           secret:

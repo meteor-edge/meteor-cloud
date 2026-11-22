@@ -1,6 +1,6 @@
 # MQTT forwarder
 
-`mqtt-forwarder` ([`src/data-plane/go/cmd/mqtt-forwarder`](../../src/data-plane/go/cmd/mqtt-forwarder/main.go)) is the **data-plane** service: the bridge between device MQTT and the control plane. It replaces the Python gateway in [`src/data-plane/data_plane`](../../src/data-plane/data_plane/) and speaks the same contract ([`contracts/mqtt-http.md`](../../contracts/mqtt-http.md)).
+`mqtt-forwarder` ([`src/data-plane/go/cmd/mqtt-forwarder`](../../src/data-plane/go/cmd/mqtt-forwarder/main.go)) is the **data-plane** service: the bridge between device MQTT and the control plane. It replaced the earlier Python gateway (removed) and speaks the same contract ([`contracts/mqtt-http.md`](../../contracts/mqtt-http.md)).
 
 - **Device messages to the control plane.** Subscribes to `devices/+/status`, `devices/+/metrics`, `devices/+/commands/result` and `devices/+/events`, and sends each message to `POST {CONTROL_PLANE_URL}/internal/mqtt/ingest` with `{"topic", "payload"}` and `X-MQTT-Internal-Token`.
 - **Control plane to devices.** Serves `POST /v1/publish`, `POST /v1/subscriptions` and `POST /v1/subscriptions/unwatch` on port 8081 (the address in the control plane's `DATA_PLANE_URL`).
@@ -118,17 +118,6 @@ A queue that stays near capacity with `forward_retries_total` rising means the c
 ## Watched topics
 
 `POST /v1/subscriptions` (the console's live MQTT view) subscribes the forwarder to the topic filter, outside the shared group, and forwards those messages too. Calls are reference-counted per topic, as before, and subscription changes are serialized so the broker always ends up with exactly the watched topics. Watches are process state: they are removed on shutdown, and the control plane opens them again with its next live view.
-
-## Fallback to the Python gateway (one release)
-
-| | Go forwarder (default) | Python gateway |
-| --- | --- | --- |
-| Compose | profile `mqtt` (service `data-plane`) | profile `mqtt-python` instead of `mqtt` (service `data-plane-python`, also reachable as `data-plane`) |
-| Ansible | `data_plane_gateway: go` | `data_plane_gateway: python` |
-| Helm | `dataPlane.gateway: go` | `dataPlane.gateway: python` |
-| `make test-mqtt` | `DATA_PLANE_SERVICE=data-plane` | `DATA_PLANE_SERVICE=data-plane-python` |
-
-Never run both: each forwards every device message. The Python gateway and its image (`meteorcloud-data-plane`) are removed in the next release.
 
 ## Tests
 

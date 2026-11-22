@@ -80,7 +80,7 @@ You provide:
 2. **Images.** The chart defaults to the signed release images on
    `ghcr.io/meteor-edge/meteorcloud-*` at the chart `appVersion`; see
    [Release images](release-images.md) to verify them and pin digests. To build your own,
-   use `src/control-plane`, `src/data-plane`, `src/data-plane/go` (application data API),
+   use `src/control-plane`, `src/data-plane/go` (application data API and MQTT forwarder),
    `console`, and the Mosquitto broker image from `src/data-plane/broker/mosquitto`
    (set `mqtt.mosquitto.image`). Set `imagePullSecrets` if your registry is private.
 3. **PostgreSQL 14+**, reachable from the cluster (Cloud SQL, RDS, Azure Database,

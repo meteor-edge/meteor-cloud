@@ -48,11 +48,6 @@ services:
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
     ports: !reset []
 
-  data-plane-python:
-    restart: unless-stopped
-    pull_policy: ${IMAGE_PULL_POLICY:-missing}
-    ports: !reset []
-
   data-api:
     restart: unless-stopped
     pull_policy: ${IMAGE_PULL_POLICY:-missing}

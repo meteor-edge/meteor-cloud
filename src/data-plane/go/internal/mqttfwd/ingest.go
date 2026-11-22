@@ -18,8 +18,8 @@ type StatusError struct{ Status int }
 
 func (e *StatusError) Error() string { return fmt.Sprintf("control-plane ingest HTTP %d", e.Status) }
 
-// IngestClient calls POST /internal/mqtt/ingest with the same body and header
-// as src/data-plane/data_plane/ingest.py.
+// IngestClient calls POST /internal/mqtt/ingest with the body and header of
+// contracts/mqtt-http.md.
 type IngestClient struct {
 	URL     string // CONTROL_PLANE_URL, without the path
 	Token   string // MQTT_INTERNAL_TOKEN

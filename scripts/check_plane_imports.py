@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """Fail if a plane imports another plane's private Python package.
 
-Scans ``src/control-plane``, ``src/data-plane``, and ``src/device-plane``.
+Scans ``src/control-plane`` and ``src/device-plane`` (the data plane is Go).
 Does not scan ``tests/e2e``, ``tests/mqtt_live``, ``infrastructure/``, or
 generated/cache dirs. Relative imports are ignored (they stay in-package).
 
 Forbidden top-level packages:
 
-- control-plane must not import ``data_plane``
-- data-plane must not import ``app``
-- device-plane (the WireGuard gateway; the agent is Go) must not import ``app``, ``data_plane``
+- device-plane (the WireGuard gateway; the agent is Go) must not import ``app``
 
-Same-plane packages (``app``, ``data_plane``) are allowed where they belong.
+The control plane's own package (``app``) is allowed where it belongs.
 """
 
 from __future__ import annotations
@@ -36,9 +34,8 @@ SKIP_DIR_NAMES = frozenset(
 
 # plane root relative to repo → forbidden top-level module names
 PLANES: dict[str, frozenset[str]] = {
-    "src/control-plane": frozenset({"data_plane"}),
-    "src/data-plane": frozenset({"app"}),
-    "src/device-plane": frozenset({"app", "data_plane"}),
+    "src/control-plane": frozenset(),
+    "src/device-plane": frozenset({"app"}),
 }
 
 

@@ -7,7 +7,7 @@ MeteorCloud is modular. Planes do not import each other’s internals; they talk
 | Kind | What | In this product |
 | --- | --- | --- |
 | **Git repository** | Where source is edited | One repo (`meteor-cloud`) |
-| **Code / module** | Folders and packages | `console/`, `src/control-plane/` (`app`), `src/data-plane/` (`data_plane`), `src/device-plane/agent-go/` (`meteorcli`, Go), `src/device-plane/gateway/` |
+| **Code / module** | Folders and packages | `console/`, `src/control-plane/` (`app`), `src/data-plane/` (Go), `src/device-plane/agent-go/` (`meteorcli`, Go), `src/device-plane/gateway/` |
 | **Deployable service** | What Compose/Helm start | API, console, optional data-plane + MQTT broker, optional VPN on the **host** |
 | **Published artifact** | What a machine downloads | Container images; `meteorcli` GitHub Release (`agent-v*`) |
 
@@ -17,7 +17,7 @@ VPN, MQTT, Redis, and MinIO are **optional**. They are off unless that install e
 
 1. The control plane remains Python.
 2. Data-plane and device-plane implementations may use other languages. The device agent is Go, in `src/device-plane/agent-go/` ([meteorcli](meteorcli.md), [internals](meteorcli-go.md)).
-3. Planes must not import one another’s private Python packages (`app`, `data_plane`).
+3. Planes must not import one another’s private Python packages (`app`).
 4. Cross-plane traffic uses documented HTTP/MQTT contracts ([`contracts/mqtt-http.md`](../contracts/mqtt-http.md), control-plane `/internal/*`). The device agent speaks [`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md), checked by JSON Schemas on both sides.
 5. PostgreSQL is the control-plane database. Other stores stay behind existing ports.
 6. Deployment infrastructure stays under `deploy/` and `infrastructure/`, not domain modules.
@@ -115,7 +115,7 @@ PostgreSQL is the control-plane database. Vendor systems (MQTT broker, Redis, fu
 
 ## Data plane
 
-The **MQTT forwarder** (Go, `src/data-plane/go/cmd/mqtt-forwarder`, Compose service `data-plane`) owns the platform MQTT session. It takes the device topics with an MQTT shared subscription and forwards each payload to `POST {CONTROL_PLANE_URL}/internal/mqtt/ingest`. It acknowledges a message to the broker only once it is done with it: the control plane accepted it, or the forwarder deliberately dropped it (a 4xx, or a 5xx after its retries). Each device's messages stay in order. One forwarder runs per installation; it resumes its broker session after a restart. It also serves the publish/watch API the control plane calls. Contract: [`contracts/mqtt-http.md`](../contracts/mqtt-http.md). Design and settings: [docs/data-plane/mqtt-forwarder.md](data-plane/mqtt-forwarder.md). The previous Python gateway (`src/data-plane/data_plane`) stays for one release behind a switch.
+The **MQTT forwarder** (Go, `src/data-plane/go/cmd/mqtt-forwarder`, Compose service `data-plane`) owns the platform MQTT session. It takes the device topics with an MQTT shared subscription and forwards each payload to `POST {CONTROL_PLANE_URL}/internal/mqtt/ingest`. It acknowledges a message to the broker only once it is done with it: the control plane accepted it, or the forwarder deliberately dropped it (a 4xx, or a 5xx after its retries). Each device's messages stay in order. One forwarder runs per installation; it resumes its broker session after a restart. It also serves the publish/watch API the control plane calls. Contract: [`contracts/mqtt-http.md`](../contracts/mqtt-http.md). Design and settings: [docs/data-plane/mqtt-forwarder.md](data-plane/mqtt-forwarder.md).
 
 ### Application data plane (Go)
 

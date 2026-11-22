@@ -6,7 +6,6 @@ updates:
   - package-ecosystem: pip
     directories:
       - /src/control-plane
-      - /src/data-plane
       - /infrastructure/installer
       - /sdk/python
     schedule:
@@ -37,7 +36,6 @@ updates:
     directories:
       - /console
       - /src/control-plane
-      - /src/data-plane
       - /src/data-plane/go
       - /src/data-plane/broker/mosquitto
     schedule:
