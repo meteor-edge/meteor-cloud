@@ -72,11 +72,16 @@ and `actions_pending` (collect from `GET /actions`). Desired software is listed 
 
 - Booleans: the runtime or tool is installed on this device. The server skips a deployment
   whose runtime is reported `false`.
-- `actions`, `deploy_kinds` (new in v1, additive): what this agent's code can do.
+- `actions`, `deploy_kinds` (new in v1, additive): what this agent's code can do. The server
+  refuses to queue an action kind the agent did not list (`409 action_unsupported`) and skips
+  a deployment whose kind is not listed. Without the list every kind stays allowed.
 - `modules` (new in v1, additive, optional): module name to health (`running`, `starting`,
   `waiting`, `failed`, `parked`, `stopped`). The Go agent sends it; older agents may omit it.
 
-The server stores the object as sent.
+The server stores the object as sent (unknown keys kept). It cleans the three lists it reads:
+a value of the wrong type is dropped, a module with an unknown state is left out, and lists
+and errors are cut to size, so a malformed value never fails the heartbeat. A heartbeat
+without `capabilities` keeps the last report.
 
 ## Routes
 
@@ -131,8 +136,12 @@ Deploy kinds today: `systemd`, `docker`, `docker_compose`.
 ### One-off actions
 
 `GET /actions` hands each action out once and may contain passwords. Kinds today:
-`reboot`, `shutdown`, `set_password`, `add_user`, `update_agent`. Results go to
-`POST /actions/report` as `done` or `failed` (+ `error`, at most 500 characters).
+`reboot`, `shutdown`, `set_password`, `add_user`, `update_agent`, `restart_module` (with
+`module`: restart that agent module; a parked one runs again) and `run_diagnostics` (the
+agent's `doctor` report). Results go to `POST /actions/report` as `done` or `failed`
+(+ `error`, at most 500 characters; `run_diagnostics` adds `output`, plain text without
+secrets, at most 16000 characters). `restart_module` and `run_diagnostics` are new in v1
+(additive); an agent that does not know them reports them `failed: Unsupported…`.
 `reboot` and `shutdown` are reported `done` **before** they run. `update_agent` is
 reported once the update has settled, on a later heartbeat.
 

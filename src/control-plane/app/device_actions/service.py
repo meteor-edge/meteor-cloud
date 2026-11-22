@@ -1,4 +1,4 @@
-"""One-off device actions from the console: restart, shut down, SSH user changes.
+"""One-off device actions from the console: restart, shut down, SSH user changes, agent repair.
 
 An administrator orders an action; the device collects it once over its authenticated
 API, applies it and reports back. A password is encrypted at rest and erased as soon
@@ -24,10 +24,13 @@ from app.core.secretbox import SecretBoxError, seal, unseal
 from app.device_actions.models import (
     KIND_ADD_USER,
     KIND_REBOOT,
+    KIND_RESTART_MODULE,
+    KIND_RUN_DIAGNOSTICS,
     KIND_SET_PASSWORD,
     KIND_SHUTDOWN,
     KIND_UPDATE_AGENT,
     POWER_KINDS,
+    REPAIR_KINDS,
     STATE_DONE,
     STATE_FAILED,
     STATE_PENDING,
@@ -44,6 +47,7 @@ from app.device_actions.schemas import (
     AgentDeviceActionsResponse,
     DeviceActionResponse,
     DeviceActionsResponse,
+    RestartModuleRequest,
     SetPasswordRequest,
 )
 from app.devices.models import Device
@@ -55,6 +59,8 @@ logger = logging.getLogger(__name__)
 POWER_PERMISSION = "device.reboot"
 USERS_PERMISSION = "device.users"
 UPDATE_AGENT_PERMISSION = "device.update_agent"
+# Agent repair (restart a module, run diagnostics) is agent maintenance, like an update.
+REPAIR_PERMISSION = UPDATE_AGENT_PERMISSION
 _NOT_COLLECTED = "The device did not collect this action in time."
 _UNREADABLE = "The stored password could not be read (the server's encryption key changed). Enter it again."
 _MAX_PENDING = 5
@@ -62,6 +68,30 @@ _MAX_PENDING = 5
 
 def _context(row: DeviceAction) -> str:
     return f"device-action:{row.device_id}:{row.id}"
+
+
+def advertised_actions(device: Device) -> list[str] | None:
+    """The action kinds the device's agent says it can run, or None when it never said.
+
+    Older agents report no ``capabilities.actions``; every kind stays allowed for them,
+    and the agent reports a kind it does not know as ``failed: Unsupported``.
+    """
+    caps = (device.metadata_ or {}).get("capabilities")
+    if not isinstance(caps, dict):
+        return None
+    kinds = caps.get("actions")
+    if not isinstance(kinds, list):
+        return None
+    return [kind for kind in kinds if isinstance(kind, str)]
+
+
+def reported_modules(device: Device) -> dict[str, dict] | None:
+    """The agent's last module health map (``capabilities.modules``), or None."""
+    caps = (device.metadata_ or {}).get("capabilities")
+    if not isinstance(caps, dict):
+        return None
+    modules = caps.get("modules")
+    return modules if isinstance(modules, dict) else None
 
 
 class DeviceActionService:
@@ -131,6 +161,7 @@ class DeviceActionService:
         can_power = self.authz.check(membership, POWER_PERMISSION, device_group_id=device.device_group_id)
         can_users = self.authz.check(membership, USERS_PERMISSION, device_group_id=device.device_group_id)
         can_update = self.authz.check(membership, UPDATE_AGENT_PERMISSION, device_group_id=device.device_group_id)
+        can_repair = self.authz.check(membership, REPAIR_PERMISSION, device_group_id=device.device_group_id)
         statement = (
             select(DeviceAction)
             .where(DeviceAction.device_id == device.id)
@@ -146,6 +177,7 @@ class DeviceActionService:
             if (row.kind in POWER_KINDS and can_power)
             or (row.kind in USER_KINDS and can_users)
             or (row.kind in UPDATE_AGENT_KINDS and can_update)
+            or (row.kind in REPAIR_KINDS and can_repair)
         ]
         return DeviceActionsResponse(actions=actions)
 
@@ -172,6 +204,7 @@ class DeviceActionService:
         sudo: bool = False,
         authorized_key: str | None = None,
         from_version: str | None = None,
+        module: str | None = None,
         audit_action: str,
         metadata: dict,
     ) -> DeviceActionsResponse:
@@ -184,6 +217,12 @@ class DeviceActionService:
         if dirty:
             self.session.flush()
         pending = [row for row in pending if row.state == STATE_PENDING]
+        supported = advertised_actions(device)
+        if supported is not None and kind not in supported:
+            raise ConflictError(
+                "action_unsupported",
+                f"The agent on this device cannot run {kind!r}. Update meteorcli first.",
+            )
         if len(pending) >= _MAX_PENDING:
             raise ConflictError(
                 "too_many_pending_actions",
@@ -193,6 +232,11 @@ class DeviceActionService:
             raise ConflictError(
                 "power_action_pending",
                 "A restart or shut-down is already waiting for this device.",
+            )
+        if kind in REPAIR_KINDS and any(row.kind == kind and row.module == module for row in pending):
+            raise ConflictError(
+                "repair_action_pending",
+                "The same repair is already waiting for this device.",
             )
         if kind == KIND_UPDATE_AGENT and self._in_flight_update(device.id) is not None:
             raise ConflictError(
@@ -205,6 +249,7 @@ class DeviceActionService:
             kind=kind,
             state=STATE_PENDING,
             from_version=from_version,
+            module=module,
             username=username,
             sudo=sudo,
             authorized_key=authorized_key,
@@ -274,6 +319,37 @@ class DeviceActionService:
             from_version=device.agent_version,
             audit_action="device.action.update_agent",
             metadata={"name": device.name, "from_version": device.agent_version},
+        )
+
+    def restart_module(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID, payload: RestartModuleRequest
+    ) -> DeviceActionsResponse:
+        device = self._require_device(actor, organization_id, device_id, REPAIR_PERMISSION)
+        modules = reported_modules(device)
+        if modules is not None and payload.module not in modules:
+            raise ValidationAppError(
+                "module_unknown",
+                f"The agent on this device has no module {payload.module!r}.",
+            )
+        return self._enqueue(
+            actor=actor,
+            device=device,
+            kind=KIND_RESTART_MODULE,
+            module=payload.module,
+            audit_action="device.action.restart_module",
+            metadata={"name": device.name, "module": payload.module},
+        )
+
+    def run_diagnostics(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID
+    ) -> DeviceActionsResponse:
+        device = self._require_device(actor, organization_id, device_id, REPAIR_PERMISSION)
+        return self._enqueue(
+            actor=actor,
+            device=device,
+            kind=KIND_RUN_DIAGNOSTICS,
+            audit_action="device.action.run_diagnostics",
+            metadata={"name": device.name},
         )
 
     def set_password(
@@ -355,6 +431,7 @@ class DeviceActionService:
                     sudo=row.sudo,
                     authorized_key=row.authorized_key,
                     from_version=row.from_version,
+                    module=row.module,
                 )
             )
         if dirty:
@@ -383,5 +460,7 @@ class DeviceActionService:
                 row.reported_at = now
                 row.state = STATE_DONE if result.state == "done" else STATE_FAILED
                 row.last_error = None if row.state == STATE_DONE else (result.error or "The device reported a failure.")
+                if row.kind == KIND_RUN_DIAGNOSTICS:
+                    row.output = result.output
             self.session.commit()
         return AgentActionReportResponse(accepted=accepted)

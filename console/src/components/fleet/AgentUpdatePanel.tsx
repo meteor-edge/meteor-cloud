@@ -2,11 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 
-import {
-  listDeviceActions,
-  updateDeviceAgent,
-  type DeviceAction,
-} from "@/api/fleet";
+import { listDeviceActions, updateDeviceAgent, type DeviceAction } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { Button } from "@/components/ui/button";
 import { cn, formatDateTime } from "@/lib/utils";
@@ -16,6 +12,8 @@ type Props = {
   organizationId: string;
   deviceId: string;
   agentVersion: string | null;
+  /** False when the device's agent says it cannot update itself. */
+  supported?: boolean;
 };
 
 function isInFlight(action: DeviceAction): boolean {
@@ -47,7 +45,13 @@ function statusNote(action: DeviceAction): { text: string; tone: string } {
 }
 
 /** Order meteorcli on this device to install the latest published release. */
-export function AgentUpdatePanel({ token, organizationId, deviceId, agentVersion }: Props) {
+export function AgentUpdatePanel({
+  token,
+  organizationId,
+  deviceId,
+  agentVersion,
+  supported = true,
+}: Props) {
   const queryClient = useQueryClient();
   const queryKey = ["device-actions", organizationId, deviceId];
   const deviceKey = ["device", organizationId, deviceId];
@@ -123,13 +127,17 @@ export function AgentUpdatePanel({ token, organizationId, deviceId, agentVersion
       </div>
 
       <p className="text-sm">
-        Installed version:{" "}
-        <span className="font-medium">{agentVersion ?? "Not reported yet"}</span>
+        Installed version: <span className="font-medium">{agentVersion ?? "Not reported yet"}</span>
       </p>
 
+      {!supported && (
+        <p className="text-sm text-muted-foreground">
+          The agent on this device cannot update itself. Run the installer on the device once.
+        </p>
+      )}
       <Button
         variant="outline"
-        disabled={busy}
+        disabled={busy || !supported}
         onClick={() => {
           if (
             window.confirm(

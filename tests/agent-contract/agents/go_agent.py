@@ -87,7 +87,7 @@ def binary() -> Path:
         go = shutil.which("go")
         if go is None:
             if os.environ.get("CI"):
-                pytest.fail("Go is required for AGENT_CONTRACT_AGENT=go in CI")
+                pytest.fail("Go is required for the contract suite in CI")
             pytest.skip("Go is not installed")
         out = Path(tempfile.mkdtemp(prefix="meteorcli-go-")) / "meteorcli"
         subprocess.run(
