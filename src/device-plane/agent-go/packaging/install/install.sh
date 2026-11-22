@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Install the Go meteorcli on a device: one script per board (scripts/dist.sh
-# fills in BOARD and the release URL), run as root:
+# Install the Go meteorcli on a device, run as root. scripts/dist.sh fills in
+# BOARD and the release URL: install-meteorcli.sh runs on any Linux board with
+# systemd, install-rpi.sh also checks that it is on a Raspberry Pi.
 #
-#   curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge/install-rpi.sh | sudo bash
-#   curl -fsSL …/install-rpi.sh | sudo bash -s -- --domain meteor.example.com --token reg_XXXX
-#   curl -fsSL …/install-rpi.sh | sudo bash -s -- --domain meteor.example.com --api-key key_XXXX --name lobby-cam
+#   curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
+#   curl -fsSL …/install-meteorcli.sh | sudo bash -s -- --domain meteor.example.com --token reg_XXXX
+#   curl -fsSL …/install-meteorcli.sh | sudo bash -s -- --domain meteor.example.com --api-key key_XXXX --name lobby-cam
 #
 # It downloads the binary for this CPU, the systemd units, sysusers.d and
 # tmpfiles.d files, checks them against SHA256SUMS, installs them, takes over
@@ -56,6 +57,7 @@ while [[ $# -gt 0 ]]; do
 	--force) force=1; shift ;;
 	--no-wireguard) wireguard=0; shift ;;
 	--no-start) start=0; shift ;;
+	--with-service) shift ;; # the Python installer's flag (Meteor Imager passes it); the service is always installed
 	-h | --help) sed -n '2,/^set -euo/p' "$0" 2>/dev/null | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
 	*) echo "error: unknown option $1 (see --help)" >&2; exit 2 ;;
 	esac

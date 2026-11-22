@@ -138,7 +138,7 @@ database enforces it.
    packages and `meteorcli`. Do not enroll it.
 2. On the device: `sudo bash meteorcli-prepare-image.sh` (agent release asset). It installs
    first boot and removes the device's identity, Wi-Fi, SSH host keys and machine-id, then
-   powers off. Details: [first-boot README](../../src/device-plane/agent/packaging/firstboot/README.md#build-an-os-image-golden-image).
+   powers off. Details: [first-boot README](../../src/device-plane/agent-go/packaging/firstboot/README.md#build-an-os-image-golden-image).
 3. Back up the card with Meteor Imager (**Back up a card**, or
    `meteor-imager backup --device /dev/sdX --out golden.img.gz`). The root filesystem is
    shrunk so the image fits smaller cards.

@@ -6,7 +6,9 @@
 #   Wi-Fi (NetworkManager, or wpa_supplicant without it), hostname, timezone,
 #   login user and password (as a crypt hash), SSH on/off, password login and an
 #   SSH public key. The enrollment values (domain, key, name, API base) move to
-#   /etc/meteorcli-firstboot.env (root only) for meteorcli-firstboot.service.
+#   /etc/meteorcli/meteorenv (root only); meteorcli.service applies that file
+#   ('meteorcli config meteorenv', as root) and deletes it before the agent starts,
+#   and the agent then asks to be enrolled by itself.
 #
 # Then .meteorenv is deleted from the card, so the key and Wi-Fi password are no
 # longer readable by whoever holds it. Nothing found: exits 0 and changes nothing.
@@ -20,8 +22,8 @@
 set -euo pipefail
 
 ROOT="${METEOR_ROOT:-}"   # tests only: prefix for every system path
-ENV_FILE="${METEOR_FIRSTBOOT_ENV:-${ROOT}/etc/meteorcli-firstboot.env}"
-TOKEN_FILE="${METEOR_DEVICE_TOKEN_FILE:-${ROOT}/etc/meteorcli/device-token}"
+ENV_FILE="${METEOR_FIRSTBOOT_ENV:-${ROOT}/etc/meteorcli/meteorenv}"
+TOKEN_FILE="${METEOR_DEVICE_TOKEN_FILE:-${ROOT}/var/lib/meteorcli/identity/device-token}"
 LOG_FILE="${METEOR_SETTINGS_LOG:-${ROOT}/var/log/meteorcli-settings.log}"
 CFG_MOUNT="${METEOR_CFG_MOUNT:-/run/meteorcfg}"
 NM_DIR="${ROOT}/etc/NetworkManager/system-connections"
@@ -499,7 +501,7 @@ save_enrollment() {
     return 0
   fi
   if [[ -s "${TOKEN_FILE}" ]]; then
-    # First boot already ran and removed itself; do not leave the key on disk.
+    # Already enrolled: do not leave the key on disk.
     log "This device is already enrolled; the enrollment key in .meteorenv was not kept"
     return 0
   fi
@@ -510,7 +512,7 @@ save_enrollment() {
   (
     umask 077
     {
-      echo "# Written by meteorcli-settings.sh from the boot partition"
+      echo "# Written by meteorcli-settings.sh from the boot partition; meteorcli.service applies and deletes it"
       echo "METEOR_DOMAIN=${domain}"
       echo "METEOR_API_KEY=${key}"
       [[ -n "$(cfg METEOR_NAME)" ]] && echo "METEOR_NAME=$(cfg METEOR_NAME)"

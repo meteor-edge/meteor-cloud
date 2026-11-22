@@ -51,7 +51,7 @@ Differences, all on the outside:
   `.meteorenv`: rename the file on the card for those.
 - **Base image.** Full first-boot (Wi-Fi, user, SSH, hostname, plus enrollment) needs an
   image with meteorcli and the first-boot units
-  ([first-boot image](../../src/device-plane/agent/packaging/firstboot/README.md)).
+  ([first-boot image](../../src/device-plane/agent-go/packaging/firstboot/README.md)).
   Enrollment alone also works on stock OS once meteorcli **0.3.2+** is installed:
   `meteorcli.service` reads the enrollment keys from the boot file. The imager still
   handles cloud-init on stock images when you use Meteor Imager instead of this file.

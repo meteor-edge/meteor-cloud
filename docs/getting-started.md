@@ -91,11 +91,11 @@ sudo meteorcli request-token --name edge-01
    waits up to ~5 minutes; after a later approval run `meteorcli claim`, then
    `meteorcli run`.
 
-With meteorcli **0.3.2+** already installed, put `meteorenv.txt` on the boot
+With meteorcli already installed, put `meteorenv.txt` on the boot
 partition (`METEOR_DOMAIN`, `METEOR_API_KEY`, optional `METEOR_NAME`);
 `meteorcli.service` submits the enrollment request and waits for approval.
 For a full Pi image that also applies Wi-Fi / user / SSH on first boot, see
-[first-boot enrollment](../src/device-plane/agent/packaging/firstboot/README.md).
+[first-boot enrollment](../src/device-plane/agent-go/packaging/firstboot/README.md).
 
 Details: [Enrollment API keys](fleet/enrollment-api-keys.md), [Device-initiated enrollment](fleet/device-request-enrollment.md), [meteorcli](meteorcli.md).
 

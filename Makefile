@@ -241,7 +241,7 @@ agent-go-test: ## Go meteorcli: gofmt, vet, go test -race (src/device-plane/agen
 agent-go-build: ## Go meteorcli: static binaries for linux arm64, arm v6, amd64 into src/device-plane/agent-go/bin
 	cd src/device-plane/agent-go && ./scripts/build.sh bin
 
-agent-go-dist: ## Go meteorcli: release files (binaries, packaging, install-rpi.sh, SHA256SUMS) into src/device-plane/agent-go/dist
+agent-go-dist: ## Go meteorcli: release files (binaries, packaging, installers, first-boot scripts, SHA256SUMS) into src/device-plane/agent-go/dist
 	cd src/device-plane/agent-go && ./scripts/dist.sh dist "0.0.0-dev+$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 agent-go-install-test: ## Go meteorcli: board installer end to end under systemd in a container (Docker, --privileged)
@@ -254,8 +254,7 @@ agent-contract-test: ## Device agent contract suite (Python and Go meteorcli vs 
 	cd tests/agent-contract && python -m pytest -q && AGENT_CONTRACT_MODE=replay python -m pytest -q
 	cd tests/agent-contract && AGENT_CONTRACT_AGENT=go python -m pytest -q -rs && AGENT_CONTRACT_AGENT=go AGENT_CONTRACT_MODE=replay python -m pytest -q
 
-agent-dist: ## Pack meteorcli (agent + runtime) into dist/ for a GitHub Release
-	./scripts/agent-dist.sh
+agent-dist: agent-go-dist ## Same as agent-go-dist (the agent-v* release is the Go meteorcli)
 
 check-plane-imports: ## Fail if planes import each other's private Python packages
 	python scripts/check_plane_imports.py

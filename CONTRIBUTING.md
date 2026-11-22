@@ -65,7 +65,7 @@ make backend-test
 make data-plane-test
 make agent-test
 make agent-contract-test   # device agent vs contracts/device-agent-v1.md (needs Docker)
-make agent-dist            # pack meteorcli for a GitHub Release
+make agent-dist            # Go meteorcli release files (same as make agent-go-dist)
 make console-test
 make check-plane-imports   # planes must not import each other
 make lint

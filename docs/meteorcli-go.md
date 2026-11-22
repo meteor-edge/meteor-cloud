@@ -1,11 +1,9 @@
-# meteorcli in Go (in progress)
+# meteorcli internals (Go)
 
-The device agent is being rewritten in Go in [`src/device-plane/agent-go/`](../src/device-plane/agent-go/).
-It speaks exactly the same contract as the Python agent
-([`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md)); the control plane, console and
-data plane do not change. Until it is complete, devices keep installing the Python `meteorcli`
-([meteorcli](meteorcli.md)); test devices can install the Go build (see
-[Installing on a device](#installing-on-a-device)).
+The device agent is written in Go in [`src/device-plane/agent-go/`](../src/device-plane/agent-go/)
+and speaks [`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md). From 0.5.0 the
+`agent-v*` releases (`releases/latest`) are the Go agent; installing, updating and first boot for
+operators are in [meteorcli](meteorcli.md). This page covers the internals.
 
 ## What exists today
 
@@ -18,7 +16,7 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | CLI: `config`, `config import`, `config meteorenv`, `status`, `register`, `request-token`, `claim`, `test`, `module restart`, `logs`, `mqtt-test`, `mqtt-listen`, `helper`, `--version`, `agent` (alias `run`) | Done |
 | Agent socket with a group policy per command; root helper (`power.*`, `logs.*`, `systemd.install_unit`, `systemd.control`, `users.*`, `docker.*`, `compose.*`, `wifi.*`, `wireguard.*`, `ssh.authorized_keys`) | Done |
 | systemd units, sysusers.d, tmpfiles.d in `packaging/` | Done |
-| Board installer (`install-rpi.sh`), CI artifact, `meteorcli-go-edge` prerelease | Done (Raspberry Pi) |
+| Installers (`install-meteorcli.sh` for any board, `install-rpi.sh`), first-boot and OS image scripts, CI artifact, `agent-v*` release, `meteorcli-go-edge` prerelease | Done |
 | Identity: register, request-token and claim run by the agent, background approval polling, credential storage, MQTT credential refresh, 401 handling | Done |
 | Heartbeat module; telemetry (inventory, metrics); platform adapters (Raspberry Pi, Jetson, generic Linux) | Done |
 | MQTT: `bus` (one session, TLS with the stored CA, reconnect with backoff), `mqtt` module (status, ping, `sync_desired`), `metrics` module (60 s metrics, app and journal events) | Done |
@@ -26,13 +24,13 @@ data plane do not change. Until it is complete, devices keep installing the Pyth
 | Deploy: signed desired software, streamed artifact downloads with SHA-256, `systemd`, `docker` and `docker_compose` runtimes through the helper, health gate and rollback | Done |
 | `appcreds` module: SDK tokens of bound workloads rotated in place | Done |
 | Network: `wifi` module (changes with commit-confirm, status reports), `wireguard` module (device tunnel, SSH keys for the browser terminal); `logs` for the console's Logs window | Done |
-| Updater: `update_agent` and `meteorcli update` start `meteorcli updater` (signed release manifest, SHA-256, `meteorcli.previous`, heartbeat health gate, automatic rollback); the edge release job signs the manifest | Done |
+| Updater: `update_agent` and `meteorcli update` start `meteorcli updater` (signed release manifest, SHA-256, `meteorcli.previous`, heartbeat health gate, automatic rollback); the release jobs sign the manifest | Done |
 
 ## Files
 
 | Path | Owner, mode | Holds |
 | --- | --- | --- |
-| `/etc/meteorcli/config.json` | root:meteor 0640 | Server (`domain`, `api_base`, `server_url`), optional pinned CA (`ca_file`), `enroll_name` (from a meteorenv file), `ssh_user` (the account the console's browser terminal signs in as; the installer sets the user who ran it), `release_url` (where the updater reads releases; empty for the `meteorcli-go-edge` release). Written by root, read by the agent, the helper and the updater. |
+| `/etc/meteorcli/config.json` | root:meteor 0640 | Server (`domain`, `api_base`, `server_url`), optional pinned CA (`ca_file`), `enroll_name` (from a meteorenv file), `ssh_user` (the account the console's browser terminal signs in as; the installer sets the user who ran it), `release_url` (where the updater reads releases; empty for the newest `agent-v*` release). Written by root, read by the agent, the helper and the updater. |
 | `/var/lib/meteorcli/identity/` | meteor 0700, files 0600 | `device.json` (device id, organization, name, heartbeat interval), `device-token`, `mqtt.json`, `mqtt-ca.crt`, `api-key` (until enrolled), `pending-claim.json` (request id and claim secret while waiting), `wireguard/` keys. Written by the agent only, except `config` (root) storing an API key and removing a server's files. |
 | `/var/lib/meteorcli/state/` | meteor 0700 | Versioned module state (`signing-keys.json`, `applied-software.json`, `wireguard.json` (the last tunnel settings, no private key), `agent-update.json` (an `update_agent` action waiting for the updater), `agent-update-outcome.json` (what the last update did; written by the updater as root, handed to meteor), ...) and `outbox/` |
 | `/usr/local/bin/meteorcli.previous` | root 0755 | The binary the last update replaced (a hard link); the updater puts it back when the new one does not come up |
@@ -52,36 +50,32 @@ atomically (temp file, fsync, rename). A file that does not parse is moved to
 
 ## Installing on a device
 
-Every merge to master that touches the Go agent publishes the **`meteorcli-go-edge`** prerelease
-(workflow `meteorcli (Go) edge build`). It holds the binaries, the packaging files, one installer
-per board and `SHA256SUMS`. It is never marked "latest", so `releases/latest/download/` keeps
-serving the Python agent to existing devices. Each board has its own install URL. Raspberry Pi is
-the first one (Pi OS or Debian with systemd, 32- or 64-bit; the installer picks the arm64 or ARMv6
-binary for the CPU):
+[meteorcli: Install](meteorcli.md#install) has the commands. Releases:
 
-```bash
-# Enroll right away with a registration token
-curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge/install-rpi.sh \
-  | sudo bash -s -- --domain meteor.example.com --token reg_XXXX --name lobby-cam
-# Or by approval: the agent submits a request by itself, then approve it in the console
-curl -fsSL …/install-rpi.sh | sudo bash -s -- --domain meteor.example.com --api-key key_XXXX
-# A device running the Python agent: identity imported, no new enrollment
-curl -fsSL …/install-rpi.sh | sudo bash
-```
+- **`agent-v<version>`** (workflow `meteorcli release`, from `src/device-plane/agent-go/VERSION`):
+  the "latest" release that devices install and update from.
+- **`meteorcli-go-edge`** (workflow `meteorcli (Go) edge build`): a prerelease rebuilt from every
+  merge to master that touches the agent.
+
+Both hold the binaries, the signed manifest, the packaging files, `install-meteorcli.sh` (any
+board), `install-rpi.sh` (Raspberry Pi only; `--force` installs on another board), the first-boot
+scripts and `SHA256SUMS`. The installers are one script (`packaging/install/install.sh`);
+`scripts/dist.sh` fills in the board and the release URL.
 
 The installer:
-- checks the board and CPU (`--force` installs on another board)
+- checks the board (`install-rpi.sh` only) and picks the binary by `uname -m`
 - downloads and verifies against `SHA256SUMS`
 - installs `/usr/local/bin/meteorcli`, the units, sysusers.d and tmpfiles.d files
 - adds `$SUDO_USER` (or `--user`) to `meteorcli` and `meteorcli-admin`
 - if the Python agent is installed: stops its service, runs `meteorcli config import` and leaves `/opt/meteorcli` for a rollback
 - applies `--domain`/`--api-base`/`--api-key`, starts the agent and runs `register` when given a token
 
-Running it again upgrades in place. To roll back to Python, run the Python `install-meteorcli.sh`.
+Running it again upgrades in place. To roll back to Python, run the installer of a Python release
+(`agent-v0.4.0`).
 
 To try a pull request before it is merged:
 1. Download the `meteorcli-go-<sha>` artifact from the CI run's Summary page and unzip it on the device.
-2. Run `sudo bash install-rpi.sh` in that folder.
+2. Run `sudo bash install-meteorcli.sh` in that folder.
 
 `make agent-go-dist` builds the same files locally (on a laptop or on the device itself, with Go
 1.24+), versioned `0.0.0-dev+<commit>`. Run as a file, the installer installs the files next to
@@ -391,7 +385,7 @@ root helper (`update.start`), which starts `meteorcli updater` as the transient 
 cannot stop it. For an action the agent first writes `state/agent-update.json`.
 
 1. **Release.** The updater reads `meteorcli-release.json` and `meteorcli-release.json.sig` from
-   `release_url` (default: the `meteorcli-go-edge` release). The manifest has the version and the
+   `release_url` (default: `releases/latest/download`, the newest `agent-v*` release). The manifest has the version and the
    SHA-256 and size of each binary; the signature is ed25519 over its exact bytes, checked against
    the release public key compiled into the binary (`internal/update/key.go`). An unsigned manifest,
    or one signed by any other key, is refused before anything is downloaded. A redirect is followed
@@ -431,12 +425,13 @@ and `meteorcli update` (or `sudo meteorcli updater`) is refused, so the one outc
 replaced before the action is reported.
 
 Only the binary is replaced: unit files, sysusers.d and tmpfiles.d stay as the installer wrote
-them. A release that changes them needs the installer (`install-rpi.sh`) once.
+them. A release that changes them needs the installer (`install-meteorcli.sh`) once.
 
 **Release signing.** `scripts/dist.sh` signs the manifest with `$METEORCLI_RELEASE_SIGNING_KEY`
-(`go run ./tools/release sign <dir> <version>`); the edge release job takes it from the repository
-secret of that name and uploads the binaries before the manifest. Without the secret the release is
-unsigned and devices refuse it. A new key pair comes from `go run ./tools/release genkey`: the
+(`go run ./tools/release sign <dir> <version>`); the release jobs take it from the repository
+secret of that name. The edge job uploads the binaries before the manifest; without the secret its
+release is unsigned and devices refuse it. The `agent-v*` job fails instead of publishing an
+unsigned release. A new key pair comes from `go run ./tools/release genkey`: the
 private key goes into the secret, the public key into `internal/update/key.go` (several keys,
 comma separated, allow a rotation: ship a build that trusts both before signing with the new one).
 Test builds trust another key with `METEORCLI_RELEASE_KEYS=<public key> scripts/build.sh` (or
@@ -648,7 +643,7 @@ binary is over 15 MB, and uploads the release files as a run artifact.
 
 ```bash
 make agent-go-systemd-test   # Docker, --privileged: Debian 12 with systemd as PID 1
-make agent-go-install-test   # the same container, checking install-rpi.sh end to end
+make agent-go-install-test   # the same container: install-rpi.sh, install-meteorcli.sh and first boot end to end
 ```
 
 The install test refuses a board that is not a Pi. It then:

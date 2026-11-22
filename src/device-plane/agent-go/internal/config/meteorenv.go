@@ -30,9 +30,15 @@ type Meteorenv struct {
 // Empty reports whether the file had nothing meteorcli can use.
 func (m Meteorenv) Empty() bool { return m.Domain == "" && m.APIBase == "" && m.APIKey == "" }
 
-// FindMeteorenv returns the meteorenv files on the boot partition, best first.
-// bootDir (from $METEOR_BOOT_DIR) is searched before /boot/firmware and /boot.
-// Every directory is moved under root, like the other paths.
+// HandoffMeteorenv is where an image's meteorcli-settings service leaves the
+// enrollment lines of a card's meteorenv (root only) after applying its Wi-Fi,
+// user and SSH settings early in boot and deleting the file from the card.
+const HandoffMeteorenv = "/etc/meteorcli/meteorenv"
+
+// FindMeteorenv returns the meteorenv files to apply, best first: the
+// settings service's hand-off file, then the boot partition. bootDir (from
+// $METEOR_BOOT_DIR) is searched before /boot/firmware and /boot. Every path is
+// moved under root, like the other paths.
 func FindMeteorenv(root, bootDir string) []string {
 	dirs := []string{"/boot/firmware", "/boot"}
 	if strings.TrimSpace(bootDir) != "" {
@@ -40,13 +46,17 @@ func FindMeteorenv(root, bootDir string) []string {
 	}
 	var found []string
 	seen := map[string]bool{}
+	if p := filepath.Join(root, HandoffMeteorenv); isRegular(p) {
+		seen[p] = true
+		found = append(found, p)
+	}
 	for _, dir := range dirs {
 		for _, name := range meteorenvNames {
 			p := filepath.Join(root, dir, name)
 			if seen[p] {
 				continue
 			}
-			if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
+			if isRegular(p) {
 				seen[p] = true
 				found = append(found, p)
 			}
@@ -91,4 +101,9 @@ func ReadMeteorenv(path string) (Meteorenv, error) {
 		APIKey:  strings.TrimSpace(v["METEOR_API_KEY"]),
 		Name:    strings.TrimSpace(v["METEOR_NAME"]),
 	}, nil
+}
+
+func isRegular(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
 }
