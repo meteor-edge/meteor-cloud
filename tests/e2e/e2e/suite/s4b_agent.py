@@ -21,7 +21,7 @@ import shlex
 from e2e.redact import redact
 from e2e.suite.context import METEORCLI
 from e2e.suite.framework import Fail, NotSupported, check, expect, wait_for
-from e2e.suite.s4_onboarding import RESET
+from e2e.suite.s4_onboarding import RESET, configure
 
 STAGE = "4b meteorcli agent"
 DIST = "/opt/meteorcli-dist"  # deploy/ansible/roles/device: device_install_dir
@@ -228,7 +228,7 @@ def enroll_by_approval(ctx):
     try:
         ctx.sh(device, RESET)
         ctx.put_secret_file(device, "/root/.meteorcloud-e2e-key", key["api_key"])
-        ctx.meteorcli(device, f"config --api-base {ctx.api_url}")
+        configure(ctx, device)
         ctx.sh(device, f'{METEORCLI} config --api-key "$(cat /root/.meteorcloud-e2e-key)"; '
                        "rm -f /root/.meteorcloud-e2e-key")
         submitted = ctx.meteorcli(device, f"request-token --name {name}")

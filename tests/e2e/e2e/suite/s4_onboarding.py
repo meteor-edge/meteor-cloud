@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 
 from e2e.http import Api
 from e2e.redact import redact
@@ -26,10 +27,18 @@ RESET = (
 )
 
 
+def configure(ctx, device) -> None:
+    """Point meteorcli at this run's API. RESET removed config.json, and with it the ssh_user the
+    installer set: the browser terminal and device logs sign in as that account."""
+    # The agent refuses root as the terminal's account (an on-prem device may be reached as root).
+    ssh_user = f" --ssh-user {shlex.quote(device.user)}" if device.user and device.user != "root" else ""
+    ctx.meteorcli(device, f"config --api-base {ctx.api_url}{ssh_user}")
+
+
 def register(ctx, device, name: str) -> str:
     """Point meteorcli at this run's API and register with the token in TOKEN_FILE (meteorcli
     removes the file once registered). Returns the device id."""
-    ctx.meteorcli(device, f"config --api-base {ctx.api_url}")
+    configure(ctx, device)
     result = ctx.meteorcli(device, f"register --token-file {TOKEN_FILE} --name {name}")
     match = REGISTERED_RE.search(result.stdout)
     if not match:
