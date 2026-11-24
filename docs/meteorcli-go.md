@@ -468,6 +468,29 @@ heartbeat. Install outcomes are also announced on `devices/{id}/events` as `depl
 `error`), once per change. A runtime is a package under `internal/deploy/runtime/` plus one line in
 `internal/deploy/runtimes.go`.
 
+### Workloads
+
+The `workloads` module (`internal/workloads`) tells the server what each installed workload is made of,
+and the `workload_*` actions (`internal/actions/workload.go`) restart, stop and start it.
+
+- **Snapshots** go to `POST /api/v1/agent/software/snapshots`: when something changed (it looks every
+  minute), every 5 minutes, after an action, and for `workload_snapshot`. At most 64 KiB. A `404` (older
+  server) quiets the module for an hour.
+- **Root helper.** `workload.inspect` and `workload.control` check ownership at call time, every time:
+  docker containers by the label `meteorcloud.workload` (`docker.run` sets it), compose containers by
+  Compose's own project and working directory labels, systemd units by a record `install_unit` keeps in
+  `units/` under the helper's state directory. They act on the verified container ids, not on names.
+  Anything else is refused, and so is `meteorcli*`. Environment, commands and foreign labels are never read.
+- **Stopped** workloads are kept in `workload-stops.json`. Reconcile reports them `in_sync`, health
+  `unknown`, `stopped_by_user`, does not apply or health-check them, and stops them again if something
+  else started them. Start, restart, or a new release or revision that was applied clears it.
+- **One at a time.** Deploys and actions share one lock; an action that cannot get it fails with "a
+  deploy is running".
+- Containers and units deployed by an older agent have no label or record: they can be seen, but not
+  managed until their next deploy.
+- A stopped container whose restart policy is `always` starts with the Docker daemon; the agent stops it
+  again on its next cycle.
+
 ### Wi-Fi
 
 The `wifi` module waits for a heartbeat that says Wi-Fi changes wait (`wifi_pending`), collects
