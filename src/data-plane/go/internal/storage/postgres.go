@@ -227,6 +227,9 @@ func (q *Query) where(args *[]any) string {
 		raw, _ := json.Marshal(q.Filter)
 		conds = append(conds, "data @> "+add(string(raw))+"::jsonb")
 	}
+	if q.Contains != "" {
+		conds = append(conds, "strpos(lower(data->>'message'), lower("+add(q.Contains)+")) > 0")
+	}
 	return strings.Join(conds, " AND ")
 }
 

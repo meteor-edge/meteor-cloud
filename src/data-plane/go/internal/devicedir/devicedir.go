@@ -9,6 +9,7 @@ package devicedir
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -171,7 +172,8 @@ func (f *FileSource) Fetch(_ context.Context, known string) (*Snapshot, error) {
 		return nil, err
 	}
 	if s.Version == "" {
-		s.Version = fmt.Sprintf("file-%d", len(raw))
+		sum := sha256.Sum256(raw)
+		s.Version = fmt.Sprintf("file-%x", sum[:8])
 	}
 	if s.Version == known {
 		return nil, nil

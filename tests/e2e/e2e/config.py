@@ -206,7 +206,7 @@ def check_settings(cfg: Config) -> list[str]:
 
 
 def required_tools(cfg: Config) -> list[str]:
-    tools = ["ansible-playbook", "ssh", "scp", "ssh-keygen", "git"]
+    tools = ["ansible-playbook", "ssh", "scp", "ssh-keygen", "git", "go"]  # go builds meteorcli
     if cfg.provider == "aws" or cfg.dns_provider == "route53":
         tools.append("terraform")
     return tools

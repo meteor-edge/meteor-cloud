@@ -45,3 +45,11 @@ class ObjectStorage(Protocol):
     def exists(self, key: str) -> bool:
         """Return whether an object exists at key."""
         ...
+
+    def presigned_get_url(self, key: str, *, expires_in: int, file_name: str | None = None) -> str | None:
+        """A short-lived URL a device can download ``key`` from directly, or None.
+
+        None means the content must be streamed through the API (filesystem storage,
+        or a bucket devices cannot reach). Must not contact the storage service.
+        """
+        ...

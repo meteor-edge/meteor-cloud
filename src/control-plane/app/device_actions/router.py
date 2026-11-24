@@ -16,7 +16,10 @@ from app.device_actions.schemas import (
     AgentActionReportResponse,
     AgentDeviceActionsResponse,
     DeviceActionsResponse,
+    RestartModuleRequest,
     SetPasswordRequest,
+    SoftwareActionRequest,
+    SoftwareActionResponse,
 )
 from app.device_actions.service import DeviceActionService
 from app.devices.dependencies import CurrentDevice
@@ -40,7 +43,7 @@ _DEVICE = "/api/v1/organizations/{organization_id}/devices/{device_id}/actions"
 def list_device_actions(
     organization_id: uuid.UUID, device_id: uuid.UUID, current_user: CurrentUser, service: ActionSvc
 ) -> DeviceActionsResponse:
-    """Recent restart, shut-down and SSH-user actions. Never a password."""
+    """Recent restart, shut-down, SSH-user, update and repair actions. Never a password."""
     return service.list_actions(actor=current_user, organization_id=organization_id, device_id=device_id)
 
 
@@ -58,6 +61,36 @@ def shutdown_device(
 ) -> DeviceActionsResponse:
     """Shut the device down on its next heartbeat."""
     return service.shutdown(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.post(f"{_DEVICE}/update-agent", response_model=DeviceActionsResponse)
+def update_device_agent(
+    organization_id: uuid.UUID, device_id: uuid.UUID, current_user: CurrentUser, service: ActionSvc
+) -> DeviceActionsResponse:
+    """Install the latest published meteorcli on the device's next heartbeat."""
+    return service.update_agent(actor=current_user, organization_id=organization_id, device_id=device_id)
+
+
+@router.post(f"{_DEVICE}/restart-module", response_model=DeviceActionsResponse)
+def restart_device_module(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    payload: RestartModuleRequest,
+    current_user: CurrentUser,
+    service: ActionSvc,
+) -> DeviceActionsResponse:
+    """Restart one meteorcli module on the device's next heartbeat (unparks a crash-looping one)."""
+    return service.restart_module(
+        actor=current_user, organization_id=organization_id, device_id=device_id, payload=payload
+    )
+
+
+@router.post(f"{_DEVICE}/run-diagnostics", response_model=DeviceActionsResponse)
+def run_device_diagnostics(
+    organization_id: uuid.UUID, device_id: uuid.UUID, current_user: CurrentUser, service: ActionSvc
+) -> DeviceActionsResponse:
+    """Ask meteorcli for its doctor report on the device's next heartbeat."""
+    return service.run_diagnostics(actor=current_user, organization_id=organization_id, device_id=device_id)
 
 
 @router.post(f"{_DEVICE}/set-password", response_model=DeviceActionsResponse)
@@ -84,6 +117,42 @@ def add_device_user(
 ) -> DeviceActionsResponse:
     """Add a user who can log in over SSH."""
     return service.add_user(actor=current_user, organization_id=organization_id, device_id=device_id, payload=payload)
+
+
+_SOFTWARE = "/api/v1/organizations/{organization_id}/devices/{device_id}/software/{software_id}/actions"
+
+
+@router.get(_SOFTWARE, response_model=list[SoftwareActionResponse])
+def list_software_actions(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    software_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: ActionSvc,
+) -> list[SoftwareActionResponse]:
+    """Recent restart, stop, start and refresh actions on one deployed workload."""
+    return service.list_software_actions(
+        actor=current_user, organization_id=organization_id, device_id=device_id, software_id=software_id
+    )
+
+
+@router.post(_SOFTWARE, response_model=SoftwareActionResponse)
+def order_software_action(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    software_id: uuid.UUID,
+    payload: SoftwareActionRequest,
+    current_user: CurrentUser,
+    service: ActionSvc,
+) -> SoftwareActionResponse:
+    """Restart, stop or start a deployed workload, or ask the device to look at it again."""
+    return service.order_software_action(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+        software_id=software_id,
+        payload=payload,
+    )
 
 
 @router.get("/api/v1/agent/actions", response_model=AgentDeviceActionsResponse)

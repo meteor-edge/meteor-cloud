@@ -2,10 +2,10 @@
 
 Revision ID: 0001_initial
 Revises:
-Create Date: 2026-11-09 00:00:00.000000
+Create Date: 2026-11-24 00:00:00.000000
 
-Squashed from the former 0001-0026 chain (no production installs existed). A database
-created by that chain has a different head and must be dropped and recreated.
+Squashed from the former 0001-0019 chain (no production installs existed). Drop and
+recreate any database that still has that chain.
 
 The catalog is frozen here rather than read from app.authorization: a migration must do
 the same thing whenever it runs, whatever the application code says later. Change the
@@ -27,10 +27,26 @@ down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# (resource, action, label, description)
 PERMISSIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("application", "command", "Send application commands", "Send commands to running applications."),
+    ("application", "create", "Create applications", "Register applications for the data plane."),
+    (
+        "application",
+        "credential",
+        "Manage application credentials",
+        "Create, rotate and revoke data-plane credentials for applications.",
+    ),
+    ("application", "delete", "Delete applications", "Delete applications and their credentials."),
+    ("application", "read", "View applications", "List applications and their credentials."),
+    ("application", "update", "Update applications", "Change application details and stream permissions."),
     ("artifact", "create", "Upload artifacts", "Upload new artifact versions."),
     ("artifact", "delete", "Delete artifacts", "Delete artifacts and their stored objects."),
+    (
+        "artifact",
+        "publish",
+        "Publish OS images",
+        "Show OS images in Meteor Imager, where anyone who can reach the server can download them.",
+    ),
     ("artifact", "read", "View artifacts", "List and download artifacts."),
     ("artifact", "update", "Update artifacts", "Edit artifact metadata."),
     ("deployment", "cancel", "Cancel deployments", "Cancel in-progress deployments."),
@@ -40,10 +56,28 @@ PERMISSIONS: tuple[tuple[str, str, str, str], ...] = (
     ("device", "create", "Create devices", "Create registration tokens and approve enrollment."),
     ("device", "delete", "Delete devices", "Remove devices within scope."),
     ("device", "logs", "View device logs", "Read service, container and system logs on a device."),
+    (
+        "device",
+        "network",
+        "Device Wi-Fi and connection",
+        "See which networks a device uses and add, change or remove its Wi-Fi. A wrong network can take it offline.",
+    ),
     ("device", "read", "View devices", "List and open devices within scope."),
-    ("device", "reboot", "Reboot devices", "Send reboot and similar operate commands within scope."),
+    ("device", "reboot", "Restart and shut down devices", "Restart or shut down a device from the console."),
     ("device", "shell", "Open device terminal", "Open a browser SSH session to a device."),
     ("device", "update", "Update devices", "Edit device metadata, type, group, and enablement."),
+    (
+        "device",
+        "update_agent",
+        "Update device agent",
+        "Order meteorcli on a device to install the latest published release.",
+    ),
+    (
+        "device",
+        "users",
+        "Manage device SSH users",
+        "Change a user's password or add an SSH user on a device. As sensitive as a shell session.",
+    ),
     ("device_group", "create", "Create device groups", "Create new device groups."),
     ("device_group", "delete", "Delete device groups", "Delete device groups within scope."),
     ("device_group", "read", "View device groups", "List and open device groups within scope."),
@@ -72,7 +106,6 @@ PERMISSIONS: tuple[tuple[str, str, str, str], ...] = (
     ("team", "update", "Update teams", "Rename teams and add or remove their members."),
 )
 
-# (key, name, description)
 SYSTEM_ROLES: tuple[tuple[str, str, str], ...] = (
     ("owner", "Owner", "Full control of the organization, including ownership and membership."),
     ("admin", "Admin", "Full operational access and membership management, without deleting the organization."),
@@ -87,8 +120,15 @@ SYSTEM_ROLES: tuple[tuple[str, str, str], ...] = (
 
 SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "owner": (
+        "application.command",
+        "application.create",
+        "application.credential",
+        "application.delete",
+        "application.read",
+        "application.update",
         "artifact.create",
         "artifact.delete",
+        "artifact.publish",
         "artifact.read",
         "artifact.update",
         "deployment.cancel",
@@ -98,10 +138,13 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "device.create",
         "device.delete",
         "device.logs",
+        "device.network",
         "device.read",
         "device.reboot",
         "device.shell",
         "device.update",
+        "device.update_agent",
+        "device.users",
         "device_group.create",
         "device_group.delete",
         "device_group.read",
@@ -130,8 +173,15 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "team.update",
     ),
     "admin": (
+        "application.command",
+        "application.create",
+        "application.credential",
+        "application.delete",
+        "application.read",
+        "application.update",
         "artifact.create",
         "artifact.delete",
+        "artifact.publish",
         "artifact.read",
         "artifact.update",
         "deployment.cancel",
@@ -141,10 +191,13 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "device.create",
         "device.delete",
         "device.logs",
+        "device.network",
         "device.read",
         "device.reboot",
         "device.shell",
         "device.update",
+        "device.update_agent",
+        "device.users",
         "device_group.create",
         "device_group.delete",
         "device_group.read",
@@ -172,6 +225,8 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "team.update",
     ),
     "operator": (
+        "application.command",
+        "application.read",
         "artifact.read",
         "deployment.cancel",
         "deployment.create",
@@ -179,7 +234,6 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "device.create",
         "device.logs",
         "device.read",
-        "device.reboot",
         "device.update",
         "device_group.read",
         "device_type.read",
@@ -192,6 +246,12 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "team.read",
     ),
     "developer": (
+        "application.command",
+        "application.create",
+        "application.credential",
+        "application.delete",
+        "application.read",
+        "application.update",
         "artifact.create",
         "artifact.delete",
         "artifact.read",
@@ -215,6 +275,7 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "team.read",
     ),
     "viewer": (
+        "application.read",
         "artifact.read",
         "deployment.read",
         "device.read",
@@ -300,12 +361,26 @@ def upgrade() -> None:
         sa.UniqueConstraint("resource", "action", name="uq_permissions_resource_action"),
     )
     op.create_table(
+        "platform_event_outbox",
+        sa.Column("organization_id", sa.UUID(), nullable=False),
+        sa.Column("device_id", sa.UUID(), nullable=True),
+        sa.Column("stream", sa.String(length=128), nullable=False),
+        sa.Column("type", sa.String(length=128), nullable=False),
+        sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("data", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_platform_event_outbox_created_at", "platform_event_outbox", ["created_at"], unique=False)
+    op.create_table(
         "users",
         sa.Column("email", sa.String(length=320), nullable=False),
         sa.Column("full_name", sa.String(length=255), nullable=False),
         sa.Column("password_hash", sa.Text(), nullable=False),
         sa.Column("is_active", sa.Boolean(), server_default="true", nullable=False),
         sa.Column("is_superuser", sa.Boolean(), server_default="false", nullable=False),
+        sa.Column("token_version", sa.Integer(), server_default="0", nullable=False),
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
@@ -328,9 +403,76 @@ def upgrade() -> None:
     )
     op.create_index("ix_organizations_slug", "organizations", ["slug"], unique=False)
     op.create_table(
+        "applications",
+        sa.Column("organization_id", sa.UUID(), nullable=False),
+        sa.Column("slug", sa.String(length=63), nullable=False),
+        sa.Column("name", sa.String(length=120), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("enabled", sa.Boolean(), server_default=sa.text("true"), nullable=False),
+        sa.Column("permissions", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
+        sa.Column("created_by_user_id", sa.UUID(), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("organization_id", "slug", name="uq_applications_org_slug"),
+    )
+    op.create_index("ix_applications_organization_id", "applications", ["organization_id"], unique=False)
+    op.create_table(
+        "artifacts",
+        sa.Column("organization_id", sa.UUID(), nullable=False),
+        sa.Column("name", sa.String(length=120), nullable=False),
+        sa.Column("version", sa.String(length=64), nullable=False),
+        sa.Column(
+            "type",
+            sa.Enum(
+                "os_image",
+                "firmware",
+                "docker",
+                "docker_compose",
+                "systemd",
+                "configuration",
+                "other",
+                name="artifact_type",
+                native_enum=False,
+                length=32,
+            ),
+            nullable=False,
+        ),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("file_name", sa.String(length=255), nullable=False),
+        sa.Column("content_type", sa.String(length=255), nullable=True),
+        sa.Column("storage_key", sa.String(length=1024), nullable=False),
+        sa.Column("size_bytes", sa.BigInteger(), nullable=False),
+        sa.Column("checksum_sha256", sa.String(length=64), nullable=False),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
+        sa.Column("created_by_user_id", sa.UUID(), nullable=True),
+        sa.Column("published", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.CheckConstraint("NOT published OR type = 'os_image'", name="ck_artifacts_published_os_image"),
+        sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("storage_key", name="uq_artifacts_storage_key"),
+    )
+    op.create_index("ix_artifacts_org_type", "artifacts", ["organization_id", "type"], unique=False)
+    op.create_index(
+        "ix_artifacts_org_type_name_version",
+        "artifacts",
+        ["organization_id", "type", sa.literal_column("lower(name)"), sa.literal_column("lower(version)")],
+        unique=False,
+    )
+    op.create_index("ix_artifacts_organization_id", "artifacts", ["organization_id"], unique=False)
+    op.create_table(
         "audit_events",
         sa.Column("organization_id", sa.UUID(), nullable=True),
         sa.Column("actor_user_id", sa.UUID(), nullable=True),
+        sa.Column("actor_type", sa.String(length=32), nullable=True),
+        sa.Column("actor_id", sa.String(length=64), nullable=True),
         sa.Column("action", sa.String(length=80), nullable=False),
         sa.Column("resource_type", sa.String(length=80), nullable=False),
         sa.Column("resource_id", sa.String(length=64), nullable=True),
@@ -349,6 +491,7 @@ def upgrade() -> None:
     op.create_index(
         "ix_audit_events_organization_id_created_at", "audit_events", ["organization_id", "created_at"], unique=False
     )
+    op.create_index("ix_audit_events_resource", "audit_events", ["resource_type", "resource_id"], unique=False)
     op.create_table(
         "device_groups",
         sa.Column("organization_id", sa.UUID(), nullable=False),
@@ -419,6 +562,35 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_table(
+        "organization_signing_keys",
+        sa.Column("organization_id", sa.UUID(), nullable=False),
+        sa.Column("key_id", sa.String(length=32), nullable=False),
+        sa.Column("public_key", sa.String(length=64), nullable=False),
+        sa.Column("sealed_private_key", sa.LargeBinary(), nullable=False),
+        sa.Column("endorsed_by", sa.String(length=32), nullable=True),
+        sa.Column("endorsement", sa.String(length=128), nullable=True),
+        sa.Column("retired_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("key_id"),
+    )
+    op.create_index(
+        op.f("ix_organization_signing_keys_organization_id"),
+        "organization_signing_keys",
+        ["organization_id"],
+        unique=False,
+    )
+    op.create_index(
+        "uq_organization_signing_keys_active",
+        "organization_signing_keys",
+        ["organization_id"],
+        unique=True,
+        postgresql_where=sa.text("retired_at IS NULL"),
+    )
+    op.create_table(
         "roles",
         sa.Column("organization_id", sa.UUID(), nullable=True),
         sa.Column("key", sa.String(length=64), nullable=False),
@@ -447,59 +619,15 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_teams_organization_id"), "teams", ["organization_id"], unique=False)
     op.create_table(
-        "artifacts",
-        sa.Column("organization_id", sa.UUID(), nullable=False),
-        sa.Column("device_type_id", sa.UUID(), nullable=True),
-        sa.Column("name", sa.String(length=120), nullable=False),
-        sa.Column("version", sa.String(length=64), nullable=False),
-        sa.Column(
-            "type",
-            sa.Enum(
-                "os_image",
-                "firmware",
-                "docker",
-                "docker_compose",
-                "systemd",
-                "configuration",
-                "other",
-                name="artifact_type",
-                native_enum=False,
-                length=32,
-            ),
-            nullable=False,
-        ),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("file_name", sa.String(length=255), nullable=False),
-        sa.Column("content_type", sa.String(length=255), nullable=True),
-        sa.Column("storage_key", sa.String(length=1024), nullable=False),
-        sa.Column("size_bytes", sa.BigInteger(), nullable=False),
-        sa.Column("checksum_sha256", sa.String(length=64), nullable=False),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
-        sa.Column("created_by_user_id", sa.UUID(), nullable=True),
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        "artifact_device_types",
+        sa.Column("artifact_id", sa.UUID(), nullable=False),
+        sa.Column("device_type_id", sa.UUID(), nullable=False),
+        sa.ForeignKeyConstraint(["artifact_id"], ["artifacts.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["device_type_id"], ["device_types.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("storage_key", name="uq_artifacts_storage_key"),
+        sa.PrimaryKeyConstraint("artifact_id", "device_type_id"),
     )
-    op.create_index("ix_artifacts_org_device_type_id", "artifacts", ["organization_id", "device_type_id"], unique=False)
-    op.create_index("ix_artifacts_org_type", "artifacts", ["organization_id", "type"], unique=False)
-    op.create_index("ix_artifacts_organization_id", "artifacts", ["organization_id"], unique=False)
     op.create_index(
-        "uq_artifacts_org_type_name_version",
-        "artifacts",
-        [
-            "organization_id",
-            "device_type_id",
-            "type",
-            sa.literal_column("lower(name)"),
-            sa.literal_column("lower(version)"),
-        ],
-        unique=True,
-        postgresql_nulls_not_distinct=True,
+        "ix_artifact_device_types_device_type_id", "artifact_device_types", ["device_type_id"], unique=False
     )
     op.create_table(
         "organization_memberships",
@@ -551,77 +679,6 @@ def upgrade() -> None:
     )
     op.create_index("ix_registration_tokens_organization_id", "registration_tokens", ["organization_id"], unique=False)
     op.create_table(
-        "role_permissions",
-        sa.Column("role_id", sa.UUID(), nullable=False),
-        sa.Column("permission_id", sa.UUID(), nullable=False),
-        sa.ForeignKeyConstraint(["permission_id"], ["permissions.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["role_id"], ["roles.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("role_id", "permission_id"),
-    )
-    op.create_table(
-        "access_bindings",
-        sa.Column("membership_id", sa.UUID(), nullable=False),
-        sa.Column("scope_type", sa.String(length=32), nullable=False),
-        sa.Column("scope_id", sa.UUID(), nullable=True),
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.ForeignKeyConstraint(["membership_id"], ["organization_memberships.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "membership_id",
-            "scope_type",
-            "scope_id",
-            name="uq_access_bindings_membership_scope",
-            postgresql_nulls_not_distinct=True,
-        ),
-    )
-    op.create_index("ix_access_bindings_membership_id", "access_bindings", ["membership_id"], unique=False)
-    op.create_index("ix_access_bindings_scope", "access_bindings", ["scope_type", "scope_id"], unique=False)
-    op.create_table(
-        "devices",
-        sa.Column("organization_id", sa.UUID(), nullable=False),
-        sa.Column("name", sa.String(length=255), nullable=False),
-        sa.Column("device_type_id", sa.UUID(), nullable=True),
-        sa.Column("device_group_id", sa.UUID(), nullable=True),
-        sa.Column("is_enabled", sa.Boolean(), server_default="true", nullable=False),
-        sa.Column("serial_number", sa.String(length=255), nullable=True),
-        sa.Column("mac_addresses", postgresql.JSONB(astext_type=sa.Text()), server_default="[]", nullable=False),
-        sa.Column("hostname", sa.String(length=255), nullable=True),
-        sa.Column("os_name", sa.String(length=255), nullable=True),
-        sa.Column("os_version", sa.String(length=255), nullable=True),
-        sa.Column("kernel_version", sa.String(length=255), nullable=True),
-        sa.Column("architecture", sa.String(length=64), nullable=True),
-        sa.Column("cpu_model", sa.String(length=255), nullable=True),
-        sa.Column("cpu_cores", sa.Integer(), nullable=True),
-        sa.Column("memory_mb", sa.Integer(), nullable=True),
-        sa.Column("labels", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
-        sa.Column("credential_hash", sa.String(length=64), nullable=True),
-        sa.Column("credential_prefix", sa.String(length=32), nullable=True),
-        sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("registered_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("registration_token_id", sa.UUID(), nullable=True),
-        sa.Column("mqtt_status", sa.String(length=16), nullable=True),
-        sa.Column("mqtt_status_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("mqtt_metrics", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("mqtt_metrics_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.ForeignKeyConstraint(["device_group_id"], ["device_groups.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["device_type_id"], ["device_types.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["registration_token_id"], ["registration_tokens.id"], ondelete="SET NULL"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("credential_hash", name="uq_devices_credential_hash"),
-    )
-    op.create_index("ix_devices_org_device_group_id", "devices", ["organization_id", "device_group_id"], unique=False)
-    op.create_index("ix_devices_org_device_type_id", "devices", ["organization_id", "device_type_id"], unique=False)
-    op.create_index("ix_devices_org_last_seen_at", "devices", ["organization_id", "last_seen_at"], unique=False)
-    op.create_index("ix_devices_org_serial_number", "devices", ["organization_id", "serial_number"], unique=False)
-    op.create_index("ix_devices_organization_id", "devices", ["organization_id"], unique=False)
-    op.create_table(
         "releases",
         sa.Column("organization_id", sa.UUID(), nullable=False),
         sa.Column("name", sa.String(length=120), nullable=False),
@@ -653,16 +710,33 @@ def upgrade() -> None:
         unique=True,
     )
     op.create_table(
-        "team_members",
-        sa.Column("team_id", sa.UUID(), nullable=False),
+        "role_permissions",
+        sa.Column("role_id", sa.UUID(), nullable=False),
+        sa.Column("permission_id", sa.UUID(), nullable=False),
+        sa.ForeignKeyConstraint(["permission_id"], ["permissions.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["role_id"], ["roles.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("role_id", "permission_id"),
+    )
+    op.create_table(
+        "access_bindings",
         sa.Column("membership_id", sa.UUID(), nullable=False),
+        sa.Column("scope_type", sa.String(length=32), nullable=False),
+        sa.Column("scope_id", sa.UUID(), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["membership_id"], ["organization_memberships.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["team_id"], ["teams.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("team_id", "membership_id"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "membership_id",
+            "scope_type",
+            "scope_id",
+            name="uq_access_bindings_membership_scope",
+            postgresql_nulls_not_distinct=True,
+        ),
     )
-    op.create_index(op.f("ix_team_members_membership_id"), "team_members", ["membership_id"], unique=False)
+    op.create_index("ix_access_bindings_membership_id", "access_bindings", ["membership_id"], unique=False)
+    op.create_index("ix_access_bindings_scope", "access_bindings", ["scope_type", "scope_id"], unique=False)
     op.create_table(
         "deployments",
         sa.Column("organization_id", sa.UUID(), nullable=False),
@@ -693,6 +767,147 @@ def upgrade() -> None:
     op.create_index("ix_deployments_organization_id", "deployments", ["organization_id"], unique=False)
     op.create_index("ix_deployments_provider_ref", "deployments", ["provider", "provider_ref"], unique=False)
     op.create_index("ix_deployments_release_id", "deployments", ["release_id"], unique=False)
+    op.create_table(
+        "devices",
+        sa.Column("organization_id", sa.UUID(), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("device_type_id", sa.UUID(), nullable=True),
+        sa.Column("device_group_id", sa.UUID(), nullable=True),
+        sa.Column("is_enabled", sa.Boolean(), server_default="true", nullable=False),
+        sa.Column("serial_number", sa.String(length=255), nullable=True),
+        sa.Column("mac_addresses", postgresql.JSONB(astext_type=sa.Text()), server_default="[]", nullable=False),
+        sa.Column("hostname", sa.String(length=255), nullable=True),
+        sa.Column("os_name", sa.String(length=255), nullable=True),
+        sa.Column("os_version", sa.String(length=255), nullable=True),
+        sa.Column("kernel_version", sa.String(length=255), nullable=True),
+        sa.Column("architecture", sa.String(length=64), nullable=True),
+        sa.Column("hardware_model", sa.String(length=255), nullable=True),
+        sa.Column("cpu_model", sa.String(length=255), nullable=True),
+        sa.Column("cpu_cores", sa.Integer(), nullable=True),
+        sa.Column("memory_mb", sa.Integer(), nullable=True),
+        sa.Column("local_ip", sa.String(length=64), nullable=True),
+        sa.Column("agent_version", sa.String(length=32), nullable=True),
+        sa.Column("labels", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
+        sa.Column("credential_hash", sa.String(length=64), nullable=True),
+        sa.Column("credential_prefix", sa.String(length=32), nullable=True),
+        sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("registered_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("reregistration_allowed_until", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("previous_credential_hash", sa.String(length=64), nullable=True),
+        sa.Column("previous_credential_until", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("registration_token_id", sa.UUID(), nullable=True),
+        sa.Column("mqtt_status", sa.String(length=16), nullable=True),
+        sa.Column("mqtt_status_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("mqtt_metrics", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("mqtt_metrics_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["device_group_id"], ["device_groups.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["device_type_id"], ["device_types.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["registration_token_id"], ["registration_tokens.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("credential_hash", name="uq_devices_credential_hash"),
+    )
+    op.create_index("ix_devices_org_device_group_id", "devices", ["organization_id", "device_group_id"], unique=False)
+    op.create_index("ix_devices_org_device_type_id", "devices", ["organization_id", "device_type_id"], unique=False)
+    op.create_index("ix_devices_org_last_seen_at", "devices", ["organization_id", "last_seen_at"], unique=False)
+    op.create_index("ix_devices_org_serial_number", "devices", ["organization_id", "serial_number"], unique=False)
+    op.create_index("ix_devices_organization_id", "devices", ["organization_id"], unique=False)
+    op.create_table(
+        "team_members",
+        sa.Column("team_id", sa.UUID(), nullable=False),
+        sa.Column("membership_id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["membership_id"], ["organization_memberships.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["team_id"], ["teams.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("team_id", "membership_id"),
+    )
+    op.create_index(op.f("ix_team_members_membership_id"), "team_members", ["membership_id"], unique=False)
+    op.create_table(
+        "application_credentials",
+        sa.Column("organization_id", sa.UUID(), nullable=False),
+        sa.Column("application_id", sa.UUID(), nullable=False),
+        sa.Column("device_id", sa.UUID(), nullable=True),
+        sa.Column("environment", sa.String(length=32), server_default="production", nullable=False),
+        sa.Column("name", sa.String(length=120), nullable=False),
+        sa.Column("token_hash", sa.String(length=64), nullable=False),
+        sa.Column("token_prefix", sa.String(length=32), nullable=False),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("rotated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("workload_key", sa.String(length=255), nullable=True),
+        sa.Column("created_by_user_id", sa.UUID(), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["application_id"], ["applications.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["device_id"], ["devices.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("token_hash", name="uq_application_credentials_token_hash"),
+    )
+    op.create_index(
+        "ix_application_credentials_application_id", "application_credentials", ["application_id"], unique=False
+    )
+    op.create_index("ix_application_credentials_device_id", "application_credentials", ["device_id"], unique=False)
+    op.create_index(
+        "ix_application_credentials_organization_id", "application_credentials", ["organization_id"], unique=False
+    )
+    op.create_table(
+        "deployment_devices",
+        sa.Column("deployment_id", sa.UUID(), nullable=False),
+        sa.Column("device_id", sa.UUID(), nullable=False),
+        sa.Column("status", sa.String(length=32), server_default="pending", nullable=False),
+        sa.Column("previous_desired_release_id", sa.UUID(), nullable=True),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("activated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("desired_revision", sa.Integer(), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["deployment_id"], ["deployments.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["device_id"], ["devices.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["previous_desired_release_id"], ["releases.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("deployment_id", "device_id", name="uq_deployment_devices_deployment_device"),
+    )
+    op.create_index("ix_deployment_devices_deployment_id", "deployment_devices", ["deployment_id"], unique=False)
+    op.create_index(
+        "ix_deployment_devices_deployment_status", "deployment_devices", ["deployment_id", "status"], unique=False
+    )
+    op.create_index("ix_deployment_devices_device_id", "deployment_devices", ["device_id"], unique=False)
+    op.create_table(
+        "device_actions",
+        sa.Column("organization_id", sa.UUID(), nullable=False),
+        sa.Column("device_id", sa.UUID(), nullable=False),
+        sa.Column("kind", sa.String(length=16), nullable=False),
+        sa.Column("state", sa.String(length=16), nullable=False),
+        sa.Column("from_version", sa.String(length=32), nullable=True),
+        sa.Column("username", sa.String(length=32), nullable=True),
+        sa.Column("module", sa.String(length=64), nullable=True),
+        sa.Column("sudo", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+        sa.Column("authorized_key", sa.Text(), nullable=True),
+        sa.Column("password_sealed", sa.LargeBinary(), nullable=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("reported_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("output", sa.Text(), nullable=True),
+        sa.Column("requested_by_user_id", sa.UUID(), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["device_id"], ["devices.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["requested_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_device_actions_device_id", "device_actions", ["device_id"], unique=False)
     op.create_table(
         "device_commands",
         sa.Column("organization_id", sa.UUID(), nullable=False),
@@ -753,9 +968,11 @@ def upgrade() -> None:
         sa.Column("os_version", sa.String(length=255), nullable=True),
         sa.Column("kernel_version", sa.String(length=255), nullable=True),
         sa.Column("architecture", sa.String(length=64), nullable=True),
+        sa.Column("hardware_model", sa.String(length=255), nullable=True),
         sa.Column("cpu_model", sa.String(length=255), nullable=True),
         sa.Column("cpu_cores", sa.Integer(), nullable=True),
         sa.Column("memory_mb", sa.Integer(), nullable=True),
+        sa.Column("local_ip", sa.String(length=64), nullable=True),
         sa.Column("labels", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False),
         sa.Column("reviewed_by_user_id", sa.UUID(), nullable=True),
@@ -850,6 +1067,50 @@ def upgrade() -> None:
     op.create_index("ix_device_software_device_id", "device_software", ["device_id"], unique=False)
     op.create_index("ix_device_software_organization_id", "device_software", ["organization_id"], unique=False)
     op.create_table(
+        "device_wifi_networks",
+        sa.Column("organization_id", sa.UUID(), nullable=False),
+        sa.Column("device_id", sa.UUID(), nullable=False),
+        sa.Column("ssid", sa.String(length=64), nullable=False),
+        sa.Column("security", sa.String(length=16), nullable=False),
+        sa.Column("hidden", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+        sa.Column("connect_now", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+        sa.Column("action", sa.String(length=16), nullable=False),
+        sa.Column("state", sa.String(length=16), nullable=False),
+        sa.Column("revision", sa.Integer(), nullable=False),
+        sa.Column("password_sealed", sa.LargeBinary(), nullable=True),
+        sa.Column("password_expires_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("reported_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("updated_by_user_id", sa.UUID(), nullable=True),
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["device_id"], ["devices.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["updated_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("device_id", "ssid", name="uq_device_wifi_networks_device_ssid"),
+    )
+    op.create_index("ix_device_wifi_networks_device_id", "device_wifi_networks", ["device_id"], unique=False)
+    op.create_table(
+        "device_wifi_status",
+        sa.Column("device_id", sa.UUID(), nullable=False),
+        sa.Column("supported", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+        sa.Column("unsupported_reason", sa.String(length=255), nullable=True),
+        sa.Column("connected_ssid", sa.String(length=64), nullable=True),
+        sa.Column("signal_percent", sa.Integer(), nullable=True),
+        sa.Column("interface", sa.String(length=32), nullable=True),
+        sa.Column("wired_connected", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+        sa.Column("saved_networks", postgresql.JSONB(astext_type=sa.Text()), server_default="[]", nullable=False),
+        sa.Column("uplink_type", sa.String(length=16), nullable=True),
+        sa.Column("uplink_interface", sa.String(length=32), nullable=True),
+        sa.Column("reported_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["device_id"], ["devices.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("device_id"),
+    )
+    op.create_table(
         "application_endpoints",
         sa.Column("organization_id", sa.UUID(), nullable=False),
         sa.Column("device_id", sa.UUID(), nullable=False),
@@ -883,37 +1144,11 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("enabled IS TRUE"),
     )
-    op.create_table(
-        "deployment_devices",
-        sa.Column("deployment_id", sa.UUID(), nullable=False),
-        sa.Column("device_id", sa.UUID(), nullable=False),
-        sa.Column("status", sa.String(length=32), server_default="pending", nullable=False),
-        sa.Column("previous_desired_release_id", sa.UUID(), nullable=True),
-        sa.Column("last_error", sa.Text(), nullable=True),
-        sa.Column("activated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("desired_revision", sa.Integer(), nullable=True),
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.ForeignKeyConstraint(["deployment_id"], ["deployments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["device_id"], ["devices.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["previous_desired_release_id"], ["releases.id"], ondelete="SET NULL"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("deployment_id", "device_id", name="uq_deployment_devices_deployment_device"),
-    )
-    op.create_index("ix_deployment_devices_deployment_id", "deployment_devices", ["deployment_id"], unique=False)
-    op.create_index(
-        "ix_deployment_devices_deployment_status", "deployment_devices", ["deployment_id", "status"], unique=False
-    )
-    op.create_index("ix_deployment_devices_device_id", "deployment_devices", ["device_id"], unique=False)
+
     _seed_authorization_catalog()
 
 
 def downgrade() -> None:
-    op.drop_index("ix_deployment_devices_device_id", table_name="deployment_devices")
-    op.drop_index("ix_deployment_devices_deployment_status", table_name="deployment_devices")
-    op.drop_index("ix_deployment_devices_deployment_id", table_name="deployment_devices")
-    op.drop_table("deployment_devices")
     op.drop_index(
         "uq_application_endpoints_device_port_enabled",
         table_name="application_endpoints",
@@ -922,6 +1157,9 @@ def downgrade() -> None:
     op.drop_index("ix_application_endpoints_organization_id", table_name="application_endpoints")
     op.drop_index("ix_application_endpoints_device_id", table_name="application_endpoints")
     op.drop_table("application_endpoints")
+    op.drop_table("device_wifi_status")
+    op.drop_index("ix_device_wifi_networks_device_id", table_name="device_wifi_networks")
+    op.drop_table("device_wifi_networks")
     op.drop_index("ix_device_software_organization_id", table_name="device_software")
     op.drop_index("ix_device_software_device_id", table_name="device_software")
     op.drop_index("ix_device_software_desired_release_id", table_name="device_software")
@@ -939,43 +1177,57 @@ def downgrade() -> None:
     op.drop_index("ix_device_commands_organization_id", table_name="device_commands")
     op.drop_index("ix_device_commands_device_id", table_name="device_commands")
     op.drop_table("device_commands")
-    op.drop_index("ix_deployments_release_id", table_name="deployments")
-    op.drop_index("ix_deployments_provider_ref", table_name="deployments")
-    op.drop_index("ix_deployments_organization_id", table_name="deployments")
-    op.drop_index("ix_deployments_org_status", table_name="deployments")
-    op.drop_table("deployments")
+    op.drop_index("ix_device_actions_device_id", table_name="device_actions")
+    op.drop_table("device_actions")
+    op.drop_index("ix_deployment_devices_device_id", table_name="deployment_devices")
+    op.drop_index("ix_deployment_devices_deployment_status", table_name="deployment_devices")
+    op.drop_index("ix_deployment_devices_deployment_id", table_name="deployment_devices")
+    op.drop_table("deployment_devices")
+    op.drop_index("ix_application_credentials_organization_id", table_name="application_credentials")
+    op.drop_index("ix_application_credentials_device_id", table_name="application_credentials")
+    op.drop_index("ix_application_credentials_application_id", table_name="application_credentials")
+    op.drop_table("application_credentials")
     op.drop_index(op.f("ix_team_members_membership_id"), table_name="team_members")
     op.drop_table("team_members")
-    op.drop_index("uq_releases_org_kind_name_version", table_name="releases")
-    op.drop_index("ix_releases_organization_id", table_name="releases")
-    op.drop_index("ix_releases_org_kind", table_name="releases")
-    op.drop_index("ix_releases_artifact_id", table_name="releases")
-    op.drop_table("releases")
     op.drop_index("ix_devices_organization_id", table_name="devices")
     op.drop_index("ix_devices_org_serial_number", table_name="devices")
     op.drop_index("ix_devices_org_last_seen_at", table_name="devices")
     op.drop_index("ix_devices_org_device_type_id", table_name="devices")
     op.drop_index("ix_devices_org_device_group_id", table_name="devices")
     op.drop_table("devices")
+    op.drop_index("ix_deployments_release_id", table_name="deployments")
+    op.drop_index("ix_deployments_provider_ref", table_name="deployments")
+    op.drop_index("ix_deployments_organization_id", table_name="deployments")
+    op.drop_index("ix_deployments_org_status", table_name="deployments")
+    op.drop_table("deployments")
     op.drop_index("ix_access_bindings_scope", table_name="access_bindings")
     op.drop_index("ix_access_bindings_membership_id", table_name="access_bindings")
     op.drop_table("access_bindings")
     op.drop_table("role_permissions")
+    op.drop_index("uq_releases_org_kind_name_version", table_name="releases")
+    op.drop_index("ix_releases_organization_id", table_name="releases")
+    op.drop_index("ix_releases_org_kind", table_name="releases")
+    op.drop_index("ix_releases_artifact_id", table_name="releases")
+    op.drop_table("releases")
     op.drop_index("ix_registration_tokens_organization_id", table_name="registration_tokens")
     op.drop_table("registration_tokens")
     op.drop_index(op.f("ix_organization_memberships_user_id"), table_name="organization_memberships")
     op.drop_index(op.f("ix_organization_memberships_role_id"), table_name="organization_memberships")
     op.drop_index(op.f("ix_organization_memberships_organization_id"), table_name="organization_memberships")
     op.drop_table("organization_memberships")
-    op.drop_index("uq_artifacts_org_type_name_version", table_name="artifacts", postgresql_nulls_not_distinct=True)
-    op.drop_index("ix_artifacts_organization_id", table_name="artifacts")
-    op.drop_index("ix_artifacts_org_type", table_name="artifacts")
-    op.drop_index("ix_artifacts_org_device_type_id", table_name="artifacts")
-    op.drop_table("artifacts")
+    op.drop_index("ix_artifact_device_types_device_type_id", table_name="artifact_device_types")
+    op.drop_table("artifact_device_types")
     op.drop_index(op.f("ix_teams_organization_id"), table_name="teams")
     op.drop_table("teams")
     op.drop_index("ix_roles_organization_id", table_name="roles")
     op.drop_table("roles")
+    op.drop_index(
+        "uq_organization_signing_keys_active",
+        table_name="organization_signing_keys",
+        postgresql_where=sa.text("retired_at IS NULL"),
+    )
+    op.drop_index(op.f("ix_organization_signing_keys_organization_id"), table_name="organization_signing_keys")
+    op.drop_table("organization_signing_keys")
     op.drop_index("ix_organization_previous_slugs_organization_id", table_name="organization_previous_slugs")
     op.drop_table("organization_previous_slugs")
     op.drop_index("ix_enrollment_api_keys_organization_id", table_name="enrollment_api_keys")
@@ -984,11 +1236,20 @@ def downgrade() -> None:
     op.drop_table("device_types")
     op.drop_index("ix_device_groups_organization_id", table_name="device_groups")
     op.drop_table("device_groups")
+    op.drop_index("ix_audit_events_resource", table_name="audit_events")
     op.drop_index("ix_audit_events_organization_id_created_at", table_name="audit_events")
     op.drop_index("ix_audit_events_actor_user_id", table_name="audit_events")
     op.drop_table("audit_events")
+    op.drop_index("ix_artifacts_organization_id", table_name="artifacts")
+    op.drop_index("ix_artifacts_org_type_name_version", table_name="artifacts")
+    op.drop_index("ix_artifacts_org_type", table_name="artifacts")
+    op.drop_table("artifacts")
+    op.drop_index("ix_applications_organization_id", table_name="applications")
+    op.drop_table("applications")
     op.drop_index("ix_organizations_slug", table_name="organizations")
     op.drop_table("organizations")
     op.drop_index("ix_users_email", table_name="users")
     op.drop_table("users")
+    op.drop_index("ix_platform_event_outbox_created_at", table_name="platform_event_outbox")
+    op.drop_table("platform_event_outbox")
     op.drop_table("permissions")

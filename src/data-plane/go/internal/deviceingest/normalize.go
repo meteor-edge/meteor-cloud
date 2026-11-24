@@ -34,6 +34,11 @@ const (
 	StreamMetrics = "meteor.device.metrics"
 	StreamStatus  = "meteor.device.status"
 	StreamEvents  = "meteor.device.events"
+	// StreamLogs holds the device's system warnings: events of type "log" on the
+	// events topic, kept apart so they cannot crowd out app lifecycle events.
+	StreamLogs = "meteor.device.logs"
+	// LogEventType is the event type the agent gives a journal entry.
+	LogEventType = "log"
 )
 
 // Subject prefixes (schema version 1).
@@ -181,9 +186,17 @@ func Normalize(deviceID, orgID string, ch Channel, payload []byte, now time.Time
 		}
 	}
 
-	data, err := json.Marshal(fields)
-	if err != nil {
+	// Do not HTML-escape: json.Marshal would turn each '<' into \u003c and inflate
+	// a still-valid payload past MaxPayloadBytes before CanonicalData sees it.
+	var rawBuf bytes.Buffer
+	enc := json.NewEncoder(&rawBuf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(fields); err != nil {
 		return nil, &envelope.Rejection{Code: ReasonInvalidPayload, Message: "payload could not be re-encoded"}
+	}
+	data, rej := envelope.CanonicalData(bytes.TrimSpace(rawBuf.Bytes()), lim.MaxPayloadBytes)
+	if rej != nil {
+		return nil, rej
 	}
 	ev := &envelope.Event{
 		ID:             id,
@@ -204,6 +217,9 @@ func Normalize(deviceID, orgID string, ch Channel, payload []byte, now time.Time
 		var t string
 		if raw, ok := fields["type"]; ok && json.Unmarshal(raw, &t) == nil && t != "" && len(t) <= 128 {
 			ev.Type = t
+		}
+		if ev.Type == LogEventType {
+			ev.Stream = StreamLogs
 		}
 	}
 	return &Result{Event: ev, TimeReplaced: replaced}, nil

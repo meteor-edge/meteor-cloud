@@ -40,9 +40,11 @@ func subjectRoot(subject string) string {
 	return "other"
 }
 
-// Publish stores ev on subject. The event id is the Nats-Msg-Id, so a publish
-// retried within the stream's duplicate window is stored once. It returns
-// duplicate=true when the stream already had the id.
+// Publish stores ev on subject. The JetStream Nats-Msg-Id is scoped by
+// organization and device as well as event id, so two tenants cannot collide on
+// a short device-chosen id inside the duplicate window. ev.ID itself is unchanged
+// as the stored event id. A publish retried within the window is stored once.
+// It returns duplicate=true when the stream already had that scoped id.
 func (p *Publisher) Publish(ctx context.Context, subject string, ev *envelope.Event) (duplicate bool, err error) {
 	body, err := json.Marshal(ev)
 	if err != nil {
@@ -52,7 +54,8 @@ func (p *Publisher) Publish(ctx context.Context, subject string, ev *envelope.Ev
 	msg.Header.Set(HeaderOrganization, ev.OrganizationID)
 	msg.Header.Set(HeaderDevice, ev.DeviceID)
 	msg.Header.Set(HeaderSchemaVersion, "1")
-	opts := []jetstream.PublishOpt{jetstream.WithMsgID(ev.ID)}
+	msgID := ev.OrganizationID + ":" + ev.DeviceID + ":" + ev.ID
+	opts := []jetstream.PublishOpt{jetstream.WithMsgID(msgID)}
 	if p.Stream != "" {
 		opts = append(opts, jetstream.WithExpectStream(p.Stream))
 	}

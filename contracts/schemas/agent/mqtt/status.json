@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "devices/{device_id}/status (device to server)",
+  "description": "QoS 1, retained. 'online' after every connect (and once more about 2 s later); last will and clean stop publish {status: offline}.",
+  "type": "object",
+  "required": [
+    "status"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "online",
+        "offline"
+      ]
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "agent_version": {
+      "type": "string"
+    },
+    "uptime_seconds": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

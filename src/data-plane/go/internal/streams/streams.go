@@ -20,7 +20,7 @@ const (
 var ErrInvalid = errors.New("invalid stream")
 
 func validSegment(s string) bool {
-	if len(s) == 0 || len(s) > 64 {
+	if len(s) == 0 || len(s) > 63 {
 		return false
 	}
 	for i := 0; i < len(s); i++ {

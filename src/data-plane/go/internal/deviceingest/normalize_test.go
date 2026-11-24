@@ -1,6 +1,7 @@
 package deviceingest
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -112,6 +113,7 @@ func TestNormalizeRejectsInvalidMessages(t *testing.T) {
 		{"array", `[1,2]`, ReasonInvalidPayload},
 		{"truncated", `{"cpu":`, ReasonInvalidPayload},
 		{"empty", ``, ReasonInvalidPayload},
+		{"nul escape", `{"note":"a\u0000b"}`, ReasonInvalidPayload},
 		{"too large", `{"x":"` + strings.Repeat("a", 100) + `"}`, ReasonTooLarge},
 		{"bad id", `{"event_id":"has space"}`, ReasonInvalidID},
 		{"non-string id", `{"event_id":5}`, ReasonInvalidID},
@@ -151,5 +153,34 @@ func TestPayloadIdentityIsIgnored(t *testing.T) {
 	}
 	if s := Subject(ChannelMetrics, res.Event.OrganizationID, res.Event.DeviceID); !strings.Contains(s, orgA) || strings.Contains(s, orgB) {
 		t.Fatalf("subject %s", s)
+	}
+}
+
+func TestNormalizeKeepsHTMLSensitiveCharsUnderLimit(t *testing.T) {
+	// json.Marshal HTML-escapes <>& to \u003c etc.; that must not inflate a
+	// below-limit payload into a CanonicalData rejection.
+	lim := envelope.DefaultLimits()
+	lim.MaxPayloadBytes = 256
+	payload := `{"note":"a < b & c > d","tags":["x<y","p&q"]}`
+	if len(payload) > lim.MaxPayloadBytes {
+		t.Fatalf("fixture larger than limit: %d", len(payload))
+	}
+	res, rej := Normalize(devA, orgA, ChannelMetrics, []byte(payload), now, lim)
+	if rej != nil {
+		t.Fatalf("rejected: %+v", rej)
+	}
+	if !bytes.Contains(res.Event.Data, []byte(`<`)) || !bytes.Contains(res.Event.Data, []byte(`&`)) {
+		t.Fatalf("expected literal < and & in data, got %s", res.Event.Data)
+	}
+}
+
+func TestNormalizeEventsAndLogs(t *testing.T) {
+	app, rej := Normalize(devA, orgA, ChannelEvents, []byte(`{"type":"app.exited","app":"web","exit_code":137}`), now, envelope.DefaultLimits())
+	if rej != nil || app.Event.Stream != StreamEvents || app.Event.Type != "app.exited" || app.Event.Kind != envelope.KindEvent {
+		t.Fatalf("app event: %+v %v", app, rej)
+	}
+	log, rej := Normalize(devA, orgA, ChannelEvents, []byte(`{"type":"log","message":"disk failing","priority":3}`), now, envelope.DefaultLimits())
+	if rej != nil || log.Event.Stream != StreamLogs || log.Event.Type != LogEventType {
+		t.Fatalf("log event: %+v %v", log, rej)
 	}
 }

@@ -1,0 +1,6 @@
+# Test-only (not shipped). jsonschema and its dependencies are MIT; see docs/licensing.md.
+pytest>=8.3.0
+jsonschema>=4.23.0
+# Makes FormatChecker enforce format "date-time" (jsonschema skips it without this). MIT.
+rfc3339-validator>=0.1.4
+paho-mqtt>=2.1.0

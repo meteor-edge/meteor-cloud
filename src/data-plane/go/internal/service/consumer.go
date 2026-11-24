@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -30,9 +31,13 @@ func RunConsumer(log *slog.Logger, opsAddr string, connCfg natsjs.ConnConfig, co
 	if err != nil {
 		return err
 	}
+	var consumerReady atomic.Bool
 	ops := Ops(opsAddr, reg, func(context.Context) map[string]error {
 		if !nc.IsConnected() {
 			return map[string]error{"nats": errors.New("not connected")}
+		}
+		if !consumerReady.Load() {
+			return map[string]error{"nats": errors.New("consumer not bound")}
 		}
 		return map[string]error{"nats": nil}
 	})
@@ -45,6 +50,7 @@ func RunConsumer(log *slog.Logger, opsAddr string, connCfg natsjs.ConnConfig, co
 	}); err != nil {
 		return err
 	}
+	consumerReady.Store(true)
 	go natsjs.WatchConsumer(ctx, cons, consCfg.Durable, 10*time.Second, nm)
 	log.Info("consuming", "stream", consCfg.Stream, "durable", consCfg.Durable, "filter_subjects", consCfg.FilterSubjects, "ops_addr", opsAddr)
 	done := make(chan struct{})

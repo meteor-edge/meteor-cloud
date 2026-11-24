@@ -20,12 +20,12 @@ not belong in the telemetry ingest path.
 ## Requirements
 
 - WireGuard connectivity and `sshd` on the device, as for the Terminal.
-- The `meteorcli-logs` helper. `sudo ./installcli.sh` (or the release installer)
+- The `meteorcli-logs` wrapper. The installer (`install-meteorcli.sh`, with `sudo`)
   installs it root-owned at `/usr/local/libexec/meteorcli-logs`, plus
-  `/etc/sudoers.d/meteorcli-logs`: passwordless sudo for that one file. The
-  device user does not need to be in the `adm`, `systemd-journal` or `docker`
-  groups (`docker` is root-equivalent). Re-run the installer after upgrading
-  from an agent without it.
+  `/etc/sudoers.d/meteorcli-logs`: passwordless sudo for that one file, for members
+  of the `meteorcli` group (the installer adds the installing user). It runs
+  `meteorcli logs`. The device user does not need to be in the `adm`,
+  `systemd-journal` or `docker` groups (`docker` is root-equivalent).
 - The `device.logs` permission. Owner, admin, operator and developer roles have
   it; viewers do not. It is separate from `device.shell` (owner/admin only), so
   people can read logs without getting a shell.
@@ -131,7 +131,7 @@ lines (`error: …`, `[end of log]`).
 
 | Symptom | Fix |
 | --- | --- |
-| `log_sources_unavailable` ("did not list its logs") | Re-run `sudo ./installcli.sh`, check `meteorcli logs` on the device |
-| `sudo: a password is required` in the log view | The SSH user is not the user `installcli.sh` set up the sudo rule for; re-run it with `sudo` as that user |
+| `log_sources_unavailable` ("did not list its logs") | Re-run the installer with `sudo`, check `meteorcli logs` on the device |
+| `sudo: a password is required` in the log view | The SSH user is not in the `meteorcli` group: `sudo usermod -aG meteorcli <user>`, or re-run the installer with `--user <user>` |
 | A container or unit is missing | Click **Refresh** on the source list; it is listed as soon as it exists |
 | `source not found` in the log view | The source was removed or renamed on the device; refresh the list and pick it again |

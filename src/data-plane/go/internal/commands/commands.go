@@ -177,6 +177,14 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*storage.Comma
 // failure the command stays PENDING and the sweeper retries.
 func (s *Service) dispatch(ctx context.Context, cmd *storage.Command) *storage.Command {
 	now := s.now().UTC()
+	// The sweep or a slow write may have taken a while: never deliver an expired command.
+	if !cmd.ExpiresAt.IsZero() && !now.Before(cmd.ExpiresAt) {
+		s.timeout(ctx, cmd, []string{storage.StatePending, storage.StateDispatched}, "expired before it was received")
+		if updated, err := s.store.GetCommand(ctx, cmd.OrganizationID, cmd.ID); err == nil && updated != nil {
+			return updated
+		}
+		return cmd
+	}
 	if err := s.bus.PublishCommand(ctx, cmd); err != nil {
 		s.metrics.FailedDeliveries.WithLabelValues("command").Inc()
 		s.log.Warn("command dispatch failed; will retry", "command_id", cmd.ID, "error", err.Error())

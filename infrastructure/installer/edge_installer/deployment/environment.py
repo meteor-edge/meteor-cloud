@@ -53,6 +53,10 @@ def build_ansible_extra_vars(
         "vpn_server_address": config.services.vpn.server_address,
         **_mqtt_extra_vars(config),
     }
+    # Staging / throwaway MQTT live suites register many devices from one address.
+    if config.installation.environment == "staging":
+        extra["registration_rate_limit_requests"] = "1000"
+        extra["enrollment_request_rate_limit_requests"] = "1000"
     # Ansible derives CONNECTIVITY_PROVIDER and the device endpoint from the gateway
     # host (generating its key when none is given); extra-vars would override that.
     vpn_key = os.environ.get("EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY", "")
@@ -99,6 +103,7 @@ def secret_env_vars() -> dict[str, str]:
         "EDGE_PLATFORM_REDIS_PASSWORD",
         "EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD",
         "EDGE_PLATFORM_MQTT_INTERNAL_TOKEN",
+        "EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN",
         "APP_SECRET_KEY",
         "EDGE_PLATFORM_ALERT_WEBHOOK_URL",
         "EDGE_PLATFORM_ALERT_HEARTBEAT_URL",

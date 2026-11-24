@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.deployments.snapshot_schemas import WorkloadSnapshot
 from app.deployments.software_models import SoftwareHealth, SoftwareSyncStatus
 from app.releases.kinds import ReleaseKind
 
@@ -39,9 +40,18 @@ class DeviceSoftwareResponse(BaseModel):
     progress_percent: int
     attempt_count: int
     last_error: str | None
+    stopped_by_user: bool = False
     reported_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class DeviceSoftwareDetailResponse(DeviceSoftwareResponse):
+    snapshot: WorkloadSnapshot | None
+    snapshot_at: datetime | None
+    # Workload actions this device's agent runs (empty: an agent without them).
+    supported_actions: list[str]
+    can_manage: bool
 
 
 class DesiredSoftwareItem(BaseModel):
@@ -55,6 +65,11 @@ class DesiredSoftwareItem(BaseModel):
     artifact_id: uuid.UUID | None
     revision: int
     spec: dict[str, Any]
+    # Signed manifest (docs/fleet/signed-updates.md): the device verifies ``signature``
+    # with its pinned organization key ``key_id`` before downloading or applying.
+    artifact_sha256: str | None = None
+    key_id: str | None = None
+    signature: str | None = None
 
 
 class SoftwareReportItem(BaseModel):
@@ -67,6 +82,8 @@ class SoftwareReportItem(BaseModel):
     sync_status: SoftwareSyncStatus | None = None
     progress_percent: int | None = Field(default=None, ge=0, le=100)
     last_error: str | None = Field(default=None, max_length=2000)
+    # Added in v1 (additive): the user stopped it from the console.
+    stopped_by_user: bool = False
 
     @field_validator("installed_version")
     @classmethod

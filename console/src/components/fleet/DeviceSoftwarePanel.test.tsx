@@ -24,7 +24,9 @@ function renderPanel(props: { deviceOnline?: boolean; onViewLogs?: () => void } 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <DeviceSoftwarePanel token="t" organizationId="org-1" deviceId="dev-1" {...props} />
+      <MemoryRouter>
+        <DeviceSoftwarePanel token="t" organizationId="org-1" deviceId="dev-1" {...props} />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }

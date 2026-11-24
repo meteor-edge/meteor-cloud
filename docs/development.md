@@ -31,7 +31,7 @@ For a product walkthrough (console + first device), start with [Getting started]
 ```bash
 make dev                 # all Compose files (shared network meteorcloud)
 make dev-control-plane   # bundled infra (postgres/redis/minio profiles) + control-plane API
-make dev-data-plane      # EMQX + data-plane MQTT gateway
+make dev-data-plane      # MQTT broker + data-plane MQTT forwarder (Go)
 make dev-console         # operator console
 ```
 
@@ -46,7 +46,6 @@ Together this starts:
 | OpenAPI | http://localhost:8000/docs |
 | PostgreSQL | localhost:5432 |
 | MQTT TLS | mqtts://localhost:8883 |
-| EMQX dashboard | http://localhost:18083 (development only) |
 | Redis | internal Docker network |
 
 Compose files:
@@ -54,7 +53,7 @@ Compose files:
 | File | Services |
 | --- | --- |
 | `deploy/compose/control-plane.yml` | `backend`; profiles `postgres`, `redis`, `minio` |
-| `deploy/compose/data-plane.yml` | profiles `mqtt` (`data-plane`), `emqx`, `data-api` (Go application data plane) |
+| `deploy/compose/data-plane.yml` | profiles `mqtt` (`data-plane`), one of `mosquitto`, `emqx`, `vernemq`, and `data-api` (Go application data plane) |
 | `deploy/compose/console.yml` | `console` (Vite dev server) |
 | `deploy/compose/docker-compose.yml` | `include:` of those three |
 | `deploy/compose/docker-compose.dev.yml` | Source mounts and hot reload (`make dev`). Console runs `npm install` on start so new packages (for example `@xterm/*`) land in the container `node_modules` volume |
@@ -109,10 +108,10 @@ uvicorn app.main:app --reload
 ### Data plane
 
 ```bash
-cd src/data-plane
+cd src/data-plane/go
 export CONTROL_PLANE_URL=http://127.0.0.1:8000
 export MQTT_BROKER_HOST=127.0.0.1
-uvicorn data_plane.main:app --host 0.0.0.0 --port 8081 --reload
+go run ./cmd/mqtt-forwarder        # the data-plane service on :8081
 ```
 
 ### Console
@@ -136,10 +135,10 @@ edge-installer validate --config config/examples/installation.yaml
 ```bash
 make test
 make backend-test
-make data-plane-test
 make data-api-test       # Go data plane: go vet + go test -race (set DATAPLANE_TEST_DATABASE_URL for the PostgreSQL suite)
 make sdk-test            # Python SDK against the real data plane binary (needs Go)
-make agent-test
+make agent-test          # Go meteorcli: gofmt, vet, go test -race (same as agent-go-test)
+make agent-contract-test # Go meteorcli against contracts/device-agent-v1.md (needs Go, and Docker for Mosquitto)
 make console-test
 make check-plane-imports
 ```
@@ -210,7 +209,7 @@ Copy `deploy/compose/.env.example` to `deploy/compose/.env` and adjust as needed
 | `DATABASE_PROVIDER` | Persistence adapter (`postgresql` only) |
 | `CACHE_PROVIDER` | Rate-limit adapter: `redis` (shared) or `memory` (per process) |
 | `OBJECT_STORAGE_PROVIDER` | Artifacts: `s3` (any S3-compatible API) or `filesystem` (`OBJECT_STORAGE_PATH`) |
-| `MQTT_PROVIDER` | MQTT adapter (`emqx` only) |
+| `MQTT_PROVIDER` | Broker adapter: `mosquitto` (default), `emqx`, `vernemq` |
 | `DEPLOYMENT_PROVIDER` | Who *executes* Deploys: `native` (default), `none`, or `mender` (stub until adapter exists). Releases/UI stay in MeteorCloud |
 | `OTA_PROVIDER` | Deprecated; prefer `DEPLOYMENT_PROVIDER` |
 | `DEPLOY_TICK_INTERVAL_SECONDS` | Seconds between background Deploy sweeps (batched delays, phased soak, pending timeouts). Default `60`; `0` disables |

@@ -23,10 +23,10 @@ JetStream is internal messaging between data-plane services. **Devices never con
                  rule-processor (Go)                 clickhouse-writer (Go)
                  Handler (rule engine)               batched, idempotent inserts
                          ▼                                   ▼
-                  alerts / actions                  ClickHouse `events` table
+                  alerts / actions                  ClickHouse `events` table (+ `device_metrics` view)
 ```
 
-The existing path from the Python data plane to the control plane (`POST /internal/mqtt/ingest`, last known status and metrics shown in the console) is unchanged; both subscribe to the same device topics.
+The existing path from the MQTT forwarder to the control plane (`POST /internal/mqtt/ingest`, last known status and metrics shown in the console) is unchanged; both subscribe to the same device topics.
 
 Each box is its own process and can be scaled on its own. All three ship in the `data-api` image (`src/data-plane/go`) with different entrypoints.
 
@@ -146,7 +146,7 @@ type Handler interface {
 | Handler error | Nak with backoff; `term` for permanent errors or after `MAX_DELIVER` attempts |
 | Undecodable message | Terminated (never decodes), logged with its subject |
 | Crash mid-batch | Unacked messages are redelivered after `ACK_WAIT` |
-| Duplicates | Same id within the duplicate window: dropped by the stream. Later redeliveries: the writer skips ids already stored (per organization); the rule handler is idempotent on the id |
+| Duplicates | Same scoped id within the JetStream duplicate window: dropped by the stream. Later sequential redeliveries: the writer skips ids already stored (per organization). Concurrent writer replicas can still both insert the same `(organization_id, event_id)` (`MergeTree` has no unique key; see [data-plane README](README.md#guarantees-in-short)). The rule handler is idempotent on the id |
 | Shutdown (SIGTERM) | Ingestion unsubscribes, finishes in-flight messages (`DEVICE_INGEST_DRAIN_TIMEOUT`, 20s) and leaves the rest unacknowledged for redelivery. Consumers finish and ack the batch in progress; the writer flushes its buffer. Then the NATS connection is drained |
 
 Device telemetry is MQTT QoS 1 between the agent and the broker, and MQTT shared subscriptions are not durable storage. The durability boundary is the JetStream publish acknowledgement: everything before it relies on MQTT redelivery, everything after it on JetStream.
@@ -184,9 +184,19 @@ All services expose Prometheus metrics on their ops port (scraped by the bundled
 | `meteorcloud_clickhouse_writer_insert_failures_total`, `_rows_total{result}`, `_insert_duration_seconds` | Writer |
 | `meteorcloud_rule_processor_events_total{kind}` | Default rule handler |
 
+## Deploy
+
+| Path | How |
+| --- | --- |
+| Compose (dev / VM) | Add `nats` and `clickhouse` to `COMPOSE_PROFILES`; set `NATS_*_PASSWORD` and `CLICKHOUSE_PASSWORD` (see `.env.example`) |
+| Ansible (EC2 / on-prem) | `nats_enabled: true`, `mqtt_enabled: true`, `dataplane_storage: clickhouse`, plus `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN`, `EDGE_PLATFORM_NATS_*_PASSWORD`, and `EDGE_PLATFORM_CLICKHOUSE_PASSWORD` |
+| Helm (Kubernetes) | `nats.enabled: true`, `mqtt.enabled: true`, `clickhouse.enabled: true` (or `clickhouse.external.url`); passwords generated in the chart Secret |
+
 ## Local development
 
-Add `nats` (and `clickhouse`) to `COMPOSE_PROFILES` in `deploy/compose/.env` (`.env.example` has development passwords), then `make dev`, or:
+Add `nats` (and `clickhouse`) to `COMPOSE_PROFILES` in `deploy/compose/.env` (`.env.example` has development passwords), then `make dev`.
+
+To start only the device-event services on top of an **already running** stack (MQTT broker + control plane + Postgres must already be up — this command does not start them):
 
 ```bash
 cd deploy/compose

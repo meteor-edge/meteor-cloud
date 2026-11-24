@@ -7,9 +7,41 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestFileSourceVersionTracksContentNotLength(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "devices.json")
+	orgA := "11111111-1111-1111-1111-111111111111"
+	orgB := "22222222-2222-2222-2222-222222222222"
+	write := func(org string) {
+		raw, _ := json.Marshal(Snapshot{Devices: []Entry{{ID: "d1", OrganizationID: org}}})
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src := &FileSource{Path: path}
+	write(orgA)
+	a, err := src.Fetch(context.Background(), "")
+	if err != nil || a == nil || a.Version == "" {
+		t.Fatalf("first: %+v %v", a, err)
+	}
+	write(orgB) // same JSON length, different org UUID
+	b, err := src.Fetch(context.Background(), a.Version)
+	if err != nil || b == nil {
+		t.Fatalf("second should change: %v %v", b, err)
+	}
+	if b.Version == a.Version {
+		t.Fatalf("version stuck on length: %q", a.Version)
+	}
+	if b.Devices[0].OrganizationID != orgB {
+		t.Fatalf("org: %q", b.Devices[0].OrganizationID)
+	}
+}
 
 func TestHTTPSyncAndFailClosed(t *testing.T) {
 	calls := 0

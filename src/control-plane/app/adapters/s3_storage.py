@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from typing import BinaryIO
+from urllib.parse import quote
 
 import boto3
 from botocore.client import Config
@@ -41,6 +42,21 @@ class S3ObjectStorage:
                 response_checksum_validation="when_required",
             ),
         )
+        # Presigned URLs carry the host they were signed for, so devices need one signed for
+        # an endpoint they can reach. With a private endpoint and no public one, stream instead.
+        public_endpoint = settings.object_storage_public_endpoint_url.strip()
+        self._presign_client = None
+        if public_endpoint:
+            self._presign_client = boto3.client(
+                "s3",
+                endpoint_url=public_endpoint,
+                region_name=settings.object_storage_region or None,
+                aws_access_key_id=settings.object_storage_access_key_id or None,
+                aws_secret_access_key=settings.object_storage_secret_access_key or None,
+                config=Config(s3={"addressing_style": "path"}, signature_version="s3v4"),
+            )
+        elif not settings.object_storage_endpoint_url:
+            self._presign_client = self._client  # AWS S3: the default endpoint is public
         self._auto_create_bucket = settings.object_storage_auto_create_bucket
         self._bucket_ready = False
         self._lock = threading.Lock()
@@ -86,6 +102,15 @@ class S3ObjectStorage:
             content_type=response.get("ContentType"),
             chunks=_chunks(),
         )
+
+    def presigned_get_url(self, key: str, *, expires_in: int, file_name: str | None = None) -> str | None:
+        """Sign a GET for ``key`` locally (no request to storage), or None when devices can't reach it."""
+        if self._presign_client is None:
+            return None
+        params: dict = {"Bucket": self._bucket, "Key": key}
+        if file_name:
+            params["ResponseContentDisposition"] = f"attachment; filename*=UTF-8''{quote(file_name)}"
+        return self._presign_client.generate_presigned_url("get_object", Params=params, ExpiresIn=expires_in)
 
     def delete(self, key: str) -> None:
         """Delete the object, tolerating a missing key; propagate storage errors."""

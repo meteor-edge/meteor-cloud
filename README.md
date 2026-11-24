@@ -2,64 +2,62 @@
 
 **Self-hosted fleet platform for Linux devices.**
 
-MeteorCloud is the control plane, operator console, MQTT data plane, and device agent for managing edge fleets you own. Enroll devices, organize them by type and group, ship artifacts, run commands over MQTT, and keep operator access multi-tenant and auditable — without sending device data to a third-party SaaS.
+Enroll machines you own, group them, ship software, watch telemetry, and send commands. You run the cloud; device data stays on your infrastructure.
 
 Website: [meteor-edge.com](https://meteor-edge.com)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-## Why MeteorCloud
+## What happens
 
-| | |
-| --- | --- |
-| **You host it** | Docker Compose on a VM/EC2, or Helm on a cluster you already run |
-| **Multi-tenant** | Organizations, memberships, RBAC, and optional device-group scopes |
-| **Device lifecycle** | Registration tokens, device-initiated enrollment, heartbeat, inventory |
-| **MQTT-ready** | TLS broker (EMQX), per-device credentials, ACL, ingest, live telemetry |
-| **Artifacts** | OS images, firmware, compose bundles — metadata in Postgres, blobs in filesystem or S3 |
-| **Replaceable infra** | PostgreSQL required; Redis, MQTT, and object storage selected by config |
-
-## Architecture
-
-MeteorCloud is split into three planes. The **console** is the operator UI; it talks only to the control plane.
-
-| Plane | Path | Role |
-| --- | --- | --- |
-| **Device plane** | `src/device-plane/agent/` | `meteorcli` on the device: enroll, heartbeat, inventory, MQTT client |
-| **Data plane** | `src/data-plane/` | Platform MQTT gateway: subscribe/publish via EMQX, forward ingest to the control plane |
-| **Control plane** | `src/control-plane/` | Identity, tenancy, device registry, artifacts, MQTT policy, operator API, persistence |
-
-### Schema
+A device runs [`meteorcli`](docs/meteorcli.md). Operators use the console, which talks only to the control-plane API.
 
 ```text
-┌─────────────────┐     ┌─────────────────┐     ┌──────────────────────┐
-│  Device plane   │     │   Data plane    │     │   Control plane      │
-│  (meteorcli)    │     │  (MQTT gateway) │     │  (API + Postgres)    │
-└────────┬────────┘     └────────┬────────┘     └──────────┬───────────┘
-         │                       │                         │
-         │  HTTPS enroll /       │                         │
-         │  heartbeat / auth     ├────────────────────────►│
-         │────────────────────────────────────────────────►│
-         │                       │                         │
-         │  MQTT telemetry /     │  HTTP ingest            │
-         │  status ──► EMQX ────►│────────────────────────►│
-         │                       │                         │
-         │◄── MQTT commands ◄────│◄── HTTP publish ────────│
-         │         EMQX          │                         │
+meteorcli
+  │  HTTPS   enroll, heartbeat, inventory
+  ├──────────────────────────────────────────► control plane ──► PostgreSQL
+  │                                                    ▲
+  │  MQTT    metrics, status, events, commands         │ live view and commands
+  └──────────► broker ──► mqtt-forwarder ──────────────┘
+                  │
+                  └──► device-ingest ──► NATS JetStream
+                                            ├─► rule-processor
+                                            └─► clickhouse-writer ──► ClickHouse
 ```
 
-**Device → cloud (typical path)**
+1. **Enroll.** The agent registers over HTTPS, then heartbeats and reports inventory. Organizations, roles, and the audit log live in the control plane.
+2. **Talk over MQTT.** The broker (Mosquitto by default) carries device metrics, status, events, and commands. Each device gets its own credentials and an ACL.
+3. **Keep the console live.** `mqtt-forwarder` forwards those messages to the control plane and publishes commands back to the device.
+4. **Fan out on NATS.** `device-ingest` binds each message to its device and organization and publishes it to **NATS JetStream**. `rule-processor` and `clickhouse-writer` consume that stream on their own: rules and alerts, and history in ClickHouse.
+5. **Ship software.** Artifacts (OS images, firmware, compose bundles) keep metadata in PostgreSQL and bytes on a filesystem volume or any S3-compatible store.
+6. **Let applications in.** The data API serves publish, subscribe, query, and commands over HTTPS and WebSocket. The [Python SDK](sdk/python/README.md) is the client. Applications do not connect to the broker.
 
-1. Agent enrolls and authenticates over **HTTPS** to the control plane.
-2. Agent publishes telemetry and status over **MQTT** to EMQX.
-3. Data plane receives those messages and **HTTP-forwards** them to the control plane for ingest and storage.
-4. Operators issue commands from the console → control plane → data plane → MQTT → agent.
+NATS is internal messaging between data-plane services. Devices connect only over HTTPS and MQTT. The console’s live view comes from the MQTT forwarder, so the control plane keeps working when the event path is off.
 
-More detail: [docs/architecture.md](docs/architecture.md).
+The event path starts with Compose profile `nats` or Helm `nats.enabled`, and needs the MQTT broker and ClickHouse. Design: [docs/data-plane/jetstream.md](docs/data-plane/jetstream.md).
 
-## Testing and development (laptop)
+## Services
 
-Compose on **your machine**. Not for production.
+| Service | Role |
+| --- | --- |
+| `meteorcli` | On the device: enroll, heartbeat, MQTT, deploys, local actions |
+| Console | Operator UI |
+| Control plane | Identity, tenancy, device registry, artifacts, operator API |
+| MQTT broker | Device transport. Mosquitto by default; EMQX or VerneMQ if you select them |
+| `mqtt-forwarder` | Platform MQTT session: ingest into the control plane, commands back out |
+| `device-ingest` | MQTT device topics → NATS JetStream |
+| `rule-processor` | Rules and alerts from the JetStream stream |
+| `clickhouse-writer` | Batched history into ClickHouse |
+| Data API | Application publish, subscribe, query, and commands |
+| PostgreSQL | Required. Control-plane data, and data-plane commands |
+| ClickHouse | Telemetry and event history |
+| Redis | Optional shared rate limits across API replicas |
+
+PostgreSQL is required. MQTT, NATS, ClickHouse, Redis, and object storage are selected in config. The smallest install is PostgreSQL, the API, the console, and a reverse proxy (Traefik with Compose, your ingress with Kubernetes).
+
+## Try it on a laptop
+
+Compose on your machine. This is for development, not production.
 
 ```bash
 git clone https://github.com/meteor-edge/meteor-cloud.git
@@ -68,125 +66,46 @@ make dev
 make seed      # owner@example.com / dev-password-123
 ```
 
-| Surface | URL |
+| | |
 | --- | --- |
 | Console | http://localhost:5173 |
-| Control plane | http://localhost:8000 |
-| OpenAPI | http://localhost:8000/docs |
-| Data plane health | http://localhost:8081/health |
-| MQTT TLS | mqtts://localhost:8883 |
-| EMQX dashboard (dev) | http://localhost:18083 |
+| API · OpenAPI | http://localhost:8000 · http://localhost:8000/docs |
+| MQTT forwarder | http://localhost:8081/health |
+| Data API | http://localhost:8082 |
+| MQTT | mqtts://localhost:8883 |
 
-Choose bundled services with `COMPOSE_PROFILES` in `deploy/compose/.env` (`postgres`, `redis`, `minio`, `mqtt`, `emqx`). Start one module: `make dev-control-plane`, `make dev-data-plane`, `make dev-console`. Stop: `make stop`.
+`make dev` starts whatever `COMPOSE_PROFILES` lists in `deploy/compose/.env`. The example includes PostgreSQL, Redis, MinIO, Mosquitto, the data API, and ClickHouse. Add `nats` to that list to start NATS, `device-ingest`, `rule-processor`, and `clickhouse-writer`. Stop with `make stop`.
 
-Kubernetes (local k3d + Helm):
+Next: [Getting started](docs/getting-started.md).
 
-```bash
-make k8s-up && make k8s-deploy && make k8s-status
-```
+## Install
 
-See [docs/getting-started.md](docs/getting-started.md) and [docs/development.md](docs/development.md).
+Same images, two paths. MeteorCloud does not create Kubernetes clusters.
 
-## Production (VM)
-
-On the server that will host MeteorCloud (on-prem VM or an existing EC2). Ansible installs Docker and starts production Compose (optional WireGuard).
-
-```bash
-# Ubuntu / Debian:     sudo apt-get update && sudo apt-get install -y git make
-# RHEL / Rocky / Alma: sudo dnf install -y git make
-git clone https://github.com/meteor-edge/meteor-cloud.git
-cd meteor-cloud
-make up PLATFORM_DOMAIN=fleet.example.com
-```
-
-Create the printed DNS records (`fleet.example.com`, `*.fleet.example.com`,
-`vpn.fleet.example.com`) and open **https://fleet.example.com**. Login and secrets
-are printed at the end (`~/.meteorcloud/secrets.env`). Stop with `make down`.
-Guide: [docs/install-quickstart.md](docs/install-quickstart.md) · [docs/dns.md](docs/dns.md).
-
-To **create** a new AWS EC2 from a laptop: `make aws-up` ([docs/aws-deployment.md](docs/aws-deployment.md)). Do not run `make aws-up` on the VM.
-
-## Deployment paths
-
-Two independent paths; same images and settings.
-
-| | Docker Compose + Ansible | Kubernetes + Helm |
+| Where | Command | Guide |
 | --- | --- | --- |
-| For | One VM, EC2, or on-prem server | An existing cluster (k3s, GKE, EKS, AKS, …) |
-| Files | [`deploy/compose/`](deploy/compose/), [`deploy/ansible/`](deploy/ansible/) | [`deploy/kubernetes/helm/meteorcloud/`](deploy/kubernetes/helm/meteorcloud/) |
-| Install | `make up` on the VM, or `ansible-playbook playbooks/site.yml` / `make aws-up` (new EC2) | `helm upgrade --install` |
-| Guide | [docs/deployment.md](docs/deployment.md) | [docs/kubernetes.md](docs/kubernetes.md) |
+| VM or existing server | `make up PLATFORM_DOMAIN=fleet.example.com` | [Install quickstart](docs/install-quickstart.md) |
+| New AWS EC2 | `make aws-up` from a laptop | [AWS](docs/aws-deployment.md) |
+| Cluster you already run | `helm upgrade --install` | [Kubernetes](docs/kubernetes.md) |
 
-**MeteorCloud does not provision or manage Kubernetes clusters.** The Helm chart installs into a cluster you already have. Ansible only prepares servers and runs Compose; it never deploys to Kubernetes. Terraform ([`infrastructure/terraform/aws`](infrastructure/terraform/aws/)) creates the AWS EC2 host for the Compose path.
+`make up` prints DNS records and the first login. Run `make aws-up` from a laptop, not on the VM. Optional WireGuard for device VPN is part of the VM path ([connectivity](docs/fleet/connectivity.md)).
 
-On a VM you already have: clone, `make up`. To create a new AWS EC2 from a laptop, `make aws-up` (or `edge-installer apply`) runs Terraform then Ansible. Fresh-instance proof: GitHub Actions → **EC2 smoke test** ([docs/aws-ci.md](docs/aws-ci.md)).
-
-### Dependencies
-
-| Dependency | Status | Options |
-| --- | --- | --- |
-| PostgreSQL | Required | Bundled container, or external |
-| Artifact storage | Required | Filesystem volume, AWS S3, or any S3-compatible API |
-| MQTT broker | Optional | Bundled or external EMQX; off by default |
-| Redis | Optional | Shared rate limits across API replicas; in-memory otherwise |
-| Kafka, ClickHouse | Not used | Not deployed |
-
-The smallest install runs PostgreSQL, the API, the console, and a reverse proxy (Traefik with Compose, your ingress with Kubernetes).
-
-## Repository layout
+## Repository
 
 ```text
-├── src/
-│   ├── control-plane/          # FastAPI (app.*), Dockerfile
-│   ├── data-plane/             # MQTT gateway (data_plane.*), Dockerfile
-│   └── device-plane/agent/     # meteorcli
-├── console/                    # operator UI, Dockerfile (nginx)
-├── deploy/
-│   ├── compose/                # Docker Compose files, .env.example
-│   ├── ansible/                # server preparation + Compose deployment
-│   └── kubernetes/helm/        # Helm chart
-├── infrastructure/
-│   ├── terraform/aws/          # EC2 host for the Compose path
-│   └── installer/              # edge-installer (Terraform + Ansible on AWS)
-├── contracts/                  # HTTP JSON between planes
-├── scripts/                    # smoke tests, certificates, CI helpers
-├── docs/
-└── Makefile
+src/control-plane/           Python API
+src/data-plane/go/           mqtt-forwarder, data API, device-ingest, rule-processor, clickhouse-writer
+src/device-plane/agent-go/   meteorcli
+console/                     operator UI
+deploy/compose/              Docker Compose
+deploy/ansible/              VM install
+deploy/kubernetes/helm/      Helm chart
+contracts/                   HTTP and MQTT contracts
+docs/
 ```
 
-## Documentation
-
-Start with [Getting started](docs/getting-started.md), then the full index: [docs/README.md](docs/README.md).
-Contributors: [CONTRIBUTING.md](CONTRIBUTING.md). Coding agents: [AGENTS.md](AGENTS.md).
-
-| Doc | Topic |
-| --- | --- |
-| [Getting started](docs/getting-started.md) | Laptop: `make dev` + first device |
-| [Concepts](docs/concepts.md) | Three planes, orgs, devices |
-| [API overview](docs/api.md) | Control-plane HTTP map |
-| [meteorcli](docs/meteorcli.md) | Device CLI |
-| [Architecture](docs/architecture.md) | Planes, contracts, git vs deploy vs artifacts |
-| [Install quickstart](docs/install-quickstart.md) | `make up` on a VM; `make aws-up` for a new EC2 |
-| [Deployment](docs/deployment.md) · [Kubernetes](docs/kubernetes.md) | Production install |
-
-Website: [meteor-edge.com](https://meteor-edge.com).
+[Documentation index](docs/README.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
 
 ## License
 
-Copyright © Meteor Edge contributors.
-
-Licensed under the [Apache License, Version 2.0](LICENSE).
-
-```text
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
+Copyright © Meteor Edge contributors. [Apache License 2.0](LICENSE).

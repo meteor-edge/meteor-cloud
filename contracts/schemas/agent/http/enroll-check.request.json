@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/enroll/check (request)",
+  "description": "Empty object or no body at all (null here). Authorization: Bearer <enrollment API key>. GET is accepted too.",
+  "type": [
+    "object",
+    "null"
+  ]
+}

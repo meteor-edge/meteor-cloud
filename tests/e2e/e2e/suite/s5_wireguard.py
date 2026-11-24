@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 
+from e2e.suite.context import WG_CONF
 from e2e.suite.framework import Fail, check, expect, wait_for
 
 STAGE = "5 wireguard"
@@ -126,8 +127,7 @@ def wrong_server_key(ctx):
         reachable = gateway_can_reach(ctx, address)
         bogus_handshake = handshake_age(ctx, device)
     finally:
-        ctx.sh(device, "wg-quick down /etc/meteorcli/wireguard/wg0.conf || true; "
-                       "wg-quick up /etc/meteorcli/wireguard/wg0.conf; systemctl start meteorcli")
+        ctx.sh(device, f"wg-quick down {WG_CONF} || true; wg-quick up {WG_CONF}; systemctl start meteorcli")
     expect(not reachable, "the gateway reached the device with a wrong server key")
     expect(bogus_handshake is None, "a handshake completed with a wrong server key")
     wait_for(lambda: gateway_can_reach(ctx, address), timeout=120, what="the tunnel to recover with the right key")

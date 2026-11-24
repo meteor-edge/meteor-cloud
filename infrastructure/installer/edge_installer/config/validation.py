@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -57,6 +58,13 @@ def validate_configuration(config: InstallationConfig) -> list[str]:
     ):
         errors.append(
             "EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN is not set (required by services.vpn)"
+        )
+
+    # Brokers send it in a URL query string (VerneMQ webhooks), so keep it URL-safe.
+    mqtt_token = os.environ.get("EDGE_PLATFORM_MQTT_INTERNAL_TOKEN")
+    if mqtt_token and not re.fullmatch(r"[A-Za-z0-9._~-]+", mqtt_token):
+        errors.append(
+            "EDGE_PLATFORM_MQTT_INTERNAL_TOKEN may only use letters, digits and . _ ~ -"
         )
 
     if config.services.cloud_app.enabled:
@@ -126,7 +134,12 @@ def _is_https_url(value: str) -> bool:
 
 def validate_dependencies(config: InstallationConfig | None = None) -> list[str]:
     errors: list[str] = []
-    for tool in ("terraform", "ansible-playbook", "ssh"):
+    from edge_installer.providers.aws.terraform import terraform_binary
+
+    terraform = terraform_binary()
+    if not command_exists(terraform):
+        errors.append(f"Required tool not found in PATH: {terraform} (install Terraform or OpenTofu)")
+    for tool in ("ansible-playbook", "ssh"):
         if not command_exists(tool):
             errors.append(f"Required tool not found in PATH: {tool}")
     return errors

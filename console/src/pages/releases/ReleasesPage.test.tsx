@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { listReleases } from "@/api/fleet";
+import { createRelease, listReleases } from "@/api/fleet";
 import { ReleasesPage } from "@/pages/releases/ReleasesPage";
 
 vi.mock("@/auth/AuthContext", () => ({
@@ -51,6 +51,7 @@ vi.mock("@/api/fleet", async () => {
       page_size: 20,
     })),
     deleteRelease: vi.fn(),
+    createRelease: vi.fn(async () => ({ id: "rel-2" })),
     getArtifact: vi.fn(async () => ({
       id: "art-1",
       name: "camera-unit",
@@ -123,6 +124,26 @@ describe("ReleasesPage", () => {
     await screen.findByRole("option", { name: /camera-unit 1.0/ });
     expect(artifactSelect).toHaveValue("art-1");
     expect(screen.getByLabelText(/^name/i)).toHaveValue("camera-unit");
+  });
+
+  it("asks devices to roll back an unhealthy update when chosen", async () => {
+    renderPage("/organizations/org-1/releases?create=1&artifact_id=art-1");
+    await screen.findByRole("option", { name: /camera-unit 1.0/ });
+    fireEvent.change(screen.getByLabelText(/^version/i), { target: { value: "1.3.0" } });
+    fireEvent.change(screen.getByLabelText(/unit name/i), { target: { value: "camera-agent.service" } });
+    fireEvent.click(screen.getByLabelText(/roll back automatically/i));
+    fireEvent.change(screen.getByLabelText(/health url/i), {
+      target: { value: "http://127.0.0.1:8080/health" },
+    });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Create release" }));
+
+    await waitFor(() => expect(createRelease).toHaveBeenCalled());
+    const payload = vi.mocked(createRelease).mock.calls[0][2];
+    expect(payload.spec).toEqual({
+      unit_name: "camera-agent.service",
+      start: true,
+      health_check: { http_url: "http://127.0.0.1:8080/health" },
+    });
   });
 
   it("links a release to its Deploys and blocks deleting it", async () => {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -15,6 +16,26 @@ from edge_installer.providers.aws.outputs import TerraformOutputs
 from edge_installer.state.paths import infrastructure_root, terraform_workdir
 
 logger = logging.getLogger(__name__)
+
+# Explicit choice of binary, e.g. EDGE_INSTALLER_TERRAFORM=tofu (OpenTofu, MPL-2.0).
+TERRAFORM_ENV = "EDGE_INSTALLER_TERRAFORM"
+
+
+def terraform_binary() -> str:
+    """The Terraform-compatible CLI to run.
+
+    Terraform >= 1.6 is BSL 1.1 (fine for provisioning, see docs/licensing.md); OpenTofu
+    (MPL-2.0) runs the same configuration. Order: $EDGE_INSTALLER_TERRAFORM, then
+    ``terraform`` on PATH, then ``tofu`` on PATH.
+    """
+    chosen = os.environ.get(TERRAFORM_ENV, "").strip()
+    if chosen:
+        return chosen
+    if shutil.which("terraform"):
+        return "terraform"
+    if shutil.which("tofu"):
+        return "tofu"
+    return "terraform"
 
 
 class TerraformRunner:
@@ -93,17 +114,17 @@ class TerraformRunner:
         return path
 
     def init(self) -> None:
-        result = run_command(["terraform", "init", "-input=false"], cwd=str(self.workdir))
+        result = run_command([terraform_binary(), "init", "-input=false"], cwd=str(self.workdir))
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_init")
 
     def validate(self) -> None:
-        result = run_command(["terraform", "validate"], cwd=str(self.workdir))
+        result = run_command([terraform_binary(), "validate"], cwd=str(self.workdir))
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_validate")
 
     def plan(self) -> str:
         self.write_tfvars()
         result = run_command(
-            ["terraform", "plan", "-input=false", "-var-file=terraform.tfvars.json"],
+            [terraform_binary(), "plan", "-input=false", "-var-file=terraform.tfvars.json"],
             cwd=str(self.workdir),
         )
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_plan")
@@ -113,7 +134,7 @@ class TerraformRunner:
         self.write_tfvars()
         result = run_command(
             [
-                "terraform",
+                terraform_binary(),
                 "apply",
                 "-input=false",
                 "-auto-approve",
@@ -131,7 +152,7 @@ class TerraformRunner:
         self.write_tfvars()
         result = run_command(
             [
-                "terraform",
+                terraform_binary(),
                 "destroy",
                 "-input=false",
                 "-auto-approve",
@@ -142,7 +163,7 @@ class TerraformRunner:
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_destroy")
 
     def read_outputs(self) -> TerraformOutputs:
-        result = run_command(["terraform", "output", "-json"], cwd=str(self.workdir))
+        result = run_command([terraform_binary(), "output", "-json"], cwd=str(self.workdir))
         require_success(result, error_cls=TerraformExecutionError, stage="terraform_outputs")
         raw = json.loads(result.stdout)
         flattened = {key: value["value"] for key, value in raw.items()}

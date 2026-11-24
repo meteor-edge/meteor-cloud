@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from unittest.mock import Mock
 
+import jwt
 import pytest
-from jose import jwt
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -218,7 +218,7 @@ def test_download_ticket_has_scoped_claims_and_configured_expiry(service, downlo
 )
 def test_signed_but_invalid_tickets_never_open_storage(service, download_args, mutation):
     link = service.create_download_link(**download_args)
-    claims = jwt.get_unverified_claims(link.ticket)
+    claims = jwt.decode(link.ticket, options={"verify_signature": False})
     changes = {
         "expired": ("exp", 1),
         "wrong_type": ("typ", "access"),
