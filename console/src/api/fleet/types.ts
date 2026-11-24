@@ -332,6 +332,8 @@ export type DeviceSoftware = {
   progress_percent: number;
   attempt_count: number;
   last_error: string | null;
+  /** A user stopped it from the console; absent from older servers. */
+  stopped_by_user?: boolean;
   reported_at: string | null;
   created_at: string;
   updated_at: string;

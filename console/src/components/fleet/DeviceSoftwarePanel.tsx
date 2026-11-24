@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { listDeviceSoftware, listEndpoints, type DeviceSoftware } from "@/api/fleet";
-import { HealthBadge } from "@/components/fleet/StatusBadge";
+import { HealthBadge, StoppedBadge } from "@/components/fleet/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -116,7 +116,12 @@ export function DeviceSoftwarePanel({
           {items.map((row) => (
             <tr key={row.id} className="border-b border-border last:border-0">
               <td className="px-4 py-3">
-                <p className="font-medium">{row.workload_key}</p>
+                <Link
+                  to={`/organizations/${organizationId}/devices/${deviceId}/software/${row.id}`}
+                  className="font-medium text-link hover:underline"
+                >
+                  {row.workload_key}
+                </Link>
                 {availableEndpoints
                   .filter(
                     (endpoint) =>
@@ -146,7 +151,11 @@ export function DeviceSoftwarePanel({
                 {row.sync_status === "updating" ? ` (${row.progress_percent}%)` : ""}
               </td>
               <td className="px-4 py-3">
-                <HealthBadge status={row.health} stale={!deviceOnline} />
+                {row.stopped_by_user ? (
+                  <StoppedBadge />
+                ) : (
+                  <HealthBadge status={row.health} stale={!deviceOnline} />
+                )}
                 {row.reported_at && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     reported {formatRelativeTime(row.reported_at)}
