@@ -65,6 +65,8 @@ def test_restart_is_handed_out_once_and_never_shows_a_password(client: TestClien
         "authorized_key": None,
         "from_version": None,
         "module": None,
+        "workload_key": None,
+        "service": None,
     }
     # Already handed out: a second collect is empty, and the heartbeat flag clears.
     assert _collect(client, agent) == []
@@ -287,7 +289,8 @@ def test_restart_module_and_diagnostics_round_trip(client: TestClient, db_sessio
     assert rows["restart_module"]["state"] == "done"
     assert rows["restart_module"]["output"] is None
     assert rows["run_diagnostics"]["output"] == report
-    assert client.get(url, headers=operator).status_code == 403
+    # An operator manages software, so may list actions, but sees none of these.
+    assert client.get(url, headers=operator).json()["actions"] == []
     events = db_session.scalars(select(AuditEvent).where(AuditEvent.action == "device.action.restart_module")).all()
     assert [event.metadata_["module"] for event in events] == ["deploy"]
 

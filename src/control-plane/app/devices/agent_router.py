@@ -15,7 +15,13 @@ from app.artifacts.dependencies import ArtifactSvc
 from app.artifacts.router import stream_artifact
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
+from app.core.exceptions import AppError
 from app.core.metrics import ARTIFACT_DOWNLOADS
+from app.deployments.snapshot_schemas import (
+    MAX_SNAPSHOT_BYTES,
+    SoftwareSnapshotRequest,
+    SoftwareSnapshotResponse,
+)
 from app.deployments.software_dependencies import DeviceSoftwareSvc
 from app.deployments.software_schemas import DesiredSoftwareItem
 from app.devices.dependencies import (
@@ -136,6 +142,22 @@ def agent_list_software(
 ) -> list[DesiredSoftwareItem]:
     """Return current desired software for this device (MQTT wake-up / poll)."""
     return software.list_desired_for_agent(device_id=device.id)
+
+
+@router.post("/software/snapshots", response_model=SoftwareSnapshotResponse)
+def agent_software_snapshot(
+    payload: SoftwareSnapshotRequest,
+    device: CurrentDevice,
+    software: DeviceSoftwareSvc,
+) -> SoftwareSnapshotResponse:
+    """What one workload on this device is made of right now (the console's software page)."""
+    if len(payload.model_dump_json()) > MAX_SNAPSHOT_BYTES:
+        raise AppError("snapshot_too_large", "The workload snapshot is too large.", status_code=413)
+    return SoftwareSnapshotResponse(
+        accepted=software.store_snapshot(
+            organization_id=device.organization_id, device_id=device.id, snapshot=payload.snapshot
+        )
+    )
 
 
 @router.get("/signing-keys", response_model=list[SigningKeyResponse])
