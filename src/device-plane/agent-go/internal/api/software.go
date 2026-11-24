@@ -76,3 +76,9 @@ func (c *Client) AppCredentials(ctx context.Context, deviceToken, workloadKey st
 	}
 	return &out, nil
 }
+
+// SoftwareSnapshot sends what one workload is made of (software-snapshots.request.json).
+func (c *Client) SoftwareSnapshot(ctx context.Context, deviceToken string, snapshot any) error {
+	body := map[string]any{"snapshot": snapshot}
+	return c.do(ctx, http.MethodPost, "/api/v1/agent/software/snapshots", deviceToken, body, nil)
+}

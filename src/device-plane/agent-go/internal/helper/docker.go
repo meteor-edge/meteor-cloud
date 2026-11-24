@@ -14,10 +14,13 @@ import (
 // parses itself (as little code as possible runs as root).
 
 // InspectTemplate is the docker inspect format the observer parses: name,
-// state, exit code, OOM kill, restarts, start time and health checks.
+// state, exit code, OOM kill, restarts, start time and health checks, then
+// (after tabs) the labels that say which workload the container belongs to.
 const InspectTemplate = "{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|" +
 	"{{.RestartCount}}|{{.State.StartedAt}}|{{if .State.Health}}{{.State.Health.Status}}|" +
-	"{{range .State.Health.Log}}{{.Start.UnixNano}},{{.End.UnixNano}};{{end}}{{end}}"
+	"{{range .State.Health.Log}}{{.Start.UnixNano}},{{.End.UnixNano}};{{end}}{{end}}" +
+	"\t{{index .Config.Labels \"" + LabelWorkload + "\"}}\t{{index .Config.Labels \"" + labelComposeProject + "\"}}" +
+	"\t{{index .Config.Labels \"" + labelComposeDir + "\"}}"
 
 // StatsFormat is the docker stats format the observer parses.
 const StatsFormat = "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}"

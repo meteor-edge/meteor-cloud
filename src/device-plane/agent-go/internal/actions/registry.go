@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"time"
 
+	"meteorcloud/meteorcli/internal/agent"
 	"meteorcloud/meteorcli/internal/api"
 	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/state"
@@ -18,6 +19,8 @@ type caller interface {
 
 // env is what an action kind may use.
 type env struct {
+	// d is for the workload_* kinds (state, lock, signals, API).
+	d      agent.Deps
 	helper caller
 	// state keeps what must survive the restart an action causes (update_agent).
 	state   *state.Store
@@ -55,11 +58,17 @@ var registry = map[string]kind{
 	// Remote repair from the console's module health panel.
 	"restart_module":  {advertised: true, run: restartModule},
 	"run_diagnostics": {advertised: true, output: runDiagnostics},
+	// One deployed workload, from the console's software page (workload.go).
+	"workload_restart":  {advertised: true, run: controlWorkload("restart")},
+	"workload_stop":     {advertised: true, run: controlWorkload("stop")},
+	"workload_start":    {advertised: true, run: controlWorkload("start")},
+	"workload_snapshot": {advertised: true, run: snapshotWorkload},
 }
 
 // order is the order of Kinds (the Python agent's capabilities order, then
 // the kinds only this agent has).
-var order = []string{"reboot", "shutdown", "set_password", "add_user", "update_agent", "restart_module", "run_diagnostics"}
+var order = []string{"reboot", "shutdown", "set_password", "add_user", "update_agent", "restart_module", "run_diagnostics",
+	"workload_restart", "workload_stop", "workload_start", "workload_snapshot"}
 
 // Kinds returns the action kinds this agent can run, for capabilities.actions.
 func Kinds() []string {

@@ -17,6 +17,9 @@ type Action struct {
 	FromVersion   *string `json:"from_version"`
 	// Module is the module restart_module restarts.
 	Module *string `json:"module"`
+	// WorkloadKey and Service are what a workload_* action acts on.
+	WorkloadKey *string `json:"workload_key"`
+	Service     *string `json:"service"`
 }
 
 // Action result states.

@@ -32,6 +32,12 @@ type ConfigChanged struct{}
 // Key implements Signal.
 func (ConfigChanged) Key() string { return "config_changed" }
 
+// WorkloadsChanged says a deploy changed what runs here (a new snapshot is due).
+type WorkloadsChanged struct{}
+
+// Key implements Signal.
+func (WorkloadsChanged) Key() string { return "workloads_changed" }
+
 // RestartModule asks the supervisor to restart one module, or run it again
 // when the crash-loop breaker parked it (the restart_module action). Each
 // module name coalesces on its own.

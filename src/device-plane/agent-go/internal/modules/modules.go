@@ -15,6 +15,7 @@ import (
 	"meteorcloud/meteorcli/internal/metrics"
 	"meteorcloud/meteorcli/internal/mqtt"
 	"meteorcloud/meteorcli/internal/network"
+	"meteorcloud/meteorcli/internal/workloads"
 )
 
 // All returns a fresh instance of every feature module, in no particular
@@ -28,6 +29,7 @@ func All() []agent.Module {
 		&actions.Module{},
 		&deploy.Module{},
 		&appcreds.Module{},
+		&workloads.Module{},
 		&network.WiFi{},
 		&network.WireGuard{},
 	}

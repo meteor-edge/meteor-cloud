@@ -21,6 +21,7 @@ import (
 	"meteorcloud/meteorcli/internal/deploy/runtime"
 	"meteorcloud/meteorcli/internal/signing"
 	"meteorcloud/meteorcli/internal/state"
+	wl "meteorcloud/meteorcli/internal/workload"
 )
 
 // name is the module's id.
@@ -42,6 +43,8 @@ type Module struct {
 	runtimes map[string]runtime.Runtime
 	kinds    map[string]kind
 	applied  appliedState
+	helper   runtime.Caller
+	stops    wl.Stops
 	probe    func(ctx context.Context, url string) string
 	clock    clock
 	// events remembers the last event per workload, so a refusal repeated
@@ -83,6 +86,8 @@ func (m *Module) setup(d agent.Deps) {
 			h = noHelper{}
 		}
 	}
+	m.helper = h
+	m.stops = wl.Stops{Store: d.State}
 	m.kinds = kinds
 	m.runtimes = map[string]runtime.Runtime{}
 	for k, spec := range kinds {
@@ -136,6 +141,9 @@ func (m *Module) reconcile(ctx context.Context) {
 		}
 	}
 	m.sendNow(ctx, token, outcomes, ids)
+	if len(outcomes) > 0 {
+		d.Signals.Publish(agent.WorkloadsChanged{})
+	}
 }
 
 // sendNow sends the outcome of install attempts at once, in a heartbeat that

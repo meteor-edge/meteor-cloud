@@ -12,6 +12,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -69,6 +70,7 @@ func (m *Module) Run(ctx context.Context, d agent.Deps) error {
 	o := newObserver(d)
 	if m.helper != nil {
 		o.helper, o.apps = m.helper, newApps(m.helper)
+		o.apps.composeDir = composeDir(d)
 	}
 	every := m.interval()
 	for {
@@ -126,7 +128,18 @@ func newObserver(d agent.Deps) *observer {
 	if d.Helper == nil {
 		h = noHelper{}
 	}
-	return &observer{d: d, helper: h, tools: &telemetry.Tools{Host: d.Host}, apps: newApps(h), now: time.Now}
+	o := &observer{d: d, helper: h, tools: &telemetry.Tools{Host: d.Host}, apps: newApps(h), now: time.Now}
+	o.apps.composeDir = composeDir(d)
+	return o
+}
+
+// composeDir is the resolved compose directory, as Docker's labels show it.
+func composeDir(d agent.Deps) string {
+	dir := d.Paths.ComposeDir()
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		return real
+	}
+	return dir
 }
 
 // publish collects one round and publishes the metrics, then the events.

@@ -122,6 +122,9 @@ func (c *cycle) reconcile(ctx context.Context, it item) (rep report, attempted b
 	key := it.key()
 	rec, had := c.applied[key]
 
+	if rep := c.stoppedByUser(ctx, it, rec, had); rep != nil {
+		return rep, false
+	}
 	if rep := c.stillRolledBack(ctx, it, rec, had); rep != nil {
 		return rep, false
 	}
@@ -140,12 +143,25 @@ func (c *cycle) reconcile(ctx context.Context, it item) (rep report, attempted b
 		}
 		if !rec.Reapply {
 			if rep := c.healthOnly(ctx, it); rep != nil {
+				// A stop that came in during the check is not a failure.
+				if stopped := c.stoppedByUser(ctx, it, rec, had); stopped != nil {
+					return stopped, false
+				}
 				return rep, false
 			}
 		}
 	}
 
-	rep, err := c.install(ctx, it, rec, had, wasApplied)
+	release, err := d.Workloads.Acquire(ctx)
+	if err != nil {
+		return nil, false // stopping
+	}
+	defer release()
+	// A stop that came in meanwhile wins over an apply of the same release.
+	if rep := c.stoppedByUser(ctx, it, rec, had); rep != nil {
+		return rep, false
+	}
+	rep, err = c.install(ctx, it, rec, had, wasApplied)
 	switch {
 	case errors.Is(err, errAuth):
 		return nil, false
@@ -202,6 +218,7 @@ func (c *cycle) install(ctx context.Context, it item, rec workload, had, wasAppl
 			d.Log.Error("record the applied release", "workload", key, "err", err)
 		}
 		c.applied[key] = workload{ReleaseID: release, Revision: revision, Item: it}
+		c.clearStop(key)
 	}
 	return rep, nil
 }
@@ -232,7 +249,7 @@ func (c *cycle) apply(ctx context.Context, it item, app *runtime.App, wasApplied
 		return failed(key, c.r.kinds[kind].missing), nil
 	}
 	w := runtime.Workload{
-		Key: key, Kind: kind, Spec: it.spec(), Artifact: artifact, App: app,
+		Key: key, Kind: kind, Release: runtime.Stringify(it["release_id"]), Spec: it.spec(), Artifact: artifact, App: app,
 		// The same release applied again with a binding: its token file was
 		// lost, and the containers must be created again to mount the new one.
 		ForceRecreate: kind == "docker_compose" && app != nil && wasApplied,
@@ -307,7 +324,12 @@ func (c *cycle) stillRolledBack(ctx context.Context, it item, rec workload, had 
 	}
 	health := runtime.Unknown
 	if !c.creds.present(rec.Item) {
+		release, err := c.r.d.Workloads.Acquire(ctx)
+		if err != nil {
+			return nil
+		}
 		restored, err := c.restore(ctx, rec.Item)
+		release()
 		if err != nil {
 			return nil // errAuth: the cycle stops
 		}
@@ -370,6 +392,7 @@ func (c *cycle) rollBack(ctx context.Context, it item, failure report, rec workl
 	if err := c.r.applied.save(record{key: it.key(), release: prevRelease, revision: prevRevision, item: previous, rolledBackFrom: back}); err != nil {
 		d.Log.Error("record the rollback", "workload", it.key(), "err", err)
 	}
+	c.clearStop(it.key())
 	c.applied[it.key()] = workload{ReleaseID: prevRelease, Revision: prevRevision, Item: previous, RolledBackFrom: back}
 	return rolledBack(it, previous, restored.health(), reason), nil
 }

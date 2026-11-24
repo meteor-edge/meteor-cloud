@@ -223,6 +223,9 @@ func (m *Module) command(ctx context.Context, d agent.Deps, msg bus.Message) {
 	case "sync_desired":
 		// A hint only: the deploy module lists desired software on its next cycle anyway.
 		d.Signals.Publish(agent.WorkWaiting{Kind: "software"})
+	case "sync_actions":
+		// Also a hint: the heartbeat says that actions wait, too.
+		d.Signals.Publish(agent.WorkWaiting{Kind: "actions"})
 	default:
 		d.Log.Debug("ignored a command of an unknown type", "type", c.Type)
 	}

@@ -249,7 +249,8 @@ func TestModuleCollectsOnSignal(t *testing.T) {
 }
 
 func TestKinds(t *testing.T) {
-	want := []string{"reboot", "shutdown", "set_password", "add_user", "update_agent", "restart_module", "run_diagnostics"}
+	want := []string{"reboot", "shutdown", "set_password", "add_user", "update_agent", "restart_module", "run_diagnostics",
+		"workload_restart", "workload_stop", "workload_start", "workload_snapshot"}
 	if got := Kinds(); !slices.Equal(got, want) {
 		t.Errorf("Kinds = %v", got)
 	}

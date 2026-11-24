@@ -18,6 +18,7 @@ import (
 	"meteorcloud/meteorcli/internal/platform"
 	"meteorcloud/meteorcli/internal/state"
 	"meteorcloud/meteorcli/internal/telemetry"
+	"meteorcloud/meteorcli/internal/workload"
 )
 
 // runAgent is `meteorcli agent` (alias `run`): build Deps, start the supervisor
@@ -89,7 +90,7 @@ func runAgent(ctx context.Context, env *Env, args []string) int {
 		Version: env.Version, Paths: p, Config: c, API: client, Identity: source, Host: host,
 		State: store, Outbox: outbox, Signals: signals, Health: health, Log: log,
 		Bus: bus.NewRouter(log.With("module", "bus")), Errors: errs,
-		Helper: helper.NewClient(p.HelperSocket()),
+		Helper: helper.NewClient(p.HelperSocket()), Workloads: workload.NewLock(),
 	}
 	sup := agent.NewSupervisor(modules.All(), deps)
 	sup.Enrolled = source.Enrolled

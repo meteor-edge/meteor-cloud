@@ -16,6 +16,7 @@ import (
 	"meteorcloud/meteorcli/internal/identity"
 	"meteorcloud/meteorcli/internal/platform"
 	"meteorcloud/meteorcli/internal/state"
+	"meteorcloud/meteorcli/internal/workload"
 )
 
 // Module is one feature of the agent (heartbeat, deploy, telemetry, ...). The
@@ -60,6 +61,8 @@ type Deps struct {
 	State *state.Store
 	// Outbox keeps reports until the server accepted them.
 	Outbox *state.Outbox
+	// Workloads keeps a deploy and a workload action from running at once.
+	Workloads *workload.Lock
 	// Signals tells other modules that something happened.
 	Signals *Signals
 	// Helper does privileged work (root) from an allowlist.
