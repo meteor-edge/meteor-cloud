@@ -399,6 +399,20 @@ def test_settings_create_missing_ssh_host_keys_and_grow_once(tmp_path: Path) -> 
     assert not calls.exists()
 
 
+def test_settings_grows_when_imager_left_boot_marker(tmp_path: Path) -> None:
+    """Meteor Imager plants meteor-expand-rootfs on the boot partition when it
+    extends the root partition; settings must consume that marker once."""
+    root = _fake_root(tmp_path)
+    boot = root / "boot" / "firmware"
+    (boot / "meteor-expand-rootfs").write_text("", encoding="utf-8")
+    stub_bin, _ = _command_stubs(tmp_path)
+
+    result = _run_settings(tmp_path, root, stub_bin)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (boot / "meteor-expand-rootfs").exists()
+
+
 def _prepared_device(tmp_path: Path) -> Path:
     root = _fake_root(tmp_path)
     boot = root / "boot" / "firmware"
