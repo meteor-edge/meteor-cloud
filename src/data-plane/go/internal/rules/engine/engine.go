@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync/atomic"
 	"time"
 
@@ -313,13 +314,8 @@ func merged(old, newer map[string]float64) map[string]float64 {
 	if len(old) == 0 {
 		return newer
 	}
-	out := make(map[string]float64, len(old)+len(newer))
-	for k, v := range old {
-		out[k] = v
-	}
-	for k, v := range newer {
-		out[k] = v
-	}
+	out := maps.Clone(old)
+	maps.Copy(out, newer)
 	return out
 }
 
