@@ -6,10 +6,16 @@ MQTT_BROKER_SERVICE ?= mosquitto
 ENV_FILE := $(COMPOSE_DIR)/.env
 COMPOSE := docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f $(COMPOSE_DIR)/docker-compose.observability.yml
-# make dev OBS=1 also starts the observability stack (same as make observability).
-OBS ?= 0
+# Observability switch. make up / make k8s-deploy default to on (Prometheus + Grafana);
+# pass OBS=0 to skip. make dev stays off unless OBS=1 (same as make observability).
+OBS ?=
 # Observability components to run (Compose profiles); drop any to turn that component off.
 OBS_PROFILES ?= metrics,logs,alerting,dashboards
+# k8s-deploy defaults on when OBS is unset; make up leaves OBS unset so the installer
+# can reuse install.env / the checkbox (still defaulting to on).
+K8S_OBS = $(or $(OBS),1)
+# Local k3d Grafana password when observability is on and GRAFANA_ADMIN_PASSWORD is unset.
+K8S_GRAFANA_ADMIN_PASSWORD ?= meteorcloud-local
 # Profiles already chosen in .env (postgres, mqtt, ...), kept when observability profiles are added.
 ENV_PROFILES = $(shell sed -n 's/^COMPOSE_PROFILES=//p' $(ENV_FILE) 2>/dev/null | tail -1)
 OBS_IMAGES_PROMETHEUS := prom/prometheus:v2.55.1
@@ -41,7 +47,8 @@ K8S_MQTT_PORT ?= 18883
 K8S_CERTS_DIR := .k8s/certs
 K8S_MQTT_SANS ?= $(K8S_RELEASE)-mqtt $(K8S_RELEASE)-mqtt.$(K8S_NAMESPACE).svc $(K8S_RELEASE)-emqx $(K8S_RELEASE)-emqx.$(K8S_NAMESPACE).svc
 IMAGE_TAG ?= dev
-# make k8s-deploy OBS=1: kube-prometheus-stack (Apache-2.0; bundles Grafana, AGPLv3) in k3d only.
+# make k8s-deploy (OBS=1 default): kube-prometheus-stack (Apache-2.0; bundles Grafana, AGPLv3) in k3d only.
+# Production clusters bring their own Prometheus; use OBS=0 to skip the local stack.
 K8S_OBS_NAMESPACE ?= monitoring
 K8S_OBS_CHART_VERSION := 93.1.1
 
@@ -150,8 +157,8 @@ stop-console: ## Stop the console Compose project
 stop-website: ## Website is not in this repo
 	@echo "The public website is not in this tree. From a meteor-ui clone: make stop-website"
 
-up: ## Install on this VM (PLATFORM_DOMAIN=example.com)
-	PLATFORM_DOMAIN="$(or $(PLATFORM_DOMAIN),$(DOMAIN))" $(ANSIBLE_DIR)/install-selfhost.sh $(ARGS)
+up: ## Install on this VM (PLATFORM_DOMAIN=example.com; OBS=0 skips Prometheus/Grafana)
+	$(if $(filter 0 1,$(OBS)),OBS="$(OBS)") PLATFORM_DOMAIN="$(or $(PLATFORM_DOMAIN),$(DOMAIN))" $(ANSIBLE_DIR)/install-selfhost.sh $(ARGS)
 
 install-selfhost: up
 
@@ -398,7 +405,7 @@ k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
 			-p "$(K8S_HTTP_PORT):80@loadbalancer" -p "$(K8S_MQTT_PORT):8883@loadbalancer"
 	kubectl config use-context k3d-$(K8S_CLUSTER)
 
-k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (OBS=1 adds Prometheus, Grafana)
+k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (Prometheus/Grafana on by default; OBS=0 to skip)
 	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-api:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
 	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
 	@# Re-issue the server certificate (same CA) when it lacks any broker Service name.
@@ -409,16 +416,17 @@ k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --ins
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) create secret generic meteorcloud-mqtt-tls \
 		--from-file=ca.crt=$(K8S_CERTS_DIR)/ca.crt --from-file=server.crt=$(K8S_CERTS_DIR)/server.crt \
 		--from-file=server.key=$(K8S_CERTS_DIR)/server.key --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
-ifeq ($(OBS),1)
-	@test -n "$$GRAFANA_ADMIN_PASSWORD" || (echo "Set GRAFANA_ADMIN_PASSWORD for the k3d Grafana (OBS=1)." && exit 1)
-	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+ifeq ($(filter 1,$(K8S_OBS)),1)
+	@pass="$${GRAFANA_ADMIN_PASSWORD:-$(K8S_GRAFANA_ADMIN_PASSWORD)}"; \
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null && \
 	helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 		--version $(K8S_OBS_CHART_VERSION) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_OBS_NAMESPACE) --create-namespace \
-		-f deploy/kubernetes/k3d-monitoring.yaml --set grafana.adminPassword="$$GRAFANA_ADMIN_PASSWORD" \
-		--wait --timeout 10m
+		-f deploy/kubernetes/k3d-monitoring.yaml --set grafana.adminPassword="$$pass" \
+		--wait --timeout 10m && \
+	echo "Grafana admin password: $$pass"
 endif
 	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
-		-f $(CHART)/values-dev.yaml $(if $(filter 1,$(OBS)),-f $(CHART)/values-monitoring.yaml) --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
+		-f $(CHART)/values-dev.yaml $(if $(filter 1,$(K8S_OBS)),-f $(CHART)/values-monitoring.yaml) --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
 		--set dataApi.image.tag=$(IMAGE_TAG) --set mqtt.mosquitto.image.tag=$(IMAGE_TAG) \
 		--set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
 		--wait --timeout 10m
@@ -428,11 +436,12 @@ endif
 	@echo ""
 	@echo "Console and API: http://localhost:$(K8S_HTTP_PORT)  (admin@example.com / LocalAdmin123!)"
 	@echo "MQTT TLS:        mqtts://localhost:$(K8S_MQTT_PORT)  (CA: $(K8S_CERTS_DIR)/ca.crt)"
-ifeq ($(OBS),1)
+ifeq ($(filter 1,$(K8S_OBS)),1)
 	@echo "Grafana:         kubectl -n $(K8S_OBS_NAMESPACE) port-forward svc/kube-prometheus-stack-grafana 3001:80"
 	@echo "Prometheus:      kubectl -n $(K8S_OBS_NAMESPACE) port-forward svc/kube-prometheus-stack-prometheus 9090:9090"
+	@echo "  (password: $${GRAFANA_ADMIN_PASSWORD:-$(K8S_GRAFANA_ADMIN_PASSWORD)}; user admin)"
 else
-	@echo "Observability:   make k8s-deploy OBS=1  (kube-prometheus-stack in k3d)"
+	@echo "Observability:   skipped (OBS=0). Re-run without OBS=0 for kube-prometheus-stack in k3d."
 endif
 
 k8s-status: ## Show MeteorCloud pods, services, ingress, and volumes in k3d

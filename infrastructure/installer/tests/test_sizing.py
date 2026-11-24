@@ -18,6 +18,7 @@ EXAMPLE = (
 
 def test_git_build_needs_medium() -> None:
     config = load_configuration(EXAMPLE)
+    config.observability.enabled = False
     size = recommend_host_size(config)
     assert size.instance_type == "t3.medium"
     assert "git_build" in size.reasons
@@ -27,6 +28,7 @@ def test_git_build_needs_medium() -> None:
 def test_registry_without_extras_fits_small() -> None:
     config = load_configuration(EXAMPLE)
     config.deployment.image_source = "registry"
+    config.observability.enabled = False
     size = recommend_host_size(config)
     assert size.instance_type == "t3.small"
     assert "git_build" not in size.reasons
@@ -34,7 +36,8 @@ def test_registry_without_extras_fits_small() -> None:
 
 def test_observability_needs_large() -> None:
     config = load_configuration(EXAMPLE)
-    config.observability.enabled = True
+    # Example defaults observability on; full stack needs large.
+    assert config.observability.enabled is True
     size = recommend_host_size(config)
     assert size.instance_type == "t3.large"
 
@@ -59,6 +62,7 @@ def test_auto_uses_recommendation() -> None:
 def test_undersized_explicit_type_is_raised() -> None:
     config = load_configuration(EXAMPLE)
     assert config.aws is not None
+    config.observability.enabled = False
     config.aws.instance_type = "t3.small"
     instance_type, _, size = resolve_aws_host(config)
     assert size.instance_type == "t3.medium"
