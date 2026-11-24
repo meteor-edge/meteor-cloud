@@ -38,6 +38,133 @@ function ports(container: SnapshotContainer): string {
     .join(", ");
 }
 
+type Stats = NonNullable<SnapshotContainer["stats"]>;
+
+function Meter({ label, percent, text }: { label: string; percent: number; text: string }) {
+  const width = Math.min(100, Math.max(0, percent));
+  return (
+    <div className="min-w-0">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="tabular-nums">{text}</span>
+      </div>
+      <div
+        className="mt-1 h-1.5 overflow-hidden rounded bg-muted"
+        role="meter"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(width)}
+      >
+        <div
+          className={cn("h-full", width >= 90 ? "bg-ember" : "bg-aurora")}
+          style={{ width: `${width}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** CPU (100% is one core), memory against its limit, network, disk and processes. */
+function Usage({ container, stats }: { container: SnapshotContainer; stats: Stats }) {
+  const cores = container.nano_cpus > 0 ? container.nano_cpus / 1e9 : 1;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <Meter
+        label="CPU"
+        percent={stats.cpu_percent / cores}
+        text={`${stats.cpu_percent.toFixed(1)}%${container.nano_cpus > 0 ? ` of ${cores} CPU` : ""}`}
+      />
+      <Meter
+        label="Memory"
+        percent={stats.memory_percent}
+        text={`${formatBytes(stats.memory_bytes)}${
+          container.memory_limit > 0 ? ` of ${formatBytes(container.memory_limit)}` : ""
+        }`}
+      />
+      <Fact
+        label="Network in / out"
+        value={`${formatBytes(stats.net_rx_bytes)} / ${formatBytes(stats.net_tx_bytes)}`}
+      />
+      <Fact
+        label="Disk read / written"
+        value={`${formatBytes(stats.block_read_bytes)} / ${formatBytes(stats.block_write_bytes)}`}
+      />
+    </div>
+  );
+}
+
+/** What the workload uses in total, and what Docker keeps on the device. */
+function Resources({ software }: { software: DeviceSoftwareDetail }) {
+  const snapshot = software.snapshot!;
+  const stats = snapshot.containers.flatMap((c) => (c.stats ? [c.stats] : []));
+  const sum = (pick: (s: Stats) => number) => stats.reduce((n, s) => n + pick(s), 0);
+  const sized = snapshot.volumes.filter((v) => v.size != null);
+  const disk = snapshot.disk;
+  if (stats.length === 0 && sized.length === 0 && !disk) {
+    return null;
+  }
+  const reclaimable = disk?.items.reduce((n, i) => n + i.reclaimable, 0) ?? 0;
+  return (
+    <Panel title="Resources">
+      <dl className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Fact
+          label="Containers running"
+          value={`${snapshot.containers.filter((c) => c.running).length} of ${snapshot.containers.length}`}
+        />
+        {stats.length > 0 && (
+          <>
+            <Fact label="CPU (100% = 1 core)" value={`${sum((s) => s.cpu_percent).toFixed(1)}%`} />
+            <Fact label="Memory" value={formatBytes(sum((s) => s.memory_bytes))} />
+            <Fact label="Processes" value={String(sum((s) => s.pids))} />
+          </>
+        )}
+        {snapshot.images.length > 0 && (
+          <Fact
+            label="Images"
+            value={formatBytes(snapshot.images.reduce((n, i) => n + i.size, 0))}
+          />
+        )}
+        {sized.length > 0 && (
+          <Fact label="Volumes" value={formatBytes(sized.reduce((n, v) => n + (v.size ?? 0), 0))} />
+        )}
+      </dl>
+      {disk && disk.items.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Docker storage on this device, all software: {formatBytes(reclaimable)} reclaimable, as
+            Docker counts it. Measured {time(disk.taken_at)}.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="py-1.5 pr-3 font-medium">Type</th>
+                  <th className="py-1.5 pr-3 font-medium">In use</th>
+                  <th className="py-1.5 pr-3 font-medium">Size</th>
+                  <th className="py-1.5 font-medium">Reclaimable</th>
+                </tr>
+              </thead>
+              <tbody>
+                {disk.items.map((i) => (
+                  <tr key={i.type} className="border-t border-border tabular-nums">
+                    <td className="py-1.5 pr-3">{i.type}</td>
+                    <td className="py-1.5 pr-3">
+                      {i.active} of {i.total}
+                    </td>
+                    <td className="py-1.5 pr-3">{formatBytes(i.size)}</td>
+                    <td className="py-1.5">{formatBytes(i.reclaimable)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function ContainerCard({
   container,
   compose,
@@ -72,6 +199,7 @@ function ContainerCard({
           {stopped ? " · stopped by user" : ""}
         </p>
       </div>
+      {container.stats && <Usage container={container} stats={container.stats} />}
       <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Fact label="Image" value={container.image} />
         <Fact label="Started" value={time(container.started_at)} />
@@ -81,6 +209,9 @@ function ContainerCard({
             label="Last exit"
             value={`code ${container.exit_code} · ${time(container.finished_at)}`}
           />
+        )}
+        {container.restart_policy && (
+          <Fact label="Restart policy" value={container.restart_policy} />
         )}
         <Fact label="Ports" value={ports(container)} />
         <Fact label="Networks" value={container.networks.join(", ")} />
@@ -164,6 +295,7 @@ export function SoftwareOverview({
           This software is too large to show completely; some parts are left out.
         </p>
       )}
+      <Resources software={software} />
       {snapshot.kind !== "systemd" && (
         <Panel title={snapshot.kind === "docker_compose" ? "Services" : "Container"}>
           {snapshot.containers.length === 0 ? (
@@ -209,7 +341,11 @@ export function SoftwareOverview({
           <ul className="space-y-1 text-sm">
             {snapshot.volumes.map((v) => (
               <li key={v.name} className="break-words">
-                {v.name} <span className="text-muted-foreground">{v.driver}</span>
+                {v.name}{" "}
+                <span className="text-muted-foreground">
+                  {v.driver}
+                  {v.size != null ? ` · ${formatBytes(v.size)}` : ""}
+                </span>
               </li>
             ))}
           </ul>
@@ -220,7 +356,18 @@ export function SoftwareOverview({
           <ul className="space-y-1 text-sm">
             {snapshot.networks.map((n) => (
               <li key={n.name} className="break-words">
-                {n.name} <span className="text-muted-foreground">{n.driver}</span>
+                {n.name}{" "}
+                <span className="text-muted-foreground">
+                  {[
+                    n.driver,
+                    n.scope,
+                    n.internal ? "internal" : "",
+                    n.subnets.join(", "),
+                    n.gateways.length > 0 ? `gateway ${n.gateways.join(", ")}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
               </li>
             ))}
           </ul>

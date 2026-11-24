@@ -103,6 +103,9 @@ func (l *looker) look(ctx context.Context) {
 		if had && last.fingerprint == fp && now.Sub(last.at) < resendEvery {
 			continue
 		}
+		mctx, cancel := context.WithTimeout(ctx, lookTimeout)
+		s.measure(mctx, l.helper, in, diskUse, diskEvery, now)
+		cancel()
 		err = send(ctx, l.d, s)
 		switch {
 		case api.StatusOf(err) == 404: // an older server

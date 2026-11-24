@@ -32,7 +32,7 @@ func snapshotWorkload(ctx context.Context, e env, a api.Action) error {
 	if err != nil {
 		return err
 	}
-	return workloads.Refresh(ctx, e.d, e.helper, in)
+	return workloads.RefreshAll(ctx, e.d, e.helper, in)
 }
 
 // controlWorkload runs verb on a workload or one compose service of it. The

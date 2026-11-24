@@ -92,6 +92,8 @@ const containerTemplate = `{"id":{{json .Id}},"name":{{json .Name}},` +
 	`"restarts":{{json .RestartCount}},"exit_code":{{json .State.ExitCode}},"oom_killed":{{json .State.OOMKilled}},` +
 	`"started_at":{{json .State.StartedAt}},"finished_at":{{json .State.FinishedAt}},` +
 	`"image":{{json .Config.Image}},"image_id":{{json .Image}},` +
+	`"restart_policy":{{with .HostConfig.RestartPolicy}}{{json .Name}}{{else}}""{{end}},` +
+	`"memory_limit":{{json .HostConfig.Memory}},"nano_cpus":{{json .HostConfig.NanoCpus}},` +
 	`"port_map":{{json (index .NetworkSettings "Ports")}},` +
 	`"mounts":[{{range $i, $m := .Mounts}}{{if $i}},{{end}}{"type":{{json (index $m "Type")}},"name":{{json (index $m "Name")}},` +
 	`"source":{{json (index $m "Source")}},"destination":{{json (index $m "Destination")}},"rw":{{json (index $m "RW")}}}{{end}}],` +
@@ -100,7 +102,8 @@ const containerTemplate = `{"id":{{json .Id}},"name":{{json .Name}},` +
 const (
 	imageTemplate   = `{"id":{{json .Id}},"tags":{{json .RepoTags}},"digests":{{json .RepoDigests}},"size":{{json .Size}},"created":{{json .Created}}}`
 	volumeTemplate  = `{"name":{{json .Name}},"driver":{{json .Driver}}}`
-	networkTemplate = `{"name":{{json .Name}},"driver":{{json .Driver}},"scope":{{json .Scope}}}`
+	networkTemplate = `{"name":{{json .Name}},"driver":{{json .Driver}},"scope":{{json .Scope}},"internal":{{json .Internal}},` +
+		`"subnets":[{{range .IPAM.Config}}{{json .Subnet}},{{end}}""],"gateways":[{{range .IPAM.Config}}{{json .Gateway}},{{end}}""]}`
 )
 
 // unitProperties are what unit status shows (never Environment= or ExecStart=).
@@ -142,6 +145,10 @@ type WorkloadContainer struct {
 	Ports      []WorkloadPort  `json:"ports"`
 	Mounts     []WorkloadMount `json:"mounts"`
 	Networks   []string        `json:"networks"`
+	// 0: no limit.
+	RestartPolicy string `json:"restart_policy"`
+	MemoryLimit   int64  `json:"memory_limit"`
+	NanoCPUs      int64  `json:"nano_cpus"`
 }
 
 // WorkloadImage, WorkloadVolume and WorkloadNetwork are objects the workload's
@@ -157,12 +164,17 @@ type WorkloadImage struct {
 type WorkloadVolume struct {
 	Name   string `json:"name"`
 	Driver string `json:"driver"`
+	// Size is set by the agent, nil until it was measured.
+	Size *int64 `json:"size"`
 }
 
 type WorkloadNetwork struct {
-	Name   string `json:"name"`
-	Driver string `json:"driver"`
-	Scope  string `json:"scope"`
+	Name     string   `json:"name"`
+	Driver   string   `json:"driver"`
+	Scope    string   `json:"scope"`
+	Internal bool     `json:"internal"`
+	Subnets  []string `json:"subnets"`
+	Gateways []string `json:"gateways"`
 }
 
 // WorkloadUnit is a systemd unit's state. MemoryBytes and CPUSeconds are nil
@@ -331,6 +343,11 @@ func (h Host) workloadInspect(ctx context.Context, _ localrpc.Peer, raw json.Raw
 	s.Images = inspectLines[WorkloadImage](ctx, h, imageTemplate, images.sorted(), "image")
 	s.Volumes = inspectLines[WorkloadVolume](ctx, h, volumeTemplate, volumes.sorted(), "volume")
 	s.Networks = inspectLines[WorkloadNetwork](ctx, h, networkTemplate, networks.sorted(), "network")
+	empty := func(v string) bool { return v == "" }
+	for i := range s.Networks {
+		n := &s.Networks[i]
+		n.Subnets, n.Gateways = slices.DeleteFunc(n.Subnets, empty), slices.DeleteFunc(n.Gateways, empty)
+	}
 	return s, nil
 }
 

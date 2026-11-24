@@ -23,6 +23,21 @@ export type SnapshotContainer = {
   ports: { host_ip: string; host_port: string; container: string }[];
   mounts: { type: string; name: string; source: string; destination: string; rw: boolean }[];
   networks: string[];
+  restart_policy: string;
+  /** 0: no limit. */
+  memory_limit: number;
+  nano_cpus: number;
+  /** Null when stopped, or from an older agent. */
+  stats: {
+    cpu_percent: number;
+    memory_bytes: number;
+    memory_percent: number;
+    net_rx_bytes: number;
+    net_tx_bytes: number;
+    block_read_bytes: number;
+    block_write_bytes: number;
+    pids: number;
+  } | null;
 };
 
 /** What a workload is made of, as the device last saw it. */
@@ -36,8 +51,20 @@ export type WorkloadSnapshot = {
   stopped_services: string[];
   containers: SnapshotContainer[];
   images: { id: string; tags: string[]; digests: string[]; size: number; created: string }[];
-  volumes: { name: string; driver: string }[];
-  networks: { name: string; driver: string; scope: string }[];
+  volumes: { name: string; driver: string; size: number | null }[];
+  networks: {
+    name: string;
+    driver: string;
+    scope: string;
+    internal: boolean;
+    subnets: string[];
+    gateways: string[];
+  }[];
+  /** Docker's disk space on the whole device. */
+  disk: {
+    taken_at: string;
+    items: { type: string; total: number; active: number; size: number; reclaimable: number }[];
+  } | null;
   unit: {
     name: string;
     load_state: string;

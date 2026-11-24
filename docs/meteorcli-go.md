@@ -481,6 +481,9 @@ and the `workload_*` actions (`internal/actions/workload.go`) restart, stop and 
   Compose's own project and working directory labels, systemd units by a record `install_unit` keeps in
   `units/` under the helper's state directory. They act on the verified container ids, not on names.
   Anything else is refused, and so is `meteorcli*`. Environment, commands and foreign labels are never read.
+- **Readings** (`workload.stats`, `docker.disk`) are added just before a snapshot is sent, so they never cause
+  one. `docker.disk` runs at most every 30 minutes, or every minute for `workload_snapshot`; it returns totals
+  and the sizes of the volumes it was asked for.
 - **Stopped** workloads are kept in `workload-stops.json`. Reconcile reports them `in_sync`, health
   `unknown`, `stopped_by_user`, does not apply or health-check them, and stops them again if something
   else started them. Start, restart, or a new release or revision that was applied clears it.

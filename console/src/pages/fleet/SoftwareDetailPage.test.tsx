@@ -58,6 +58,21 @@ function container(service: string, running = true) {
     ports: [{ host_ip: "0.0.0.0", host_port: "8080", container: "80/tcp" }],
     mounts: [],
     networks: ["shop_default"],
+    restart_policy: "always",
+    memory_limit: 64 * 1024 * 1024,
+    nano_cpus: 0,
+    stats: running
+      ? {
+          cpu_percent: 12.5,
+          memory_bytes: 32 * 1024 * 1024,
+          memory_percent: 50,
+          net_rx_bytes: 1024,
+          net_tx_bytes: 2048,
+          block_read_bytes: 0,
+          block_write_bytes: 0,
+          pids: 3,
+        }
+      : null,
   };
 }
 
@@ -94,8 +109,21 @@ function detail(overrides: Partial<DeviceSoftwareDetail> = {}): DeviceSoftwareDe
       stopped_services: [],
       containers: [container("web"), container("db")],
       images: [],
-      volumes: [{ name: "shop_data", driver: "local" }],
-      networks: [],
+      volumes: [{ name: "shop_data", driver: "local", size: 2048 }],
+      networks: [
+        {
+          name: "shop_default",
+          driver: "bridge",
+          scope: "local",
+          internal: false,
+          subnets: ["172.20.0.0/16"],
+          gateways: ["172.20.0.1"],
+        },
+      ],
+      disk: {
+        taken_at: "2026-11-24T10:00:00Z",
+        items: [{ type: "Images", total: 3, active: 1, size: 4096, reclaimable: 1024 }],
+      },
       unit: null,
     },
     snapshot_at: new Date().toISOString(),
@@ -153,6 +181,33 @@ describe("SoftwareDetailPage", () => {
         service: "web",
       }),
     );
+  });
+
+  it("shows what the software uses", async () => {
+    renderPage();
+    expect(await screen.findByText("25.0%")).toBeInTheDocument(); // both containers
+    const memory = screen.getAllByRole("meter", { name: "Memory" });
+    expect(memory[0]).toHaveAttribute("aria-valuenow", "50");
+    expect(screen.getByText(/172\.20\.0\.0\/16/)).toBeInTheDocument();
+    expect(screen.getByText("1 of 3")).toBeInTheDocument();
+    expect(screen.getByText(/reclaimable, as Docker/)).toBeInTheDocument();
+  });
+
+  it("works with a snapshot without readings", async () => {
+    const snapshot = detail().snapshot!;
+    vi.mocked(getDeviceSoftware).mockResolvedValue(
+      detail({
+        snapshot: {
+          ...snapshot,
+          disk: null,
+          volumes: [{ name: "shop_data", driver: "local", size: null }],
+          containers: snapshot.containers.map((c) => ({ ...c, stats: null })),
+        },
+      }),
+    );
+    renderPage();
+    expect(await screen.findByText("shop_data")).toBeInTheDocument();
+    expect(screen.queryByText("Resources")).toBeNull();
   });
 
   it("does nothing when the question is declined", async () => {

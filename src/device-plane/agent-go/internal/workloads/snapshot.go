@@ -31,6 +31,7 @@ const (
 	maxPorts    = 64
 	maxMounts   = 64
 	maxNames    = 32 // networks per container, tags and digests per image
+	maxSubnets  = 8
 	maxObjects  = 64 // images, volumes, networks
 	maxText     = 512
 	maxServices = 64
@@ -40,6 +41,8 @@ const (
 type container struct {
 	helper.WorkloadContainer
 	Metric string `json:"metric"`
+	// Stats is nil for a stopped container.
+	Stats *helper.WorkloadStats `json:"stats"`
 }
 
 // Snapshot is what one workload is made of right now.
@@ -57,6 +60,8 @@ type Snapshot struct {
 	Volumes         []helper.WorkloadVolume  `json:"volumes"`
 	Networks        []helper.WorkloadNetwork `json:"networks"`
 	Unit            *helper.WorkloadUnit     `json:"unit"`
+	// Disk is Docker's disk space on the whole device (totals, no names).
+	Disk *Disk `json:"disk"`
 }
 
 const noteOlder = "Deployed by an older agent. Deploy it again to restart, stop or start it from here."
@@ -146,6 +151,10 @@ func (s *Snapshot) fit() {
 	}
 	s.Volumes = cut(s.Volumes, maxObjects, t)
 	s.Networks = cut(s.Networks, maxObjects, t)
+	for i := range s.Networks {
+		n := &s.Networks[i]
+		n.Subnets, n.Gateways = cut(n.Subnets, maxSubnets, t), cut(n.Gateways, maxSubnets, t)
+	}
 	if s.size() <= maxSnapshot {
 		return
 	}
@@ -184,10 +193,21 @@ func (s *Snapshot) fingerprint() string {
 // Refresh takes and sends the snapshot of one workload now (the
 // workload_snapshot action, and after every other workload action).
 func Refresh(ctx context.Context, d agent.Deps, h caller, in deploy.Installed) error {
-	s, err := Take(ctx, h, in, workload.Stops{Store: d.State}.Get(in.Key), time.Now())
+	return refresh(ctx, d, h, in, diskEvery)
+}
+
+// RefreshAll is Refresh that also measures the disk space again.
+func RefreshAll(ctx context.Context, d agent.Deps, h caller, in deploy.Installed) error {
+	return refresh(ctx, d, h, in, diskRefresh)
+}
+
+func refresh(ctx context.Context, d agent.Deps, h caller, in deploy.Installed, diskAge time.Duration) error {
+	now := time.Now()
+	s, err := Take(ctx, h, in, workload.Stops{Store: d.State}.Get(in.Key), now)
 	if err != nil {
 		return err
 	}
+	s.measure(ctx, h, in, diskUse, diskAge, now)
 	return send(ctx, d, s)
 }
 

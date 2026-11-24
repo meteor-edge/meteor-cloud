@@ -19,12 +19,22 @@ const route = "/api/v1/agent/software/snapshots"
 type fakeHelper struct {
 	state   helper.WorkloadState
 	inspect string
+	stats   []helper.WorkloadStats
+	disk    helper.DockerDisk
+	disks   int
 }
 
 func (f *fakeHelper) Call(_ context.Context, op string, _, out any) error {
 	var v any = f.state
 	if op == "docker.inspect" {
 		v = helper.DockerOutput{OK: true, Output: f.inspect}
+	}
+	switch op {
+	case "workload.stats":
+		v = f.stats
+	case "docker.disk":
+		f.disks++
+		v = f.disk
 	}
 	b, _ := json.Marshal(v)
 	return json.Unmarshal(b, out)
@@ -89,4 +99,57 @@ func TestSnapshotFits(t *testing.T) {
 	if err != nil || s.size() > maxSnapshot || !s.Truncated || len(s.Containers) != 20 {
 		t.Errorf("size %d truncated %v err %v", s.size(), s.Truncated, err)
 	}
+}
+
+func TestMeasure(t *testing.T) {
+	h := &fakeHelper{
+		state: helper.WorkloadState{Managed: true, Containers: []helper.WorkloadContainer{{Name: "web"}, {Name: "db"}},
+			Volumes: []helper.WorkloadVolume{{Name: "data"}}},
+		stats: []helper.WorkloadStats{{Name: "web", CPUPercent: 2.5, MemoryBytes: 10}},
+		disk:  helper.DockerDisk{Items: []helper.DiskUse{{Type: "Images", Reclaimable: 7}}, Volumes: map[string]int64{"data": 42}},
+	}
+	in := deploy.Installed{Key: "shop", Kind: "docker_compose", Name: "shop"}
+	now := time.Unix(1_700_000_000, 0)
+	c := &disks{}
+	take := func(age time.Duration) *Snapshot {
+		s, err := Take(context.Background(), h, in, workload.Stop{}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := s.fingerprint()
+		s.measure(context.Background(), h, in, c, age, now)
+		if before == s.fingerprint() {
+			t.Error("nothing was measured")
+		}
+		return s
+	}
+	s := take(diskEvery)
+	if s.Containers[0].Stats == nil || s.Containers[0].Stats.CPUPercent != 2.5 || s.Containers[1].Stats != nil ||
+		s.Disk.Items[0].Reclaimable != 7 || *s.Volumes[0].Size != 42 {
+		t.Errorf("%+v", s)
+	}
+	now = now.Add(10 * time.Minute)
+	if s = take(diskEvery); h.disks != 1 || s.Disk == nil {
+		t.Errorf("measured %d times within half an hour", h.disks)
+	}
+	if take(diskRefresh); h.disks != 2 {
+		t.Error("a refresh did not measure again")
+	}
+}
+
+func TestNewVolumeIsMeasuredSoon(t *testing.T) {
+	h := &fakeHelper{disk: helper.DockerDisk{Items: []helper.DiskUse{{Type: "Images"}}}}
+	c, now := &disks{}, time.Unix(1_700_000_000, 0)
+	get := func(want int, volumes ...helper.WorkloadVolume) {
+		t.Helper()
+		if c.get(context.Background(), h, volumes, diskEvery, now); h.disks != want {
+			t.Errorf("measured %d times, want %d", h.disks, want)
+		}
+	}
+	get(1)
+	get(1, helper.WorkloadVolume{Name: "data"}) // seen right after a measurement
+	now = now.Add(5 * time.Minute)
+	get(2, helper.WorkloadVolume{Name: "data"})
+	now = now.Add(5 * time.Minute)
+	get(2, helper.WorkloadVolume{Name: "data"})
 }

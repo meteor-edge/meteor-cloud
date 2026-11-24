@@ -147,7 +147,8 @@ containers with images, ports, mount paths and networks, or its systemd unit. On
 `truncated` is set. The agent sends one when something changed (it looks every minute), every 5 minutes,
 and for `workload_snapshot`. Environment variables, commands and labels that are not MeteorCloud's are
 never read. `managed: false` means the device would refuse restart, stop and start, because the workload
-was deployed by an older agent.
+was deployed by an older agent. `stats`, volume `size` and `disk` are readings: they do not cause a
+snapshot by themselves. `disk` is Docker's space on the whole device in totals, without names.
 
 ### One-off actions
 

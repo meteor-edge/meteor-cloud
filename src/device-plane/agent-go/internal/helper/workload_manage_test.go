@@ -214,3 +214,29 @@ func TestDockerRunLabels(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestWorkloadStatsAndDisk(t *testing.T) {
+	h, calls, answers := manageHost(t)
+	answers["ps -a -q"] = "a1\na2\n"
+	answers["container inspect"] = `{"id":"a1","name":"/shop","running":true}` + "\n" + `{"id":"a2","name":"/old","running":false}`
+	answers["stats --no-stream"] = `{"Name":"shop","CPUPerc":"1.50%","MemUsage":"2MiB / 1GiB","MemPerc":"0.2%","NetIO":"1.5kB / 2MB","BlockIO":"0B / 3GB","PIDs":"4"}`
+	out, err := call(t, h, "workload.stats", WorkloadRequest{Kind: "docker", Key: "shop", Name: "shop"})
+	var stats []WorkloadStats
+	_ = json.Unmarshal(out, &stats)
+	want := WorkloadStats{Name: "shop", CPUPercent: 1.5, MemoryBytes: 2 << 20, MemoryPercent: 0.2, NetRxBytes: 1500, NetTxBytes: 2e6, BlockWrite: 3e9, PIDs: 4}
+	if err != nil || len(stats) != 1 || stats[0] != want {
+		t.Errorf("stats %s, %v", out, err)
+	}
+	if got := last(calls); !strings.HasSuffix(got, " a1") {
+		t.Errorf("ran %s", got)
+	}
+	answers["system df --format"] = `{"Type":"Images","TotalCount":"3","Active":"1","Size":"2GB","Reclaimable":"1.5GB (75%)"}`
+	answers["system df -v"] = "data 5MB\nforeign 9GB\n"
+	out, err = call(t, h, "docker.disk", DockerDiskRequest{Volumes: []string{"data"}})
+	var d DockerDisk
+	_ = json.Unmarshal(out, &d)
+	if err != nil || len(d.Items) != 1 || d.Items[0] != (DiskUse{Type: "Images", Total: 3, Active: 1, Size: 2e9, Reclaimable: 15e8}) ||
+		len(d.Volumes) != 1 || d.Volumes["data"] != 5e6 {
+		t.Errorf("disk %s, %v", out, err)
+	}
+}

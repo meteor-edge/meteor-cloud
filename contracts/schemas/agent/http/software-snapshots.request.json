@@ -166,6 +166,60 @@
                 },
                 "maxItems": 32,
                 "type": "array"
+              },
+              "restart_policy": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "memory_limit": {
+                "type": "integer"
+              },
+              "nano_cpus": {
+                "type": "integer"
+              },
+              "stats": {
+                "anyOf": [
+                  {
+                    "description": "What a running container uses, when the snapshot was sent.",
+                    "properties": {
+                      "name": {
+                        "maxLength": 512,
+                        "type": "string"
+                      },
+                      "cpu_percent": {
+                        "type": "number"
+                      },
+                      "memory_bytes": {
+                        "type": "integer"
+                      },
+                      "memory_percent": {
+                        "type": "number"
+                      },
+                      "net_rx_bytes": {
+                        "type": "integer"
+                      },
+                      "net_tx_bytes": {
+                        "type": "integer"
+                      },
+                      "block_read_bytes": {
+                        "type": "integer"
+                      },
+                      "block_write_bytes": {
+                        "type": "integer"
+                      },
+                      "pids": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -226,6 +280,16 @@
               "driver": {
                 "maxLength": 128,
                 "type": "string"
+              },
+              "size": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -250,6 +314,25 @@
               "scope": {
                 "maxLength": 128,
                 "type": "string"
+              },
+              "internal": {
+                "type": "boolean"
+              },
+              "subnets": {
+                "items": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              "gateways": {
+                "items": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "type": "array"
               }
             },
             "required": [
@@ -325,6 +408,54 @@
               },
               "required": [
                 "name"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disk": {
+          "anyOf": [
+            {
+              "description": "Docker's disk space on the whole device: totals, no names.",
+              "properties": {
+                "taken_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "items": {
+                  "items": {
+                    "properties": {
+                      "type": {
+                        "maxLength": 128,
+                        "type": "string"
+                      },
+                      "total": {
+                        "type": "integer"
+                      },
+                      "active": {
+                        "type": "integer"
+                      },
+                      "size": {
+                        "type": "integer"
+                      },
+                      "reclaimable": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 8,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "taken_at"
               ],
               "type": "object"
             },

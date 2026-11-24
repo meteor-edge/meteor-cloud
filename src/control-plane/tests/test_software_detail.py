@@ -147,6 +147,25 @@ def test_snapshot_limits(client: TestClient, db_session: Session) -> None:
     assert client.post(url, json=_snapshot()).status_code == 401
 
 
+def test_snapshot_readings(client: TestClient, db_session: Session) -> None:
+    d = _Device(client, db_session)
+    stats = {"name": "web", "cpu_percent": 1.5, "memory_bytes": 2048, "pids": 3}
+    sent = _snapshot(
+        containers=[
+            {"name": "web", "state": "running", "restart_policy": "always", "memory_limit": 4096, "stats": stats}
+        ],
+        volumes=[{"name": "data", "size": 42}],
+        networks=[{"name": "n", "subnets": ["172.20.0.0/16"], "gateways": ["172.20.0.1"]}],
+        disk={"taken_at": "2026-11-24T10:00:00Z", "items": [{"type": "Images", "size": 9, "reclaimable": 7}]},
+    )
+    assert client.post("/api/v1/agent/software/snapshots", headers=d.agent, json=sent).json() == {"accepted": True}
+    snapshot = d.detail()["snapshot"]
+    assert snapshot["containers"][0]["stats"]["cpu_percent"] == 1.5
+    assert snapshot["containers"][0]["memory_limit"] == 4096
+    assert snapshot["volumes"][0]["size"] == 42 and snapshot["networks"][0]["subnets"] == ["172.20.0.0/16"]
+    assert snapshot["disk"]["items"][0]["reclaimable"] == 7
+
+
 # ------------------------------------------------------------------ access
 
 

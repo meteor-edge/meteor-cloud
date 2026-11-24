@@ -34,6 +34,20 @@ class SnapshotMount(BaseModel):
     rw: bool = False
 
 
+class SnapshotStats(BaseModel):
+    """What a running container uses, when the snapshot was sent."""
+
+    name: Text
+    cpu_percent: float = 0
+    memory_bytes: int = 0
+    memory_percent: float = 0
+    net_rx_bytes: int = 0
+    net_tx_bytes: int = 0
+    block_read_bytes: int = 0
+    block_write_bytes: int = 0
+    pids: int = 0
+
+
 class SnapshotContainer(BaseModel):
     id: Short = ""
     name: Text
@@ -54,6 +68,11 @@ class SnapshotContainer(BaseModel):
     ports: list[SnapshotPort] = Field(default_factory=list, max_length=64)
     mounts: list[SnapshotMount] = Field(default_factory=list, max_length=64)
     networks: list[Text] = Field(default_factory=list, max_length=32)
+    restart_policy: Short = ""
+    # 0: no limit.
+    memory_limit: int = 0
+    nano_cpus: int = 0
+    stats: SnapshotStats | None = None
 
 
 class SnapshotImage(BaseModel):
@@ -67,12 +86,31 @@ class SnapshotImage(BaseModel):
 class SnapshotVolume(BaseModel):
     name: Text
     driver: Short = ""
+    size: int | None = None
 
 
 class SnapshotNetwork(BaseModel):
     name: Text
     driver: Short = ""
     scope: Short = ""
+    internal: bool = False
+    subnets: list[Short] = Field(default_factory=list, max_length=8)
+    gateways: list[Short] = Field(default_factory=list, max_length=8)
+
+
+class SnapshotDiskUse(BaseModel):
+    type: Short
+    total: int = 0
+    active: int = 0
+    size: int = 0
+    reclaimable: int = 0
+
+
+class SnapshotDisk(BaseModel):
+    """Docker's disk space on the whole device: totals, no names."""
+
+    taken_at: datetime
+    items: list[SnapshotDiskUse] = Field(default_factory=list, max_length=8)
 
 
 class SnapshotUnit(BaseModel):
@@ -104,6 +142,7 @@ class WorkloadSnapshot(BaseModel):
     volumes: list[SnapshotVolume] = Field(default_factory=list, max_length=64)
     networks: list[SnapshotNetwork] = Field(default_factory=list, max_length=64)
     unit: SnapshotUnit | None = None
+    disk: SnapshotDisk | None = None
 
 
 class SoftwareSnapshotRequest(BaseModel):
