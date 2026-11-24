@@ -214,11 +214,15 @@ func (c *cycle) install(ctx context.Context, it item, rec workload, had, wasAppl
 		rep = back
 	}
 	if release, revision, ok := it.identity(); ok && rep.status() == statusInSync {
+		// Before the release is recorded: when it fails, the next cycle applies
+		// again, and an old stop cannot hit the new release.
+		if err := c.clearStop(key); err != nil {
+			return nil, fmt.Errorf("clear the stopped state: %w", err)
+		}
 		if err := c.r.applied.save(record{key: key, release: release, revision: revision, item: it}); err != nil {
 			d.Log.Error("record the applied release", "workload", key, "err", err)
 		}
 		c.applied[key] = workload{ReleaseID: release, Revision: revision, Item: it}
-		c.clearStop(key)
 	}
 	return rep, nil
 }
@@ -328,6 +332,10 @@ func (c *cycle) stillRolledBack(ctx context.Context, it item, rec workload, had 
 		if err != nil {
 			return nil
 		}
+		if stopped := c.stoppedByUser(ctx, it, rec, had, true); stopped != nil {
+			release()
+			return stopped
+		}
 		restored, err := c.restore(ctx, rec.Item)
 		release()
 		if err != nil {
@@ -388,11 +396,13 @@ func (c *cycle) rollBack(ctx context.Context, it item, failure report, rec workl
 	if restored.status() != statusInSync {
 		return failed(it.key(), fmt.Sprintf("%s; rolling back to %s also failed: %s", reason, previous.version(), restored.lastError())), nil
 	}
+	if err := c.clearStop(it.key()); err != nil {
+		d.Log.Error("clear the stopped state of a workload", "workload", it.key(), "err", err)
+	}
 	back := &failedRelease{ReleaseID: release, Revision: revision, Reason: reason}
 	if err := c.r.applied.save(record{key: it.key(), release: prevRelease, revision: prevRevision, item: previous, rolledBackFrom: back}); err != nil {
 		d.Log.Error("record the rollback", "workload", it.key(), "err", err)
 	}
-	c.clearStop(it.key())
 	c.applied[it.key()] = workload{ReleaseID: prevRelease, Revision: prevRevision, Item: previous, RolledBackFrom: back}
 	return rolledBack(it, previous, restored.health(), reason), nil
 }

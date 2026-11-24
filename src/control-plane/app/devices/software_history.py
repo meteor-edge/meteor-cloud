@@ -7,6 +7,7 @@ events and CPU/memory from the agent's device events and ``app.*`` metrics, depl
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import datetime
@@ -127,7 +128,16 @@ def software_history(
 
     raw_changes = [
         event
-        for event in _pages(dp, org, {**common, "stream": SOFTWARE_STREAM, "order": "asc"})
+        for event in _pages(
+            dp,
+            org,
+            {
+                **common,
+                "stream": SOFTWARE_STREAM,
+                "order": "asc",
+                "filter": json.dumps({"workload_key": row.workload_key}),
+            },
+        )
         if (event.get("data") or {}).get("workload_key") == row.workload_key
     ]
     changes: list[HealthChange] = []

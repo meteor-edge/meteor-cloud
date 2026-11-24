@@ -28,8 +28,8 @@ const (
 
 // disks remembers the last measurement for every workload's snapshot.
 type disks struct {
-	mu      sync.Mutex
-	known   map[string]bool
+	mu    sync.Mutex
+	known map[string]bool
 	// pending: a volume was seen that is not measured yet.
 	pending bool
 	at      time.Time

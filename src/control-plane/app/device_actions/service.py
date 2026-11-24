@@ -456,15 +456,18 @@ class DeviceActionService:
         pending = self._pending(device.id, for_update=True)
         if self._expire(pending):
             self.session.flush()
-        for row in pending:
-            if row.state == STATE_PENDING and (row.kind, row.workload_key, row.service) == (
-                payload.kind,
-                software.workload_key,
-                payload.service,
-            ):
-                # The same order is already waiting: that one will do.
-                self.session.commit()
-                return self._software_response(row, actor.email)
+        same = [
+            row
+            for row in pending
+            if row.state == STATE_PENDING
+            and row.workload_key == software.workload_key
+            and (row.kind in WORKLOAD_MANAGE_KINDS) == manage
+        ]
+        # The newest waiting order is this one: it will do. An older one is not enough, as
+        # what was ordered after it (stop, start, then stop again) would win.
+        if same and (same[-1].kind, same[-1].service) == (payload.kind, payload.service):
+            self.session.commit()
+            return self._software_response(same[-1], self._requester(actor, organization_id, same[-1]))
         kinds = WORKLOAD_MANAGE_KINDS if manage else {KIND_WORKLOAD_SNAPSHOT}
         recent = self.session.scalar(
             select(func.count())
@@ -519,6 +522,16 @@ class DeviceActionService:
         self.session.commit()
         self._wake(device.id)
         return self._software_response(row, actor.email)
+
+    def _requester(self, actor: User, organization_id: uuid.UUID, row: DeviceAction) -> str | None:
+        """Who ordered ``row``, when ``actor`` may know."""
+        if row.requested_by_user_id == actor.id:
+            return actor.email
+        membership = self.authz.require_membership(user_id=actor.id, organization_id=organization_id)
+        if row.requested_by_user_id is None or not self.authz.check(membership, "member.read"):
+            return None
+        user = self.session.get(User, row.requested_by_user_id)
+        return user.email if user else None
 
     def _software_response(self, row: DeviceAction, requested_by: str | None) -> SoftwareActionResponse:
         response = SoftwareActionResponse.model_validate(row)

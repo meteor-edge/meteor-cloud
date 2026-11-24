@@ -40,6 +40,12 @@ func snapshotWorkload(ctx context.Context, e env, a api.Action) error {
 // in between leaves what the user asked for.
 func controlWorkload(verb string) func(context.Context, env, api.Action) error {
 	return func(ctx context.Context, e env, a api.Action) error {
+		release, err := e.d.Workloads.AcquireSoon(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+		// Under the lock: a deploy may have changed the workload meanwhile.
 		in, err := installed(e, a)
 		if err != nil {
 			return err
@@ -48,11 +54,6 @@ func controlWorkload(verb string) func(context.Context, env, api.Action) error {
 		if service != "" && in.Kind != "docker_compose" {
 			return fmt.Errorf("workload %q has no services", in.Key)
 		}
-		release, err := e.d.Workloads.AcquireSoon(ctx)
-		if err != nil {
-			return err
-		}
-		defer release()
 		stops := workload.Stops{Store: e.d.State}
 		before := stops.Get(in.Key)
 		next, do := before, verb

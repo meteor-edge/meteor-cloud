@@ -169,6 +169,16 @@ func (s *Snapshot) fit() {
 	for i := range s.Containers {
 		s.Containers[i].Ports = []helper.WorkloadPort{}
 	}
+	if s.size() <= maxSnapshot {
+		return
+	}
+	for i := range s.Containers {
+		s.Containers[i].Networks = []string{}
+	}
+	s.Volumes, s.Networks = []helper.WorkloadVolume{}, []helper.WorkloadNetwork{}
+	for s.size() > maxSnapshot && len(s.Containers) > 0 {
+		s.Containers = s.Containers[:len(s.Containers)-1]
+	}
 }
 
 func (s *Snapshot) size() int {

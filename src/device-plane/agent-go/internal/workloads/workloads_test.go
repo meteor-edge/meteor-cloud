@@ -90,6 +90,9 @@ func TestSnapshotFits(t *testing.T) {
 	long := strings.Repeat("x", 2000)
 	for range 20 {
 		c := helper.WorkloadContainer{Name: "c"}
+		for range 40 {
+			c.Networks = append(c.Networks, long[:128])
+		}
 		for range 100 {
 			c.Mounts = append(c.Mounts, helper.WorkloadMount{Source: long, Destination: long})
 		}

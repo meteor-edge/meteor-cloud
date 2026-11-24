@@ -106,8 +106,4 @@ func StillRunning(st helper.WorkloadState, stop wl.Stop) []string {
 }
 
 // clearStop forgets that the user stopped key: a new deploy started it.
-func (c *cycle) clearStop(key string) {
-	if err := c.r.stops.Set(key, wl.Stop{}); err != nil {
-		c.r.d.Log.Error("clear the stopped state of a workload", "workload", key, "err", err)
-	}
-}
+func (c *cycle) clearStop(key string) error { return c.r.stops.Set(key, wl.Stop{}) }

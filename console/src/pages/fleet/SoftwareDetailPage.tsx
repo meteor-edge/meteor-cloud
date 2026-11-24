@@ -286,7 +286,9 @@ export function SoftwareDetailPage() {
       {tab === "activity" && (
         <section className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-glow sm:p-6">
           <h2 className="text-lg font-semibold">Activity</h2>
-          {actions.length === 0 ? (
+          {actionsQuery.isError ? (
+            <p className="text-sm text-destructive">Could not load the activity.</p>
+          ) : actions.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nothing was ordered yet.</p>
           ) : (
             <div className="overflow-x-auto">

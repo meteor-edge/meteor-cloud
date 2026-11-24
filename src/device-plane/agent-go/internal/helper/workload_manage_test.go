@@ -98,14 +98,25 @@ func TestWorkloadControlCompose(t *testing.T) {
 	for _, tt := range []struct{ verb, service, want string }{
 		{"stop", "", "docker compose -p shop stop"},
 		{"start", "", "docker compose -p shop start"},
-		{"restart", "", "docker compose -p shop restart db web"}, // not the finished job
-		{"restart", "web", "docker compose -p shop restart web"},
+		{"restart", "", "docker compose -p shop restart --no-deps db web"}, // not the finished job
+		{"restart", "web", "docker compose -p shop restart --no-deps web"},
 	} {
 		if _, err := call(t, h, "workload.control", control("docker_compose", "shop", "shop", tt.verb, tt.service)); err != nil {
 			t.Fatal(err)
 		}
 		if got := last(calls); got != tt.want {
 			t.Errorf("ran %s, want %s", got, tt.want)
+		}
+	}
+	// Only a finished job is left: a restart must not run it again.
+	answers["container inspect"] = `{"name":"/shop-migrate-1","service":"migrate","running":false}`
+	n := len(*calls)
+	if _, err := call(t, h, "workload.control", control("docker_compose", "shop", "shop", "restart", "")); localrpc.CodeOf(err) != localrpc.CodeBadRequest {
+		t.Errorf("err = %v", err)
+	}
+	for _, c := range (*calls)[n:] {
+		if c[1] == "compose" {
+			t.Errorf("ran %v", c)
 		}
 	}
 	for _, s := range []string{"nope", "--all"} {

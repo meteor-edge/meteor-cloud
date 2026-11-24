@@ -537,6 +537,10 @@ func (h Host) controlProject(ctx context.Context, r WorkloadControlRequest) erro
 		}
 	}
 	args := []string{"compose", "-p", r.Name, r.Verb}
+	if r.Verb == "restart" {
+		// Not what depends on it: that may be stopped on purpose.
+		args = append(args, "--no-deps")
+	}
 	switch {
 	case r.Service != "":
 		if !known[r.Service] {
@@ -545,6 +549,10 @@ func (h Host) controlProject(ctx context.Context, r WorkloadControlRequest) erro
 		args = append(args, r.Service)
 	case r.Verb == "restart":
 		// Only what runs: a one-shot job that finished must not run again.
+		// Without names Compose would restart everything.
+		if len(running) == 0 {
+			return badRequest("nothing of compose project %s runs; start it instead", r.Name)
+		}
 		args = append(args, running.sorted()...)
 	}
 	_, err = h.Run(ctx, "docker", args...)

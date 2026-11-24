@@ -151,7 +151,7 @@ def agent_software_snapshot(
     software: DeviceSoftwareSvc,
 ) -> SoftwareSnapshotResponse:
     """What one workload on this device is made of right now (the console's software page)."""
-    if len(payload.model_dump_json()) > MAX_SNAPSHOT_BYTES:
+    if len(payload.model_dump_json(exclude_unset=True).encode()) > MAX_SNAPSHOT_BYTES:
         raise AppError("snapshot_too_large", "The workload snapshot is too large.", status_code=413)
     return SoftwareSnapshotResponse(
         accepted=software.store_snapshot(

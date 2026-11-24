@@ -453,3 +453,22 @@ def test_device_group_scope(client: TestClient, db_session: Session) -> None:
     device.device_group_id = mine.id
     db_session.commit()
     assert d.order("workload_stop", headers).status_code == 200
+
+
+def test_only_the_newest_waiting_order_is_coalesced(client: TestClient, db_session: Session) -> None:
+    d = _Device(client, db_session)
+    for kind in ("workload_stop", "workload_start", "workload_stop", "workload_stop"):
+        assert d.order(kind).status_code == 200
+    assert [a["kind"] for a in d.collect()] == ["workload_stop", "workload_start", "workload_stop"]
+
+
+def test_coalesced_order_keeps_its_requester(client: TestClient, db_session: Session) -> None:
+    d = _Device(client, db_session)
+    operator = d.member(OrganizationRole.OPERATOR)
+    first = d.order("workload_stop", operator).json()
+    again = d.order("workload_stop").json()
+    assert again["id"] == first["id"] and again["requested_by"] == "operator@example.com"
+    # An operator may not see members.
+    d.collect()
+    d.order("workload_start")
+    assert d.order("workload_start", operator).json()["requested_by"] is None
