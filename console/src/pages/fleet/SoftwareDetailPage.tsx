@@ -125,6 +125,8 @@ export function SoftwareDetailPage() {
     software.supported_actions.includes("workload_restart") &&
     software.installed_release_id !== null &&
     snapshot?.managed !== false;
+  // The whole workload is stopped: the device starts all of it, not one service.
+  const allStopped = software.stopped_by_user && (snapshot?.stopped_services.length ?? 0) === 0;
   const canRefresh = software.supported_actions.includes("workload_snapshot");
   const pending = (kind: SoftwareActionKind, service?: string) =>
     waiting.some((a) => a.kind === kind && a.service === (service ?? null));
@@ -204,7 +206,7 @@ export function SoftwareDetailPage() {
                 >
                   Restart
                 </Button>
-                {(!software.stopped_by_user || (snapshot?.stopped_services.length ?? 0) > 0) && (
+                {!allStopped && (
                   <Button
                     type="button"
                     variant="outline"
@@ -259,7 +261,10 @@ export function SoftwareDetailPage() {
       <Tabs tabs={tabs} active={tab} onChange={setTab} label="Software sections" />
 
       {tab === "overview" && (
-        <SoftwareOverview software={software} onService={canManage ? run : undefined} />
+        <SoftwareOverview
+          software={software}
+          onService={canManage && !allStopped ? run : undefined}
+        />
       )}
       {tab === "health" && (
         <SoftwareHealth

@@ -128,6 +128,19 @@ func (l *Lock) Acquire(ctx context.Context) (release func(), err error) {
 	}
 }
 
+// TryAcquire takes the lock only when it is free.
+func (l *Lock) TryAcquire() (release func(), ok bool) {
+	if l == nil {
+		return func() {}, true
+	}
+	select {
+	case l.c <- struct{}{}:
+		return func() { <-l.c }, true
+	default:
+		return nil, false
+	}
+}
+
 // AcquireSoon is Acquire for an action: ErrBusy when a deploy holds it longer.
 func (l *Lock) AcquireSoon(ctx context.Context) (func(), error) {
 	wctx, cancel := context.WithTimeout(ctx, lockWait)

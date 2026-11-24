@@ -12,8 +12,9 @@ import (
 // the desired release is the one that is installed (or was rolled back from):
 // it is neither health-checked nor applied again, and is stopped again when
 // something else started it. nil for any other workload; a new release or
-// revision goes through install, which clears the record.
-func (c *cycle) stoppedByUser(ctx context.Context, it item, rec workload, had bool) report {
+// revision goes through install, which clears the record. locked says that the
+// caller holds the workload lock.
+func (c *cycle) stoppedByUser(ctx context.Context, it item, rec workload, had, locked bool) report {
 	if !had || rec.Item == nil {
 		return nil
 	}
@@ -36,7 +37,7 @@ func (c *cycle) stoppedByUser(ctx context.Context, it item, rec workload, had bo
 	default:
 		return nil
 	}
-	c.stopAgain(ctx, installedFrom(rec.Item), stop)
+	c.stopAgain(ctx, installedFrom(rec.Item), locked)
 	// A service may be stopped while the others run; health stays unknown.
 	rep["stopped_by_user"] = true
 	return rep
@@ -44,8 +45,23 @@ func (c *cycle) stoppedByUser(ctx context.Context, it item, rec workload, had bo
 
 // stopAgain stops what the record says is stopped but runs (Docker's restart
 // policy "always" after a daemon restart, a token refresh, a manual start).
-func (c *cycle) stopAgain(ctx context.Context, in Installed, stop wl.Stop) {
+//
+// It needs the workload lock, and reads the record under it: a Start that runs
+// meanwhile must not be undone. When an action holds the lock, the next cycle
+// looks again.
+func (c *cycle) stopAgain(ctx context.Context, in Installed, locked bool) {
 	d := c.r.d
+	if !locked {
+		release, ok := d.Workloads.TryAcquire()
+		if !ok {
+			return
+		}
+		defer release()
+	}
+	stop := c.r.stops.Get(in.Key)
+	if !stop.Any() {
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 	req := helper.WorkloadRequest{Kind: in.Kind, Key: in.Key, Name: in.Name}

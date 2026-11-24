@@ -122,7 +122,7 @@ func (c *cycle) reconcile(ctx context.Context, it item) (rep report, attempted b
 	key := it.key()
 	rec, had := c.applied[key]
 
-	if rep := c.stoppedByUser(ctx, it, rec, had); rep != nil {
+	if rep := c.stoppedByUser(ctx, it, rec, had, false); rep != nil {
 		return rep, false
 	}
 	if rep := c.stillRolledBack(ctx, it, rec, had); rep != nil {
@@ -144,7 +144,7 @@ func (c *cycle) reconcile(ctx context.Context, it item) (rep report, attempted b
 		if !rec.Reapply {
 			if rep := c.healthOnly(ctx, it); rep != nil {
 				// A stop that came in during the check is not a failure.
-				if stopped := c.stoppedByUser(ctx, it, rec, had); stopped != nil {
+				if stopped := c.stoppedByUser(ctx, it, rec, had, false); stopped != nil {
 					return stopped, false
 				}
 				return rep, false
@@ -158,7 +158,7 @@ func (c *cycle) reconcile(ctx context.Context, it item) (rep report, attempted b
 	}
 	defer release()
 	// A stop that came in meanwhile wins over an apply of the same release.
-	if rep := c.stoppedByUser(ctx, it, rec, had); rep != nil {
+	if rep := c.stoppedByUser(ctx, it, rec, had, true); rep != nil {
 		return rep, false
 	}
 	rep, err = c.install(ctx, it, rec, had, wasApplied)

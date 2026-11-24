@@ -194,6 +194,8 @@ describe("SoftwareDetailPage", () => {
     renderPage();
     expect(await screen.findByText("Stopped by user")).toBeInTheDocument();
     expect(button("Stop")).toBeNull();
+    // All of it starts again, not one service.
+    expect(button("Start service")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() =>
       expect(orderSoftwareAction).toHaveBeenCalledWith("t", "org-1", "dev-1", "sw-1", {

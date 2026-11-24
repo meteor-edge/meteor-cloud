@@ -15,7 +15,8 @@ minutes; **Refresh now** asks for it at once.
 
 ## Restart, stop and start
 
-- A Compose workload can be restarted, stopped or started as a whole or one service at a time.
+- A Compose workload can be restarted, stopped or started as a whole or one service at a time. After
+  a stop of the whole workload, start the whole workload.
 - **Stop** stays stopped, also after a reboot, until **Start**, **Restart** or a new deploy. A stopped
   workload is not a failed one: rollouts ignore it.
 - The device gets the order over MQTT at once, or with its next heartbeat without MQTT. An order it does

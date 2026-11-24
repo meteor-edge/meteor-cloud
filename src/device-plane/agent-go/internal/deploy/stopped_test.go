@@ -76,3 +76,28 @@ func TestInstalledWorkloads(t *testing.T) {
 		t.Errorf("%+v, %v", all, err)
 	}
 }
+
+// A Start holds the lock while it runs: a cycle that saw the stop record just
+// before must not stop the workload after it.
+func TestStopAgainLeavesARunningActionAlone(t *testing.T) {
+	e := newEnv(t)
+	e.d.Workloads = wl.NewLock()
+	e.m = &Module{Helper: e.host, clock: e.m.clock, probe: e.m.probe}
+	e.m.setup(e.d)
+	e.desire(dockerItem(rel1, "1.0.0", 1, map[string]any{"image": "demo:1"}))
+	e.cycle()
+	if err := (wl.Stops{Store: e.d.State}).Set("demo-app", wl.Stop{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	release, ok := e.d.Workloads.TryAcquire()
+	if !ok {
+		t.Fatal("the lock is not free")
+	}
+	if got := e.cycle()["demo-app"]; got["stopped_by_user"] != true || e.host.count("workload.control") != 0 {
+		t.Errorf("stopped during an action: %v", got)
+	}
+	release()
+	if e.cycle(); e.host.count("workload.control") != 1 {
+		t.Error("not stopped once the action finished")
+	}
+}
