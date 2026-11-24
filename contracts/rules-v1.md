@@ -107,12 +107,12 @@ firing --resolve condition--> normal | cooldown --cooldown over--> normal
 `acknowledged` and `silenced` are control-plane states of an alert record (user
 actions); they never change what the engine evaluates.
 
-Each firing starts a new *episode*. Every transition produces one outbox item per
+Each firing starts a new *episode*. The counter survives disabling or editing a rule. Every transition produces one outbox item per
 matching action, keyed
 `<rule_id>:<device_id>:<episode>:<transition>[:<fingerprint>][:<reason>]:a<index>`.
 The key is stored uniquely, so a replayed evaluation can never enqueue an action
 twice, and the control plane uses it to make alert creation and resolution
-idempotent.
+idempotent. Order is kept per rule, device, action type and integration.
 
 Resolve reasons: `condition_cleared`, `rule_updated` (the condition, scope,
 sources or alerting mode changed: state is discarded and the alert re-fires if
@@ -134,7 +134,8 @@ How each is delivered (`internal/rules/dispatch`):
   (`POST /internal/rules/alert-transitions`, idempotent by key).
 - `webhook` and `notification` post to a notification integration of the rule's
   organization. Kind `webhook` gets the JSON below plus `params`; kind `slack` gets a
-  Slack-compatible `{"text": "..."}`. Headers: `X-MeteorCloud-Event: rule.<transition>`,
+  Slack-compatible `{"text": "..."}`, kind `email` a text message through the platform's
+  mail server, kind `telegram` a message from the organization's bot. HTTP headers: `X-MeteorCloud-Event: rule.<transition>`,
   `X-MeteorCloud-Delivery: <idempotency key>` and, when the integration has a secret,
   `X-MeteorCloud-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`. Private,
   loopback and link-local addresses are refused, redirects are not followed, and an

@@ -60,8 +60,8 @@ func (h *harness) restart() {
 func (h *harness) update(rules ...RuleRecord) {
 	h.snap = &Snapshot{Version: fmt.Sprintf("v%d", len(rules)+h.seq), Rules: rules, Devices: testDevices}
 	rs := CompileSnapshot(h.snap, dsl.DefaultLimits())
-	old := h.e.Apply(rs)
-	if err := h.e.Reconcile(context.Background(), old, rs); err != nil {
+	h.e.Apply(rs)
+	if err := h.e.Reconcile(context.Background(), rs); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -430,8 +430,11 @@ func TestRemovedRuleResolvesItsAlerts(t *testing.T) {
 	h.update()
 	h.expect(tr{"dev-a", "firing", ""}, tr{"dev-a", "resolved", "rule_removed"})
 	st, _ := h.store.LoadStates(context.Background(), "dev-a", []string{"r1"})
-	if len(st) != 0 {
-		t.Fatal("state deleted")
+	if !st["r1"].Retired() || len(st["r1"].Nodes) != 0 || st["r1"].Episode != 1 {
+		t.Fatalf("only the episode counter is kept: %+v", st["r1"])
+	}
+	if ids, _ := h.store.RuleIDs(context.Background()); len(ids) != 0 {
+		t.Fatalf("a retired rule has no state to reconcile: %v", ids)
 	}
 }
 

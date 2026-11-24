@@ -31,6 +31,8 @@ import { OrganizationSettingsPage } from "@/pages/organizations/OrganizationSett
 import { TeamDetailPage } from "@/pages/organizations/TeamDetailPage";
 import { TeamsPage } from "@/pages/organizations/TeamsPage";
 import { AlertsPage } from "@/pages/rules/AlertsPage";
+import { ChannelsPage } from "@/pages/rules/ChannelsPage";
+import { DeviceHealthPage } from "@/pages/rules/DeviceHealthPage";
 import { RuleEditorPage } from "@/pages/rules/RuleEditorPage";
 import { RulesPage } from "@/pages/rules/RulesPage";
 
@@ -98,6 +100,22 @@ export function App() {
           element={
             <ProtectedRoute>
               <AlertsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/device-health"
+          element={
+            <ProtectedRoute>
+              <DeviceHealthPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/channels"
+          element={
+            <ProtectedRoute>
+              <ChannelsPage />
             </ProtectedRoute>
           }
         />

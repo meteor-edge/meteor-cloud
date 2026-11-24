@@ -6,7 +6,9 @@ import {
   acknowledgeAlert,
   createSilence,
   deleteSilence,
+  getAlertSummary,
   listAlerts,
+  listRules,
   listSilences,
   type AlertFilters,
   type AlertStatus,
@@ -19,12 +21,15 @@ import { Label } from "@/components/ui/label";
 import { canActOnAlerts } from "@/lib/permissions";
 
 import { SeverityBadge, StatusBadge } from "./badges";
+import { DeviceName, DevicePicker } from "./DevicePicker";
 import {
   cardClass,
   errorText,
-  formatValues,
+  formatReadings,
   selectClass,
   tableHeadClass,
+  useDebounced,
+  useMetrics,
   useOrgRole,
 } from "./shared";
 
@@ -33,12 +38,23 @@ const PAGE_SIZE = 50;
 type View = "active" | AlertStatus | "all";
 type Cursor = { before: string; before_id: string };
 
-function filtersFor(view: View, severity: string, ruleId: string): AlertFilters {
+type Chosen = {
+  severity: string;
+  ruleId: string;
+  deviceId: string;
+  metric: string;
+  search: string;
+};
+
+function filtersFor(view: View, chosen: Chosen): AlertFilters {
   const filters: AlertFilters = { limit: PAGE_SIZE };
   if (view === "active") filters.active = true;
   else if (view !== "all") filters.status = view;
-  if (severity) filters.severity = severity as Severity;
-  if (ruleId) filters.rule_id = ruleId;
+  if (chosen.severity) filters.severity = chosen.severity as Severity;
+  if (chosen.ruleId) filters.rule_id = chosen.ruleId;
+  if (chosen.deviceId) filters.device_id = chosen.deviceId;
+  if (chosen.metric) filters.metric = chosen.metric;
+  if (chosen.search) filters.search = chosen.search;
   return filters;
 }
 
@@ -50,15 +66,43 @@ export function AlertsPage() {
   const [view, setView] = useState<View>("active");
   const [severity, setSeverity] = useState("");
   const [cursors, setCursors] = useState<Cursor[]>([]);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const ruleId = searchParams.get("rule_id") ?? "";
-  const filters = { ...filtersFor(view, severity, ruleId), ...(cursors[cursors.length - 1] ?? {}) };
+  const deviceId = searchParams.get("device_id") ?? "";
+  const [metric, setMetric] = useState("");
+  const [search, setSearch] = useState("");
+  const term = useDebounced(search.trim(), 300);
+  const metrics = useMetrics(organizationId);
+  const setParam = (key: string, value: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    });
+    setCursors([]);
+  };
+  const filters = {
+    ...filtersFor(view, { severity, ruleId, deviceId, metric, search: term }),
+    ...(cursors[cursors.length - 1] ?? {}),
+  };
 
   const alerts = useQuery({
     queryKey: ["alerts", organizationId, token, filters],
     queryFn: () => listAlerts(token!, organizationId, filters),
     enabled: Boolean(token && organizationId),
     refetchInterval: 15_000,
+  });
+  const summary = useQuery({
+    queryKey: ["alert-summary", organizationId, token],
+    queryFn: () => getAlertSummary(token!, organizationId),
+    enabled: Boolean(token && organizationId),
+    refetchInterval: 15_000,
+  });
+  const rules = useQuery({
+    queryKey: ["rules", organizationId, token],
+    queryFn: () => listRules(token!, organizationId),
+    enabled: Boolean(token && organizationId),
   });
   const silences = useQuery({
     queryKey: ["alert-silences", organizationId, token],
@@ -68,7 +112,17 @@ export function AlertsPage() {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["alerts", organizationId] });
     queryClient.invalidateQueries({ queryKey: ["alert-silences", organizationId] });
+    queryClient.invalidateQueries({ queryKey: ["alert-summary", organizationId] });
   };
+  const hush = useMutation({
+    mutationFn: ({ rule_id, device_id }: { rule_id: string; device_id: string }) =>
+      createSilence(token!, organizationId, {
+        rule_id,
+        device_id,
+        ends_at: new Date(Date.now() + 2 * 3600_000).toISOString(),
+      }),
+    onSuccess: refresh,
+  });
   const ack = useMutation({
     mutationFn: (id: string) => acknowledgeAlert(token!, organizationId, id),
     onSuccess: refresh,
@@ -92,7 +146,107 @@ export function AlertsPage() {
         </div>
       </div>
 
+      {summary.data && (
+        <div
+          className="grid grid-cols-2 gap-3 md:grid-cols-5"
+          aria-label="Active alerts"
+          role="group"
+        >
+          {(
+            [
+              ["Firing", summary.data.firing, () => setView("firing")],
+              ["Acknowledged", summary.data.acknowledged, () => setView("acknowledged")],
+              [
+                "Critical",
+                summary.data.by_severity.critical ?? 0,
+                () => {
+                  setView("active");
+                  setSeverity("critical");
+                },
+              ],
+              [
+                "Warning",
+                summary.data.by_severity.warning ?? 0,
+                () => {
+                  setView("active");
+                  setSeverity("warning");
+                },
+              ],
+            ] as [string, number, () => void][]
+          ).map(([label, count, show]) => (
+            <button
+              key={label}
+              type="button"
+              className={`text-left hover:bg-secondary ${cardClass}`}
+              onClick={() => {
+                setSeverity("");
+                setCursors([]);
+                show();
+              }}
+            >
+              <div className="text-2xl font-semibold">{count}</div>
+              <div className="text-sm text-muted-foreground">{label}</div>
+            </button>
+          ))}
+          <div className={cardClass}>
+            <div className="text-2xl font-semibold">{summary.data.devices}</div>
+            <div className="text-sm text-muted-foreground">Devices affected</div>
+          </div>
+        </div>
+      )}
+
       <div className={`grid gap-3 md:grid-cols-3 ${cardClass}`}>
+        <div>
+          <Label htmlFor="alert-search">Search</Label>
+          <Input
+            id="alert-search"
+            className="mt-1"
+            value={search}
+            placeholder="Device or rule name"
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setCursors([]);
+            }}
+          />
+        </div>
+        <div>
+          <Label htmlFor="alert-rule">Rule</Label>
+          <select
+            id="alert-rule"
+            className={selectClass}
+            value={ruleId}
+            onChange={(event) => setParam("rule_id", event.target.value)}
+          >
+            <option value="">Any</option>
+            {ruleId && !(rules.data ?? []).some((r) => r.id === ruleId) && (
+              <option value={ruleId}>{ruleId.slice(0, 8)}</option>
+            )}
+            {(rules.data ?? []).map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label htmlFor="alert-metric">Metric</Label>
+          <select
+            id="alert-metric"
+            className={selectClass}
+            value={metric}
+            onChange={(event) => {
+              setMetric(event.target.value);
+              setCursors([]);
+            }}
+          >
+            <option value="">Any</option>
+            {metrics.list.map((m) => (
+              <option key={m.field} value={m.field}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <div>
           <Label htmlFor="alert-view">Show</Label>
           <select
@@ -128,11 +282,23 @@ export function AlertsPage() {
             <option value="info">Info</option>
           </select>
         </div>
+        <div>
+          <Label>Device</Label>
+          <div className="mt-1">
+            <DevicePicker
+              organizationId={organizationId}
+              label="Device"
+              single
+              value={deviceId ? [deviceId] : []}
+              onChange={(ids) => setParam("device_id", ids[0] ?? "")}
+            />
+          </div>
+        </div>
       </div>
 
-      {(alerts.isError || ack.isError) && (
+      {(alerts.isError || ack.isError || hush.isError) && (
         <p className="text-sm text-destructive" role="alert">
-          {errorText(alerts.error ?? ack.error, "Could not load alerts.")}
+          {errorText(alerts.error ?? ack.error ?? hush.error, "Could not load alerts.")}
         </p>
       )}
 
@@ -174,10 +340,10 @@ export function AlertsPage() {
                 </td>
                 <td className="px-4 py-3">
                   <Link
-                    className="font-mono text-xs hover:underline"
+                    className="hover:underline"
                     to={`/organizations/${organizationId}/devices/${alert.device_id}`}
                   >
-                    {alert.device_id.slice(0, 8)}
+                    {alert.device_name || alert.device_id.slice(0, 8)}
                   </Link>
                 </td>
                 <td className="px-4 py-3">
@@ -186,8 +352,8 @@ export function AlertsPage() {
                 <td className="px-4 py-3">
                   <StatusBadge status={alert.status} silenced={alert.silenced} />
                 </td>
-                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                  {formatValues(alert.trigger_values)}
+                <td className="px-4 py-3 text-muted-foreground">
+                  {formatReadings(alert.trigger_values, metrics.byField)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {canAct && alert.status === "firing" && (
@@ -198,6 +364,19 @@ export function AlertsPage() {
                       onClick={() => ack.mutate(alert.id)}
                     >
                       Acknowledge
+                    </Button>
+                  )}
+                  {canAct && alert.status !== "resolved" && !alert.silenced && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={hush.isPending}
+                      title="Hold notifications of this rule for this device for 2 hours"
+                      onClick={() =>
+                        hush.mutate({ rule_id: alert.rule_id, device_id: alert.device_id })
+                      }
+                    >
+                      Silence 2 h
                     </Button>
                   )}
                 </td>
@@ -241,6 +420,7 @@ export function AlertsPage() {
         token={token}
         canAct={canAct}
         silences={silences.data ?? []}
+        rules={rules.data ?? []}
         onChange={refresh}
       />
     </section>
@@ -252,11 +432,13 @@ function Silences({
   token,
   canAct,
   silences,
+  rules,
   onChange,
 }: {
   organizationId: string;
   token: string | null;
   canAct: boolean;
+  rules: { id: string; name: string }[];
   silences: {
     id: string;
     rule_id: string | null;
@@ -304,9 +486,17 @@ function Silences({
           {silences.map((silence) => (
             <li key={silence.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <span>
-                {silence.rule_id ? `Rule ${silence.rule_id.slice(0, 8)}` : "All rules"} ·{" "}
-                {silence.device_id ? `device ${silence.device_id.slice(0, 8)}` : "all devices"} ·
-                until {new Date(silence.ends_at).toLocaleString()}
+                {silence.rule_id
+                  ? (rules.find((r) => r.id === silence.rule_id)?.name ??
+                    `Rule ${silence.rule_id.slice(0, 8)}`)
+                  : "All rules"}{" "}
+                ·{" "}
+                {silence.device_id ? (
+                  <DeviceName organizationId={organizationId} id={silence.device_id} />
+                ) : (
+                  "all devices"
+                )}{" "}
+                · until {new Date(silence.ends_at).toLocaleString()}
                 {silence.comment && (
                   <span className="text-muted-foreground"> · {silence.comment}</span>
                 )}
@@ -344,33 +534,44 @@ function Silences({
             </select>
           </div>
           <div>
-            <Label htmlFor="silence-rule">Rule ID</Label>
-            <Input
+            <Label htmlFor="silence-rule">Rule</Label>
+            <select
               id="silence-rule"
+              className={selectClass}
               value={ruleId}
               onChange={(e) => setRuleId(e.target.value)}
-              placeholder="Any"
-            />
+            >
+              <option value="">Any</option>
+              {rules.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
-            <Label htmlFor="silence-device">Device ID</Label>
-            <Input
-              id="silence-device"
-              value={deviceId}
-              onChange={(e) => setDeviceId(e.target.value)}
-              placeholder="Any"
-            />
+            <Label>Device</Label>
+            <div className="mt-1">
+              <DevicePicker
+                organizationId={organizationId}
+                label="Device to silence"
+                single
+                value={deviceId ? [deviceId] : []}
+                onChange={(ids) => setDeviceId(ids[0] ?? "")}
+              />
+            </div>
           </div>
           <div>
             <Label htmlFor="silence-comment">Comment</Label>
             <Input
               id="silence-comment"
+              className="mt-1"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               maxLength={200}
             />
           </div>
-          <div className="flex items-end">
+          <div className="flex items-start pt-6">
             <Button type="submit" disabled={create.isPending}>
               Silence
             </Button>

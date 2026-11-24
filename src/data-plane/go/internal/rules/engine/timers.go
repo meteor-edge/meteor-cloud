@@ -129,10 +129,13 @@ func (e *Engine) tick(ctx context.Context, t state.Timer) error {
 	return nil
 }
 
-// retire resolves an open alert of a removed rule (or a device that left the rule's
-// scope) and deletes the state and its timer.
+// retire resolves an open alert of a removed or disabled rule (or of a device that
+// left the rule's scope) and drops its evaluation state and timer. The record itself
+// stays as a tombstone, because it carries the episode counter: episodes are part of
+// the idempotency keys, so a rule that is enabled again must continue counting or its
+// next alert would look like a replay of an old one and never be sent.
 func (e *Engine) retire(ctx context.Context, st *state.RuleState, r *Rule, reason string) error {
-	b := &state.Batch{Deleted: []*state.RuleState{st}, TimersClear: []state.Key{st.Key()}}
+	b := &state.Batch{TimersClear: []state.Key{st.Key()}}
 	if st.Phase == state.PhaseFiring {
 		t := Transition{Kind: TransitionResolved, Reason: reason, Episode: st.Episode, At: e.clock.Now()}
 		e.firing.Add(-1)
@@ -145,46 +148,59 @@ func (e *Engine) retire(ctx context.Context, st *state.RuleState, r *Rule, reaso
 		}
 		e.enqueue(b, []pending{{r, st, t}})
 	}
+	if !st.Retired() {
+		st.Retire(e.clock.Now())
+		b.States = []*state.RuleState{st}
+	}
 	return e.commits.commit(ctx, b)
 }
 
-// Reconcile compares two snapshots and retires state of rules that disappeared or
-// changed their condition, so open alerts close without waiting for an event. It
-// also seeds absence timers for devices that have never reported, so "device never
-// sent anything" fires too.
-func (e *Engine) Reconcile(ctx context.Context, old, cur *RuleSet) error {
-	if old != nil {
-		for _, or := range old.Rules() {
-			nr, still := cur.Rule(or.ID)
-			if still && nr.Hash == or.Hash {
-				continue
+// Reconcile compares the stored evaluation state with the current rules, so open
+// alerts close without waiting for an event when a rule was removed, disabled or
+// changed, or when a device left its scope. Working from the stored state (not from
+// the previous snapshot) also covers what changed while no worker was running. It
+// seeds absence timers for devices without state, so "device never sent anything"
+// fires too, including for devices added after the rule.
+func (e *Engine) Reconcile(ctx context.Context, cur *RuleSet) error {
+	ids, err := e.store.RuleIDs(ctx)
+	if err != nil {
+		e.metrics.StateErrors.WithLabelValues("load").Inc()
+		return err
+	}
+	for _, id := range ids {
+		r, exists := cur.Rule(id)
+		if err := e.eachState(ctx, id, func(st *state.RuleState) error {
+			if st.Retired() {
+				return nil
 			}
-			if err := e.eachState(ctx, or.ID, func(st *state.RuleState) error {
-				if !still {
-					unlock := e.locks.lock(st.DeviceID)
-					defer unlock()
-					return e.retire(ctx, st, nil, ReasonRemoved)
-				}
+			dev, okDev := cur.Device(st.DeviceID)
+			switch {
+			case !exists:
+				return e.retireLocked(ctx, st, nil, ReasonRemoved)
+			case !okDev || !r.Matches(dev):
+				return e.retireLocked(ctx, st, r, ReasonNoDevice)
+			case st.ConditionHash != r.Hash:
 				return e.Tick(ctx, state.Timer{RuleID: st.RuleID, DeviceID: st.DeviceID, OrgID: st.OrgID, Due: e.clock.Now()})
-			}); err != nil {
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	for _, r := range cur.Rules() {
+		if r.Prog.HasAbsence() {
+			if err := e.seedAbsence(ctx, cur, r); err != nil {
 				return err
 			}
 		}
 	}
-	for _, r := range cur.Rules() {
-		if !r.Prog.HasAbsence() {
-			continue
-		}
-		if old != nil {
-			if or, ok := old.Rule(r.ID); ok && or.Hash == r.Hash {
-				continue
-			}
-		}
-		if err := e.seedAbsence(ctx, cur, r); err != nil {
-			return err
-		}
-	}
 	return nil
+}
+
+func (e *Engine) retireLocked(ctx context.Context, st *state.RuleState, r *Rule, reason string) error {
+	unlock := e.locks.lock(st.DeviceID)
+	defer unlock()
+	return e.retire(ctx, st, r, reason)
 }
 
 func (e *Engine) eachState(ctx context.Context, ruleID string, fn func(*state.RuleState) error) error {
@@ -208,12 +224,15 @@ func (e *Engine) eachState(ctx context.Context, ruleID string, fn func(*state.Ru
 }
 
 func (e *Engine) seedAbsence(ctx context.Context, rs *RuleSet, r *Rule) error {
+	known := map[string]bool{}
+	if err := e.eachState(ctx, r.ID, func(st *state.RuleState) error {
+		known[st.DeviceID] = st.ConditionHash == r.Hash
+		return nil
+	}); err != nil {
+		return err
+	}
 	for _, d := range rs.MatchingDevices(r) {
-		states, err := e.store.LoadStates(ctx, d.ID, []string{r.ID})
-		if err != nil {
-			return err
-		}
-		if st := states[r.ID]; st != nil && st.ConditionHash == r.Hash {
+		if known[d.ID] {
 			continue
 		}
 		if err := e.Tick(ctx, state.Timer{RuleID: r.ID, DeviceID: d.ID, OrgID: d.OrganizationID, Due: e.clock.Now()}); err != nil {

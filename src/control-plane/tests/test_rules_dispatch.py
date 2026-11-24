@@ -60,6 +60,9 @@ def test_delivery_returns_integration_secret_and_silence(client: TestClient, db_
         "secret": "x" * 20,
         "enabled": True,
         "silenced": False,
+        "config": {},
+        "device_name": device.name,
+        "organization_name": org.name,
     }
     ends = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     client.post(f"/api/v1/organizations/{org.id}/alert-silences", headers=headers, json={"ends_at": ends})

@@ -82,3 +82,31 @@ func TestOutboxContract(t *testing.T) {
 		})
 	}
 }
+
+func TestOutboxOrderIsPerTarget(t *testing.T) {
+	for name, s := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx, now := context.Background(), time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
+			var items []OutboxItem
+			for _, k := range []string{"email:1", "chat:1", "email:2", "chat:2"} {
+				o := outboxItem("t:"+k, "rt", "dt", "notification", now)
+				o.Target = k[:len(k)-2]
+				items = append(items, o)
+			}
+			if errs := s.CommitMany(ctx, []*Batch{{Outbox: items}}); errs[0] != nil {
+				t.Fatal(errs[0])
+			}
+			got, err := s.(Outbox).ClaimOutbox(ctx, now, time.Minute, 10)
+			if err != nil || len(got) != 2 || got[0].Target == got[1].Target {
+				t.Fatalf("the first of each target: %+v %v", got, err)
+			}
+			if err := s.(Outbox).MarkDelivered(ctx, got[0].ID, now); err != nil {
+				t.Fatal(err)
+			}
+			next, _ := s.(Outbox).ClaimOutbox(ctx, now, time.Minute, 10)
+			if len(next) != 1 || next[0].Target != got[0].Target {
+				t.Fatalf("only the delivered target moves on: %+v", next)
+			}
+		})
+	}
+}

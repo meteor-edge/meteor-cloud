@@ -5,7 +5,7 @@
 // Delivery never runs inside evaluation. Each action is claimed with a lease,
 // delivered with a timeout, retried with backoff, and moved to the dead letter table
 // after a permanent failure or too many attempts. An older pending action of the
-// same rule, device and type is always delivered first, so a resolve never
+// same rule, device, type and target is always delivered first, so a resolve never
 // overtakes its firing. Delivery is at least once; receivers deduplicate with the
 // idempotency key that every request carries.
 package dispatch
@@ -66,10 +66,12 @@ type Config struct {
 
 func (c *Config) defaults() {
 	if c.Workers <= 0 {
-		c.Workers = 8
+		c.Workers = 16
 	}
-	if c.Batch <= 0 {
-		c.Batch = 100
+	if c.Batch <= 0 || c.Batch > c.Workers {
+		// Never claim more than can be delivered at once: an action waiting for a free
+		// worker would use up its lease and be delivered twice.
+		c.Batch = c.Workers
 	}
 	if c.Lease <= 0 {
 		c.Lease = 2 * time.Minute

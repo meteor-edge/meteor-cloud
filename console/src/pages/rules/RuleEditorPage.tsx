@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import {
   createRule,
@@ -21,31 +21,30 @@ import {
 } from "@/api/rules";
 import { useAuth } from "@/auth/AuthContext";
 import { Button } from "@/components/ui/button";
+import { Tabs } from "@/components/ui/tabs";
 import { canEditRules } from "@/lib/permissions";
 
-import { cardClass, errorText, formatValues, tableHeadClass, useOrgRole } from "./shared";
-
-const RULE_TEMPLATE: RuleDefinition = {
-  schema_version: 1,
-  name: "High CPU",
-  severity: "warning",
-  scope: { type: "organization" },
-  condition: {
-    type: "duration",
-    duration: "5m",
-    condition: { type: "comparison", field: "cpu_percent", operator: "gt", value: 90 },
-  },
-  resolve: { type: "comparison", field: "cpu_percent", operator: "lt", value: 80 },
-  cooldown: "10m",
-};
-
-function sampleEvents(): TestEvent[] {
-  const start = Date.now() - 10 * 60_000;
-  return [0, 2, 4, 6, 8].map((minute, index) => ({
-    time: new Date(start + minute * 60_000).toISOString(),
-    data: { cpu_percent: index < 4 ? 95 : 50 },
-  }));
-}
+import {
+  emptyForm,
+  formProblems,
+  fromDefinition,
+  newCondition,
+  sampleEvents,
+  summary,
+  toDefinition,
+  type FormCondition,
+  type FormOperator,
+  type RuleForm,
+} from "./form";
+import { RuleFormFields } from "./RuleFormFields";
+import {
+  cardClass,
+  errorText,
+  formatReadings,
+  tableHeadClass,
+  useMetrics,
+  useOrgRole,
+} from "./shared";
 
 const KEY_ORDER = [
   "schema_version",
@@ -72,6 +71,9 @@ function ordered(definition: RuleDefinition): RuleDefinition {
   return Object.fromEntries(keys.map((key) => [key, definition[key]]));
 }
 
+const NOT_IN_FORM =
+  "This rule uses features the form does not have (such as nested conditions), so it is edited as JSON.";
+
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 const textareaClass =
   "mt-1 block w-full rounded-md border border-input bg-background p-3 font-mono text-xs leading-relaxed";
@@ -82,6 +84,23 @@ function parse<T>(text: string): { value?: T; error?: string } {
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Invalid JSON" };
   }
+}
+
+/** A new rule's form; filters from the device health page come as ?c=field:operator:value:max. */
+function initialForm(params: URLSearchParams): RuleForm {
+  const conditions: FormCondition[] = params
+    .getAll("c")
+    .map((c) => c.split(":"))
+    .filter((p) => p.length >= 3)
+    .map(([field, operator, value, max = ""]) =>
+      newCondition({ field, operator: operator as FormOperator, value, max }),
+    );
+  if (conditions.length === 0) return emptyForm();
+  const form = emptyForm({
+    conditions,
+    match: params.get("match") === "any" ? "any" : "all",
+  });
+  return { ...form, name: summary(form, {}).replace(/^When (.*?), for at least.*$/, "$1") };
 }
 
 export function RuleEditorPage() {
@@ -111,18 +130,69 @@ export function RuleEditorPage() {
     refetchInterval: 15_000,
   });
 
-  const [text, setText] = useState(() => pretty(RULE_TEMPLATE));
-  const [eventsText, setEventsText] = useState(() => pretty(sampleEvents()));
+  const [params] = useSearchParams();
+  const [form, setForm] = useState<RuleForm>(() => initialForm(params));
+  const [mode, setMode] = useState<"form" | "json">("form");
+  const [formNote, setFormNote] = useState("");
+  const [text, setText] = useState("");
+  const [eventsText, setEventsText] = useState(() => pretty(sampleEvents(form)));
+  const metrics = useMetrics(organizationId);
   const [problems, setProblems] = useState<Problem[] | null>(null);
   const [preview, setPreview] = useState<DevicePreview | null>(null);
   const [steps, setSteps] = useState<TestStep[] | null>(null);
   const [localError, setLocalError] = useState("");
 
+  /** Show a definition, in the form when the form can express all of it. */
+  function load(next: RuleDefinition) {
+    const asForm = fromDefinition(next);
+    setText(pretty(ordered(next)));
+    setProblems(null);
+    setPreview(null);
+    if (asForm) {
+      setForm(asForm);
+      setEventsText(pretty(sampleEvents(asForm)));
+    }
+    setMode(asForm ? "form" : "json");
+    setFormNote(asForm ? "" : NOT_IN_FORM);
+  }
+
+  // A saved definition does not follow the on/off switch, and saving applies its
+  // "enabled": carry the current state, so a save never switches a rule on or off.
   useEffect(() => {
-    if (rule.data) setText(pretty(ordered(rule.data.definition)));
+    if (rule.data) load({ ...rule.data.definition, enabled: rule.data.enabled });
   }, [rule.data]);
 
+  function switchMode(next: "form" | "json") {
+    setLocalError("");
+    setProblems(null);
+    if (next === mode) return;
+    if (next === "json") {
+      setText(pretty(ordered(toDefinition(form))));
+      setFormNote("");
+      setMode("json");
+      return;
+    }
+    const parsed = parse<RuleDefinition>(text);
+    if (parsed.error) {
+      setLocalError(`The definition is not valid JSON: ${parsed.error}`);
+      return;
+    }
+    const asForm = fromDefinition(parsed.value!);
+    if (!asForm) {
+      setFormNote(NOT_IN_FORM);
+      return;
+    }
+    setForm(asForm);
+    setFormNote("");
+    setMode("form");
+  }
+
   function definition(): RuleDefinition | undefined {
+    if (mode === "form") {
+      const missing = formProblems(form);
+      setLocalError(missing.join(" "));
+      return missing.length ? undefined : toDefinition(form);
+    }
     const parsed = parse<RuleDefinition>(text);
     if (parsed.error) {
       setLocalError(`The definition is not valid JSON: ${parsed.error}`);
@@ -236,21 +306,63 @@ export function RuleEditorPage() {
             Rule format reference
           </a>
         </div>
-        <label htmlFor="rule-definition" className="sr-only">
-          Rule definition (JSON)
-        </label>
-        <textarea
-          id="rule-definition"
-          className={textareaClass}
-          rows={22}
-          spellCheck={false}
-          value={text}
-          readOnly={!canEdit}
-          onChange={(event) => {
-            setText(event.target.value);
-            setProblems(null);
-          }}
+        <Tabs
+          label="Edit as"
+          tabs={[
+            { id: "form", label: "Form" },
+            { id: "json", label: "JSON" },
+          ]}
+          active={mode}
+          onChange={switchMode}
         />
+        {formNote && (
+          <p className="text-sm text-muted-foreground" role="status">
+            {formNote}
+          </p>
+        )}
+        {mode === "form" ? (
+          <RuleFormFields
+            organizationId={organizationId}
+            form={form}
+            isNew={isNew}
+            disabled={!canEdit}
+            onChange={(next) => {
+              setForm(next);
+              setProblems(null);
+              setLocalError("");
+            }}
+          />
+        ) : (
+          <>
+            <label htmlFor="rule-definition" className="sr-only">
+              Rule definition (JSON)
+            </label>
+            <textarea
+              id="rule-definition"
+              className={textareaClass}
+              rows={22}
+              spellCheck={false}
+              value={text}
+              readOnly={!canEdit}
+              onChange={(event) => {
+                setText(event.target.value);
+                setProblems(null);
+              }}
+            />
+          </>
+        )}
+        {isNew && mode === "form" && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.rest.enabled !== false}
+              onChange={(event) =>
+                setForm({ ...form, rest: { ...form.rest, enabled: event.target.checked } })
+              }
+            />
+            Activate the alarm as soon as it is created
+          </label>
+        )}
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
@@ -336,6 +448,19 @@ export function RuleEditorPage() {
         />
         <Button
           variant="outline"
+          className="mr-2"
+          onClick={() => {
+            const def = definition();
+            const asForm = def && fromDefinition(def);
+            if (asForm) setEventsText(pretty(sampleEvents(asForm)));
+            else if (def)
+              setLocalError("Sample events can only be made for rules the form can show.");
+          }}
+        >
+          Make events for this rule
+        </Button>
+        <Button
+          variant="outline"
           disabled={testing.isPending}
           onClick={() => {
             const def = definition();
@@ -383,7 +508,7 @@ export function RuleEditorPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                    {formatValues(step.values)}
+                    {formatReadings(step.values, metrics.byField)}
                   </td>
                 </tr>
               ))}
@@ -429,7 +554,7 @@ export function RuleEditorPage() {
                     <td className="px-3 py-2">{device.phase}</td>
                     <td className="px-3 py-2">{new Date(device.phase_since).toLocaleString()}</td>
                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                      {formatValues(device.last_values)}
+                      {formatReadings(device.last_values, metrics.byField)}
                     </td>
                   </tr>
                 ))}
@@ -451,7 +576,9 @@ export function RuleEditorPage() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => setText(pretty(ordered(version.definition)))}
+                  onClick={() =>
+                    load({ ...version.definition, enabled: rule.data?.enabled ?? true })
+                  }
                 >
                   Load into editor
                 </Button>

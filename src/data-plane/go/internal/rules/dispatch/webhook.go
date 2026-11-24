@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,10 +33,18 @@ const (
 // Delivery is where one webhook or notification goes, as the control plane answers it.
 type Delivery struct {
 	URL      string `json:"url"`
-	Kind     string `json:"kind"` // webhook | slack
+	Kind     string `json:"kind"` // webhook | slack | email | telegram
 	Secret   string `json:"secret"`
 	Enabled  bool   `json:"enabled"`
 	Silenced bool   `json:"silenced"`
+	// Config holds what a kind needs besides URL and secret.
+	Config struct {
+		Recipients []string `json:"recipients"` // email
+		ChatID     string   `json:"chat_id"`    // telegram
+	} `json:"config"`
+	DeviceName       string `json:"device_name"`
+	OrganizationName string `json:"organization_name"`
+	Link             string `json:"-"` // console page, set by the sender
 }
 
 // Resolver looks up an integration for one action.
@@ -66,6 +73,10 @@ type WebhookSender struct {
 	Resolver Resolver
 	Client   *http.Client
 	Now      func() time.Time
+	Email    *SMTP     // nil: email is not configured on this platform
+	Telegram *Telegram // nil: the public Bot API with the guarded client
+	// ConsoleURL, when set, adds a link to the alerts page to messages.
+	ConsoleURL string
 }
 
 // NewWebhookClient returns the guarded HTTP client used for outgoing webhooks.
@@ -110,11 +121,42 @@ func (s *WebhookSender) Send(ctx context.Context, item state.OutboxItem, p *engi
 	if !d.Enabled || d.Silenced {
 		return Skipped, nil
 	}
+	return s.Deliver(ctx, d, item, p)
+}
+
+// Deliver sends one action to an integration, whatever its state.
+func (s *WebhookSender) Deliver(ctx context.Context, d *Delivery, item state.OutboxItem, p *engine.ActionPayload) (Outcome, error) {
+	client := s.Client
+	if client == nil {
+		client = NewWebhookClient(false)
+	}
+	if s.ConsoleURL != "" {
+		d.Link = strings.TrimRight(s.ConsoleURL, "/") + "/organizations/" + p.OrganizationID + "/alerts"
+	}
+	switch d.Kind {
+	case "email":
+		if s.Email == nil {
+			return "", Permanent(errors.New("email is not configured on this platform (RULES_SMTP_HOST)"))
+		}
+		if err := s.Email.Send(ctx, d.Config.Recipients, headline(d, p), messageText(d, p), item.Key); err != nil {
+			return "", err
+		}
+		return Delivered, nil
+	case "telegram":
+		tg := s.Telegram
+		if tg == nil {
+			tg = &Telegram{Client: client}
+		}
+		if err := tg.Send(ctx, d.Secret, d.Config.ChatID, headline(d, p)+"\n\n"+messageText(d, p)); err != nil {
+			return "", err
+		}
+		return Delivered, nil
+	}
 	u, err := url.Parse(d.URL)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 		return "", Permanent(fmt.Errorf("integration URL is not an http(s) URL"))
 	}
-	body, err := webhookBody(d.Kind, item, p)
+	body, err := webhookBody(d, item, p)
 	if err != nil {
 		return "", Permanent(err)
 	}
@@ -141,10 +183,6 @@ func (s *WebhookSender) Send(ctx context.Context, item state.OutboxItem, p *engi
 			now = s.Now
 		}
 		req.Header.Set(SignatureHeader, Sign(d.Secret, now().Unix(), body))
-	}
-	client := s.Client
-	if client == nil {
-		client = NewWebhookClient(false)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -174,9 +212,9 @@ func Sign(secret string, unix int64, body []byte) string {
 	return "t=" + t + ",v1=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func webhookBody(kind string, item state.OutboxItem, p *engine.ActionPayload) ([]byte, error) {
-	if kind == "slack" {
-		return json.Marshal(map[string]string{"text": slackText(p)})
+func webhookBody(d *Delivery, item state.OutboxItem, p *engine.ActionPayload) ([]byte, error) {
+	if d.Kind == "slack" {
+		return json.Marshal(map[string]string{"text": headline(d, p) + "\n" + messageText(d, p)})
 	}
 	return json.Marshal(map[string]any{
 		"idempotency_key": item.Key,
@@ -185,29 +223,9 @@ func webhookBody(kind string, item state.OutboxItem, p *engine.ActionPayload) ([
 		"rule_name":       p.RuleName,
 		"organization_id": p.OrganizationID,
 		"device_id":       p.DeviceID,
+		"device_name":     d.DeviceName,
 		"severity":        p.Severity,
 		"event":           p.Transition,
 		"params":          p.Action.Params,
 	})
-}
-
-func slackText(p *engine.ActionPayload) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[%s] %s %s on device %s", strings.ToUpper(p.Severity), p.RuleName, p.Transition.Kind, p.DeviceID)
-	if p.Transition.Reason != "" {
-		fmt.Fprintf(&b, " (%s)", p.Transition.Reason)
-	}
-	keys := make([]string, 0, len(p.Transition.Values))
-	for k := range p.Transition.Values {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for i, k := range keys {
-		sep := ", "
-		if i == 0 {
-			sep = ": "
-		}
-		fmt.Fprintf(&b, "%s%s=%g", sep, k, p.Transition.Values[k])
-	}
-	return b.String()
 }

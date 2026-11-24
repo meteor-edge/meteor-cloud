@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -55,12 +56,29 @@ type engineConfig struct {
 	apiAddr       string
 	dispatch      bool
 	allowPrivate  bool
+	consoleURL    string
+	telegramAPI   string
+	smtp          *dispatch.SMTP
 	dispatchCfg   dispatch.Config
 	engine        engine.Config
 }
 
+// loadSMTP reads the platform's mail server; nil when RULES_SMTP_HOST is empty.
+func loadSMTP(e *natsjs.Env) *dispatch.SMTP {
+	host := e.String("RULES_SMTP_HOST", "")
+	if host == "" {
+		return nil
+	}
+	return &dispatch.SMTP{Addr: net.JoinHostPort(host, e.String("RULES_SMTP_PORT", "587")),
+		Username: e.String("RULES_SMTP_USERNAME", ""), Password: e.Secret("RULES_SMTP_PASSWORD"),
+		From: e.String("RULES_SMTP_FROM", ""), TLS: e.String("RULES_SMTP_TLS", "starttls")}
+}
+
 func loadEngineConfig(e *natsjs.Env) engineConfig {
 	return engineConfig{
+		consoleURL:    e.String("RULES_CONSOLE_URL", ""),
+		telegramAPI:   e.String("RULES_TELEGRAM_API_URL", dispatch.TelegramAPI),
+		smtp:          loadSMTP(e),
 		databaseURL:   e.String("RULES_DATABASE_URL", ""),
 		maxConns:      int32(e.Int("RULES_DATABASE_MAX_CONNS", 20)),
 		controlPlane:  e.String("CONTROL_PLANE_URL", ""),
@@ -70,7 +88,7 @@ func loadEngineConfig(e *natsjs.Env) engineConfig {
 		dispatch:      e.String("RULES_DISPATCH", "true") != "false",
 		allowPrivate:  e.String("RULES_WEBHOOK_ALLOW_PRIVATE", "false") == "true",
 		dispatchCfg: dispatch.Config{
-			Workers:     e.Int("RULES_DISPATCH_WORKERS", 8),
+			Workers:     e.Int("RULES_DISPATCH_WORKERS", 16),
 			MaxAttempts: e.Int("RULES_DISPATCH_MAX_ATTEMPTS", 10),
 			Backoff: e.Durations("RULES_DISPATCH_BACKOFF",
 				[]time.Duration{5 * time.Second, 30 * time.Second, 2 * time.Minute, 10 * time.Minute, 30 * time.Minute}),
@@ -107,9 +125,12 @@ func runEngine(ctx context.Context, cfg engineConfig, store *state.Postgres, reg
 		Source: &rules.HTTPSnapshotSource{URL: cfg.controlPlane, Token: cfg.token}}
 	start(syncer.Run)
 	start(eng.RunTimers)
+	var webhooks *dispatch.WebhookSender
 	if cfg.dispatch {
-		webhooks := &dispatch.WebhookSender{Resolver: &dispatch.ControlPlaneResolver{CP: cp},
-			Client: dispatch.NewWebhookClient(cfg.allowPrivate)}
+		client := dispatch.NewWebhookClient(cfg.allowPrivate)
+		webhooks = &dispatch.WebhookSender{Resolver: &dispatch.ControlPlaneResolver{CP: cp},
+			Client: client, Email: cfg.smtp, ConsoleURL: cfg.consoleURL,
+			Telegram: &dispatch.Telegram{API: cfg.telegramAPI, Client: client}}
 		d := dispatch.New(cfg.dispatchCfg, store, map[string]dispatch.Sender{
 			dsl.ActionAlert:         &dispatch.AlertSender{CP: cp},
 			dsl.ActionWebhook:       webhooks,
@@ -120,7 +141,7 @@ func runEngine(ctx context.Context, cfg engineConfig, store *state.Postgres, reg
 		start(d.Run)
 	}
 	api := &http.Server{Addr: cfg.apiAddr, ReadHeaderTimeout: 5 * time.Second,
-		Handler: (&rules.API{Engine: eng, Token: cfg.token, Limits: cfg.engine.Limits}).Handler()}
+		Handler: (&rules.API{Engine: eng, Token: cfg.token, Limits: cfg.engine.Limits, Sender: webhooks}).Handler()}
 	go func() {
 		if err := api.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("rules API stopped", "addr", cfg.apiAddr, "error", err.Error())
@@ -169,6 +190,11 @@ func run() error {
 	ecfg := loadEngineConfig(e)
 	if e.Err != nil {
 		return e.Err
+	}
+	if ecfg.smtp != nil {
+		if err := ecfg.smtp.Validate(); err != nil {
+			return err
+		}
 	}
 	var store *state.Postgres
 	if ecfg.databaseURL != "" {

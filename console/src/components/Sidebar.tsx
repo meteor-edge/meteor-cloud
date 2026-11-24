@@ -1,4 +1,5 @@
 import {
+  Activity,
   BellRing,
   BookOpen,
   Boxes,
@@ -14,6 +15,7 @@ import {
   List,
   ListChecks,
   LogIn,
+  Mail,
   Package,
   Rocket,
   Router,
@@ -297,15 +299,25 @@ export function Sidebar() {
                 <NavSection
                   icon={BellRing}
                   label="Monitoring"
-                  active={["alerts", "rules"].some(isPage)}
+                  active={["device-health", "alerts", "rules", "channels"].some(isPage)}
                   collapsed={collapsed}
                   onExpand={() => setCollapsed(false)}
                 >
+                  <SubLink
+                    to={`${orgPath}/device-health`}
+                    icon={Activity}
+                    active={isPage("device-health")}
+                  >
+                    Device health
+                  </SubLink>
                   <SubLink to={`${orgPath}/alerts`} icon={BellRing} active={isPage("alerts")}>
                     Alerts
                   </SubLink>
                   <SubLink to={`${orgPath}/rules`} icon={ListChecks} active={isPage("rules")}>
                     Rules
+                  </SubLink>
+                  <SubLink to={`${orgPath}/channels`} icon={Mail} active={isPage("channels")}>
+                    Notifications
                   </SubLink>
                 </NavSection>
                 {(showMembers || showTeams) && (

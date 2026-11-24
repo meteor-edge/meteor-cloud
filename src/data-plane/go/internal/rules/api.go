@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -8,8 +9,10 @@ import (
 	"strconv"
 	"time"
 
+	"meteorcloud/dataplane/internal/rules/dispatch"
 	"meteorcloud/dataplane/internal/rules/dsl"
 	"meteorcloud/dataplane/internal/rules/engine"
+	"meteorcloud/dataplane/internal/rules/state"
 )
 
 // API serves the rule engine's internal routes for the control plane: rule tests
@@ -19,6 +22,9 @@ type API struct {
 	Engine *engine.Engine
 	Token  string
 	Limits dsl.Limits
+	// Sender delivers test messages to notification integrations; nil when the
+	// dispatcher runs elsewhere.
+	Sender *dispatch.WebhookSender
 }
 
 // StatusEntry is the evaluation state of one rule and device, without node internals.
@@ -39,6 +45,7 @@ func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/rules/simulate", a.simulate)
 	mux.HandleFunc("GET /internal/rules/status/{rule_id}", a.status)
+	mux.HandleFunc("POST /internal/rules/test-delivery", a.testDelivery)
 	mux.HandleFunc("GET /internal/rules/engine", a.engineInfo)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("X-Data-Plane-Internal-Token")
@@ -78,6 +85,9 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]StatusEntry, 0, len(states))
 	for _, st := range states {
+		if st.Retired() {
+			continue
+		}
 		e := StatusEntry{DeviceID: st.DeviceID, RuleVersion: st.RuleVersion, Phase: st.Phase, PhaseSince: st.PhaseSince,
 			Episode: st.Episode, LastEvaluated: st.LastEvaluated, LastEventID: st.LastEventID, LastValues: st.LastValues}
 		if !st.CooldownUntil.IsZero() {
@@ -93,12 +103,42 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) engineInfo(w http.ResponseWriter, _ *http.Request) {
 	rs := a.Engine.Rules()
+	channels := map[string]bool{"email": a.Sender != nil && a.Sender.Email != nil}
 	if rs == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ready": false})
+		writeJSON(w, http.StatusOK, map[string]any{"ready": false, "channels": channels})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ready": true, "snapshot_version": rs.Version, "rules": rs.Len(),
-		"refused": rs.Errors})
+		"refused": rs.Errors, "channels": channels})
+}
+
+// testDelivery sends one sample alert to an integration, now and without retries, and
+// answers whether it arrived. The control plane has already checked who may do this.
+func (a *API) testDelivery(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OrganizationID string            `json:"organization_id"`
+		Delivery       dispatch.Delivery `json:"delivery"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if a.Sender == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "this rule processor does not deliver notifications"})
+		return
+	}
+	now := time.Now().UTC()
+	key := "test:" + req.OrganizationID + ":" + strconv.FormatInt(now.UnixNano(), 36)
+	p := &engine.ActionPayload{RuleName: "Test notification", OrganizationID: req.OrganizationID, DeviceID: "example",
+		Severity: dsl.SeverityInfo, Transition: engine.Transition{Kind: engine.TransitionFiring, At: now,
+			Values: map[string]float64{"cpu_percent": 92.5}}}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	if _, err := a.Sender.Deliver(ctx, &req.Delivery, state.OutboxItem{Key: key}, p); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"delivered": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"delivered": true})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -62,6 +62,8 @@ export type Alert = {
   resolved_at: string | null;
   resolve_reason: string | null;
   trigger_event_id: string | null;
+  /** In lists and details. */
+  device_name?: string;
   trigger_values: Record<string, number>;
 };
 
@@ -84,6 +86,8 @@ export type AlertFilters = {
   rule_id?: string;
   device_id?: string;
   severity?: Severity;
+  search?: string;
+  metric?: string;
   before?: string;
   before_id?: string;
   limit?: number;
@@ -101,12 +105,78 @@ export type Silence = {
   created_at: string;
 };
 
+export type IntegrationKind = "webhook" | "slack" | "email" | "telegram";
+export type IntegrationBody = {
+  name?: string;
+  url?: string;
+  recipients?: string[];
+  chat_id?: string;
+  secret?: string;
+  enabled?: boolean;
+};
+export type ChannelCapabilities = { engine: boolean; email: boolean };
+
+export type Metric = {
+  field: string;
+  label: string;
+  unit: string;
+  group: string;
+  description: string;
+  suggested_operator: string;
+  suggested_value: number;
+  devices: number;
+  min: number | null;
+  max: number | null;
+};
+
+export type LiveCondition = { field: string; operator: string; value: number; max?: number };
+export type LiveQuery = {
+  conditions?: LiveCondition[];
+  match?: "all" | "any";
+  search?: string;
+  state?: "any" | "online" | "offline";
+  alerts?: "any" | "active" | "none";
+  group_id?: string;
+  device_type_id?: string;
+  fresh_minutes?: number;
+  limit?: number;
+  offset?: number;
+};
+export type LiveDevice = {
+  id: string;
+  name: string;
+  device_group_id: string | null;
+  device_type_id: string | null;
+  online: boolean;
+  metrics_at: string | null;
+  fresh: boolean;
+  metrics: Record<string, number>;
+  alerts: {
+    id: string;
+    rule_id: string;
+    rule_name: string;
+    severity: Severity;
+    status: AlertStatus;
+  }[];
+};
+export type LiveResult = { total: number; matching: number; devices: LiveDevice[] };
+
+export type AlertSummary = {
+  firing: number;
+  acknowledged: number;
+  devices: number;
+  by_severity: Partial<Record<Severity, number>>;
+  by_rule: Record<string, number>;
+};
+
 export type Integration = {
   id: string;
   organization_id: string;
-  kind: "webhook" | "slack";
+  kind: IntegrationKind;
   name: string;
   url: string;
+  recipients: string[];
+  chat_id: string | null;
   enabled: boolean;
   has_secret: boolean;
   created_at: string;
@@ -233,15 +303,10 @@ export const listIntegrations = (token: string, org: string) =>
 export const createIntegration = (
   token: string,
   org: string,
-  body: { kind: "webhook" | "slack"; name: string; url: string; secret?: string },
+  body: IntegrationBody & { kind: IntegrationKind; name: string },
 ) => apiRequest<Integration>(`${base(org)}/notification-integrations`, { token, body });
 
-export const updateIntegration = (
-  token: string,
-  org: string,
-  id: string,
-  body: { name?: string; url?: string; enabled?: boolean; secret?: string },
-) =>
+export const updateIntegration = (token: string, org: string, id: string, body: IntegrationBody) =>
   apiRequest<Integration>(`${base(org)}/notification-integrations/${id}`, {
     token,
     method: "PATCH",
@@ -250,3 +315,21 @@ export const updateIntegration = (
 
 export const deleteIntegration = (token: string, org: string, id: string) =>
   apiRequest<void>(`${base(org)}/notification-integrations/${id}`, { token, method: "DELETE" });
+
+export const testIntegration = (token: string, org: string, id: string) =>
+  apiRequest<{ delivered: boolean; error: string | null }>(
+    `${base(org)}/notification-integrations/${id}/test`,
+    { token, method: "POST" },
+  );
+
+export const getChannelCapabilities = (token: string, org: string) =>
+  apiRequest<ChannelCapabilities>(`${base(org)}/notification-integrations/capabilities`, { token });
+
+export const listMetrics = (token: string, org: string) =>
+  apiRequest<Metric[]>(`${base(org)}/rules/metrics`, { token });
+
+export const queryLiveDevices = (token: string, org: string, body: LiveQuery) =>
+  apiRequest<LiveResult>(`${base(org)}/rules/live-devices`, { token, body });
+
+export const getAlertSummary = (token: string, org: string) =>
+  apiRequest<AlertSummary>(`${base(org)}/alerts/summary`, { token });

@@ -182,6 +182,21 @@ func (m *Memory) StatesForRule(_ context.Context, ruleID, after string, limit in
 	return out, nil
 }
 
+func (m *Memory) RuleIDs(context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seen := map[string]bool{}
+	var out []string
+	for k, s := range m.states {
+		if !s.Retired() && !seen[k.RuleID] {
+			seen[k.RuleID] = true
+			out = append(out, k.RuleID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func (m *Memory) Counts(context.Context) (int, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

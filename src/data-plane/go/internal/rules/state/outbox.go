@@ -11,8 +11,8 @@ import (
 //
 // ClaimOutbox hands out pending actions that are due, hiding each for lease (a
 // worker that dies mid-delivery loses its claim when the lease runs out). It never
-// hands out an action while an older pending action of the same rule, device and
-// type exists, so a resolve cannot overtake its firing.
+// hands out an action while an older pending action of the same rule, device, type
+// and target exists, so a resolve cannot overtake its firing.
 type Outbox interface {
 	ClaimOutbox(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]OutboxItem, error)
 	MarkDelivered(ctx context.Context, id int64, now time.Time) error
@@ -26,14 +26,14 @@ const claimSQL = `
 		SELECT c.id FROM rules.action_outbox c
 		WHERE c.status = 'pending' AND c.next_attempt_at <= $1
 		  AND NOT EXISTS (SELECT 1 FROM rules.action_outbox p WHERE p.status = 'pending'
-		      AND p.rule_id = c.rule_id AND p.device_id = c.device_id AND p.action_type = c.action_type AND p.id < c.id)
+		      AND p.rule_id = c.rule_id AND p.device_id = c.device_id AND p.action_type = c.action_type AND p.target = c.target AND p.id < c.id)
 		ORDER BY c.next_attempt_at, c.id
 		LIMIT $3
 		FOR UPDATE SKIP LOCKED
 	) due
 	WHERE o.id = due.id
 	RETURNING o.id, o.idempotency_key, o.organization_id, o.rule_id, o.rule_version, o.device_id, o.transition,
-		o.action_type, o.payload, o.status, o.attempts, o.next_attempt_at, COALESCE(o.last_error, ''), o.created_at`
+		o.action_type, o.target, o.payload, o.status, o.attempts, o.next_attempt_at, COALESCE(o.last_error, ''), o.created_at`
 
 func (p *Postgres) ClaimOutbox(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]OutboxItem, error) {
 	rows, err := p.pool.Query(ctx, claimSQL, now, now.Add(lease), limit)
@@ -46,7 +46,7 @@ func (p *Postgres) ClaimOutbox(ctx context.Context, now time.Time, lease time.Du
 		var o OutboxItem
 		var payload []byte
 		if err := rows.Scan(&o.ID, &o.Key, &o.OrgID, &o.RuleID, &o.RuleVersion, &o.DeviceID, &o.Transition,
-			&o.ActionType, &payload, &o.Status, &o.Attempts, &o.NextAttempt, &o.LastError, &o.CreatedAt); err != nil {
+			&o.ActionType, &o.Target, &payload, &o.Status, &o.Attempts, &o.NextAttempt, &o.LastError, &o.CreatedAt); err != nil {
 			return nil, err
 		}
 		o.Payload = payload
@@ -115,14 +115,14 @@ func truncate(s string) string {
 func (m *Memory) ClaimOutbox(_ context.Context, now time.Time, lease time.Duration, limit int) ([]OutboxItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	blocked := map[[3]string]bool{}
+	blocked := map[[4]string]bool{}
 	var out []OutboxItem
 	for i := range m.outbox {
 		o := &m.outbox[i]
 		if o.Status != OutboxPending {
 			continue
 		}
-		k := [3]string{o.RuleID, o.DeviceID, o.ActionType}
+		k := [4]string{o.RuleID, o.DeviceID, o.ActionType, o.Target}
 		if blocked[k] {
 			continue
 		}

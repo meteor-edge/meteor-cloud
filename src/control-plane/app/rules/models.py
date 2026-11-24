@@ -164,7 +164,11 @@ class AlertSilence(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 
 class NotificationIntegration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """Where webhook and notification actions deliver: a URL and an optional signing secret."""
+    """Where webhook and notification actions deliver.
+
+    webhook and slack use ``url`` (and an optional signing secret); email uses
+    ``config.recipients``; telegram uses ``config.chat_id`` and its bot token as secret.
+    """
 
     __tablename__ = "notification_integrations"
     __table_args__ = (
@@ -175,9 +179,10 @@ class NotificationIntegration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
-    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # webhook | slack
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # webhook | slack | email | telegram
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)  # "" for email and telegram
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     # AES-GCM sealed (app.core.secretbox); never returned by the API.
     secret_sealed: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)

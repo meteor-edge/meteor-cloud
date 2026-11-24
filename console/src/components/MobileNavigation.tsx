@@ -119,11 +119,17 @@ export function MobileNavigation() {
                       </MobileSubnav>
                       <p className="px-3 pt-3 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Monitoring</p>
                       <MobileSubnav>
+                        <NavLink to={`${organizationPath}/device-health`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("device-health"))}>
+                          Device health
+                        </NavLink>
                         <NavLink to={`${organizationPath}/alerts`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("alerts"))}>
                           Alerts
                         </NavLink>
                         <NavLink to={`${organizationPath}/rules`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("rules"))}>
                           Rules
+                        </NavLink>
+                        <NavLink to={`${organizationPath}/channels`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("channels"))}>
+                          Notifications
                         </NavLink>
                       </MobileSubnav>
                       {(canManageMembers(role) || canReadTeams(role)) && (

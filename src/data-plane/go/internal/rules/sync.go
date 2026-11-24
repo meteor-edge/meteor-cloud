@@ -70,8 +70,7 @@ type Syncer struct {
 	Limits   dsl.Limits
 	Log      *slog.Logger
 
-	unreconciled *engine.RuleSet // previous rule set while a reconcile is owed
-	owed         bool
+	owed bool // a reconcile is owed for the loaded snapshot
 }
 
 // Once performs one refresh.
@@ -86,17 +85,15 @@ func (s *Syncer) Once(ctx context.Context) error {
 	}
 	if snap != nil {
 		rs := engine.CompileSnapshot(snap, s.Limits)
-		old := s.Engine.Apply(rs)
-		if !s.owed {
-			s.unreconciled, s.owed = old, true
-		}
+		s.Engine.Apply(rs)
+		s.owed = true
 		s.Log.Info("rule snapshot loaded", "version", rs.Version, "rules", rs.Len(), "refused", len(rs.Errors))
 	}
 	if s.owed {
-		if err := s.Engine.Reconcile(ctx, s.unreconciled, s.Engine.Rules()); err != nil {
+		if err := s.Engine.Reconcile(ctx, s.Engine.Rules()); err != nil {
 			return fmt.Errorf("reconcile rules: %w", err)
 		}
-		s.unreconciled, s.owed = nil, false
+		s.owed = false
 	}
 	return nil
 }

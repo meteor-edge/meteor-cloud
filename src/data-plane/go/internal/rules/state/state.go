@@ -57,6 +57,17 @@ type RuleState struct {
 	Version int64 `json:"version"`
 }
 
+// Retired reports whether the record is a tombstone: the rule or device is out of the
+// picture and only the episode counter still matters.
+func (s *RuleState) Retired() bool { return s.ConditionHash == "" }
+
+// Retire turns the record into a tombstone, keeping the episode counter.
+func (s *RuleState) Retire(now time.Time) {
+	s.ConditionHash, s.Nodes = "", eval.State{}
+	s.Phase, s.PhaseSince, s.ActiveAlerts = PhaseNormal, now, 0
+	s.CooldownUntil, s.TimerDue, s.LastValues = time.Time{}, time.Time{}, nil
+}
+
 func (s *RuleState) Key() Key { return Key{s.RuleID, s.DeviceID} }
 
 // Clone deep-copies a state (JSON round trip keeps it honest with what is stored).
@@ -128,6 +139,7 @@ type OutboxItem struct {
 	DeviceID    string          `json:"device_id"`
 	Transition  string          `json:"transition"`
 	ActionType  string          `json:"action_type"`
+	Target      string          `json:"target,omitempty"` // what the action is sent to; order is kept per target
 	Payload     json.RawMessage `json:"payload"`
 	Status      string          `json:"status"`
 	Attempts    int             `json:"attempts"`
@@ -170,6 +182,8 @@ type Store interface {
 	// StatesForRule pages through the states of one rule (status API, reconciling a
 	// changed or removed rule). Pass the last device id seen as after.
 	StatesForRule(ctx context.Context, ruleID, after string, limit int) ([]*RuleState, error)
+	// RuleIDs lists every rule that has stored state, tombstones excluded.
+	RuleIDs(ctx context.Context) ([]string, error)
 	// Counts returns the number of stored timers and pending outbox items.
 	Counts(ctx context.Context) (timers, outbox int, err error)
 	Ping(ctx context.Context) error

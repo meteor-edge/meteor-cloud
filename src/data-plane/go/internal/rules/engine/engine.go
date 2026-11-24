@@ -308,6 +308,21 @@ func (e *Engine) reconcileVersion(st *state.RuleState, r *Rule, now time.Time) [
 	return out
 }
 
+// merged is old with the newer readings over it; neither map is changed.
+func merged(old, newer map[string]float64) map[string]float64 {
+	if len(old) == 0 {
+		return newer
+	}
+	out := make(map[string]float64, len(old)+len(newer))
+	for k, v := range old {
+		out[k] = v
+	}
+	for k, v := range newer {
+		out[k] = v
+	}
+	return out
+}
+
 // advance runs the alert state machine for one evaluation.
 func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time.Time, ev *eval.Event, ooo bool) []Transition {
 	var ts []Transition
@@ -316,10 +331,15 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 		eventID = ev.ID
 	}
 	fire := func() {
+		values := out.Values
+		if ev == nil && st.Phase == state.PhasePending {
+			// A timer carries no readings; the ones that kept the rule pending caused this.
+			values = merged(st.LastValues, out.Values)
+		}
 		st.Episode++
 		st.Phase, st.PhaseSince, st.ActiveAlerts = state.PhaseFiring, now, 1
-		st.LastValues = out.Values
-		ts = append(ts, Transition{Kind: TransitionFiring, Episode: st.Episode, At: now, EventID: eventID, Values: out.Values})
+		st.LastValues = values
+		ts = append(ts, Transition{Kind: TransitionFiring, Episode: st.Episode, At: now, EventID: eventID, Values: values})
 		e.firing.Add(1)
 	}
 	if st.Phase == state.PhaseCooldown && !now.Before(st.CooldownUntil) {
@@ -331,12 +351,15 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 			fire()
 		} else if out.Pending {
 			st.Phase, st.PhaseSince = state.PhasePending, now
+			st.LastValues = out.Values
 		}
 	case state.PhasePending:
 		if out.Fire {
 			fire()
 		} else if !out.Pending {
 			st.Phase, st.PhaseSince = state.PhaseNormal, now
+		} else if ev != nil && !ooo {
+			st.LastValues = merged(st.LastValues, out.Values)
 		}
 	case state.PhaseFiring:
 		resolve := !out.Fire
@@ -344,6 +367,7 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 			resolve = *out.Resolve && !out.Fire
 		}
 		if resolve {
+			st.LastValues = merged(st.LastValues, out.Values)
 			ts = append(ts, Transition{Kind: TransitionResolved, Reason: ReasonCleared, Episode: st.Episode, At: now, EventID: eventID, Values: out.Values})
 			e.firing.Add(-1)
 			st.ActiveAlerts = 0
@@ -434,7 +458,7 @@ func (e *Engine) enqueue(b *state.Batch, ts []pending) {
 				OrganizationID: p.st.OrgID, DeviceID: p.st.DeviceID, Severity: sev, Transition: p.t, Action: a})
 			b.Outbox = append(b.Outbox, state.OutboxItem{Key: IdempotencyKey(p.rule.ID, p.st.DeviceID, p.t, i),
 				OrgID: p.st.OrgID, RuleID: p.rule.ID, RuleVersion: p.rule.Version, DeviceID: p.st.DeviceID,
-				Transition: p.t.Kind, ActionType: a.Type, Payload: payload, Status: state.OutboxPending,
+				Transition: p.t.Kind, ActionType: a.Type, Target: a.IntegrationID, Payload: payload, Status: state.OutboxPending,
 				NextAttempt: p.t.At, CreatedAt: e.clock.Now()})
 		}
 	}

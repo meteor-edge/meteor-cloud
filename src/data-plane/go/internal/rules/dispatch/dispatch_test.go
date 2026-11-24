@@ -155,7 +155,7 @@ func TestWebhookIsSignedSkippedWhenSilencedAndRefusesPrivateAddresses(t *testing
 	delivery.Kind = "slack"
 	enqueue(t, store, "resolved", dsl.ActionNotification, dsl.Action{IntegrationID: "i1"})
 	d.Pass(ctx)
-	if !strings.Contains(string(gotBody), `"text":"[CRITICAL] High CPU resolved on device dev-1: cpu_percent=97.5"`) {
+	if !strings.Contains(string(gotBody), `"text":"[RESOLVED] CRITICAL: High CPU on device dev-1\nDevice: device dev-1`) {
 		t.Fatalf("slack text %s", gotBody)
 	}
 

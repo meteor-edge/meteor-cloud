@@ -92,7 +92,7 @@ func Simulate(ctx context.Context, req SimRequest, lim dsl.Limits, allowPlatform
 	e := New(Config{CommitLinger: time.Microsecond, CommitBatch: 1, TimerLease: 24 * time.Hour}, store, clock, nil, nil)
 	defer e.Close()
 	e.Apply(rs)
-	if err := e.Reconcile(ctx, nil, rs); err != nil {
+	if err := e.Reconcile(ctx, rs); err != nil {
 		return nil, err
 	}
 	res := &SimResult{}

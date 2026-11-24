@@ -10,10 +10,12 @@ import copy
 import hashlib
 import json
 import uuid
-from datetime import UTC, datetime
+from collections import Counter
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, or_, select
+from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,13 +23,22 @@ from app.audit.models import AuditEvent
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
+from app.core.exceptions import AppError, ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.core.secretbox import SecretBoxError, seal, unseal
 from app.device_actions.service import DeviceActionService
 from app.devices.models import Device, DeviceGroup, DeviceType
+from app.devices.status import offline_cutoff
 from app.identity.models import User
-from app.rules.definition import Problem, RuleDefinitionError, condition_hash, severity_of, validate_definition
+from app.rules.definition import (
+    FUNCTIONS,
+    Problem,
+    RuleDefinitionError,
+    condition_hash,
+    severity_of,
+    validate_definition,
+)
 from app.rules.engine_client import RulesEngineClient
+from app.rules.metrics import KNOWN_METRICS, compare, numeric_metrics, spec_for
 from app.rules.models import (
     ACTIVE_ALERT_STATUSES,
     ALERT_ACKNOWLEDGED,
@@ -41,17 +52,25 @@ from app.rules.models import (
     RuleVersion,
 )
 from app.rules.schemas import (
+    AlertSummary,
     AlertTransition,
     AlertTransitionResult,
+    ChannelCapabilities,
     CommandResult,
     DeliveryRequest,
     DeliveryResponse,
+    DeliveryTestResult,
     DevicePreview,
     EngineAction,
     IntegrationCreate,
     IntegrationResponse,
     IntegrationUpdate,
+    LiveAlert,
+    LiveDevice,
+    LiveQuery,
+    LiveResult,
     MatchingDevice,
+    MetricResponse,
     ProblemResponse,
     RulesSnapshot,
     RuleTestRequest,
@@ -59,7 +78,9 @@ from app.rules.schemas import (
     SnapshotDevice,
     SnapshotRule,
     ValidationResult,
+    check_integration,
 )
+from app.tenancy.models import Organization
 
 # Device commands a rule may send, and the permission its author must hold. The
 # control plane re-checks the author's current access when the command is delivered.
@@ -96,11 +117,21 @@ def _integration_view(row: NotificationIntegration) -> IntegrationResponse:
         kind=row.kind,
         name=row.name,
         url=row.url,
+        recipients=list((row.config or {}).get("recipients") or []),
+        chat_id=(row.config or {}).get("chat_id"),
         enabled=row.enabled,
         has_secret=row.secret_sealed is not None,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _integration_config(kind: str, recipients: list[str] | None, chat_id: str | None) -> dict[str, Any]:
+    if kind == "email":
+        return {"recipients": list(dict.fromkeys(recipients or []))}
+    if kind == "telegram":
+        return {"chat_id": chat_id}
+    return {}
 
 
 class RuleService:
@@ -361,12 +392,30 @@ class RuleService:
         rule_id: uuid.UUID | None = None,
         device_id: uuid.UUID | None = None,
         severity: str | None = None,
+        search: str = "",
+        metric: str = "",
         before: datetime | None = None,
         before_id: uuid.UUID | None = None,
         limit: int = 50,
-    ) -> list[Alert]:
-        self._authorize(actor, organization_id, "alert.read")
-        statement = select(Alert).where(Alert.organization_id == organization_id)
+    ) -> list[tuple[Alert, str]]:
+        membership = self._authorize(actor, organization_id, "alert.read")
+        statement = self._visible(
+            membership,
+            select(Alert, Device.name)
+            .join(Device, Device.id == Alert.device_id)
+            .where(Alert.organization_id == organization_id),
+        )
+        if search.strip():
+            statement = statement.where(
+                or_(
+                    Device.name.icontains(search.strip(), autoescape=True),
+                    Alert.rule_name.icontains(search.strip(), autoescape=True),
+                )
+            )
+        if metric:
+            # Values are keyed by field, or by function(field) for aggregates.
+            functions = [f"{fn}({metric})" for fn in FUNCTIONS]
+            statement = statement.where(Alert.trigger_values.has_any(array([metric, *functions])))
         if status:
             statement = statement.where(Alert.status == status)
         if active is not None:
@@ -386,7 +435,34 @@ class RuleService:
                 )
             else:
                 statement = statement.where(Alert.fired_at < before)
-        return list(self.session.scalars(statement.order_by(Alert.fired_at.desc(), Alert.id.desc()).limit(limit)))
+        return [
+            (alert, name)
+            for alert, name in self.session.execute(
+                statement.order_by(Alert.fired_at.desc(), Alert.id.desc()).limit(limit)
+            )
+        ]
+
+    def alert_summary(self, *, actor: User, organization_id: uuid.UUID) -> AlertSummary:
+        membership = self._authorize(actor, organization_id, "alert.read")
+        rows = self.session.execute(
+            self._visible(membership, select(Alert.rule_id, Alert.device_id, Alert.severity, Alert.status))
+            .join(Device, Device.id == Alert.device_id)
+            .where(Alert.organization_id == organization_id, Alert.status.in_(ACTIVE_ALERT_STATUSES))
+        ).all()
+        return AlertSummary(
+            firing=sum(r.status == ALERT_FIRING for r in rows),
+            acknowledged=sum(r.status == ALERT_ACKNOWLEDGED for r in rows),
+            devices=len({r.device_id for r in rows}),
+            by_severity=dict(Counter(r.severity for r in rows)),
+            by_rule=dict(Counter(r.rule_id for r in rows)),
+        )
+
+    def _visible(self, membership, statement):
+        """Limit a statement that joins devices to the member's device groups."""
+        scope = self.authz.scope_for(membership)
+        if scope.mode == "device_groups":
+            statement = statement.where(Device.device_group_id.in_(scope.device_group_ids))
+        return statement
 
     def _alert(self, organization_id: uuid.UUID, alert_id: uuid.UUID) -> Alert:
         row = self.session.get(Alert, alert_id)
@@ -396,15 +472,18 @@ class RuleService:
 
     def get_alert(
         self, *, actor: User, organization_id: uuid.UUID, alert_id: uuid.UUID
-    ) -> tuple[Alert, list[AlertEvent]]:
-        self._authorize(actor, organization_id, "alert.read")
+    ) -> tuple[Alert, str, list[AlertEvent]]:
+        membership = self._authorize(actor, organization_id, "alert.read")
         alert = self._alert(organization_id, alert_id)
+        name = self.session.scalar(self._visible(membership, select(Device.name).where(Device.id == alert.device_id)))
+        if name is None:
+            raise NotFoundError("alert_not_found", "Alert was not found.")
         events = list(
             self.session.scalars(
                 select(AlertEvent).where(AlertEvent.alert_id == alert.id).order_by(AlertEvent.at, AlertEvent.id)
             )
         )
-        return alert, events
+        return alert, name, events
 
     def acknowledge(self, *, actor: User, organization_id: uuid.UUID, alert_id: uuid.UUID) -> Alert:
         self._authorize(actor, organization_id, "alert.acknowledge")
@@ -537,6 +616,175 @@ class RuleService:
     def _seal(self, row: NotificationIntegration, secret: str | None) -> None:
         row.secret_sealed = seal(self.settings, secret, context=f"integration:{row.id}") if secret else None
 
+    def _unseal(self, row: NotificationIntegration) -> str | None:
+        if row.secret_sealed is None:
+            return None
+        try:
+            return unseal(self.settings, row.secret_sealed, context=f"integration:{row.id}")
+        except SecretBoxError as exc:
+            raise ConflictError("integration_secret_unreadable", "The integration secret cannot be read.") from exc
+
+    def channel_capabilities(self, *, actor: User, organization_id: uuid.UUID) -> ChannelCapabilities:
+        self._authorize(actor, organization_id, "rule.read")
+        try:
+            channels = self.engine.engine().get("channels") or {}
+        except AppError:
+            return ChannelCapabilities(engine=False, email=False)
+        return ChannelCapabilities(engine=True, email=bool(channels.get("email")))
+
+    def test_integration(
+        self, *, actor: User, organization_id: uuid.UUID, integration_id: uuid.UUID
+    ) -> DeliveryTestResult:
+        """Send a sample alert through an integration now, even when it is switched off."""
+        self._authorize(actor, organization_id, "integration.manage")
+        row = self._integration(organization_id, integration_id)
+        organization = self.session.get(Organization, organization_id)
+        result = self.engine.test_delivery(
+            {
+                "organization_id": str(organization_id),
+                "delivery": {
+                    "url": row.url,
+                    "kind": row.kind,
+                    "secret": self._unseal(row) or "",
+                    "enabled": True,
+                    "config": row.config or {},
+                    "device_name": "Example device",
+                    "organization_name": organization.name if organization else "",
+                },
+            }
+        )
+        self.audit.record(
+            action="integration.test",
+            resource_type="notification_integration",
+            actor=actor,
+            organization_id=organization_id,
+            resource_id=row.id,
+            outcome="success" if result.get("delivered") else "failure",
+        )
+        self.session.commit()
+        return DeliveryTestResult(delivered=bool(result.get("delivered")), error=result.get("error"))
+
+    # ---- metrics and live device state ----------------------------------
+
+    def _visible_devices(self, actor: User, organization_id: uuid.UUID):
+        membership = self._authorize_devices(actor, organization_id)
+        return self.session.execute(
+            self._visible(
+                membership,
+                select(
+                    Device.id,
+                    Device.name,
+                    Device.device_group_id,
+                    Device.device_type_id,
+                    Device.last_seen_at,
+                    Device.mqtt_metrics,
+                    Device.mqtt_metrics_at,
+                ).where(Device.organization_id == organization_id, Device.is_enabled.is_(True)),
+            ).order_by(Device.name, Device.id)
+        ).all()
+
+    def _authorize_devices(self, actor: User, organization_id: uuid.UUID):
+        membership = self.authz.require_membership(user_id=actor.id, organization_id=organization_id)
+        self.authz.require_role_permission(membership, "device.read")
+        return membership
+
+    def list_metrics(self, *, actor: User, organization_id: uuid.UUID, search: str = "") -> list[MetricResponse]:
+        """Every known metric plus whatever the organization's devices report."""
+        seen: dict[str, list[float]] = {}
+        for device in self._visible_devices(actor, organization_id):
+            for field, value in numeric_metrics(device.mqtt_metrics).items():
+                seen.setdefault(field, []).append(value)
+        known = [m.field for m in KNOWN_METRICS]
+        others = sorted(set(seen) - set(known))
+        words = search.lower().split()
+        out = []
+        for field in [*known, *others]:
+            spec = spec_for(field)
+            text = f"{field} {spec.label} {spec.group} {spec.description}".lower()
+            if not all(word in text for word in words):
+                continue
+            values = seen.get(field, [])
+            out.append(
+                MetricResponse(
+                    field=field,
+                    label=spec.label,
+                    unit=spec.unit,
+                    group=spec.group,
+                    description=spec.description,
+                    suggested_operator=spec.operator,
+                    suggested_value=spec.threshold,
+                    devices=len(values),
+                    min=min(values, default=None),
+                    max=max(values, default=None),
+                )
+            )
+        return out[:1000]
+
+    def live_devices(self, *, actor: User, organization_id: uuid.UUID, query: LiveQuery) -> LiveResult:
+        membership = self._authorize_devices(actor, organization_id)
+        rows = self._visible_devices(actor, organization_id)
+        now = datetime.now(UTC)
+        online_after = offline_cutoff(offline_threshold_seconds=self.settings.device_offline_threshold_seconds)
+        fresh_after = now - timedelta(minutes=query.fresh_minutes)
+        alerts: dict[uuid.UUID, list[LiveAlert]] = {}
+        if self.authz.has_permission(membership, "alert.read"):
+            for alert in self.session.scalars(
+                select(Alert)
+                .where(Alert.organization_id == organization_id, Alert.status.in_(ACTIVE_ALERT_STATUSES))
+                .order_by(Alert.fired_at.desc())
+            ):
+                alerts.setdefault(alert.device_id, []).append(
+                    LiveAlert(
+                        id=alert.id,
+                        rule_id=alert.rule_id,
+                        rule_name=alert.rule_name,
+                        severity=alert.severity,
+                        status=alert.status,
+                    )
+                )
+        needle = query.search.strip().lower()
+        matched: list[LiveDevice] = []
+        for row in rows:
+            online = row.last_seen_at is not None and row.last_seen_at >= online_after
+            fresh = row.mqtt_metrics_at is not None and row.mqtt_metrics_at >= fresh_after
+            active = alerts.get(row.id, [])
+            if (
+                (needle and needle not in row.name.lower())
+                or (query.state != "any" and online != (query.state == "online"))
+                or (query.alerts != "any" and bool(active) != (query.alerts == "active"))
+                or (query.group_id and row.device_group_id != query.group_id)
+                or (query.device_type_id and row.device_type_id != query.device_type_id)
+            ):
+                continue
+            metrics = numeric_metrics(row.mqtt_metrics)
+            if query.conditions:
+                results = [
+                    fresh and c.field in metrics and compare(metrics[c.field], c.operator, c.value, c.max)
+                    for c in query.conditions
+                ]
+                if not (all(results) if query.match == "all" else any(results)):
+                    continue
+            matched.append(
+                LiveDevice(
+                    id=row.id,
+                    name=row.name,
+                    device_group_id=row.device_group_id,
+                    device_type_id=row.device_type_id,
+                    online=online,
+                    metrics_at=row.mqtt_metrics_at,
+                    fresh=fresh,
+                    metrics=metrics,
+                    alerts=active,
+                )
+            )
+        # Devices with alerts first, then by name.
+        matched.sort(key=lambda d: (not d.alerts, d.name.lower()))
+        return LiveResult(
+            total=len(rows),
+            matching=len(matched),
+            devices=matched[query.offset : query.offset + query.limit],
+        )
+
     def create_integration(
         self, *, actor: User, organization_id: uuid.UUID, payload: IntegrationCreate
     ) -> IntegrationResponse:
@@ -546,7 +794,8 @@ class RuleService:
             organization_id=organization_id,
             kind=payload.kind,
             name=payload.name.strip(),
-            url=str(payload.url),
+            url=str(payload.url) if payload.url else "",
+            config=_integration_config(payload.kind, payload.recipients, payload.chat_id),
             enabled=payload.enabled,
             created_by_user_id=actor.id,
         )
@@ -582,13 +831,25 @@ class RuleService:
         changed = sorted(payload.model_fields_set - {"secret"})
         if payload.name is not None:
             row.name = payload.name.strip()
-        if payload.url is not None:
-            row.url = str(payload.url)
+        sent = payload.model_fields_set
+        config = row.config or {}
+        url = str(payload.url) if payload.url is not None else row.url
+        recipients = payload.recipients if payload.recipients is not None else config.get("recipients")
+        chat_id = payload.chat_id if payload.chat_id is not None else config.get("chat_id")
+        if "secret" in sent:
+            secret = payload.secret or None
+        else:
+            secret = self._unseal(row) if sent & {"url", "recipients", "chat_id"} else None
+        if sent & {"url", "recipients", "chat_id", "secret"}:
+            try:
+                check_integration(row.kind, url=url, recipients=recipients, chat_id=chat_id, secret=secret)
+            except ValueError as exc:
+                raise ValidationAppError("invalid_integration", f"{exc}.") from exc
+            row.url = url
+            row.config = _integration_config(row.kind, recipients, chat_id)
         if payload.enabled is not None:
             row.enabled = payload.enabled
-        if "secret" in payload.model_fields_set:
-            if payload.secret and len(payload.secret) < 16:
-                raise ValidationAppError("invalid_secret", "secret must be at least 16 characters.")
+        if "secret" in sent:
             self._seal(row, payload.secret or None)
             changed.append("secret")
         try:
@@ -707,6 +968,20 @@ class RuleService:
         )
         if ev.transition == "firing":
             return self._fire(item, base)
+        if not ev.fingerprint:
+            # A resolve ends the episode: per-event alerts of it carry fingerprints of their own.
+            for extra in self.session.scalars(
+                select(Alert).where(
+                    Alert.rule_id == item.rule_id,
+                    Alert.device_id == item.device_id,
+                    Alert.episode == ev.episode,
+                    Alert.fingerprint != "",
+                    Alert.status.in_(ACTIVE_ALERT_STATUSES),
+                )
+            ):
+                self._resolve(
+                    extra, ev.at, ev.reason or "condition_cleared", key=None, values=ev.values, event_id=ev.event_id
+                )
         alert = self.session.scalar(base.where(Alert.episode == ev.episode).order_by(Alert.fired_at.desc()))
         if alert is None:
             return AlertTransitionResult(idempotency_key=key, alert_id=None, status="ignored", detail="no such alert")
@@ -826,12 +1101,9 @@ class RuleService:
         row = self.session.get(NotificationIntegration, payload.integration_id)
         if row is None or row.organization_id != payload.organization_id:
             raise NotFoundError("integration_not_found", "Integration was not found.")
-        secret = ""
-        if row.secret_sealed is not None:
-            try:
-                secret = unseal(self.settings, row.secret_sealed, context=f"integration:{row.id}")
-            except SecretBoxError as exc:
-                raise ConflictError("integration_secret_unreadable", "The integration secret cannot be read.") from exc
+        secret = self._unseal(row) or ""
+        device = self.session.get(Device, payload.device_id)
+        organization = self.session.get(Organization, payload.organization_id)
         silences = self._active_silences(payload.organization_id, payload.at)
         return DeliveryResponse(
             url=row.url,
@@ -839,6 +1111,9 @@ class RuleService:
             secret=secret,
             enabled=row.enabled,
             silenced=self._silenced(silences, payload.rule_id, payload.device_id),
+            config=row.config or {},
+            device_name=device.name if device and device.organization_id == payload.organization_id else "",
+            organization_name=organization.name if organization else "",
         )
 
     def run_command(self, item: EngineAction) -> CommandResult:
