@@ -45,6 +45,8 @@ type Delivery struct {
 	DeviceName       string `json:"device_name"`
 	OrganizationName string `json:"organization_name"`
 	Link             string `json:"-"` // console page, set by the sender
+	// Group lists the devices of a message that covers several; empty for one device.
+	Group []string `json:"-"`
 }
 
 // Resolver looks up an integration for one action.

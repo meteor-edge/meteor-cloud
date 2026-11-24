@@ -52,7 +52,7 @@ func TestOutboxContract(t *testing.T) {
 			if err := ob.Reschedule(ctx, hook.ID, now.Add(30*time.Second), "HTTP 503"); err != nil {
 				t.Fatal(err)
 			}
-			if err := ob.MarkDelivered(ctx, firing.ID, now); err != nil {
+			if err := ob.MarkDelivered(ctx, now, firing.ID); err != nil {
 				t.Fatal(err)
 			}
 			later, _ := ob.ClaimOutbox(ctx, now.Add(time.Minute), time.Minute, 10)
@@ -100,12 +100,58 @@ func TestOutboxOrderIsPerTarget(t *testing.T) {
 			if err != nil || len(got) != 2 || got[0].Target == got[1].Target {
 				t.Fatalf("the first of each target: %+v %v", got, err)
 			}
-			if err := s.(Outbox).MarkDelivered(ctx, got[0].ID, now); err != nil {
+			if err := s.(Outbox).MarkDelivered(ctx, now, got[0].ID); err != nil {
 				t.Fatal(err)
 			}
 			next, _ := s.(Outbox).ClaimOutbox(ctx, now, time.Minute, 10)
 			if len(next) != 1 || next[0].Target != got[0].Target {
 				t.Fatalf("only the delivered target moves on: %+v", next)
+			}
+		})
+	}
+}
+
+func TestClaimMoreTakesOnlyWhatCanShareAMessage(t *testing.T) {
+	for name, s := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx, ob := context.Background(), s.(Outbox)
+			now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
+			other := func(o OutboxItem, change func(*OutboxItem)) OutboxItem { change(&o); return o }
+			item := func(key, device string, at time.Time) OutboxItem {
+				return outboxItem(key, "r1", device, "notification", at)
+			}
+			if errs := s.CommitMany(ctx, []*Batch{{Outbox: []OutboxItem{
+				item("lead", "d1", now),
+				item("soon", "d2", now.Add(5*time.Second)),
+				item("late", "d3", now.Add(time.Minute)),
+				other(item("later-resolve", "d2", now), func(o *OutboxItem) { o.Transition = "resolved" }),
+				other(item("org", "d4", now.Add(time.Second)), func(o *OutboxItem) { o.OrgID = "org-2" }),
+				other(item("target", "d5", now.Add(time.Second)), func(o *OutboxItem) { o.Target = "x" }),
+				other(item("rule", "d6", now.Add(time.Second)), func(o *OutboxItem) { o.RuleID = "r2" }),
+			}}}); errs[0] != nil {
+				t.Fatal(errs[0])
+			}
+			lead, err := ob.ClaimOutbox(ctx, now, time.Minute, 1)
+			if err != nil || len(lead) != 1 {
+				t.Fatal(lead, err)
+			}
+			keys := func(anyRule bool) map[string]bool {
+				got, err := ob.ClaimMore(ctx, lead[0], anyRule, now, now.Add(10*time.Second), time.Minute, 10)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out := map[string]bool{}
+				for _, o := range got {
+					out[o.Key] = true
+				}
+				return out
+			}
+			if got := keys(false); len(got) != 1 || !got["soon"] {
+				t.Fatalf("same rule: %v", got)
+			}
+			// d2's resolve still waits for the firing that is being delivered.
+			if got := keys(true); len(got) != 1 || !got["rule"] {
+				t.Fatalf("any rule: %v", got)
 			}
 		})
 	}

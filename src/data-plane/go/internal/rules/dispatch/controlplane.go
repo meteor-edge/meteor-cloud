@@ -102,6 +102,49 @@ func (s *AlertSender) Send(ctx context.Context, item state.OutboxItem, _ *engine
 	return Delivered, nil
 }
 
+// Alert records of one organization go in batches; each is applied on its own.
+func (s *AlertSender) Groups(context.Context, state.OutboxItem, *engine.ActionPayload) (ok, anyRule bool, limit int) {
+	return true, true, 100
+}
+
+func (s *AlertSender) SendGroup(ctx context.Context, items []state.OutboxItem, ps []*engine.ActionPayload) []Result {
+	results := make([]Result, len(items))
+	var body []any
+	for _, it := range items {
+		m, err := envelope(it)
+		if err != nil {
+			return s.each(ctx, items, ps)
+		}
+		body = append(body, m)
+	}
+	var out struct {
+		Results []struct {
+			Status string `json:"status"`
+		} `json:"results"`
+	}
+	err := s.CP.Post(ctx, "/internal/rules/alert-transitions", map[string]any{"items": body}, &out)
+	if IsPermanent(err) || (err == nil && len(out.Results) != len(items)) {
+		// One refused item must not take the others with it.
+		return s.each(ctx, items, ps)
+	}
+	for i := range results {
+		results[i] = Result{Delivered, err}
+		if err == nil && out.Results[i].Status == "ignored" {
+			results[i].Outcome = Skipped
+		}
+	}
+	return results
+}
+
+func (s *AlertSender) each(ctx context.Context, items []state.OutboxItem, ps []*engine.ActionPayload) []Result {
+	results := make([]Result, len(items))
+	for i := range items {
+		out, err := s.Send(ctx, items[i], ps[i])
+		results[i] = Result{out, err}
+	}
+	return results
+}
+
 // CommandSender asks the control plane to send a device command. The control plane
 // re-checks, at delivery time, that the rule's author may still send it to that
 // device, with the same permission and device-group scope as the console.

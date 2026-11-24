@@ -75,6 +75,7 @@ func loadSMTP(e *natsjs.Env) *dispatch.SMTP {
 }
 
 func loadEngineConfig(e *natsjs.Env) engineConfig {
+	groupWait := e.Duration("RULES_NOTIFY_GROUP_WAIT", 10*time.Second)
 	return engineConfig{
 		consoleURL:    e.String("RULES_CONSOLE_URL", ""),
 		telegramAPI:   e.String("RULES_TELEGRAM_API_URL", dispatch.TelegramAPI),
@@ -89,6 +90,7 @@ func loadEngineConfig(e *natsjs.Env) engineConfig {
 		allowPrivate:  e.String("RULES_WEBHOOK_ALLOW_PRIVATE", "false") == "true",
 		dispatchCfg: dispatch.Config{
 			Workers:     e.Int("RULES_DISPATCH_WORKERS", 16),
+			GroupWait:   groupWait,
 			MaxAttempts: e.Int("RULES_DISPATCH_MAX_ATTEMPTS", 10),
 			Backoff: e.Durations("RULES_DISPATCH_BACKOFF",
 				[]time.Duration{5 * time.Second, 30 * time.Second, 2 * time.Minute, 10 * time.Minute, 30 * time.Minute}),
@@ -97,6 +99,8 @@ func loadEngineConfig(e *natsjs.Env) engineConfig {
 			CommitBatch:  e.Int("RULES_COMMIT_BATCH", 64),
 			CommitLinger: e.Duration("RULES_COMMIT_LINGER", 2*time.Millisecond),
 			TimerEvery:   e.Duration("RULES_TIMER_INTERVAL", time.Second),
+			TimerWorkers: e.Int("RULES_TIMER_WORKERS", 16),
+			NotifyWait:   groupWait,
 			Limits:       dsl.DefaultLimits(),
 		},
 	}

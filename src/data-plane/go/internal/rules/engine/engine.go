@@ -72,7 +72,11 @@ type Config struct {
 	TimerLease   time.Duration // how long a claimed timer is hidden from other workers
 	TimerBatch   int           // timers claimed per scheduler pass
 	TimerEvery   time.Duration // scheduler pass interval
-	Limits       dsl.Limits
+	TimerWorkers int           // timers evaluated at once
+	// NotifyWait holds notifications back this long, so the dispatcher can put devices
+	// that change together into one message. 0 sends at once.
+	NotifyWait time.Duration
+	Limits     dsl.Limits
 }
 
 func (c *Config) defaults() {
@@ -96,6 +100,9 @@ func (c *Config) defaults() {
 	}
 	if c.TimerEvery <= 0 {
 		c.TimerEvery = time.Second
+	}
+	if c.TimerWorkers <= 0 {
+		c.TimerWorkers = 16
 	}
 	if c.Limits.MaxNodes == 0 {
 		c.Limits = dsl.DefaultLimits()
@@ -452,10 +459,14 @@ func (e *Engine) enqueue(b *state.Batch, ts []pending) {
 			}
 			payload, _ := json.Marshal(ActionPayload{RuleID: p.rule.ID, RuleVersion: p.rule.Version, RuleName: p.rule.Def.Name,
 				OrganizationID: p.st.OrgID, DeviceID: p.st.DeviceID, Severity: sev, Transition: p.t, Action: a})
+			next := p.t.At
+			if a.Type == dsl.ActionNotification {
+				next = next.Add(e.cfg.NotifyWait)
+			}
 			b.Outbox = append(b.Outbox, state.OutboxItem{Key: IdempotencyKey(p.rule.ID, p.st.DeviceID, p.t, i),
 				OrgID: p.st.OrgID, RuleID: p.rule.ID, RuleVersion: p.rule.Version, DeviceID: p.st.DeviceID,
 				Transition: p.t.Kind, ActionType: a.Type, Target: a.IntegrationID, Payload: payload, Status: state.OutboxPending,
-				NextAttempt: p.t.At, CreatedAt: e.clock.Now()})
+				NextAttempt: next, CreatedAt: e.clock.Now()})
 		}
 	}
 }

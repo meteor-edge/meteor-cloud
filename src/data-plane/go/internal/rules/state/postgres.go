@@ -85,6 +85,8 @@ var migrations = []string{
 	`ALTER TABLE rules.action_outbox ADD COLUMN target text NOT NULL DEFAULT '';
 	DROP INDEX rules.action_outbox_order;
 	CREATE INDEX action_outbox_order ON rules.action_outbox (rule_id, device_id, action_type, target, id) WHERE status = 'pending';`,
+	// 4: finding the actions that can share one message.
+	`CREATE INDEX action_outbox_group ON rules.action_outbox (action_type, target, organization_id, next_attempt_at) WHERE status = 'pending';`,
 }
 
 // Postgres is the durable Store.

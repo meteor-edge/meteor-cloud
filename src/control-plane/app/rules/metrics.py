@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import ColumnElement, Float, case, cast, func
+
+from app.devices.models import Device
 from app.mqtt.payloads import METRIC_NAME
 
 
@@ -74,20 +77,18 @@ def numeric_metrics(snapshot: dict[str, Any] | None) -> dict[str, float]:
     }
 
 
-def compare(value: float, operator: str, threshold: float, maximum: float | None = None) -> bool:
-    match operator:
-        case "gt":
-            return value > threshold
-        case "gte":
-            return value >= threshold
-        case "lt":
-            return value < threshold
-        case "lte":
-            return value <= threshold
-        case "eq":
-            return value == threshold
-        case "ne":
-            return value != threshold
-        case "between":
-            return maximum is not None and threshold <= value <= maximum
-    raise ValueError(f"unknown operator {operator!r}")
+def reading_matches(field: str, operator: str, value: float, maximum: float | None = None) -> ColumnElement[bool]:
+    """SQL: the device's last reading of ``field`` compares true. A missing reading never does."""
+    reading = case(
+        (func.jsonb_typeof(Device.mqtt_metrics[field]) == "number", cast(Device.mqtt_metrics[field].astext, Float))
+    )
+    tests = {
+        "gt": reading > value,
+        "gte": reading >= value,
+        "lt": reading < value,
+        "lte": reading <= value,
+        "eq": reading == value,
+        "ne": reading != value,
+        "between": reading.between(value, maximum),
+    }
+    return func.coalesce(tests[operator], False)

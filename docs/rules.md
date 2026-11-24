@@ -91,6 +91,10 @@ admin or owner role, and acknowledging or silencing also works for operators.
   `https://api.telegram.org/bot<token>/getUpdates`. The token is stored encrypted, never
   returned and never logged. Messages (device and rule name, readings) are sent to
   Telegram's servers.
+- **Grouping**: email, Telegram and Slack messages wait 10 seconds, and all devices the
+  same rule fired (or resolved) for by then share one message: the count and the first 20
+  names, up to 1,000 devices. Devices under a silence are left out. Webhooks go to programs
+  and stay one request per alert, and the alerts page always has one alert per device.
 - Each channel is delivered and retried on its own: one that is down does not delay the
   others. Within a channel, *resolved* never overtakes *firing*.
 - Disabling or deleting a rule resolves its alerts without notifying its channels.
@@ -132,7 +136,8 @@ The engine runs inside the `rule-processor` service (Compose profile `nats`, see
 | `RULES_SMTP_TLS` | `starttls` | `starttls` (required, never downgraded), `tls` or `none` (no login allowed) |
 | `RULES_TELEGRAM_API_URL` | `https://api.telegram.org` | Bot API server |
 | `RULES_CONSOLE_URL` | empty | Adds a link to the alerts page to messages |
-| `RULES_COMMIT_BATCH`, `RULES_COMMIT_LINGER`, `RULES_TIMER_INTERVAL` | `64`, `2ms`, `1s` | Group commit and timer pass tuning |
+| `RULES_NOTIFY_GROUP_WAIT` | `10s` | How long messages wait for other devices to join (see grouping); `0s` sends at once |
+| `RULES_COMMIT_BATCH`, `RULES_COMMIT_LINGER`, `RULES_TIMER_INTERVAL`, `RULES_TIMER_WORKERS` | `64`, `2ms`, `1s`, `16` | Group commit and timer tuning |
 
 Any number of replicas can run: per-device locks plus compare-and-swap on the state
 rows keep evaluations consistent, timers and outbox rows are claimed with leases

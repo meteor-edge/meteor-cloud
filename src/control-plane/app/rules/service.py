@@ -14,8 +14,8 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, or_, select
-from sqlalchemy.dialects.postgresql import array
+from sqlalchemy import Float, Text, and_, case, cast, func, not_, or_, select, true
+from sqlalchemy.dialects.postgresql import JSONB, array
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,7 @@ from app.device_actions.service import DeviceActionService
 from app.devices.models import Device, DeviceGroup, DeviceType
 from app.devices.status import offline_cutoff
 from app.identity.models import User
+from app.mqtt.payloads import METRIC_NAME
 from app.rules.definition import (
     FUNCTIONS,
     Problem,
@@ -38,7 +39,7 @@ from app.rules.definition import (
     validate_definition,
 )
 from app.rules.engine_client import RulesEngineClient
-from app.rules.metrics import KNOWN_METRICS, compare, numeric_metrics, spec_for
+from app.rules.metrics import KNOWN_METRICS, numeric_metrics, reading_matches, spec_for
 from app.rules.models import (
     ACTIVE_ALERT_STATUSES,
     ALERT_ACKNOWLEDGED,
@@ -57,6 +58,7 @@ from app.rules.schemas import (
     AlertTransitionResult,
     ChannelCapabilities,
     CommandResult,
+    DeliveryDeviceState,
     DeliveryRequest,
     DeliveryResponse,
     DeliveryTestResult,
@@ -666,22 +668,10 @@ class RuleService:
 
     # ---- metrics and live device state ----------------------------------
 
-    def _visible_devices(self, actor: User, organization_id: uuid.UUID):
-        membership = self._authorize_devices(actor, organization_id)
-        return self.session.execute(
-            self._visible(
-                membership,
-                select(
-                    Device.id,
-                    Device.name,
-                    Device.device_group_id,
-                    Device.device_type_id,
-                    Device.last_seen_at,
-                    Device.mqtt_metrics,
-                    Device.mqtt_metrics_at,
-                ).where(Device.organization_id == organization_id, Device.is_enabled.is_(True)),
-            ).order_by(Device.name, Device.id)
-        ).all()
+    def _enabled_devices(self, membership, organization_id: uuid.UUID, *columns):
+        return self._visible(
+            membership, select(*columns).where(Device.organization_id == organization_id, Device.is_enabled.is_(True))
+        )
 
     def _authorize_devices(self, actor: User, organization_id: uuid.UUID):
         membership = self.authz.require_membership(user_id=actor.id, organization_id=organization_id)
@@ -690,10 +680,22 @@ class RuleService:
 
     def list_metrics(self, *, actor: User, organization_id: uuid.UUID, search: str = "") -> list[MetricResponse]:
         """Every known metric plus whatever the organization's devices report."""
-        seen: dict[str, list[float]] = {}
-        for device in self._visible_devices(actor, organization_id):
-            for field, value in numeric_metrics(device.mqtt_metrics).items():
-                seen.setdefault(field, []).append(value)
+        membership = self._authorize_devices(actor, organization_id)
+        # CASE, not WHERE: PostgreSQL may otherwise expand or cast before it filters.
+        snapshot = case((func.jsonb_typeof(Device.mqtt_metrics) == "object", Device.mqtt_metrics))
+        entry = func.jsonb_each(snapshot).table_valued("key", "value")
+        number = case(
+            (func.jsonb_typeof(cast(entry.c.value, JSONB)) == "number", cast(cast(entry.c.value, Text), Float))
+        )
+        rows = self.session.execute(
+            self._enabled_devices(
+                membership, organization_id, entry.c.key, func.count(number), func.min(number), func.max(number)
+            )
+            .select_from(Device)
+            .join(entry, true())
+            .group_by(entry.c.key)
+        ).all()
+        seen = {key: (count, low, high) for key, count, low, high in rows if count and METRIC_NAME.match(key)}
         known = [m.field for m in KNOWN_METRICS]
         others = sorted(set(seen) - set(known))
         words = search.lower().split()
@@ -703,7 +705,7 @@ class RuleService:
             text = f"{field} {spec.label} {spec.group} {spec.description}".lower()
             if not all(word in text for word in words):
                 continue
-            values = seen.get(field, [])
+            count, low, high = seen.get(field, (0, None, None))
             out.append(
                 MetricResponse(
                     field=field,
@@ -713,24 +715,74 @@ class RuleService:
                     description=spec.description,
                     suggested_operator=spec.operator,
                     suggested_value=spec.threshold,
-                    devices=len(values),
-                    min=min(values, default=None),
-                    max=max(values, default=None),
+                    devices=count,
+                    min=low,
+                    max=high,
                 )
             )
         return out[:1000]
 
     def live_devices(self, *, actor: User, organization_id: uuid.UUID, query: LiveQuery) -> LiveResult:
         membership = self._authorize_devices(actor, organization_id)
-        rows = self._visible_devices(actor, organization_id)
-        now = datetime.now(UTC)
         online_after = offline_cutoff(offline_threshold_seconds=self.settings.device_offline_threshold_seconds)
-        fresh_after = now - timedelta(minutes=query.fresh_minutes)
+        fresh = Device.mqtt_metrics_at >= datetime.now(UTC) - timedelta(minutes=query.fresh_minutes)
+        active = (
+            select(Alert.id)
+            .where(
+                Alert.organization_id == organization_id,
+                Alert.device_id == Device.id,
+                Alert.status.in_(ACTIVE_ALERT_STATUSES),
+                self.authz.has_permission(membership, "alert.read"),
+            )
+            .exists()
+        )
+        where = []
+        if query.search.strip():
+            where.append(Device.name.icontains(query.search.strip(), autoescape=True))
+        if query.state != "any":
+            online = func.coalesce(Device.last_seen_at >= online_after, False)
+            where.append(online if query.state == "online" else not_(online))
+        if query.alerts != "any":
+            where.append(active if query.alerts == "active" else not_(active))
+        if query.group_id:
+            where.append(Device.device_group_id == query.group_id)
+        if query.device_type_id:
+            where.append(Device.device_type_id == query.device_type_id)
+        if query.conditions:
+            tests = [reading_matches(c.field, c.operator, c.value, c.max) for c in query.conditions]
+            where.append(and_(fresh, and_(*tests) if query.match == "all" else or_(*tests)))
+        total = self.session.scalar(self._enabled_devices(membership, organization_id, func.count(Device.id)))
+        matching = self.session.scalar(
+            self._enabled_devices(membership, organization_id, func.count(Device.id)).where(*where)
+        )
+        rows = self.session.execute(
+            self._enabled_devices(
+                membership,
+                organization_id,
+                Device.id,
+                Device.name,
+                Device.device_group_id,
+                Device.device_type_id,
+                func.coalesce(Device.last_seen_at >= online_after, False).label("online"),
+                func.coalesce(fresh, False).label("fresh"),
+                Device.mqtt_metrics,
+                Device.mqtt_metrics_at,
+            )
+            .where(*where)
+            # Devices with alerts first, then by name.
+            .order_by(case((active, 0), else_=1), func.lower(Device.name), Device.id)
+            .limit(query.limit)
+            .offset(query.offset)
+        ).all()
         alerts: dict[uuid.UUID, list[LiveAlert]] = {}
-        if self.authz.has_permission(membership, "alert.read"):
+        if rows and self.authz.has_permission(membership, "alert.read"):
             for alert in self.session.scalars(
                 select(Alert)
-                .where(Alert.organization_id == organization_id, Alert.status.in_(ACTIVE_ALERT_STATUSES))
+                .where(
+                    Alert.organization_id == organization_id,
+                    Alert.device_id.in_([row.id for row in rows]),
+                    Alert.status.in_(ACTIVE_ALERT_STATUSES),
+                )
                 .order_by(Alert.fired_at.desc())
             ):
                 alerts.setdefault(alert.device_id, []).append(
@@ -742,47 +794,23 @@ class RuleService:
                         status=alert.status,
                     )
                 )
-        needle = query.search.strip().lower()
-        matched: list[LiveDevice] = []
-        for row in rows:
-            online = row.last_seen_at is not None and row.last_seen_at >= online_after
-            fresh = row.mqtt_metrics_at is not None and row.mqtt_metrics_at >= fresh_after
-            active = alerts.get(row.id, [])
-            if (
-                (needle and needle not in row.name.lower())
-                or (query.state != "any" and online != (query.state == "online"))
-                or (query.alerts != "any" and bool(active) != (query.alerts == "active"))
-                or (query.group_id and row.device_group_id != query.group_id)
-                or (query.device_type_id and row.device_type_id != query.device_type_id)
-            ):
-                continue
-            metrics = numeric_metrics(row.mqtt_metrics)
-            if query.conditions:
-                results = [
-                    fresh and c.field in metrics and compare(metrics[c.field], c.operator, c.value, c.max)
-                    for c in query.conditions
-                ]
-                if not (all(results) if query.match == "all" else any(results)):
-                    continue
-            matched.append(
+        return LiveResult(
+            total=total or 0,
+            matching=matching or 0,
+            devices=[
                 LiveDevice(
                     id=row.id,
                     name=row.name,
                     device_group_id=row.device_group_id,
                     device_type_id=row.device_type_id,
-                    online=online,
+                    online=row.online,
                     metrics_at=row.mqtt_metrics_at,
-                    fresh=fresh,
-                    metrics=metrics,
-                    alerts=active,
+                    fresh=row.fresh,
+                    metrics=numeric_metrics(row.mqtt_metrics),
+                    alerts=alerts.get(row.id, []),
                 )
-            )
-        # Devices with alerts first, then by name.
-        matched.sort(key=lambda d: (not d.alerts, d.name.lower()))
-        return LiveResult(
-            total=len(rows),
-            matching=len(matched),
-            devices=matched[query.offset : query.offset + query.limit],
+                for row in rows
+            ],
         )
 
     def create_integration(
@@ -1114,7 +1142,36 @@ class RuleService:
             config=row.config or {},
             device_name=device.name if device and device.organization_id == payload.organization_id else "",
             organization_name=organization.name if organization else "",
+            devices=self._delivery_devices(payload),
         )
+
+    def _delivery_devices(self, payload: DeliveryRequest) -> list[DeliveryDeviceState]:
+        if not payload.devices:
+            return []
+        names = dict(
+            self.session.execute(
+                select(Device.id, Device.name).where(
+                    Device.organization_id == payload.organization_id,
+                    Device.id.in_({d.device_id for d in payload.devices}),
+                )
+            ).all()
+        )
+        # Silences active at any of the devices' times, then each checked at its own.
+        silences = self.session.scalars(
+            select(AlertSilence).where(
+                AlertSilence.organization_id == payload.organization_id,
+                AlertSilence.ends_at > min(d.at for d in payload.devices),
+            )
+        ).all()
+        return [
+            DeliveryDeviceState(
+                name=names.get(d.device_id, ""),
+                silenced=self._silenced(
+                    [s for s in silences if s.starts_at <= d.at < s.ends_at], payload.rule_id, d.device_id
+                ),
+            )
+            for d in payload.devices
+        ]
 
     def run_command(self, item: EngineAction) -> CommandResult:
         """Send a rule's device command as its author, with the console's permission and scope checks."""

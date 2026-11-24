@@ -384,12 +384,24 @@ class CommandResult(BaseModel):
     detail: str | None = None
 
 
+class DeliveryDevice(BaseModel):
+    device_id: uuid.UUID
+    at: datetime
+
+
 class DeliveryRequest(BaseModel):
     integration_id: uuid.UUID
     organization_id: uuid.UUID
     rule_id: uuid.UUID
     device_id: uuid.UUID
     at: datetime
+    # A message for several devices of the rule: their names and silences in one call.
+    devices: list[DeliveryDevice] = Field(default_factory=list, max_length=1000)
+
+
+class DeliveryDeviceState(BaseModel):
+    name: str
+    silenced: bool
 
 
 class DeliveryResponse(BaseModel):
@@ -401,6 +413,7 @@ class DeliveryResponse(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     device_name: str = ""
     organization_name: str = ""
+    devices: list[DeliveryDeviceState] = Field(default_factory=list)  # in request order
 
 
 class RuleTestEvent(BaseModel):
