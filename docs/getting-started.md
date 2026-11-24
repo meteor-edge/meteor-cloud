@@ -63,8 +63,9 @@ Pick one path.
 
 ```bash
 curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
-# from a cloud checkout instead: cd src/device-plane/agent && sudo ./installcli.sh
-sudo meteorcli register --server http://localhost:8000 --token reg_... --name edge-01
+# from a cloud checkout instead: make agent-go-dist, then sudo bash src/device-plane/agent-go/dist/install-meteorcli.sh
+sudo meteorcli config --api-base http://localhost:8000
+sudo meteorcli register --token reg_... --name edge-01
 # meteorcli.service (started by the installer) connects within a few seconds:
 journalctl -u meteorcli -f
 # without root / systemd there is no service: meteorcli run   (foreground; Ctrl+C to stop)
@@ -91,11 +92,11 @@ sudo meteorcli request-token --name edge-01
    waits up to ~5 minutes; after a later approval run `meteorcli claim`, then
    `meteorcli run`.
 
-With meteorcli **0.3.2+** already installed, put `meteorenv.txt` on the boot
+With meteorcli already installed, put `meteorenv.txt` on the boot
 partition (`METEOR_DOMAIN`, `METEOR_API_KEY`, optional `METEOR_NAME`);
 `meteorcli.service` submits the enrollment request and waits for approval.
 For a full Pi image that also applies Wi-Fi / user / SSH on first boot, see
-[first-boot enrollment](../src/device-plane/agent/packaging/firstboot/README.md).
+[first-boot enrollment](../src/device-plane/agent-go/packaging/firstboot/README.md).
 
 Details: [Enrollment API keys](fleet/enrollment-api-keys.md), [Device-initiated enrollment](fleet/device-request-enrollment.md), [meteorcli](meteorcli.md).
 
@@ -103,7 +104,7 @@ Details: [Enrollment API keys](fleet/enrollment-api-keys.md), [Device-initiated 
 
 - Device appears in the console under the organization.
 - Heartbeats update `last_seen_at` ([Heartbeat](fleet/heartbeat.md)).
-- With MQTT enabled (`mqtt` / `emqx` Compose profiles), the agent keeps a TLS MQTT session ([MQTT](fleet/mqtt.md)).
+- With MQTT enabled (`mqtt` / `mosquitto` Compose profiles), the agent keeps a TLS MQTT session ([MQTT](fleet/mqtt.md)).
 
 ## Next steps
 

@@ -268,11 +268,13 @@ class DeviceResponse(BaseModel):
     cpu_cores: int | None
     memory_mb: int | None
     local_ip: str | None = None
+    agent_version: str | None = None
     labels: dict[str, Any]
     metadata: dict[str, Any]
     credential_prefix: str | None
     last_seen_at: datetime | None
     registered_at: datetime | None
+    reregistration_allowed_until: datetime | None = None
     created_at: datetime
     updated_at: datetime
     mqtt_configured: bool = False
@@ -329,6 +331,9 @@ class DeviceCredentialResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 class AgentRegisterRequest(BaseModel):
     token: str = Field(min_length=1)
+    # The device's current credential, when it has one. Re-registering hardware that is
+    # already a device needs it, unless an administrator allowed re-registration.
+    device_token: str | None = Field(default=None, max_length=512)
     name: str | None = Field(default=None, max_length=255)
     serial_number: str | None = Field(default=None, max_length=255)
     mac_addresses: list[str] = Field(default_factory=list)
@@ -342,6 +347,7 @@ class AgentRegisterRequest(BaseModel):
     cpu_cores: int | None = Field(default=None, ge=0)
     memory_mb: int | None = Field(default=None, ge=0)
     local_ip: LocalIp = Field(default=None, max_length=64)
+    agent_version: str | None = Field(default=None, max_length=32)
     labels: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -368,6 +374,7 @@ class AgentHeartbeatRequest(BaseModel):
     cpu_cores: int | None = Field(default=None, ge=0)
     memory_mb: int | None = Field(default=None, ge=0)
     local_ip: LocalIp = Field(default=None, max_length=64)
+    agent_version: str | None = Field(default=None, max_length=32)
     metrics: dict[str, Any] = Field(default_factory=dict)
     # Agent-reported install capabilities (systemd, docker, docker_compose, …).
     capabilities: dict[str, Any] = Field(default_factory=dict)

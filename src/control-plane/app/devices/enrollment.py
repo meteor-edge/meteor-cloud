@@ -423,5 +423,7 @@ class EnrollmentService:
         device.credential_prefix = generated.display_prefix
         device.last_seen_at = now
         device.registered_at = now
-        device.is_enabled = True
+        # An administrator approved this hardware, which also closes any re-registration window.
+        # A disabled device stays disabled: enabling it is a separate, explicit action.
+        device.reregistration_allowed_until = None
         return self.devices.update(device)

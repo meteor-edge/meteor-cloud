@@ -57,7 +57,13 @@
 
     - name: Check for existing application images
       ansible.builtin.command:
-        cmd: docker image inspect {{ ([backend_image, frontend_image] + ([data_plane_image] if mqtt_enabled | bool else [])) | join(' ') }}
+        cmd: docker image inspect {{ platform_built_images | join(' ') }}
+      vars:
+        platform_bundled_mosquitto: "{{ mqtt_enabled | bool and mqtt_broker == 'bundled' and mqtt_provider == 'mosquitto' }}"
+        platform_built_images: >-
+          {{ [backend_image, frontend_image]
+             + ([data_api_image] if data_api_enabled | bool or mqtt_enabled | bool else [])
+             + ([mosquitto_image] if platform_bundled_mosquitto | bool else []) }}
       register: platform_images
       changed_when: false
       failed_when: false
@@ -129,6 +135,33 @@
     cmd: "{{ platform_compose }} exec -T postgres sh /tmp/align-postgres-password.sh check"
     chdir: "{{ platform_compose_dir }}"
   changed_when: false
+
+# --remove-orphans keeps containers of services whose profile was switched off
+# (for example cache_provider redis -> memory, or mqtt_provider emqx -> mosquitto),
+# so remove those explicitly. Do it before the stack starts: an old broker still
+# holds the MQTT host ports. Volumes are kept, so switching back keeps the data.
+- name: List services enabled by the current profiles
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} config --services"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_enabled_services
+  changed_when: false
+
+- name: List existing service containers
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} ps --all --services"
+    chdir: "{{ platform_compose_dir }}"
+  register: platform_existing_services
+  changed_when: false
+
+- name: Remove containers of disabled services
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} rm --stop --force {{ platform_disabled_services | join(' ') }}"
+    chdir: "{{ platform_compose_dir }}"
+  vars:
+    platform_disabled_services: "{{ platform_existing_services.stdout_lines | difference(platform_enabled_services.stdout_lines) }}"
+  when: platform_disabled_services | length > 0
+  changed_when: true
 
 - name: Start platform stack
   ansible.builtin.command:
@@ -210,30 +243,85 @@
   ansible.builtin.command: /usr/local/sbin/meteorcloud-imds-guard {{ compose_project_name }}
   changed_when: false
 
-# --remove-orphans keeps containers of services whose profile was switched off
-# (for example cache_provider redis -> memory), so remove those explicitly.
-- name: List services enabled by the current profiles
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} config --services"
-    chdir: "{{ platform_compose_dir }}"
-  register: platform_enabled_services
-  changed_when: false
+- name: Install the backup script
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../../scripts/backup.sh"
+    dest: /usr/local/sbin/meteorcloud-backup
+    owner: root
+    group: root
+    mode: "0755"
 
-- name: List existing service containers
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} ps --all --services"
-    chdir: "{{ platform_compose_dir }}"
-  register: platform_existing_services
-  changed_when: false
+- name: Install the restore script
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../../scripts/restore.sh"
+    dest: /usr/local/sbin/meteorcloud-restore
+    owner: root
+    group: root
+    mode: "0755"
 
-- name: Remove containers of disabled services
-  ansible.builtin.command:
-    cmd: "{{ platform_compose }} rm --stop --force {{ platform_disabled_services | join(' ') }}"
-    chdir: "{{ platform_compose_dir }}"
-  vars:
-    platform_disabled_services: "{{ platform_existing_services.stdout_lines | difference(platform_enabled_services.stdout_lines) }}"
-  when: platform_disabled_services | length > 0
-  changed_when: true
+- name: Write the backup settings
+  ansible.builtin.copy:
+    dest: "{{ platform_root }}/backup.env"
+    owner: root
+    group: root
+    mode: "0600"
+    # systemd EnvironmentFile syntax (double-quoted, C escapes). Do not shell-source this
+    # file: restore via systemd-run --property=EnvironmentFile=… (docs/backups.md).
+    content: |
+      {% macro systemd_env(value) -%}"{{ value | string | replace('\\', '\\\\') | replace('"', '\\"') | replace('\n', '\\n') }}"{%- endmacro %}
+      COMPOSE_DIR={{ systemd_env(platform_compose_dir) }}
+      COMPOSE={{ systemd_env(platform_compose | trim) }}
+      BACKUP_DIR={{ systemd_env(platform_root ~ '/backups') }}
+      BACKUP_LOCK_FILE={{ systemd_env(platform_root ~ '/backups/.lock') }}
+      BACKUP_RETENTION_DAYS={{ systemd_env(backup_retention_days) }}
+      BACKUP_S3_URI={{ systemd_env(backup_s3_uri) }}
+      BACKUP_S3_ENDPOINT_URL={{ systemd_env(backup_s3_endpoint_url) }}
+      AWS_REGION={{ systemd_env(backup_s3_region) }}
+      AWS_ACCESS_KEY_ID={{ systemd_env(backup_s3_access_key_id) }}
+      AWS_SECRET_ACCESS_KEY={{ systemd_env(backup_s3_secret_access_key) }}
+      AWS_SESSION_TOKEN={{ systemd_env(backup_s3_session_token) }}
+  no_log: true
+
+- name: Install the backup units
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ item.content }}"
+  loop:
+    - name: meteorcloud-backup.service
+      content: |
+        [Unit]
+        Description=Back up MeteorCloud (PostgreSQL, ClickHouse, artifacts)
+        After=docker.service
+        Requires=docker.service
+
+        [Service]
+        Type=oneshot
+        EnvironmentFile={{ platform_root }}/backup.env
+        ExecStart=/usr/local/sbin/meteorcloud-backup
+    - name: meteorcloud-backup.timer
+      content: |
+        [Unit]
+        Description=Nightly MeteorCloud backup
+
+        [Timer]
+        OnCalendar={{ backup_on_calendar }}
+        RandomizedDelaySec=10m
+        Persistent=true
+
+        [Install]
+        WantedBy=timers.target
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Enable or disable the nightly backup
+  ansible.builtin.systemd:
+    name: meteorcloud-backup.timer
+    enabled: "{{ backup_enabled | bool }}"
+    state: "{{ 'started' if backup_enabled | bool else 'stopped' }}"
+    daemon_reload: true
 
 # Bind-mounted config files are not part of the Compose config hash.
 - name: Restart services whose mounted configuration changed
@@ -241,7 +329,7 @@
     cmd: "{{ platform_compose }} restart {{ item }}"
     chdir: "{{ platform_compose_dir }}"
   loop: >-
-    {{ (['emqx'] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
+    {{ ([mqtt_provider] if mqtt_enabled | bool and mqtt_broker == 'bundled' else [])
        + (platform_observability_services if observability_enabled | bool else []) }}
   vars:
     platform_observability_by_component:
@@ -254,7 +342,7 @@
          | map('extract', platform_observability_by_component) | select('defined') | flatten }}
   when: >-
     (platform_service_config is defined and platform_service_config.changed)
-    or (item == 'emqx' and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
+    or (item == mqtt_provider and platform_mqtt_certs is defined and platform_mqtt_certs.changed)
     or (item == 'alertmanager' and platform_alertmanager_secret is defined and platform_alertmanager_secret.changed)
     or (item == 'alertmanager' and platform_alertmanager_heartbeat_secret is defined
         and platform_alertmanager_heartbeat_secret.changed)

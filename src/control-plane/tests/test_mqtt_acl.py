@@ -35,8 +35,8 @@ def test_device_cannot_subscribe_own_events() -> None:
     assert not can_access_topic(DEVICE, "subscribe", f"devices/{DEVICE}/events")
 
 
-def test_device_cannot_publish_events_or_custom_topics() -> None:
-    assert not can_access_topic(DEVICE, "publish", f"devices/{DEVICE}/events")
+def test_device_publishes_own_events_but_no_custom_topics() -> None:
+    assert can_access_topic(DEVICE, "publish", f"devices/{DEVICE}/events")
     assert not can_access_topic(DEVICE, "publish", f"devices/{DEVICE}/custom")
     assert not can_access_topic(DEVICE, "subscribe", f"devices/{DEVICE}/custom")
 

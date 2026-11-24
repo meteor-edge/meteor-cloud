@@ -30,8 +30,8 @@ def test_script_exits_zero_on_this_repository() -> None:
 
 
 def test_detects_forbidden_import(tmp_path: Path) -> None:
-    (tmp_path / "src/data-plane/data_plane").mkdir(parents=True)
-    (tmp_path / "src/data-plane/data_plane/bad.py").write_text(
+    (tmp_path / "src/device-plane/gateway").mkdir(parents=True)
+    (tmp_path / "src/device-plane/gateway/bad.py").write_text(
         "from app.core.config import Settings\n",
         encoding="utf-8",
     )
@@ -41,27 +41,17 @@ def test_detects_forbidden_import(tmp_path: Path) -> None:
 
 
 def test_allows_same_plane_import(tmp_path: Path) -> None:
-    (tmp_path / "src/data-plane/data_plane").mkdir(parents=True)
-    (tmp_path / "src/data-plane/data_plane/ok.py").write_text(
-        "from data_plane.main import app\n",
+    (tmp_path / "src/control-plane/app").mkdir(parents=True)
+    (tmp_path / "src/control-plane/app/ok.py").write_text(
+        "from app.core.config import Settings\n",
         encoding="utf-8",
     )
     assert check_tree(tmp_path) == []
 
 
-def test_control_plane_must_not_import_agent(tmp_path: Path) -> None:
-    (tmp_path / "src/control-plane/app").mkdir(parents=True)
-    (tmp_path / "src/control-plane/app/leak.py").write_text(
-        "import edge_agent.client\n",
-        encoding="utf-8",
-    )
-    hits = check_tree(tmp_path)
-    assert any("edge_agent" in line for line in hits)
-
-
 def test_relative_imports_are_ignored(tmp_path: Path) -> None:
-    (tmp_path / "src/device-plane/agent").mkdir(parents=True)
-    (tmp_path / "src/device-plane/agent/local.py").write_text(
+    (tmp_path / "src/device-plane/gateway").mkdir(parents=True)
+    (tmp_path / "src/device-plane/gateway/local.py").write_text(
         "from .client import Agent\n",
         encoding="utf-8",
     )

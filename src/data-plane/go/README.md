@@ -25,11 +25,12 @@ DATAPLANE_STORAGE=memory DATAPLANE_BUS=memory DATAPLANE_POLICY_FILE=policy.json 
 | `internal/envelope` | Message validation and the stored envelope |
 | `internal/ingest` | Bounded queue, batching, retries, backpressure |
 | `internal/storage` | `Store` and `EventStore` interfaces; ClickHouse (events), PostgreSQL and in-memory implementations |
-| `internal/bus` | Fan-out between replicas: EMQX or in-memory. MQTT topics and ACLs |
+| `internal/bus` | Fan-out between replicas: MQTT broker or in-memory. MQTT topics and ACLs |
 | `internal/live` | Live subscriptions |
 | `internal/commands` | Command state machine, redelivery, timeouts |
 | `internal/api` | HTTP and WebSocket API, rate limits, MQTT login exchange |
 | `internal/mqttgw` | Ingestion of messages published directly over MQTT; dead letters |
+| `internal/mqttfwd` | `cmd/mqtt-forwarder`: device MQTT to the control plane, publish/watch API ([docs](../../../docs/data-plane/mqtt-forwarder.md)) |
 | `internal/observability` | Prometheus metrics, JSON logging |
 
 ## Rule engine (`internal/rules`)

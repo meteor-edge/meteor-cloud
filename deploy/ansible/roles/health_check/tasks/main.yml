@@ -25,28 +25,62 @@
 
 # Devices verify the broker against the CA the API hands out and the public host,
 # so check exactly that (a SAN without the public host fails here, not on devices).
+# OpenSSL 3's -verify_hostname treats the value as a DNS name; for a bare IP use
+# -verify_ip or the check fails even when the cert SAN lists that address.
+- name: Check the application data API through the entry point
+  ansible.builtin.uri:
+    url: "{{ platform_health_url }}/v1/whoami"
+    validate_certs: false
+    status_code: [401]
+  register: data_api_health
+  retries: 20
+  delay: 5
+  until: data_api_health.status == 401
+  when: data_api_enabled | bool
+
 - name: Check the MQTT broker over TLS
-  ansible.builtin.command:
-    argv:
-      - openssl
-      - s_client
-      - -connect
-      - "127.0.0.1:{{ mqtt_broker_port }}"
-      - -servername
-      - "{{ mqtt_public_host }}"
-      - -verify_hostname
-      - "{{ mqtt_public_host }}"
-      - -CAfile
-      - "{{ platform_certs_dir }}/ca.crt"
-      - -verify_return_error
-      - -brief
-    stdin: ""
+  ansible.builtin.shell: |
+    set -euo pipefail
+    host='{{ mqtt_public_host }}'
+    port='{{ mqtt_broker_port }}'
+    ca='{{ platform_certs_dir }}/ca.crt'
+    if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      openssl s_client -connect "127.0.0.1:${port}" -verify_ip "$host" \
+        -CAfile "$ca" -verify_return_error -brief </dev/null
+    else
+      openssl s_client -connect "127.0.0.1:${port}" -servername "$host" \
+        -verify_hostname "$host" -CAfile "$ca" -verify_return_error -brief </dev/null
+    fi
+  args:
+    executable: /bin/bash
   register: mqtt_health
   changed_when: false
   retries: 20
   delay: 5
   until: mqtt_health.rc == 0
   when: mqtt_enabled | bool and mqtt_broker == 'bundled'
+
+# JetStream must be enabled and healthy before device-ingest / consumers are useful.
+- name: Check NATS JetStream health on loopback
+  ansible.builtin.uri:
+    url: http://127.0.0.1:{{ nats_monitor_port | default(8222) }}/healthz?js-enabled-only=true
+    return_content: true
+  register: nats_health
+  retries: 20
+  delay: 5
+  until: nats_health.status == 200 and ('ok' in (nats_health.content | default('')))
+  when: nats_enabled | bool
+
+- name: Check device-ingest is healthy
+  ansible.builtin.command:
+    cmd: "{{ platform_compose }} exec -T device-ingest device-ingest healthcheck"
+    chdir: "{{ platform_compose_dir }}"
+  register: device_ingest_health
+  changed_when: false
+  retries: 20
+  delay: 5
+  until: device_ingest_health.rc == 0
+  when: nats_enabled | bool
 
 - name: Check the WireGuard interface is up
   ansible.builtin.command: wg show wg0 listen-port

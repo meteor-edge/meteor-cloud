@@ -69,6 +69,18 @@ export function setDeviceEnabled(
   );
 }
 
+/** Let this hardware register again with a registration token for a limited time (e.g. after a re-flash). */
+export function allowDeviceReregistration(
+  token: string,
+  organizationId: string,
+  deviceId: string,
+): Promise<Device> {
+  return apiRequest<Device>(
+    `/api/v1/organizations/${organizationId}/devices/${deviceId}/allow-reregistration`,
+    { method: "POST", token },
+  );
+}
+
 export function rotateDeviceCredential(
   token: string,
   organizationId: string,

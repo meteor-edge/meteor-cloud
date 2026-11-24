@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "devices/{device_id}/metrics (device to server)",
+  "description": "QoS 1, not retained, every 60 s. Every reading is best effort and may be absent. App metrics are flat keys app.<name>.<field>, name at most 50 characters.",
+  "type": "object",
+  "required": [
+    "timestamp"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string"
+    },
+    "cpu_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "memory_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "disk_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "memory_used_bytes": {
+      "type": "integer"
+    },
+    "memory_total_bytes": {
+      "type": "integer"
+    },
+    "disk_used_bytes": {
+      "type": "integer"
+    },
+    "disk_total_bytes": {
+      "type": "integer"
+    },
+    "load_1m": {
+      "type": "number"
+    },
+    "load_5m": {
+      "type": "number"
+    },
+    "load_15m": {
+      "type": "number"
+    },
+    "uptime_seconds": {
+      "type": "integer"
+    },
+    "temperature_c": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "net_rx_bps": {
+      "type": "number"
+    },
+    "net_tx_bps": {
+      "type": "number"
+    },
+    "wifi_signal_dbm": {
+      "type": "number"
+    },
+    "agent_errors": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "patternProperties": {
+    "^app\\.[A-Za-z0-9_.~-]{1,50}\\.(up|restarts|healthy|mem)$": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "^app\\.[A-Za-z0-9_.~-]{1,50}\\.(cpu|health_ms)$": {
+      "type": "number"
+    }
+  }
+}

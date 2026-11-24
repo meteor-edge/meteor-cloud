@@ -115,6 +115,10 @@ func (s *Server) OpsHandler() http.Handler {
 	mux.Handle("GET /metrics", s.metrics.Handler())
 	mux.Handle("POST /internal/v1/commands", s.internal("internal_commands_create", s.handleInternalCommandCreate))
 	mux.Handle("GET /internal/v1/organizations/{org}/commands/{id}", s.internal("internal_commands_get", s.handleInternalCommandGet))
+	mux.Handle("GET /internal/v1/organizations/{org}/devices/{device}/metrics", s.internal("internal_device_metrics", s.handleInternalDeviceMetrics))
+	mux.Handle("GET /internal/v1/organizations/{org}/devices/online", s.internal("internal_devices_online", s.handleInternalOnlineDevices))
+	mux.Handle("GET /internal/v1/organizations/{org}/events", s.internal("internal_events_query", s.handleInternalEventsQuery))
+	mux.Handle("POST /internal/v1/events", s.internal("internal_events_write", s.handleInternalEventsWrite))
 	return mux
 }
 
@@ -207,7 +211,7 @@ func (s *Server) auth(route string, next http.HandlerFunc) http.Handler {
 			writeError(w, http.StatusUnauthorized, "invalid_credentials", "The application token is invalid, expired or revoked.")
 			return
 		}
-		if !s.allow(id.CredentialID, 1) {
+		if !s.allow(id.CredentialID, 1, 0) {
 			s.rateLimited(w)
 			return
 		}
@@ -222,7 +226,9 @@ func (s *Server) rateLimited(w http.ResponseWriter) {
 }
 
 // allow spends n tokens of the credential's bucket.
-func (s *Server) allow(credentialID string, n int) bool {
+// allow charges n tokens. spent is what this request already paid, so that a batch as
+// large as the bucket fits into a full bucket.
+func (s *Server) allow(credentialID string, n, spent int) bool {
 	if s.opts.RateLimitPerSec <= 0 {
 		return true
 	}
@@ -247,8 +253,11 @@ func (s *Server) allow(credentialID string, n int) bool {
 	entry.seen = now
 	s.limMu.Unlock()
 	// A request larger than the bucket takes the whole bucket instead of failing forever.
-	if b := entry.lim.Burst(); n > b && b > 0 {
+	if b := entry.lim.Burst() - spent; n > b {
 		n = b
+	}
+	if n <= 0 {
+		return true
 	}
 	return entry.lim.AllowN(now, n)
 }

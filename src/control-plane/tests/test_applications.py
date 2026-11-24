@@ -63,6 +63,8 @@ def _policy(client: TestClient) -> dict:
         ("energy..power", False),
         ("meteor.lifecycle", False),
         ("a." * 8 + "a", False),
+        ("a" * 63, True),
+        ("a" * 64, False),
         ("", False),
     ],
 )
@@ -161,6 +163,12 @@ def test_credential_lifecycle_and_policy_snapshot(client: TestClient, db_session
 
     rotated = client.post(f"{base}/{secret['id']}/rotate", headers=headers).json()
     assert rotated["token"] != secret["token"]
+    # Rotating again keeps the lifetime the credential was created with.
+    row = db_session.get(ApplicationCredential, uuid.UUID(secret["id"]))
+    first = row.expires_at - row.rotated_at
+    rotated = client.post(f"{base}/{secret['id']}/rotate", headers=headers).json()
+    db_session.refresh(row)
+    assert abs((row.expires_at - row.rotated_at) - first) < timedelta(seconds=1)
     policy = _policy(client)
     assert [item["token_hash"] for item in policy["credentials"]] == [hash_token(rotated["token"])]
 
@@ -366,10 +374,14 @@ def test_reserved_streams_can_be_received_but_not_published(client: TestClient, 
 
 def test_broker_hooks_leave_application_logins_to_the_data_plane(client: TestClient) -> None:
     mqtt_internal = {"X-MQTT-Internal-Token": get_settings().mqtt_internal_token}
-    auth = client.post(
-        "/internal/mqtt/authenticate", headers=mqtt_internal, json={"username": "app_1234", "password": "mca_x"}
-    )
-    assert auth.json()["result"] == "ignore"
+    login = {"username": "app_1234", "password": "mca_x"}
+    for clientid, result in [("app_1234", "ignore"), ("app_1234-worker", "ignore")]:
+        auth = client.post("/internal/mqtt/authenticate", headers=mqtt_internal, json={**login, "clientid": clientid})
+        assert auth.json()["result"] == result
+    # An application can never present a device's (or anyone else's) client id.
+    for body in [login, {**login, "clientid": f"device-{uuid.uuid4()}"}, {**login, "clientid": "app_12345"}]:
+        auth = client.post("/internal/mqtt/authenticate", headers=mqtt_internal, json=body)
+        assert auth.json()["result"] == "deny", body
     acl = client.post(
         "/internal/mqtt/authorize",
         headers=mqtt_internal,
@@ -388,3 +400,37 @@ def test_policy_endpoint_is_closed_without_a_configured_token(client, monkeypatc
     for token in (None, "", "dev-data-plane-internal"):
         headers = {} if token is None else {"X-Data-Plane-Internal-Token": token}
         assert client.get("/internal/data-plane/policy", headers=headers).status_code == 401
+
+
+def test_device_directory_lists_enrolled_enabled_devices_with_their_org(
+    client: TestClient, db_session: Session
+) -> None:
+    from app.devices.models import Device
+
+    assert client.get("/internal/data-plane/devices").status_code == 401
+    org, _ = _org(client, db_session)
+    other, _ = _org(client, db_session, email="other@example.com")
+    enrolled = Device(organization_id=org.id, name="a", credential_hash="h" * 64)
+    foreign = Device(organization_id=other.id, name="b", credential_hash="i" * 64)
+    disabled = Device(organization_id=org.id, name="c", credential_hash="j" * 64, is_enabled=False)
+    pending = Device(organization_id=org.id, name="d")
+    db_session.add_all([enrolled, foreign, disabled, pending])
+    db_session.commit()
+
+    response = client.get("/internal/data-plane/devices", headers=INTERNAL)
+    assert response.status_code == 200
+    body = response.json()
+    owners = {item["id"]: item["organization_id"] for item in body["devices"]}
+    assert owners == {str(enrolled.id): str(org.id), str(foreign.id): str(other.id)}
+    assert response.headers["ETag"] == f'"{body["version"]}"'
+
+    unchanged = client.get(
+        "/internal/data-plane/devices", headers={**INTERNAL, "If-None-Match": f'"{body["version"]}"'}
+    )
+    assert unchanged.status_code == 304
+
+    enrolled.is_enabled = False
+    db_session.commit()
+    changed = client.get("/internal/data-plane/devices", headers=INTERNAL).json()
+    assert changed["version"] != body["version"]
+    assert [item["id"] for item in changed["devices"]] == [str(foreign.id)]

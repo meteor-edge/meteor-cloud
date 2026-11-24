@@ -65,13 +65,13 @@ Every stored message has this shape. It is what queries and subscriptions return
 | `received_at` | Set by the data plane |
 | `seq` | Optional publisher sequence number, stored as given |
 | `device_id`, `environment` | Omitted when empty |
-| `data` | A JSON object, at most 64 KB |
+| `data` | A JSON object, at most 64 KB. Keys and values are free-form (energy readings, nested phases, …). Rejected when not a single object, larger than the limit, or not storable as JSON text (for example `\u0000`); one rejected message does not fail the rest of the batch |
 
 Ordering: events are ordered by `time`, then `id`. The data plane does not reorder or reject late data inside the accepted window.
 
 ## Delivery semantics
 
-- **Accepted means persisted.** `POST /v1/messages` answers 200 only after every message marked `stored` or `duplicate` is durably written. There is no "accepted but not yet stored" state over HTTP.
+- **Accepted means persisted.** `POST /v1/messages` answers 200 only after every message marked `stored`, `accepted` or `duplicate` is durably written. `stored` means written to event storage. `accepted` means written to the durable message queue, from which storage, rules and export connectors read it; it is never lost, but can take a moment to appear in queries. This version of the service answers `stored`; deployments with a message queue answer `accepted`. Clients must treat both as success.
 - **At least once, deduplicated.** A client that gets no answer retries with the same ids. The first write of an `(organization, id)` wins. A retry is reported as `duplicate` and stores nothing.
 - **Backpressure, not loss.** A full ingestion queue answers `503 overloaded` with `Retry-After`. A storage failure answers `503 storage_unavailable`. In both cases nothing from the request may be assumed stored.
 - **Live delivery follows storage** and is best effort: a subscriber gets an event after it was stored, at most once per connection. A subscriber that cannot keep up is disconnected with close code 4008 and can backfill from history.
@@ -119,7 +119,7 @@ Up to 500 messages. Only `stream` and `data` are required. Response 200:
  "accepted": 1, "rejected": 1}
 ```
 
-`status` is `stored`, `duplicate` or `rejected`. Rejection codes: `invalid_stream`, `invalid_kind`, `invalid_id`, `invalid_payload`, `payload_too_large`, `invalid_timestamp`, `forbidden_stream`. One rejected message does not fail the others.
+`status` is `stored`, `accepted`, `duplicate` or `rejected` (see [Delivery semantics](#delivery-semantics)). Rejection codes: `invalid_stream`, `invalid_kind`, `invalid_id`, `invalid_payload`, `payload_too_large`, `invalid_timestamp`, `forbidden_stream`. One rejected message does not fail the others.
 
 ### `GET /v1/streams/{stream}/data`
 
@@ -165,6 +165,7 @@ any non-final state -> TIMEOUT
 - `TIMEOUT` when `expires_at` passes before `received`, when `max_attempts` (0 means unlimited) is used up, or when no result arrives within `timeout_seconds` after `received`.
 - Acknowledgements may skip states (`succeeded` straight after delivery is valid). A final state never changes. Defaults: `timeout_seconds` 60, `expires_in_seconds` 3600.
 - With `device_id`, only the instance of the application on that device may acknowledge. Without it, any instance may.
+- A command is not delivered again once the service has recorded `received`. Until then it can arrive more than once (for example when the receipt itself is lost on the way), so handlers must tolerate repeats. The price of not redelivering after `received`: if the handler finished but its result cannot be reported within `timeout_seconds` (the application lost its connection for that long), the command ends in `TIMEOUT`. A sender treats `TIMEOUT` as "outcome unknown", not as "did not run".
 
 ### `POST /v1/mqtt/credentials`
 
@@ -205,7 +206,7 @@ Server to client:
 
 The SDK does not use MQTT. It is offered for clients that already speak it. MQTT 5, TLS, QoS 1.
 
-Login: `POST /v1/mqtt/credentials`, then connect with the returned `username` (`app_<credential id>`), `password` (a JWT, valid one hour by default) and `client_id`. The broker verifies the signature and enforces the topic list embedded in the token, so a client can reach nothing beyond the answer's `publish` and `subscribe` filters. A subscribe or publish outside them disconnects the client.
+Login: `POST /v1/mqtt/credentials`, then connect with the returned `username` (`app_<credential id>`), `password` (a JWT, valid one hour by default) and `client_id`. The broker verifies the signature and enforces the topic list embedded in the token, so a client can reach nothing beyond the answer's `publish` and `subscribe` filters. Subscribe to exactly the filters in `subscribe`: a narrower or wider filter is refused, even one inside the permission. Use the returned `client_id`, or that value followed by `-` and a suffix of your own; any other client id is refused, so an application cannot take over a device's session. A retained publish is refused as well. A subscribe or publish outside the lists disconnects the client.
 
 Topics (a stream's dots become topic levels; `*` becomes `+`, a trailing `**` becomes `+/#`):
 
@@ -221,6 +222,7 @@ Rules: organization, application and device come from the topic, which the broke
 
 Known limits of direct MQTT in v1 (the HTTP and WebSocket paths do not have them):
 
+- It needs the EMQX broker (`MQTT_PROVIDER=emqx`), whose JWT authenticator checks the token. Mosquitto (the default) and VerneMQ refuse `app_` logins, so on those brokers applications use HTTP and WebSocket. The data plane's own broker connection works on every broker.
 - Revocation is not immediate. The broker checks the token when the client connects, so a client that is already connected keeps its session until the token expires (`DATAPLANE_MQTT_TOKEN_TTL`, one hour by default), even after its credential is revoked or its permissions shrink. No new token is issued in that time. Shorten the TTL where that window matters.
 - The data plane subscribes with a clean session. A message published while no replica is connected to the broker is not consumed, so at-least-once delivery on this path needs at least two replicas or a client that retries until the data is visible.
 - Messages that arrive over MQTT carry no `environment`, because the broker does not tell the data plane which credential published them.
@@ -240,5 +242,9 @@ The data plane never calls the control plane while handling a message. It needs 
 Only enabled applications and usable credentials (not revoked, not expired, device not disabled) are listed. The data plane polls every 5 seconds, serves from the last snapshot while the control plane is unreachable, and refuses all credentials once the snapshot is older than `DATAPLANE_POLICY_MAX_STALE` (24 hours).
 
 **Operator commands** (control plane pushes, ops listener `:8092`, same shared token header): `POST /internal/v1/commands` with `{organization_id, application_id, issued_by, name, payload, device_id?, ...}` and `GET /internal/v1/organizations/{org}/commands/{id}`.
+
+**Device telemetry history** (control plane reads, ops listener, same header): `GET /internal/v1/organizations/{org}/devices/{device}/metrics?start&end&bucket&names` answers bucketed `{name, points: [{t, avg, min, max, count}]}` series of the device's `meteor.device.metrics` stream. Details: [device telemetry](../docs/data-plane/device-telemetry.md).
+
+**Platform history** (ops listener, same header): `POST /internal/v1/events` stores control-plane events (only `meteor.deployments`; ids are outbox ids, so retries are stored once); `GET /internal/v1/organizations/{org}/events?stream=meteor.*&device_id&start&end&order&limit&cursor&filter&q&previous=1` reads a platform stream; `GET /internal/v1/organizations/{org}/devices/online?start&end&bucket` counts distinct devices with metrics per bucket. Devices publish app lifecycle events and journal warnings on `devices/<id>/events`; events of type `log` are stored in `meteor.device.logs`. Details: [platform history](../docs/data-plane/platform-history.md).
 
 **Agent credential minting** (device agent to control plane): `POST /api/v1/agent/applications/credentials` with the device token and `{"workload_key": "..."}`. Answers a device-scoped token only when the device's desired release for that workload is bound to an application: `{token, credential_id, expires_at, refresh_after, endpoint, application, application_id, organization_id, device_id, environment}`.

@@ -1,14 +1,107 @@
-# Data plane: MQTT gateway, application data API, plus an optional bundled broker.
-#   mqtt       data-plane service (needed whenever MQTT_ENABLED=true)
-#   emqx       bundled EMQX broker (or point MQTT_BROKER_HOST at an external EMQX)
-#   data-api   application data plane (Go): publish, subscribe, query, commands for
-#              applications that use the MeteorCloud SDK (contracts/data-plane-v1.md)
+# Data plane: MQTT gateway, application data API, plus one optional bundled broker.
+#   mqtt        data-plane service: the Go MQTT forwarder (needed whenever MQTT_ENABLED=true)
+#   data-api    application data plane (Go): publish, subscribe, query, commands for
+#               applications that use the MeteorCloud SDK (contracts/data-plane-v1.md)
+# Pick ONE broker profile and set MQTT_PROVIDER to the same name
+# (or pick none and point MQTT_BROKER_HOST at an external broker):
+#   mosquitto   Eclipse Mosquitto + meteorcloud_auth plugin (default; EPL-2.0/EDL-1.0)
+#   emqx        EMQX 5.8.6 (Apache 2.0; do not bump past 5.8, see docs/licensing.md)
+#   vernemq     VerneMQ (official image is under the VerneMQ EULA; see docs/licensing.md)
+# Every broker asks the control plane for logins and topic permissions, so the
+# security rules are the same whichever one runs (docs/fleet/mqtt.md).
+#   nats        device event path (docs/data-plane/jetstream.md): NATS JetStream plus
+#               device-ingest (MQTT -> JetStream), rule-processor and clickhouse-writer
 networks:
   meteorcloud:
     # Shared name so separately started module projects can join each other.
     name: ${COMPOSE_NETWORK_NAME:-meteorcloud}
 
+volumes:
+  mosquitto_data:
+  vernemq_data:
+  clickhouse_data:
+  nats_data:
+
+# Every bundled broker answers to "mqtt-broker" and to "emqx". The default
+# MQTT_BROKER_HOST stays "emqx" because certificates from before the broker
+# became selectable only carry SAN DNS:emqx; new certificates carry both, and
+# .env.example sets mqtt-broker.
+x-broker-network: &broker-network
+  meteorcloud:
+    aliases:
+      - mqtt-broker
+      - emqx
+
 services:
+  mosquitto:
+    image: ${MOSQUITTO_IMAGE:-meteorcloud/mosquitto:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/broker/mosquitto
+    profiles: [mosquitto]
+    environment:
+      # Read by the meteorcloud_auth plugin. An empty token stops the broker at startup.
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
+      MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
+      MQTT_ACL_CACHE_SECONDS: ${MQTT_ACL_CACHE_SECONDS:-60}
+    ports:
+      - "${MQTT_PORT:-8883}:8883"
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}/server.crt:/mosquitto/certs/server.crt:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/server.key:/mosquitto/certs/server.key:ro
+      - mosquitto_data:/mosquitto/data
+    networks: *broker-network
+
+  vernemq:
+    image: ${VERNEMQ_IMAGE:-vernemq/vernemq:2.2.1}
+    # The image runs as UID 10000; group 1000 owns the bind-mounted server.key (mode 0640).
+    group_add: ["1000"]
+    profiles: [vernemq]
+    environment:
+      # Accepting the EULA is your decision: the official image is free to
+      # evaluate, commercial use needs a VerneMQ subscription or your own build
+      # from the Apache-2.0 source (set VERNEMQ_IMAGE). The broker will not
+      # start until this is "yes".
+      DOCKER_VERNEMQ_ACCEPT_EULA: ${VERNEMQ_ACCEPT_EULA:-no}
+      DOCKER_VERNEMQ_ALLOW_ANONYMOUS: "off"
+      # No local users or ACL files: the control plane decides through webhooks.
+      DOCKER_VERNEMQ_PLUGINS__VMQ_PASSWD: "off"
+      DOCKER_VERNEMQ_PLUGINS__VMQ_ACL: "off"
+      DOCKER_VERNEMQ_PLUGINS__VMQ_WEBHOOKS: "on"
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCREGISTER__HOOK: auth_on_register
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCREGISTER__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_register?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCPUBLISH__HOOK: auth_on_publish
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCPUBLISH__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_publish?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCSUBSCRIBE__HOOK: auth_on_subscribe
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCSUBSCRIBE__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_subscribe?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCREGISTERM5__HOOK: auth_on_register_m5
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCREGISTERM5__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_register_m5?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCPUBLISHM5__HOOK: auth_on_publish_m5
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCPUBLISHM5__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_publish_m5?token=${MQTT_INTERNAL_TOKEN:-}
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCSUBSCRIBEM5__HOOK: auth_on_subscribe_m5
+      DOCKER_VERNEMQ_VMQ_WEBHOOKS__MCSUBSCRIBEM5__ENDPOINT: ${CONTROL_PLANE_URL:-http://backend:8000}/internal/mqtt/vernemq/auth_on_subscribe_m5?token=${MQTT_INTERNAL_TOKEN:-}
+      # TLS on 8883 is the only published listener; plain 1883 stays on loopback.
+      DOCKER_VERNEMQ_LISTENER__TCP__DEFAULT: 127.0.0.1:1883
+      DOCKER_VERNEMQ_LISTENER__SSL__DEFAULT: 0.0.0.0:8883
+      DOCKER_VERNEMQ_LISTENER__SSL__CAFILE: /vernemq/certs/ca.crt
+      DOCKER_VERNEMQ_LISTENER__SSL__CERTFILE: /vernemq/certs/server.crt
+      DOCKER_VERNEMQ_LISTENER__SSL__KEYFILE: /vernemq/certs/server.key
+      DOCKER_VERNEMQ_LISTENER__SSL__TLS_VERSION: tlsv1.2
+      DOCKER_VERNEMQ_LISTENER__SSL__ALLOWED_PROTOCOL_VERSIONS: "3,4,5"
+      DOCKER_VERNEMQ_MAX_MESSAGE_SIZE: "262144"
+    ports:
+      - "${MQTT_PORT:-8883}:8883"
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}/ca.crt:/vernemq/certs/ca.crt:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/server.crt:/vernemq/certs/server.crt:ro
+      - ${MQTT_CERTS_DIR:-../../certs}/server.key:/vernemq/certs/server.key:ro
+      - vernemq_data:/vernemq/data
+    healthcheck:
+      test: ["CMD-SHELL", "vernemq ping | grep -q pong"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+    networks: *broker-network
+
   emqx:
     image: emqx/emqx:5.8.6
     profiles: [emqx]
@@ -51,8 +144,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 12
-    networks:
-      - meteorcloud
+    networks: *broker-network
 
   # Column store for application data (telemetry, events, inference). Reached only by the
   # data API over the Compose network: no port is published.
@@ -73,29 +165,42 @@ services:
     networks:
       - meteorcloud
 
+  # Device MQTT -> control plane (POST /internal/mqtt/ingest) and the publish/watch API
+  # the control plane calls at DATA_PLANE_URL (contracts/mqtt-http.md). Go binary from
+  # the data-api image (docs/data-plane/mqtt-forwarder.md).
   data-plane:
-    image: ${DATA_PLANE_IMAGE:-meteorcloud/data-plane:dev}
+    image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}
     build:
-      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/go
     profiles: [mqtt]
+    entrypoint: ["mqtt-forwarder"]
     env_file:
       - ${METEORCLOUD_ENV_FILE:-.env}
-    environment:
+    environment: &data-plane-env
       CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
       HTTP_ADDR: ":8081"
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
+      MQTT_PROVIDER: ${MQTT_PROVIDER:-mosquitto}
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
       MQTT_CA_CERT_PATH: /certs/ca.crt
     volumes:
       - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
     ports:
       - "8081:8081"
-    depends_on:
+    depends_on: &data-plane-depends
+      mosquitto:
+        condition: service_healthy
+        required: false
       emqx:
         condition: service_healthy
         required: false
+      vernemq:
+        condition: service_healthy
+        required: false
+    # Queued messages are forwarded on stop (MQTT_FORWARDER_DRAIN_TIMEOUT, 20 s).
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
+      test: ["CMD", "mqtt-forwarder", "healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -115,8 +220,9 @@ services:
       DATAPLANE_HTTP_ADDR: ":8082"
       DATAPLANE_OPS_ADDR: ":8092"
       # clickhouse: telemetry, events and inference results go to ClickHouse; commands stay in
-      # PostgreSQL. postgres: everything in PostgreSQL (small installations, no clickhouse profile).
-      DATAPLANE_STORAGE: ${DATAPLANE_STORAGE:-clickhouse}
+      # PostgreSQL. postgres: everything in PostgreSQL (fallback when unset, so installs without the
+      # clickhouse profile keep working). New installs set DATAPLANE_STORAGE=clickhouse in .env.
+      DATAPLANE_STORAGE: ${DATAPLANE_STORAGE:-postgres}
       DATAPLANE_CLICKHOUSE_URL: ${DATAPLANE_CLICKHOUSE_URL:-http://clickhouse:8123}
       DATAPLANE_CLICKHOUSE_DATABASE: ${CLICKHOUSE_DB:-meteorcloud}
       DATAPLANE_CLICKHOUSE_USER: ${CLICKHOUSE_USER:-meteorcloud}
@@ -136,7 +242,13 @@ services:
       # Only the application API is published; metrics and the internal API stay on the network.
       - "${DATA_API_PORT:-8082}:8082"
     depends_on:
+      mosquitto:
+        condition: service_healthy
+        required: false
       emqx:
+        condition: service_healthy
+        required: false
+      vernemq:
         condition: service_healthy
         required: false
       clickhouse:
@@ -148,5 +260,128 @@ services:
     networks:
       - meteorcloud
 
-volumes:
-  clickhouse_data:
+  # Internal messaging for the device event path. Devices never connect here; only the
+  # data-plane services below do, each with its own user (config/nats/nats.conf).
+  nats:
+    image: nats:2.15.3-alpine
+    profiles: [nats]
+    # Refuse to start with an empty password rather than run an open server.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        : "$${NATS_INGEST_PASSWORD:?is empty: set it in .env (see .env.example)}"
+        : "$${NATS_RULES_PASSWORD:?is empty}" "$${NATS_CHWRITER_PASSWORD:?is empty}" "$${NATS_ADMIN_PASSWORD:?is empty}"
+        exec nats-server -c /etc/nats/nats.conf
+    environment:
+      NATS_INGEST_PASSWORD: ${NATS_INGEST_PASSWORD:-}
+      NATS_RULES_PASSWORD: ${NATS_RULES_PASSWORD:-}
+      NATS_CHWRITER_PASSWORD: ${NATS_CHWRITER_PASSWORD:-}
+      NATS_ADMIN_PASSWORD: ${NATS_ADMIN_PASSWORD:-}
+      NATS_JETSTREAM_MAX_FILE_STORE: ${NATS_JETSTREAM_MAX_FILE_STORE:-20GB}
+    volumes:
+      - ./config/nats/nats.conf:/etc/nats/nats.conf:ro
+      - ${NATS_DATA:-nats_data}:/data
+    ports:
+      # Loopback only: for the nats CLI on this host. Monitoring is never public.
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_PORT:-8222}:8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:8222/healthz?js-enabled-only=true' | grep -q ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - meteorcloud
+
+  # MQTT -> JetStream bridge for device agent topics (devices/<id>/metrics|status|events).
+  device-ingest:
+    image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/go
+    profiles: [nats]
+    entrypoint: ["device-ingest"]
+    environment:
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://backend:8000}
+      DATA_PLANE_INTERNAL_TOKEN: ${DATA_PLANE_INTERNAL_TOKEN:-}
+      DEVICE_INGEST_MQTT_URL: ${DEVICE_INGEST_MQTT_URL:-mqtts://${MQTT_BROKER_HOST:-emqx}:${MQTT_BROKER_PORT:-8883}}
+      MQTT_PLATFORM_USERNAME: ${MQTT_PLATFORM_USERNAME:-platform}
+      MQTT_PLATFORM_PASSWORD: ${MQTT_PLATFORM_PASSWORD:-}
+      MQTT_CA_CERT_PATH: /certs/ca.crt
+      NATS_URL: nats://nats:4222
+      NATS_INGEST_USER: ingest
+      NATS_INGEST_PASSWORD: ${NATS_INGEST_PASSWORD:-}
+      NATS_STREAM_REPLICAS: ${NATS_STREAM_REPLICAS:-1}
+      NATS_STREAM_MAX_BYTES: ${NATS_STREAM_MAX_BYTES:-10GB}
+      NATS_STREAM_MAX_AGE: ${NATS_STREAM_MAX_AGE:-168h}
+      NATS_STREAM_STORAGE: ${NATS_STREAM_STORAGE:-file}
+      NATS_STREAM_RETENTION: ${NATS_STREAM_RETENTION:-limits}
+      NATS_STREAM_DISCARD: ${NATS_STREAM_DISCARD:-old}
+    volumes:
+      - ${MQTT_CERTS_DIR:-../../certs}:/certs:ro
+    healthcheck:
+      test: ["CMD", "device-ingest", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - meteorcloud
+
+  rule-processor:
+    image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/go
+    profiles: [nats]
+    entrypoint: ["rule-processor"]
+    environment:
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      NATS_URL: nats://nats:4222
+      NATS_RULES_USER: rules
+      NATS_RULES_PASSWORD: ${NATS_RULES_PASSWORD:-}
+      RULES_WORKERS: ${RULES_WORKERS:-8}
+    healthcheck:
+      test: ["CMD", "rule-processor", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - meteorcloud
+
+  clickhouse-writer:
+    image: ${DATA_API_IMAGE:-meteorcloud/data-api:dev}
+    build:
+      context: ${METEORCLOUD_SOURCE_DIR:-../..}/src/data-plane/go
+    profiles: [nats]
+    entrypoint: ["clickhouse-writer"]
+    environment:
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      NATS_URL: nats://nats:4222
+      NATS_CHWRITER_USER: chwriter
+      NATS_CHWRITER_PASSWORD: ${NATS_CHWRITER_PASSWORD:-}
+      CLICKHOUSE_URL: ${DATAPLANE_CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-meteorcloud}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-meteorcloud}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      # Same retention as data-api: writer OpenClickHouse applies table TTL; 0 would clear it.
+      DATAPLANE_RETENTION_DAYS: ${DATAPLANE_RETENTION_DAYS:-0}
+      CLICKHOUSE_WRITER_BATCH_SIZE: ${CLICKHOUSE_WRITER_BATCH_SIZE:-1000}
+      CLICKHOUSE_WRITER_FLUSH_INTERVAL: ${CLICKHOUSE_WRITER_FLUSH_INTERVAL:-1s}
+    healthcheck:
+      test: ["CMD", "clickhouse-writer", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      nats:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+        required: false
+    networks:
+      - meteorcloud

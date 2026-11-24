@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GET /api/v1/agent/network/wifi (200)",
+  "description": "Wi-Fi changes waiting for this device. Holds passwords: never log the body.",
+  "type": "object",
+  "required": [
+    "changes"
+  ],
+  "properties": {
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "action",
+          "ssid",
+          "security",
+          "hidden",
+          "connect_now"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "../common.json#/$defs/uuid"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "apply",
+              "remove"
+            ]
+          },
+          "ssid": {
+            "type": "string"
+          },
+          "security": {
+            "type": "string"
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "connect_now": {
+            "type": "boolean"
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

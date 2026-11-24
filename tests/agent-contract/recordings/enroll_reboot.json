@@ -1,0 +1,237 @@
+{
+  "scenario": "enroll_reboot",
+  "contract": "contracts/device-agent-v1.md",
+  "http": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/enroll/request",
+        "headers": {
+          "authorization": "Bearer <api_key>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "agent_version": "<inventory>",
+          "architecture": "<inventory>",
+          "cpu_cores": "<inventory>",
+          "cpu_model": "<inventory>",
+          "hardware_model": "<inventory>",
+          "hostname": "<inventory>",
+          "kernel_version": "<inventory>",
+          "local_ip": "<inventory>",
+          "mac_addresses": "<inventory>",
+          "memory_mb": "<inventory>",
+          "os_name": "<inventory>",
+          "os_version": "<inventory>",
+          "serial_number": "<inventory>"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "request_id": "<uuid:1>",
+          "claim_secret": "<claim_secret>",
+          "status": "pending",
+          "poll_interval_seconds": 10,
+          "expires_at": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/enroll/poll",
+        "headers": {
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "claim_secret": "<claim_secret>",
+          "request_id": "<uuid:1>"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "status": "approved",
+          "poll_interval_seconds": 10,
+          "device_id": "<uuid:2>",
+          "device_token": "<device_token>",
+          "organization_id": "<uuid:3>",
+          "name": "contract-device",
+          "heartbeat_interval_seconds": 60,
+          "mqtt": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/agent/mqtt",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "enabled": false,
+          "config_version": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/connectivity/wireguard",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "public_key": "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {},
+        "body": {
+          "error": {
+            "code": "not_found",
+            "message": "POST /api/v1/agent/connectivity/wireguard is not scripted"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/heartbeat",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "agent_version": "<inventory>",
+          "architecture": "<inventory>",
+          "capabilities": {
+            "systemd": true,
+            "docker": true,
+            "docker_compose": true,
+            "wireguard": true,
+            "ssh": true,
+            "actions": [
+              "reboot",
+              "shutdown",
+              "set_password",
+              "add_user",
+              "update_agent",
+              "restart_module",
+              "run_diagnostics",
+              "workload_restart",
+              "workload_stop",
+              "workload_start",
+              "workload_snapshot"
+            ],
+            "deploy_kinds": [
+              "systemd",
+              "docker",
+              "docker_compose"
+            ],
+            "modules": {
+              "actions": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "appcreds": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "deploy": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "heartbeat": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "identity": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "metrics": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "mqtt": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "socket": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "wifi": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "wireguard": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "workloads": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              }
+            }
+          },
+          "cpu_cores": "<inventory>",
+          "cpu_model": "<inventory>",
+          "hardware_model": "<inventory>",
+          "hostname": "<inventory>",
+          "kernel_version": "<inventory>",
+          "local_ip": "<inventory>",
+          "mac_addresses": "<inventory>",
+          "memory_mb": "<inventory>",
+          "os_name": "<inventory>",
+          "os_version": "<inventory>",
+          "serial_number": "<inventory>"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "device_id": "<uuid:2>",
+          "status": "online",
+          "heartbeat_interval_seconds": 60,
+          "server_time": "<timestamp>",
+          "desired_software": [],
+          "wifi_pending": false,
+          "actions_pending": false
+        }
+      }
+    }
+  ]
+}

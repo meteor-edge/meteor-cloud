@@ -1,0 +1,5 @@
+# Installed by the meteorcli installer (0440). Lets members of the meteorcli
+# group, such as the device's SSH user, read the device's logs as root through
+# the console's Logs window (sudo -n /usr/local/libexec/meteorcli-logs ...).
+# The wrapper only runs `meteorcli logs`, which reads sources from a fixed list.
+%meteorcli ALL=(root) NOPASSWD: /usr/local/libexec/meteorcli-logs

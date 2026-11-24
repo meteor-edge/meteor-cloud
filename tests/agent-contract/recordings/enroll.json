@@ -1,0 +1,160 @@
+{
+  "scenario": "enroll",
+  "contract": "contracts/device-agent-v1.md",
+  "http": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/health",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "status": "ok",
+          "service": "meteorcloud",
+          "version": "test"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/enroll/check",
+        "headers": {
+          "authorization": "Bearer <api_key>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "ok": true,
+          "organization_id": "<uuid:1>",
+          "organization_name": "Contract Org",
+          "key_name": "Field techs",
+          "key_prefix": "key_contract",
+          "expires_at": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/enroll/request",
+        "headers": {
+          "authorization": "Bearer <api_key>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "serial_number": "<inventory>",
+          "mac_addresses": "<inventory>",
+          "hostname": "<inventory>",
+          "os_name": "<inventory>",
+          "os_version": "<inventory>",
+          "kernel_version": "<inventory>",
+          "architecture": "<inventory>",
+          "hardware_model": "<inventory>",
+          "cpu_model": "<inventory>",
+          "cpu_cores": "<inventory>",
+          "memory_mb": "<inventory>",
+          "local_ip": "<inventory>",
+          "agent_version": "<inventory>"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "request_id": "<uuid:2>",
+          "claim_secret": "<claim_secret>",
+          "status": "pending",
+          "poll_interval_seconds": 10,
+          "expires_at": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/enroll/poll",
+        "headers": {
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "request_id": "<uuid:2>",
+          "claim_secret": "<claim_secret>"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "status": "pending",
+          "poll_interval_seconds": 10
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/enroll/poll",
+        "headers": {
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "request_id": "<uuid:2>",
+          "claim_secret": "<claim_secret>"
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Retry-After": "15"
+        },
+        "body": {
+          "error": {
+            "code": "rate_limited",
+            "message": "Too many polls."
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/enroll/poll",
+        "headers": {
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "request_id": "<uuid:2>",
+          "claim_secret": "<claim_secret>"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "status": "approved",
+          "poll_interval_seconds": 10,
+          "device_id": "<uuid:3>",
+          "device_token": "<device_token>",
+          "organization_id": "<uuid:1>",
+          "name": "contract-device",
+          "heartbeat_interval_seconds": 60,
+          "mqtt": null
+        }
+      }
+    }
+  ]
+}

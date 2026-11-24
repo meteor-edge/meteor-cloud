@@ -16,16 +16,20 @@ render Prometheus Operator objects for clusters that already run it
 | --- | --- | --- |
 | API (`backend`) | Deployment + Service; init container runs `alembic upgrade head` and the optional first-admin step | always |
 | Console | Deployment + Service (nginx) | always |
-| Ingress | `/api`, `/health` -> API; `/` -> console | `ingress.enabled` (off by default; overlays turn it on) |
-| PostgreSQL | StatefulSet + PVC (single instance, no backups) | `postgresql.mode=bundled` (default) |
+| Ingress | `/api`, `/health` -> API; `/v1` -> data API when enabled; `/` -> console | `ingress.enabled` (off by default; overlays turn it on) |
+| PostgreSQL | StatefulSet + PVC (single instance; optional nightly pg_dump CronJob) | `postgresql.mode=bundled` (default) |
 | Artifact volume | PVC | `objectStorage.provider=filesystem` (default) |
 | Data plane | Deployment (1 replica) | `mqtt.enabled` |
-| EMQX | Deployment + Service (LoadBalancer, 8883 TLS) | `mqtt.enabled` and `mqtt.broker=bundled` |
+| Application data API | Deployment + Service (`/v1` on 8082; ops on 8092 ClusterIP only) | `dataApi.enabled` |
+| MQTT broker (Mosquitto, or EMQX with `mqtt.provider=emqx`) | Deployment + Service (LoadBalancer, 8883 TLS) | `mqtt.enabled` and `mqtt.broker=bundled` |
+| ClickHouse | StatefulSet + Service (HTTP 8123) | `clickhouse.enabled` |
+| NATS JetStream | StatefulSet + Service (4222/8222 ClusterIP) | `nats.enabled` |
+| device-ingest / rule-processor / clickhouse-writer | Deployments (same `dataApi.image`) | `nats.enabled` (needs `mqtt.enabled` and ClickHouse) |
 | Redis | Deployment (no persistence) | `cache.provider=redis` and `cache.redis.mode=bundled` |
 | Apps proxy | Traefik Deployment + LoadBalancer Service + PVC (ACME) for public app hostnames | `connectivity.apps.proxy.enabled` |
 | Test pod | `helm test` hook | `helm test` |
 
-No MinIO, Kafka, or ClickHouse.
+No MinIO or Kafka. ClickHouse and NATS are optional (`clickhouse.enabled` / `nats.enabled`).
 
 Configuration is split as follows:
 - **Application settings** go into a ConfigMap.
@@ -39,10 +43,10 @@ The chart refuses to render unsupported combinations, for example several API re
 | File | Use |
 | --- | --- |
 | `values.yaml` | Defaults: bundled PostgreSQL, filesystem storage, in-memory rate limits, MQTT off, ingress off |
-| `values-dev.yaml` | Local and dev (one model): local images, bundled PostgreSQL and EMQX, Traefik ingress |
+| `values-dev.yaml` | Local and dev (one model): local images, bundled PostgreSQL and MQTT broker, application data API (`dataApi.enabled`), Traefik ingress |
 | `values-staging.yaml` | Example staging: external PostgreSQL, S3, existing Secret, one replica, MQTT off |
 | `values-production.yaml` | Example production: external PostgreSQL, S3, Redis, existing Secret, two replicas, TLS ingress |
-| `values-ci.yaml` | Pull-request CI only: minimal (no Redis, MinIO, MQTT, Kafka, ClickHouse) |
+| `values-ci.yaml` | Pull-request CI only: minimal plus the data API on `/v1` (no Redis, MinIO, MQTT, Kafka, ClickHouse) |
 
 Environments are overlays on one chart (local/dev, then staging, then production):
 
@@ -59,7 +63,7 @@ create the Secret it references before installing. Never commit real secrets.
 
 ```bash
 make k8s-up && make k8s-deploy
-open http://localhost:8088          # admin@meteorcloud.local / LocalAdmin123!
+open http://localhost:8088          # admin@example.com / LocalAdmin123!
 make k8s-test                       # helm test + scripts/smoke_test.py
 make k8s-down
 ```
@@ -73,9 +77,12 @@ ingress, uninstalls, and deletes the cluster.
 You provide:
 
 1. **A cluster** (Kubernetes 1.25+) and `kubectl`/`helm` access to a namespace.
-2. **Images** in a registry the cluster can pull from. Build them from
-   `src/control-plane`, `src/data-plane`, and `console`. Set `imagePullSecrets`
-   if the registry is private.
+2. **Images.** The chart defaults to the signed release images on
+   `ghcr.io/meteor-edge/meteorcloud-*` at the chart `appVersion`; see
+   [Release images](release-images.md) to verify them and pin digests. To build your own,
+   use `src/control-plane`, `src/data-plane/go` (application data API and MQTT forwarder),
+   `console`, and the Mosquitto broker image from `src/data-plane/broker/mosquitto`
+   (set `mqtt.mosquitto.image`). Set `imagePullSecrets` if your registry is private.
 3. **PostgreSQL 14+**, reachable from the cluster (Cloud SQL, RDS, Azure Database,
    or self-hosted). Put the SQLAlchemy URL in `DATABASE_URL`, for example
    `postgresql+psycopg://user:pass@host:5432/edge_platform?sslmode=require`.
@@ -85,7 +92,7 @@ You provide:
 6. **For devices (MQTT)**: a way to expose TCP 8883 (a cloud LoadBalancer,
    MetalLB, or k3s servicelb), a DNS name for `mqtt.publicHost`, and a TLS Secret
    with `ca.crt`, `server.crt`, and `server.key`. The server certificate needs
-   SANs for the public host and for `<release>-emqx`, because the data plane
+   SANs for the public host and for the broker Service (`<fullname>-mqtt`, or `<fullname>-emqx` with `mqtt.provider=emqx`; `<fullname>` is `<release>-meteorcloud` (or `<release>-<nameOverride>`), just `<release>` when the release name already contains that name, or `fullnameOverride` when set; Helm cuts it to 63 characters; for release `fleet` that is `fleet-meteorcloud-mqtt`), because the data plane
    verifies it inside the cluster.
 7. **Redis** (optional), for consistent rate limits across API replicas.
 
@@ -100,6 +107,8 @@ kubectl -n meteorcloud create secret generic meteorcloud-secrets \
   --from-literal=REDIS_URL='rediss://...' \
   --from-literal=MQTT_PLATFORM_PASSWORD="$(openssl rand -hex 16)" \
   --from-literal=MQTT_INTERNAL_TOKEN="$(openssl rand -hex 24)" \
+  --from-literal=DATA_PLANE_INTERNAL_TOKEN="$(openssl rand -hex 24)" \
+  --from-literal=DATAPLANE_DATABASE_URL='postgres://...' \
   --from-literal=EMQX_DASHBOARD_PASSWORD="$(openssl rand -hex 16)" \
   --from-literal=EMQX_NODE_COOKIE="$(openssl rand -hex 24)"
 kubectl -n meteorcloud create secret generic meteorcloud-mqtt-tls \
@@ -114,6 +123,33 @@ python3 scripts/smoke_test.py https://fleet.example.com
 
 Upgrades use the same `helm upgrade --install` with new image tags. Migrations run
 in the API's init container before the new version serves traffic.
+
+## Application data API (SDK)
+
+The Go data API (`src/data-plane/go`, image `meteorcloud/data-api`) serves the
+SDK's publish, subscribe, query and commands on `/v1`. It is off by default:
+
+```yaml
+dataApi:
+  enabled: true
+  bus: memory        # one replica; mqtt fans out through the broker (needs mqtt.enabled)
+  storage: postgres  # schema "dataplane" in the platform database
+```
+
+- **Internal token.** The API and the data API share `DATA_PLANE_INTERNAL_TOKEN`
+  (policy feed and commands). The chart generates it, or takes
+  `secrets.dataPlaneInternalToken`. With `secrets.existingSecret`, add
+  `DATA_PLANE_INTERNAL_TOKEN` and `DATAPLANE_DATABASE_URL` (`postgres://...`, not
+  `postgresql+psycopg://`) to that Secret; `helm install` stops if either is missing.
+- **Endpoint.** The ingress routes `/v1` to the data API's port 8082, so
+  applications use the console URL: `METEORCLOUD_ENDPOINT=https://fleet.example.com`.
+  The ops port 8092 (`/readyz`, `/metrics`, the internal API) is never routed.
+- **Direct MQTT** for applications is optional; the SDK works over HTTPS and
+  WebSocket with the default Mosquitto broker. It needs `dataApi.bus=mqtt`,
+  `mqtt.provider=emqx` and `dataApi.mqtt.direct=true`. A bundled EMQX gets the JWT
+  authenticator automatically; for an external EMQX, add a JWT authenticator
+  (HMAC, `from = password`, `acl_claim_name = "acl"`) with the same
+  `DATAPLANE_MQTT_JWT_SECRET`.
 
 ## Device WireGuard (gateway VM)
 
@@ -206,9 +242,9 @@ The chart itself is the same everywhere; only values differ.
 
 ## Limitations
 
-- Bundled PostgreSQL is a single instance without backups or HA; use an external database for production data.
+- Bundled PostgreSQL is a single instance without HA. Backups are off unless you set `postgresql.bundled.backup.enabled=true` ([Backups and restore](backups.md)); use an external database for production data.
 - The data plane runs as one replica, because MQTT subscriptions are not shared.
-- The bundled EMQX is a single node, and its sessions and retained messages are not persisted.
+- The bundled broker is a single node, and its sessions and retained messages are not persisted.
 - `cache.provider=memory` keeps rate-limit counters per pod.
 - Migrations run in each API pod's init container. With several replicas starting at the same time, one may retry while another migrates.
 - Images are not published by this repository; you build and push them.

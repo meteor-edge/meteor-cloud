@@ -1,0 +1,99 @@
+{{- if .Values.clickhouse.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $secretName := include "meteorcloud.secretName" . }}
+{{- $ch := .Values.clickhouse }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-clickhouse
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "clickhouse") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "clickhouse") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}-clickhouse
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "clickhouse") | nindent 4 }}
+spec:
+  serviceName: {{ $fullname }}-clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "clickhouse") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "clickhouse") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: clickhouse
+          image: {{ printf "%s:%s" $ch.image.repository $ch.image.tag }}
+          imagePullPolicy: {{ $ch.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8123
+          env:
+            - name: CLICKHOUSE_DB
+              value: {{ $ch.database | quote }}
+            - name: CLICKHOUSE_USER
+              value: {{ $ch.username | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: CLICKHOUSE_PASSWORD }
+          readinessProbe:
+            httpGet: { path: /ping, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /ping, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml $ch.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+      {{- if not $ch.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if $ch.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $ch.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $ch.persistence.size }}
+  {{- end }}
+{{- end }}

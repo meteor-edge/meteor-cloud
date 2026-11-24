@@ -1,4 +1,4 @@
-"""Online status, LWT, reconnect, and command isolation against real EMQX."""
+"""Online status, LWT, reconnect, and command isolation against the real broker."""
 
 from __future__ import annotations
 
@@ -77,13 +77,13 @@ def test_agent_reconnects_after_broker_restart(api, live_config):
             "docker compose -f deploy/compose/docker-compose.yml",
         )
         result = subprocess.run(
-            [*compose.split(), "restart", "emqx"],
+            [*compose.split(), "restart", live_config.broker_service],
             check=False,
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
-            pytest.skip("Could not restart EMQX (not a local Compose stack)")
+            pytest.skip("Could not restart the broker (not a local Compose stack)")
         wait_mqtt_tls(live_config.mqtt_host, live_config.mqtt_port, live_config.mqtt_ca_file)
         assert wait_until(lambda: session.connect_count >= 2, timeout_seconds=40)
         assert session.connect_ok is True
@@ -114,8 +114,9 @@ def test_other_device_cannot_complete_foreign_command(api, live_config):
                 "result": {"message": "hijack"},
             }
         )
-        published = session_b.publish(f"devices/{device_a.device_id}/commands/result", hijack)
-        assert (not published) or session_b.disconnect_event.wait(3)
+        # Brokers differ on a denied publish (disconnect, or accept and drop);
+        # what matters is that the forged result is never applied (asserted below).
+        session_b.publish(f"devices/{device_a.device_id}/commands/result", hijack)
         response = api.ping(device_a.device_id)
         assert response.get("status") == "completed"
         result = response.get("result") or {}

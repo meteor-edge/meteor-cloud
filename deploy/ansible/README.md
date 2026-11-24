@@ -55,11 +55,14 @@ Settings come from three places:
 
 Required secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD` and `EDGE_PLATFORM_JWT_SECRET`.
 Others are required only by the option that uses them, e.g.
-`EDGE_PLATFORM_MQTT_INTERNAL_TOKEN` and `EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD`
-with MQTT, or `EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID` and
+`EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD` and `EDGE_PLATFORM_MQTT_INTERNAL_TOKEN`
+with MQTT, `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN` with the application data API,
+or `EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID` and
 `EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY` with bundled MinIO (optional for
 external S3 when the host has an IAM role). Every run checks these first and fails
-with a clear message.
+with a clear message. If `EDGE_PLATFORM_MQTT_INTERNAL_TOKEN` is unset, Ansible
+writes a random one to `/opt/edge-platform/secrets/mqtt_internal_token` and reuses
+it. Production rejects the built-in default even when MQTT is off.
 
 Infrastructure options:
 
@@ -68,7 +71,11 @@ Infrastructure options:
 | `postgres_provider` | `bundled`, `external` (`EDGE_PLATFORM_DATABASE_URL`) | `bundled` |
 | `cache_provider` | `memory`, `redis` (`redis_provider`: `bundled` / `external`) | `memory` |
 | `object_storage_provider` | `filesystem`, `s3` (AWS S3, any S3-compatible API, GCS interoperability, or bundled MinIO with `minio_enabled`) | `filesystem` |
-| `mqtt_enabled` / `mqtt_broker` | `false`, or `true` with `bundled` (EMQX) / `external` | `false` |
+| `mqtt_enabled` / `mqtt_broker` | `false`, or `true` with `bundled` / `external` | `false` |
+| `mqtt_provider` | Broker software: `mosquitto`, `emqx`, or `vernemq` (needs `vernemq_accept_eula: "yes"`) | `mosquitto` |
+| `data_api_enabled` / `dataplane_bus` | `false`, or `true` with `memory` / `mqtt` (mqtt needs `mqtt_enabled`) | `false` / `memory` |
+| `dataplane_storage` | `postgres` (default) or `clickhouse` (`EDGE_PLATFORM_CLICKHOUSE_PASSWORD`, Compose profile `clickhouse`) | `postgres` |
+| `nats_enabled` | Device event path (MQTT → JetStream → rule-processor / clickhouse-writer). Needs `mqtt_enabled`, `dataplane_storage=clickhouse`, `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN`, `EDGE_PLATFORM_CLICKHOUSE_PASSWORD`, and `EDGE_PLATFORM_NATS_*_PASSWORD` | `false` |
 | `observability_enabled` | Prometheus, Loki, Alloy, Alertmanager, Grafana on 127.0.0.1 | `false` |
 | `observability_components` | Any of `metrics`, `logs`, `alerting`, `dashboards` (retention, webhook and external URLs: [Observability](../../docs/observability.md#ansible)) | all four |
 | `image_source` | `git` (build on host), `registry` (pull) | `git` |

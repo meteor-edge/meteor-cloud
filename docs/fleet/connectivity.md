@@ -115,12 +115,11 @@ See [`deploy/ansible/README.md`](../../deploy/ansible/README.md#wireguard-gatewa
 
 ## Device side
 
-`sudo ./installcli.sh` (and the release installer with `sudo`) installs
-`wireguard-tools` on Debian/Raspberry Pi OS when `wg` / `wg-quick` are missing.
-`meteorcli run` (as the device user; `installcli.sh` also installs passwordless
-`sudo` for the `meteorcli-wg` helper):
+The installer (`install-meteorcli.sh`, with `sudo`) installs `wireguard-tools` on
+Debian/Raspberry Pi OS when `wg` / `wg-quick` are missing. The agent's `wireguard` module
+(the root helper writes `wg0` for it; [WireGuard](../meteorcli-go.md#wireguard)):
 
-1. Generates a keypair under `~/.config/meteorcli/wireguard/` (or `/etc/meteorcli` for the service)
+1. Generates a keypair under `/var/lib/meteorcli/identity/wireguard/`
 2. POSTs the **public** key, this login (`pi`, `ubuntu`, …) and the sshd **public** host key
    (`/etc/ssh/ssh_host_ed25519_key.pub`) to `/api/v1/agent/connectivity/wireguard`
 3. Writes `wg0.conf` and runs `wg-quick up`
@@ -245,6 +244,16 @@ must be able to reach `10.8.0.0/16`. Re-run `meteorcli run` on each device so it
 installs the CA (and, until it is retired, the gateway key); see
 [SSH certificates](#ssh-certificates-instead-of-the-shared-key). Tests use `SHELL_PROVIDER=echo`. Set
 `shell_provider: none` in inventory if you want the tunnel without the terminal.
+
+On a laptop (`make dev`), the dev Compose file mounts `SHELL_SSH_DIR` (default
+`deploy/compose/shell`) at `/run/meteorcloud/shell`. Put `id_ed25519` there,
+mode `0600`, and set `SHELL_PROVIDER=ssh_gateway`,
+`SHELL_SSH_IDENTITY_FILE=/run/meteorcloud/shell/id_ed25519`, and
+`SHELL_GATEWAY_PUBLIC_KEY` to that key's public line. Recreate the backend.
+Do not add `docker-compose.vpn.yml` for this: it publishes the API on
+`127.0.0.1` only, so a device on the LAN can no longer reach it. The device
+installs the gateway key on its next WireGuard registration (within about 15
+minutes, or restart `meteorcli`).
 
 ## Test locally (no real tunnel)
 

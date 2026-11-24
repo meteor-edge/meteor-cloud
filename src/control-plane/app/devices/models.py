@@ -232,6 +232,8 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     memory_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # LAN address of the primary physical interface. Not a WireGuard address.
     local_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # meteorcli version last reported on a heartbeat (X.Y.Z).
+    agent_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     labels: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
@@ -259,6 +261,19 @@ class Device(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
     registered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # Until when this hardware may register again without its current device token
+    # (an administrator allowed it, e.g. after re-flashing the card). None = not allowed.
+    reregistration_allowed_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # Previous credential, kept briefly so a lost register response can be retried
+    # with the old device token (see device_registration_retry_seconds).
+    previous_credential_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    previous_credential_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )

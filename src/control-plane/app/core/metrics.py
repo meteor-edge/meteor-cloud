@@ -165,6 +165,10 @@ DEVICE_REGISTRATIONS = counter(
     "meteorcloud_device_registrations_total", "Agent registration attempts by outcome", ["result"]
 )
 AGENT_HEARTBEATS = counter("meteorcloud_agent_heartbeats_total", "Agent heartbeats accepted")
+# mode: redirect (presigned object-storage URL) | stream (bytes through the API)
+ARTIFACT_DOWNLOADS = counter(
+    "meteorcloud_agent_artifact_downloads_total", "Agent artifact downloads by how they were served", ["mode"]
+)
 # result: submitted | error
 ENROLLMENT_REQUESTS = counter(
     "meteorcloud_enrollment_requests_total", "Enrollment requests submitted by agents", ["result"]
@@ -179,7 +183,7 @@ AUTH_LOGINS = counter("meteorcloud_auth_logins_total", "Console user logins by o
 # --- MQTT, device commands ----------------------------------------------------
 
 # action: authenticate | authorize; result: allow | deny
-MQTT_AUTH = counter("meteorcloud_mqtt_auth_total", "EMQX authentication/authorization decisions", ["action", "result"])
+MQTT_AUTH = counter("meteorcloud_mqtt_auth_total", "MQTT broker auth decisions", ["action", "result"])
 # kind: status | metrics | command_result | unknown; result: applied | rejected
 MQTT_MESSAGES_INGESTED = counter(
     "meteorcloud_mqtt_messages_ingested_total", "Device MQTT messages received from the data plane", ["kind", "result"]

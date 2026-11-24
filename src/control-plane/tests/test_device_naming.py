@@ -305,11 +305,20 @@ def test_reregistering_with_a_taken_name_gets_a_number(client: TestClient, db_se
     _org, _headers, token, _release = _setup_release(client, db_session)
     _register_device(client, token, name="Lobby", mac="aa:bb:cc:dd:00:12")
     other = _register_device(client, token, name="Kiosk", mac="aa:bb:cc:dd:00:13")
-    renamed = _register_device(client, token, name="lobby", mac="aa:bb:cc:dd:00:13")
+
+    def again(name: str, device_token: str) -> dict:
+        response = client.post(
+            "/api/v1/agent/register",
+            json={"token": token, "device_token": device_token, "mac_addresses": ["aa:bb:cc:dd:00:13"], "name": name},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    renamed = again("lobby", other["device_token"])
     assert renamed["device_id"] == other["device_id"]
     assert renamed["name"] == "lobby-2"
     # Asking again for the name it already has keeps it (case changes included).
-    assert _register_device(client, token, name="LOBBY-2", mac="aa:bb:cc:dd:00:13")["name"] == "LOBBY-2"
+    assert again("LOBBY-2", renamed["device_token"])["name"] == "LOBBY-2"
 
 
 def _device_type(client: TestClient, org, headers, name: str, **fields) -> str:
@@ -381,7 +390,28 @@ def test_reregistering_with_the_hostname_as_name_keeps_the_device_name(client: T
     first = _register_device(client, token, name="Lobby", mac="aa:bb:cc:dd:00:22")
     again = client.post(
         "/api/v1/agent/register",
-        json={"token": token, "name": "raspberrypi", "hostname": "raspberrypi", "mac_addresses": ["aa:bb:cc:dd:00:22"]},
+        json={
+            "token": token,
+            "device_token": first["device_token"],
+            "name": "raspberrypi",
+            "hostname": "raspberrypi",
+            "mac_addresses": ["aa:bb:cc:dd:00:22"],
+        },
     )
     assert again.status_code in (200, 201), again.text
     assert (again.json()["device_id"], again.json()["name"]) == (first["device_id"], "Lobby")
+
+
+def test_approving_known_hardware_keeps_a_disabled_device_disabled(client: TestClient, db_session: Session) -> None:
+    org, headers, key = _org_with_key(client, db_session)
+    first = _submit(client, key, name="kiosk", mac_addresses=["aa:bb:cc:dd:00:30"])
+    _approve(client, org, headers, first["request_id"])
+    device_id = _claim(client, first)["device_id"]
+    disabled = client.post(f"/api/v1/organizations/{org.id}/devices/{device_id}/disable", headers=headers)
+    assert disabled.status_code == 200
+
+    again = _submit(client, key, name="kiosk", mac_addresses=["aa:bb:cc:dd:00:30"])
+    _approve(client, org, headers, again["request_id"])
+    assert _claim(client, again)["device_id"] == device_id
+    device = client.get(f"/api/v1/organizations/{org.id}/devices/{device_id}", headers=headers).json()
+    assert device["is_enabled"] is False
