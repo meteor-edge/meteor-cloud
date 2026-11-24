@@ -61,6 +61,7 @@ class SnapshotContainer(BaseModel):
     restarts: int = 0
     exit_code: int = 0
     oom_killed: bool = False
+    created_at: Short = ""
     started_at: Short = ""
     finished_at: Short = ""
     image: Text = ""
@@ -72,6 +73,8 @@ class SnapshotContainer(BaseModel):
     # 0: no limit.
     memory_limit: int = 0
     nano_cpus: int = 0
+    # What it wrote in its own filesystem; None until measured.
+    size_rw: int | None = None
     stats: SnapshotStats | None = None
 
 

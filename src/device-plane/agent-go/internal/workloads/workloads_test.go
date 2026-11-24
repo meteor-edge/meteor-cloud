@@ -106,10 +106,10 @@ func TestSnapshotFits(t *testing.T) {
 
 func TestMeasure(t *testing.T) {
 	h := &fakeHelper{
-		state: helper.WorkloadState{Managed: true, Containers: []helper.WorkloadContainer{{Name: "web"}, {Name: "db"}},
+		state: helper.WorkloadState{Managed: true, Containers: []helper.WorkloadContainer{{Name: "web", ID: "w"}, {Name: "db", ID: "d"}},
 			Volumes: []helper.WorkloadVolume{{Name: "data"}}},
 		stats: []helper.WorkloadStats{{Name: "web", CPUPercent: 2.5, MemoryBytes: 10}},
-		disk:  helper.DockerDisk{Items: []helper.DiskUse{{Type: "Images", Reclaimable: 7}}, Volumes: map[string]int64{"data": 42}},
+		disk:  helper.DockerDisk{Items: []helper.DiskUse{{Type: "Images", Reclaimable: 7}}, Volumes: map[string]int64{"data": 42}, Containers: map[string]int64{"w": 9}},
 	}
 	in := deploy.Installed{Key: "shop", Kind: "docker_compose", Name: "shop"}
 	now := time.Unix(1_700_000_000, 0)
@@ -128,6 +128,7 @@ func TestMeasure(t *testing.T) {
 	}
 	s := take(diskEvery)
 	if s.Containers[0].Stats == nil || s.Containers[0].Stats.CPUPercent != 2.5 || s.Containers[1].Stats != nil ||
+		s.Containers[0].SizeRW == nil || *s.Containers[0].SizeRW != 9 || s.Containers[1].SizeRW != nil ||
 		s.Disk.Items[0].Reclaimable != 7 || *s.Volumes[0].Size != 42 {
 		t.Errorf("%+v", s)
 	}
@@ -145,7 +146,7 @@ func TestNewVolumeIsMeasuredSoon(t *testing.T) {
 	c, now := &disks{}, time.Unix(1_700_000_000, 0)
 	get := func(want int, volumes ...helper.WorkloadVolume) {
 		t.Helper()
-		if c.get(context.Background(), h, volumes, diskEvery, now); h.disks != want {
+		if c.get(context.Background(), h, &Snapshot{WorkloadKey: "a", Volumes: volumes}, diskEvery, now); h.disks != want {
 			t.Errorf("measured %d times, want %d", h.disks, want)
 		}
 	}

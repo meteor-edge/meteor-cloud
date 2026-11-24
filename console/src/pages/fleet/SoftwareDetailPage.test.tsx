@@ -51,7 +51,9 @@ function container(service: string, running = true) {
     restarts: 2,
     exit_code: 0,
     oom_killed: false,
-    started_at: "2026-11-24T10:00:00Z",
+    created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+    started_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    size_rw: 4096,
     finished_at: "0001-01-01T00:00:00Z",
     image: "nginx:1",
     image_id: "sha256:1",
@@ -170,9 +172,9 @@ describe("SoftwareDetailPage", () => {
 
   it("shows services and volumes and stops one service after asking", async () => {
     renderPage();
-    expect(await screen.findByText("shop-web-1")).toBeInTheDocument();
+    expect(await screen.findByRole("cell", { name: "shop-web-1" })).toBeInTheDocument();
     expect(screen.getByText("shop_data")).toBeInTheDocument();
-    expect(screen.getAllByText("8080 → 80/tcp")).toHaveLength(2);
+    expect(screen.getAllByText("8080 → 80/tcp")).toHaveLength(4);
     fireEvent.click(screen.getAllByRole("button", { name: "Stop service" })[0]);
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("Stop web?"));
     await waitFor(() =>
@@ -191,6 +193,32 @@ describe("SoftwareDetailPage", () => {
     expect(screen.getByText(/172\.20\.0\.0\/16/)).toBeInTheDocument();
     expect(screen.getByText("1 of 3")).toBeInTheDocument();
     expect(screen.getByText(/reclaimable, as Docker/)).toBeInTheDocument();
+  });
+
+  it("lists containers like docker ps", async () => {
+    const snapshot = detail().snapshot!;
+    const stopped = {
+      ...container("job", false),
+      exit_code: 3,
+      finished_at: new Date(Date.now() - 3_600_000).toISOString(),
+    };
+    vi.mocked(getDeviceSoftware).mockResolvedValue(
+      detail({
+        snapshot: {
+          ...snapshot,
+          containers: [{ ...container("web"), health: "healthy" }, stopped],
+        },
+      }),
+    );
+    const view = renderPage();
+    expect(await screen.findByText(/^Up 3 h.*\(healthy\)$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Exited \(3\) 1 h.* ago$/)).toBeInTheDocument();
+    expect(screen.getAllByText("4.0 KB").length).toBeGreaterThanOrEqual(2);
+    view.unmount();
+    // Offline: nobody knows how long it has been up.
+    vi.mocked(getDevice).mockResolvedValue({ name: "kiosk", status: "offline" } as never);
+    renderPage();
+    expect(await screen.findByText("Up (healthy)")).toBeInTheDocument();
   });
 
   it("says when the device does not count memory", async () => {
@@ -254,7 +282,7 @@ describe("SoftwareDetailPage", () => {
   ])("has no buttons with %s", async (_, overrides) => {
     vi.mocked(getDeviceSoftware).mockResolvedValue(detail(overrides));
     renderPage();
-    await screen.findByText("shop-web-1");
+    await screen.findByRole("cell", { name: "shop-web-1" });
     for (const name of ["Restart", "Stop", "Start", "Stop service"]) {
       expect(button(name)).toBeNull();
     }
@@ -280,7 +308,7 @@ describe("SoftwareDetailPage", () => {
 
   it("shows only this workload's logs, and no tab without the permission", async () => {
     const view = renderPage();
-    await screen.findByText("shop-web-1");
+    await screen.findByRole("cell", { name: "shop-web-1" });
     openTab("Logs");
     expect(screen.getByText("logs true false")).toBeInTheDocument();
     view.unmount();
@@ -288,7 +316,7 @@ describe("SoftwareDetailPage", () => {
       organizations: [{ organization_id: "org-1", permissions: [] }],
     } as never);
     renderPage();
-    await screen.findByText("shop-web-1");
+    await screen.findByRole("cell", { name: "shop-web-1" });
     await waitFor(() => expect(screen.queryByRole("tab", { name: "Logs" })).toBeNull());
   });
 
@@ -337,7 +365,7 @@ describe("SoftwareDetailPage", () => {
       ],
     });
     const view = renderPage();
-    await screen.findByText("shop-web-1");
+    await screen.findByRole("cell", { name: "shop-web-1" });
     openTab("Health");
     expect(await screen.findByText("75.0% healthy")).toBeInTheDocument();
     expect(screen.getByText("exit 1")).toBeInTheDocument();
@@ -349,7 +377,7 @@ describe("SoftwareDetailPage", () => {
       new ApiError(503, "telemetry_unavailable", "off"),
     );
     renderPage();
-    await screen.findByText("shop-web-1");
+    await screen.findByRole("cell", { name: "shop-web-1" });
     openTab("Health");
     expect(await screen.findByText(/History is not enabled/)).toBeInTheDocument();
   });

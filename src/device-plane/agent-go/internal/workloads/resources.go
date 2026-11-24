@@ -33,42 +33,58 @@ type disks struct {
 	// pending: a volume was seen that is not measured yet.
 	pending bool
 	at      time.Time
-	disk    *Disk
-	volumes map[string]int64
+	// ids are the containers of each workload.
+	ids  map[string][]string
+	disk *Disk
+	use  helper.DockerDisk
 }
 
 var diskUse = &disks{}
 
-func (c *disks) get(ctx context.Context, h caller, volumes []helper.WorkloadVolume, maxAge time.Duration, now time.Time) (*Disk, map[string]int64) {
+func (c *disks) get(ctx context.Context, h caller, s *Snapshot, maxAge time.Duration, now time.Time) (*Disk, helper.DockerDisk) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.known == nil {
-		c.known = map[string]bool{}
+		c.known, c.ids = map[string]bool{}, map[string][]string{}
 	}
 	fresh := !c.at.IsZero() && now.Sub(c.at) < maxAge
-	for _, v := range volumes {
+	for _, v := range s.Volumes {
 		if !c.known[v.Name] && len(c.known) < 256 {
 			c.known[v.Name], c.pending = true, true
 		}
 	}
-	// A new volume is measured soon, but not at once for every new one.
+	ids := []string{}
+	for _, ct := range s.Containers {
+		if ct.ID != "" {
+			ids = append(ids, ct.ID)
+		}
+	}
+	if !slices.Equal(ids, c.ids[s.WorkloadKey]) {
+		c.ids[s.WorkloadKey], c.pending = ids, true
+	}
+	// A new volume or container is measured soon, but not at once for every new one.
 	if c.pending {
 		fresh = fresh && now.Sub(c.at) < diskRefresh
 	}
 	if fresh {
-		return c.disk, c.volumes
+		return c.disk, c.use
 	}
 	// A failure waits its turn too.
 	c.at, c.pending = now, false
 	ctx, cancel := context.WithTimeout(ctx, diskTimeout)
 	defer cancel()
+	req := helper.DockerDiskRequest{Volumes: slices.Sorted(maps.Keys(c.known))}
+	for _, key := range slices.Sorted(maps.Keys(c.ids)) {
+		req.Containers = append(req.Containers, c.ids[key]...)
+	}
+	req.Containers = req.Containers[:min(len(req.Containers), 256)]
 	var out helper.DockerDisk
-	if err := h.Call(ctx, "docker.disk", helper.DockerDiskRequest{Volumes: slices.Sorted(maps.Keys(c.known))}, &out); err != nil || len(out.Items) == 0 {
-		return c.disk, c.volumes
+	if err := h.Call(ctx, "docker.disk", req, &out); err != nil || len(out.Items) == 0 {
+		return c.disk, c.use
 	}
 	c.disk = &Disk{TakenAt: bus.Timestamp(now), Items: out.Items[:min(len(out.Items), maxDisk)]}
-	c.volumes = out.Volumes
-	return c.disk, c.volumes
+	c.use = out
+	return c.disk, c.use
 }
 
 // measure adds what the workload uses right now. Only before sending: these
@@ -89,10 +105,15 @@ func (s *Snapshot) measure(ctx context.Context, h caller, in deploy.Installed, c
 			}
 		}
 	}
-	disk, volumes := c.get(ctx, h, s.Volumes, maxAge, now)
+	disk, use := c.get(ctx, h, s, maxAge, now)
 	s.Disk = disk
+	for i := range s.Containers {
+		if n, ok := use.Containers[s.Containers[i].ID]; ok {
+			s.Containers[i].SizeRW = &n
+		}
+	}
 	for i := range s.Volumes {
-		if n, ok := volumes[s.Volumes[i].Name]; ok {
+		if n, ok := use.Volumes[s.Volumes[i].Name]; ok {
 			s.Volumes[i].Size = &n
 		}
 	}

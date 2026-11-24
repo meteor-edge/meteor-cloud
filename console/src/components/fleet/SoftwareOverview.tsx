@@ -38,6 +38,101 @@ function ports(container: SnapshotContainer): string {
     .join(", ");
 }
 
+function ago(value: string, now: number): string | null {
+  const at = Date.parse(value);
+  if (Number.isNaN(at) || at <= 0) {
+    return null;
+  }
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  const days = Math.floor(seconds / 86_400);
+  return days >= 2 ? `${days} days` : formatDuration(seconds);
+}
+
+/** Like the STATUS column of docker ps. Without ``live`` the device may have changed since. */
+function status(c: SnapshotContainer, now: number, live: boolean): string {
+  const health = c.health && c.health !== "none" ? ` (${c.health})` : "";
+  if (c.running) {
+    const up = live ? ago(c.started_at, now) : null;
+    return `${c.state === "running" ? "Up" : c.state}${up ? ` ${up}` : ""}${health}`;
+  }
+  if (c.state === "exited" || c.state === "dead") {
+    const since = ago(c.finished_at, now);
+    return `Exited (${c.exit_code})${since ? ` ${since} ago` : ""}`;
+  }
+  return c.state;
+}
+
+/** The workload's containers like docker ps, plus what they use. */
+function ContainerTable({
+  containers,
+  now,
+  live,
+}: {
+  containers: SnapshotContainer[];
+  now: number;
+  live: boolean;
+}) {
+  const heads = [
+    "Name",
+    "Image",
+    "Status",
+    "Created",
+    "Ports",
+    "CPU",
+    "Memory",
+    "Processes",
+    "Disk",
+  ];
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[820px] text-left text-sm">
+        <thead className="text-xs text-muted-foreground">
+          <tr>
+            {heads.map((head) => (
+              <th key={head} className="py-1.5 pr-3 font-medium">
+                {head}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {containers.map((c) => {
+            const created = c.created_at ? ago(c.created_at, now) : null;
+            return (
+              <tr key={c.id || c.name} className="border-t border-border align-top tabular-nums">
+                <td className="py-1.5 pr-3 font-medium">{c.name}</td>
+                <td className="break-all py-1.5 pr-3">{c.image || "—"}</td>
+                <td
+                  className={cn(
+                    "py-1.5 pr-3",
+                    c.running && c.health !== "unhealthy" ? "text-aurora" : "text-ember",
+                  )}
+                >
+                  {status(c, now, live)}
+                </td>
+                <td className="whitespace-nowrap py-1.5 pr-3">
+                  {created ? `${created} ago` : "—"}
+                </td>
+                <td className="py-1.5 pr-3">{ports(c) || "—"}</td>
+                <td className="py-1.5 pr-3">
+                  {c.stats ? `${c.stats.cpu_percent.toFixed(1)}%` : "—"}
+                </td>
+                <td className="whitespace-nowrap py-1.5 pr-3">
+                  {c.stats && c.stats.memory_bytes > 0 ? formatBytes(c.stats.memory_bytes) : "—"}
+                </td>
+                <td className="py-1.5 pr-3">{c.stats ? c.stats.pids : "—"}</td>
+                <td className="whitespace-nowrap py-1.5">
+                  {c.size_rw != null ? formatBytes(c.size_rw) : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 type Stats = NonNullable<SnapshotContainer["stats"]>;
 
 function Meter({ label, percent, text }: { label: string; percent: number; text: string }) {
@@ -278,9 +373,12 @@ function ContainerCard({
 /** What the workload is made of: containers or the systemd unit, volumes, networks, images. */
 export function SoftwareOverview({
   software,
+  live,
   onService,
 }: {
   software: DeviceSoftwareDetail;
+  /** The device is online, so what ran then still counts up. */
+  live: boolean;
   /** Set when the user may manage services one by one. */
   onService?: ServiceOrder;
 }) {
@@ -294,6 +392,9 @@ export function SoftwareOverview({
     );
   }
   const unit = snapshot.unit;
+  // The page asks again every few seconds, so this moves on.
+  const now = Date.now();
+  const unitUp = live && unit?.active_state === "active" ? ago(unit.active_since, now) : null;
   return (
     <div className="space-y-6">
       {snapshot.note && <p className="text-sm text-muted-foreground">{snapshot.note}</p>}
@@ -308,21 +409,24 @@ export function SoftwareOverview({
           {snapshot.containers.length === 0 ? (
             <p className="text-sm text-muted-foreground">No containers exist right now.</p>
           ) : (
-            <ul className="space-y-3">
-              {snapshot.containers.map((c) => (
-                <ContainerCard
-                  key={c.id || c.name}
-                  container={c}
-                  compose={snapshot.kind === "docker_compose"}
-                  stopped={
-                    Boolean(software.stopped_by_user) &&
-                    (snapshot.stopped_services.length === 0 ||
-                      snapshot.stopped_services.includes(c.service))
-                  }
-                  onService={onService}
-                />
-              ))}
-            </ul>
+            <>
+              <ContainerTable containers={snapshot.containers} now={now} live={live} />
+              <ul className="space-y-3">
+                {snapshot.containers.map((c) => (
+                  <ContainerCard
+                    key={c.id || c.name}
+                    container={c}
+                    compose={snapshot.kind === "docker_compose"}
+                    stopped={
+                      Boolean(software.stopped_by_user) &&
+                      (snapshot.stopped_services.length === 0 ||
+                        snapshot.stopped_services.includes(c.service))
+                    }
+                    onService={onService}
+                  />
+                ))}
+              </ul>
+            </>
           )}
         </Panel>
       )}
@@ -332,6 +436,7 @@ export function SoftwareOverview({
             <Fact label="State" value={`${unit.active_state} (${unit.sub_state})`} />
             <Fact label="At boot" value={unit.enabled} />
             <Fact label="Active since" value={time(unit.active_since)} />
+            {unitUp && <Fact label="Uptime" value={unitUp} />}
             <Fact label="Restarts" value={String(unit.restarts)} />
             <Fact label="Last result" value={`${unit.result} · exit ${unit.exit_status}`} />
             {unit.memory_bytes != null && (

@@ -243,11 +243,21 @@ func TestWorkloadStatsAndDisk(t *testing.T) {
 	}
 	answers["system df --format"] = `{"Type":"Images","TotalCount":"3","Active":"1","Size":"2GB","Reclaimable":"1.5GB (75%)"}`
 	answers["system df -v"] = "data 5MB\nforeign 9GB\n"
-	out, err = call(t, h, "docker.disk", DockerDiskRequest{Volumes: []string{"data"}})
+	id := strings.Repeat("a", 64)
+	answers["ps -a --no-trunc --size"] = id + " 1.5kB (virtual 53MB)\n" + strings.Repeat("b", 64) + " 9GB\n"
+	out, err = call(t, h, "docker.disk", DockerDiskRequest{Volumes: []string{"data"}, Containers: []string{id}})
 	var d DockerDisk
 	_ = json.Unmarshal(out, &d)
 	if err != nil || len(d.Items) != 1 || d.Items[0] != (DiskUse{Type: "Images", Total: 3, Active: 1, Size: 2e9, Reclaimable: 15e8}) ||
-		len(d.Volumes) != 1 || d.Volumes["data"] != 5e6 {
+		len(d.Volumes) != 1 || d.Volumes["data"] != 5e6 ||
+		len(d.Containers) != 1 || d.Containers[id] != 1500 {
 		t.Errorf("disk %s, %v", out, err)
+	}
+}
+
+func TestDockerDiskRefusesOtherFilters(t *testing.T) {
+	h, calls, _ := manageHost(t)
+	if _, err := call(t, h, "docker.disk", DockerDiskRequest{Containers: []string{"--all"}}); localrpc.CodeOf(err) != localrpc.CodeBadRequest || len(*calls) != 0 {
+		t.Errorf("err = %v, ran %v", err, *calls)
 	}
 }

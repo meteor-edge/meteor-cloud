@@ -90,7 +90,7 @@ const containerTemplate = `{"id":{{json .Id}},"name":{{json .Name}},` +
 	`"state":{{json .State.Status}},"running":{{json .State.Running}},` +
 	`"health":{{with index .State "Health"}}{{json .Status}}{{else}}""{{end}},` +
 	`"restarts":{{json .RestartCount}},"exit_code":{{json .State.ExitCode}},"oom_killed":{{json .State.OOMKilled}},` +
-	`"started_at":{{json .State.StartedAt}},"finished_at":{{json .State.FinishedAt}},` +
+	`"created_at":{{json .Created}},"started_at":{{json .State.StartedAt}},"finished_at":{{json .State.FinishedAt}},` +
 	`"image":{{json .Config.Image}},"image_id":{{json .Image}},` +
 	`"restart_policy":{{with .HostConfig.RestartPolicy}}{{json .Name}}{{else}}""{{end}},` +
 	`"memory_limit":{{json .HostConfig.Memory}},"nano_cpus":{{json .HostConfig.NanoCpus}},` +
@@ -138,6 +138,7 @@ type WorkloadContainer struct {
 	Restarts   int             `json:"restarts"`
 	ExitCode   int             `json:"exit_code"`
 	OOMKilled  bool            `json:"oom_killed"`
+	CreatedAt  string          `json:"created_at"`
 	StartedAt  string          `json:"started_at"`
 	FinishedAt string          `json:"finished_at"`
 	Image      string          `json:"image"`
@@ -149,6 +150,9 @@ type WorkloadContainer struct {
 	RestartPolicy string `json:"restart_policy"`
 	MemoryLimit   int64  `json:"memory_limit"`
 	NanoCPUs      int64  `json:"nano_cpus"`
+	// SizeRW is what the container wrote in its own filesystem; set by the
+	// agent, nil until it was measured.
+	SizeRW *int64 `json:"size_rw"`
 }
 
 // WorkloadImage, WorkloadVolume and WorkloadNetwork are objects the workload's

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -41,18 +42,23 @@ type DiskUse struct {
 	Reclaimable int64  `json:"reclaimable"`
 }
 
-// DockerDiskRequest is the params of docker.disk: the volumes to measure.
+// DockerDiskRequest is the params of docker.disk: the volumes and containers
+// (full ids) to measure.
 type DockerDiskRequest struct {
-	Volumes []string `json:"volumes"`
+	Volumes    []string `json:"volumes"`
+	Containers []string `json:"containers"`
 }
 
 // DockerDisk is the answer of docker.disk.
 type DockerDisk struct {
-	Items   []DiskUse        `json:"items"`
-	Volumes map[string]int64 `json:"volumes"`
+	Items      []DiskUse        `json:"items"`
+	Volumes    map[string]int64 `json:"volumes"`
+	Containers map[string]int64 `json:"containers"`
 }
 
 const maxDiskVolumes = 256
+
+var containerIDRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // workloadStats answers for the workload's own running containers only.
 func (h Host) workloadStats(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
@@ -107,10 +113,15 @@ func (h Host) dockerDisk(ctx context.Context, _ localrpc.Peer, raw json.RawMessa
 	if err := decode(raw, &r); err != nil {
 		return nil, err
 	}
-	if len(r.Volumes) > maxDiskVolumes {
-		return nil, badRequest("at most %d volumes", maxDiskVolumes)
+	if len(r.Volumes) > maxDiskVolumes || len(r.Containers) > maxDiskVolumes {
+		return nil, badRequest("at most %d volumes and containers", maxDiskVolumes)
 	}
-	out := DockerDisk{Items: []DiskUse{}, Volumes: map[string]int64{}}
+	for _, id := range r.Containers {
+		if !containerIDRe.MatchString(id) {
+			return nil, badRequest("%q is not a container id", id)
+		}
+	}
+	out := DockerDisk{Items: []DiskUse{}, Volumes: map[string]int64{}, Containers: map[string]int64{}}
 	lines, err := h.dockerLines(ctx, "system", "df", "--format", "{{json .}}")
 	if err != nil {
 		return nil, err
@@ -124,6 +135,19 @@ func (h Host) dockerDisk(ctx context.Context, _ localrpc.Peer, raw json.RawMessa
 		u.Total, _ = strconv.Atoi(d.TotalCount)
 		u.Active, _ = strconv.Atoi(d.Active)
 		out.Items = append(out.Items, u)
+	}
+	if len(r.Containers) > 0 {
+		args := []string{"ps", "-a", "--no-trunc", "--size", "--format", "{{.ID}} {{.Size}}"}
+		for _, id := range r.Containers {
+			args = append(args, "--filter", "id="+id)
+		}
+		// "<id> 1.09kB (virtual 53MB)". Without it the rest is still good.
+		lines, _ := h.dockerLines(ctx, args...)
+		for _, l := range lines {
+			if id, v, ok := strings.Cut(l, " "); ok && slices.Contains(r.Containers, id) {
+				out.Containers[id] = size(v)
+			}
+		}
 	}
 	if len(r.Volumes) == 0 {
 		return out, nil

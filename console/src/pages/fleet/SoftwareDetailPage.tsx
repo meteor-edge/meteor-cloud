@@ -263,6 +263,7 @@ export function SoftwareDetailPage() {
       {tab === "overview" && (
         <SoftwareOverview
           software={software}
+          live={online}
           onService={canManage && !allStopped ? run : undefined}
         />
       )}

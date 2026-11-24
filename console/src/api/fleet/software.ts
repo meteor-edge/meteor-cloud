@@ -16,6 +16,8 @@ export type SnapshotContainer = {
   restarts: number;
   exit_code: number;
   oom_killed: boolean;
+  /** Absent from older agents. */
+  created_at?: string;
   started_at: string;
   finished_at: string;
   image: string;
@@ -27,6 +29,8 @@ export type SnapshotContainer = {
   /** 0: no limit. */
   memory_limit: number;
   nano_cpus: number;
+  /** Written in its own filesystem; null until measured. */
+  size_rw?: number | null;
   /** Null when stopped, or from an older agent. */
   stats: {
     cpu_percent: number;

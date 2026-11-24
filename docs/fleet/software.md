@@ -13,10 +13,14 @@ deployed to that device. Containers and services you run yourself are not shown 
 **Seen … ago** tells how old the picture is. The device sends it when something changed and every 5
 minutes; **Refresh now** asks for it at once.
 
+The Overview lists containers like `docker ps`: name, image, status with uptime, created, ports, plus CPU,
+memory, processes and the disk space the container wrote in its own filesystem (not its logs or volumes).
+The command is left out, as it can hold secrets.
+
 For containers the Overview also shows what they use: CPU (100% is one core), memory against its limit,
 network and disk traffic since the container started, and processes; volume sizes; network subnets; and
 Docker's storage on the device with how much of it is reclaimable as Docker counts it. CPU and the like are from the moment
-the device sent the picture. Docker's storage and volume sizes are measured every 30 minutes, and again
+the device sent the picture. Docker's storage, volume and container sizes are measured every 30 minutes, and again
 by **Refresh now**, because measuring reads every file in the volumes. Raspberry Pi OS does not count memory per
 container by default; the page then says so (`cgroup_enable=memory` in `/boot/firmware/cmdline.txt` and a
 reboot turns it on). The storage numbers are totals of
