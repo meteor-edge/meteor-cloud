@@ -98,12 +98,25 @@ func TestBrokerWatchOverlappingDeviceTopicsIngestsOnce(t *testing.T) {
 	cp := &controlPlane{got: map[string][]string{}}
 	srv := httptest.NewServer(cp)
 	defer srv.Close()
+	// A status retained before the forwarder starts: it arrives through the
+	// retained replay, so the replay's subscription is in place from then on.
+	// Published before that, the status below would be replayed as well.
+	ctx := context.Background()
+	probe := fmt.Sprintf("devices/probe-%d/status", time.Now().UnixNano())
+	pub := devicePublisher(t, broker)
+	retain := func(payload string) {
+		if _, err := pub.Publish(ctx, &paho.Publish{Topic: probe, QoS: 1, Retain: true, Payload: []byte(payload)}); err != nil {
+			t.Error(err)
+		}
+	}
+	retain(`{"status":"online"}`)
+	defer retain("") // clear it
 	fwd := startForwarder(t, broker, srv.URL)
 	defer fwd.stop()
 	if !fwd.sess.dedupWatches() {
 		t.Skip("the broker does not support subscription identifiers")
 	}
-	ctx := context.Background()
+	waitFor(t, func() bool { return cp.count(probe) == 1 })
 	dev := fmt.Sprintf("watch-%d", time.Now().UnixNano())
 	status, other := "devices/"+dev+"/status", "devices/"+dev+"/other"
 	dropped := func() float64 { return testutil.ToFloat64(fwd.metrics.WatchDuplicatesDropped) }
