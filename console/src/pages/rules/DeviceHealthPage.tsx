@@ -132,7 +132,9 @@ export function DeviceHealthPage() {
         </p>
       </div>
 
-      <div className={`space-y-4 ${cardClass}`}>
+      {/* Cards blur what is behind them, which makes each a stacking context: lift this one
+          so the metric list opens over the table below. */}
+      <div className={`relative z-20 space-y-4 ${cardClass}`}>
         <div className="flex flex-wrap gap-2" aria-label="Quick filters" role="group">
           {PRESETS.map((preset) => {
             const target = { ...EVERYTHING, ...preset.filter };
@@ -255,8 +257,10 @@ export function DeviceHealthPage() {
                   const metric = metrics.byField[c.field];
                   const symbol = OPERATORS.find((o) => o.id === c.operator)?.symbol;
                   const limit =
-                    c.operator === "between" ? `${c.value} and ${c.max}` : Number(c.value);
-                  return `${metric?.label ?? c.field} ${symbol} ${limit}${metric?.unit === "%" ? "%" : metric?.unit ? ` ${metric.unit}` : ""}`;
+                    c.operator === "between"
+                      ? `${formatNumber(Number(c.value), metric?.unit)} and ${formatNumber(Number(c.max), metric?.unit)}`
+                      : formatNumber(Number(c.value), metric?.unit);
+                  return `${metric?.label ?? c.field} ${symbol} ${limit}`;
                 })
                 .join(filter.match === "all" ? " and " : " or ")}
               . Only readings from the last 5 minutes count.

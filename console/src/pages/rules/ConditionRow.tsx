@@ -166,7 +166,7 @@ export function ConditionRow({
               ))}
             </select>
           </div>
-          <div className="w-28">
+          <div className="w-36">
             <Input
               aria-label={`Condition ${n} value`}
               type="number"

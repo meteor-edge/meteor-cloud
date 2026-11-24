@@ -294,7 +294,7 @@ export function RuleEditorPage() {
         )}
       </div>
 
-      <div className={`space-y-3 ${cardClass}`}>
+      <div className={`relative z-20 space-y-3 ${cardClass}`}>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-lg font-semibold">Definition</h2>
           <a

@@ -113,7 +113,7 @@ export function MetricPicker({
           id={`${id}-list`}
           role="listbox"
           aria-label={`${label} options`}
-          className="absolute z-30 mt-1 max-h-72 w-full min-w-72 overflow-y-auto rounded-md border border-border bg-background shadow-lg"
+          className="absolute z-30 mt-1 max-h-72 w-full min-w-80 overflow-y-auto rounded-md border border-border bg-background shadow-lg"
         >
           {found.map((metric, index) => (
             <li

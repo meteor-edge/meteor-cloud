@@ -95,64 +95,66 @@ export function ChannelsPage() {
           {errorText(error, "Could not change the channels.")}
         </p>
       )}
-      <ul className={`divide-y divide-border text-sm ${cardClass}`}>
-        {(integrations.data ?? []).map((item) => (
-          <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-            <div className="min-w-0">
-              <span className="font-medium">{item.name}</span>{" "}
-              <span className="rounded-full border border-border px-2 py-0.5 text-xs">
-                {KIND_LABEL[item.kind]}
-              </span>
-              {!item.enabled && <span className="ml-2 text-xs text-muted-foreground">off</span>}
-              <div className="break-all text-muted-foreground">{describe(item)}</div>
-              {results[item.id] && (
-                <div
-                  role="status"
-                  className={results[item.id].ok ? "text-emerald-600" : "text-destructive"}
-                >
-                  {results[item.id].text}
-                </div>
-              )}
-            </div>
-            {canEdit && (
-              <span className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={test.isPending}
-                  aria-label={`Send test to ${item.name}`}
-                  onClick={() => test.mutate(item.id)}
-                >
-                  Send test
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setEditing(item)}>
-                  Edit
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => toggle.mutate(item)}>
-                  {item.enabled ? "Disable" : "Enable"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Delete ${item.name}? A channel that a rule uses cannot be deleted.`,
+      {integrations.data && (
+        <ul className={`divide-y divide-border text-sm ${cardClass}`}>
+          {(integrations.data ?? []).map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+              <div className="min-w-0">
+                <span className="font-medium">{item.name}</span>{" "}
+                <span className="rounded-full border border-border px-2 py-0.5 text-xs">
+                  {KIND_LABEL[item.kind]}
+                </span>
+                {!item.enabled && <span className="ml-2 text-xs text-muted-foreground">off</span>}
+                <div className="break-all text-muted-foreground">{describe(item)}</div>
+                {results[item.id] && (
+                  <div
+                    role="status"
+                    className={results[item.id].ok ? "text-emerald-600" : "text-destructive"}
+                  >
+                    {results[item.id].text}
+                  </div>
+                )}
+              </div>
+              {canEdit && (
+                <span className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={test.isPending}
+                    aria-label={`Send test to ${item.name}`}
+                    onClick={() => test.mutate(item.id)}
+                  >
+                    Send test
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditing(item)}>
+                    Edit
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => toggle.mutate(item)}>
+                    {item.enabled ? "Disable" : "Enable"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Delete ${item.name}? A channel that a rule uses cannot be deleted.`,
+                        )
                       )
-                    )
-                      remove.mutate(item.id);
-                  }}
-                >
-                  Delete
-                </Button>
-              </span>
-            )}
-          </li>
-        ))}
-        {integrations.data?.length === 0 && (
-          <li className="py-2 text-muted-foreground">No channels yet.</li>
-        )}
-      </ul>
+                        remove.mutate(item.id);
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </span>
+              )}
+            </li>
+          ))}
+          {integrations.data?.length === 0 && (
+            <li className="py-2 text-muted-foreground">No channels yet.</li>
+          )}
+        </ul>
+      )}
       {canEdit && (
         <ChannelForm
           key={editing?.id ?? "new"}
