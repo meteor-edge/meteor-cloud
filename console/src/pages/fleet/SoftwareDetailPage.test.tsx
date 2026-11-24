@@ -193,6 +193,24 @@ describe("SoftwareDetailPage", () => {
     expect(screen.getByText(/reclaimable, as Docker/)).toBeInTheDocument();
   });
 
+  it("says when the device does not count memory", async () => {
+    const snapshot = detail().snapshot!;
+    vi.mocked(getDeviceSoftware).mockResolvedValue(
+      detail({
+        snapshot: {
+          ...snapshot,
+          containers: snapshot.containers.map((c) => ({
+            ...c,
+            stats: { ...c.stats!, memory_bytes: 0, memory_percent: 0 },
+          })),
+        },
+      }),
+    );
+    renderPage();
+    expect(await screen.findAllByText("Not measured on this device")).toHaveLength(2);
+    expect(screen.queryByRole("meter", { name: "Memory" })).toBeNull();
+  });
+
   it("works with a snapshot without readings", async () => {
     const snapshot = detail().snapshot!;
     vi.mocked(getDeviceSoftware).mockResolvedValue(

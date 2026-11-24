@@ -17,7 +17,9 @@ For containers the Overview also shows what they use: CPU (100% is one core), me
 network and disk traffic since the container started, and processes; volume sizes; network subnets; and
 Docker's storage on the device with how much of it is reclaimable as Docker counts it. CPU and the like are from the moment
 the device sent the picture. Docker's storage and volume sizes are measured every 30 minutes, and again
-by **Refresh now**, because measuring reads every file in the volumes. The storage numbers are totals of
+by **Refresh now**, because measuring reads every file in the volumes. Raspberry Pi OS does not count memory per
+container by default; the page then says so (`cgroup_enable=memory` in `/boot/firmware/cmdline.txt` and a
+reboot turns it on). The storage numbers are totals of
 the whole device; names of other software are never sent. Nothing is cleaned up from here.
 
 ## Restart, stop and start

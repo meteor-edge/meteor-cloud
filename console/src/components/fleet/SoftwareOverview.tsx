@@ -75,13 +75,18 @@ function Usage({ container, stats }: { container: SnapshotContainer; stats: Stat
         percent={stats.cpu_percent / cores}
         text={`${stats.cpu_percent.toFixed(1)}%${container.nano_cpus > 0 ? ` of ${cores} CPU` : ""}`}
       />
-      <Meter
-        label="Memory"
-        percent={stats.memory_percent}
-        text={`${formatBytes(stats.memory_bytes)}${
-          container.memory_limit > 0 ? ` of ${formatBytes(container.memory_limit)}` : ""
-        }`}
-      />
+      {stats.memory_bytes > 0 ? (
+        <Meter
+          label="Memory"
+          percent={stats.memory_percent}
+          text={`${formatBytes(stats.memory_bytes)}${
+            container.memory_limit > 0 ? ` of ${formatBytes(container.memory_limit)}` : ""
+          }`}
+        />
+      ) : (
+        // No running container uses 0 B: the kernel does not count (Raspberry Pi OS default).
+        <Fact label="Memory" value="Not measured on this device" />
+      )}
       <Fact
         label="Network in / out"
         value={`${formatBytes(stats.net_rx_bytes)} / ${formatBytes(stats.net_tx_bytes)}`}
@@ -115,7 +120,9 @@ function Resources({ software }: { software: DeviceSoftwareDetail }) {
         {stats.length > 0 && (
           <>
             <Fact label="CPU (100% = 1 core)" value={`${sum((s) => s.cpu_percent).toFixed(1)}%`} />
-            <Fact label="Memory" value={formatBytes(sum((s) => s.memory_bytes))} />
+            {stats.every((s) => s.memory_bytes > 0) && (
+              <Fact label="Memory" value={formatBytes(sum((s) => s.memory_bytes))} />
+            )}
             <Fact label="Processes" value={String(sum((s) => s.pids))} />
           </>
         )}
