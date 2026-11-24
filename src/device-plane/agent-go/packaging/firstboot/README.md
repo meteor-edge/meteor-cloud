@@ -148,9 +148,11 @@ To publish an image with Docker, packages and meteorcli already installed:
    artifact and publish it ([artifacts](../../../../../docs/fleet/artifacts.md#meteor-imager-public-os-images)).
 
 On Linux, Meteor Imager extends the root partition to the card while writing and grows the
-filesystem when `e2fsprogs` is installed. On each new card's first boot, `meteorcli-settings`
-still grows the filesystem once (the partition may already fill the card), creates new SSH host
-keys and applies `.meteorenv`; the agent then sends one token request.
+filesystem when `e2fsprogs` is installed. It also leaves `meteor-expand-rootfs` on the boot
+partition so first boot can finish the job when write-time resize could not (macOS, or a
+kernel that still showed the old partition size). `meteorcli-settings` grows once when that
+marker or `/etc/meteorcli-expand-rootfs` is present, creates new SSH host keys and applies
+`.meteorenv`; the agent then sends one token request.
 
 ## Copy files by hand
 

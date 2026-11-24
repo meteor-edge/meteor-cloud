@@ -14,7 +14,9 @@
 # longer readable by whoever holds it. Nothing found: exits 0 and changes nothing.
 #
 # On every boot, before that: SSH host keys are created when missing, and the root
-# filesystem grows to the card once when meteorcli-prepare-image.sh asked for it.
+# filesystem grows to the card once when meteorcli-prepare-image.sh asked for it
+# (/etc/meteorcli-expand-rootfs) or when Meteor Imager left meteor-expand-rootfs
+# on the config/boot partition after extending the partition while writing.
 #
 # Config partition, first match: a FAT partition labelled METEORCFG (any device
 # type), /boot/firmware (Raspberry Pi OS Bookworm+), /boot, /boot/efi (x86).
@@ -28,6 +30,7 @@ LOG_FILE="${METEOR_SETTINGS_LOG:-${ROOT}/var/log/meteorcli-settings.log}"
 CFG_MOUNT="${METEOR_CFG_MOUNT:-/run/meteorcfg}"
 NM_DIR="${ROOT}/etc/NetworkManager/system-connections"
 EXPAND_FLAG="${ROOT}/etc/meteorcli-expand-rootfs"
+BOOT_EXPAND_NAME="meteor-expand-rootfs"
 SSHD_DROPIN="${ROOT}/etc/ssh/sshd_config.d/10-meteor.conf"
 MOUNTED_CFG=""
 SETTINGS_PATH=""
@@ -460,10 +463,27 @@ ensure_ssh_host_keys() {
 
 # Grow the root filesystem to the card, once. Meteor Imager may already have
 # extended the partition while writing; resize2fs still runs in that case.
+# Trigger: /etc/meteorcli-expand-rootfs (prepare-image) and/or
+# meteor-expand-rootfs on the boot/config partition (imager write).
 expand_rootfs_once() {
-  [[ -f "${EXPAND_FLAG}" ]] || return 0
+  local boot_flag="" d
+  for d in "${ROOT}/boot/firmware" "${ROOT}/boot" "${ROOT}/boot/efi"; do
+    if [[ -f "${d}/${BOOT_EXPAND_NAME}" ]]; then
+      boot_flag="${d}/${BOOT_EXPAND_NAME}"
+      break
+    fi
+  done
+  if [[ -n "${MOUNTED_CFG}" && -f "${MOUNTED_CFG}/${BOOT_EXPAND_NAME}" ]]; then
+    boot_flag="${MOUNTED_CFG}/${BOOT_EXPAND_NAME}"
+  fi
+  if [[ ! -f "${EXPAND_FLAG}" && -z "${boot_flag}" ]]; then
+    return 0
+  fi
   # Removed first: a failure must not repeat on every boot.
   rm -f "${EXPAND_FLAG}"
+  if [[ -n "${boot_flag}" ]]; then
+    rm -f "${boot_flag}" 2>/dev/null || remove_settings_file "${boot_flag}" || true
+  fi
   [[ -z "${ROOT}" ]] || return 0
   local src name disk num last
   src="$(findmnt -n -o SOURCE /)"
@@ -547,7 +567,13 @@ main() {
   local path step failed=0
   expand_rootfs_once || log "warning: resizing the root filesystem failed"
   ensure_ssh_host_keys || log "warning: SSH host keys failed"
-  find_settings_file || exit 0
+  find_settings_file || {
+    # Imager may have left only the expand marker on a METEORCFG partition.
+    expand_rootfs_once || log "warning: resizing the root filesystem failed"
+    exit 0
+  }
+  # Config partition is mounted: pick up meteor-expand-rootfs there too.
+  expand_rootfs_once || log "warning: resizing the root filesystem failed"
   path="${SETTINGS_PATH}"
   log "Applying ${path}"
   parse_settings "${path}"

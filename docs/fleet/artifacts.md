@@ -143,12 +143,11 @@ database enforces it.
    `meteor-imager backup --device /dev/sdX --out golden.img.gz`). The root filesystem is
    shrunk so the image fits smaller cards.
 4. Upload the file here as an `os_image` with **Show in Meteor Imager**.
-5. Write cards with Meteor Imager: the **General** tab sets hostname, user and password, Wi-Fi
-   and SSH; the **MeteorCloud** tab sets the domain and an enrollment key. On Linux the imager
-   extends the root partition to the card and grows the filesystem when `e2fsprogs` is installed.
-   Each device gets new host keys and sends a token request that shows up under pending
-   enrollments for approval. A prepared image still grows the filesystem on first boot if the
-   computer that wrote the card could not.
+5. Write cards with Meteor Imager: OS settings and MeteorCloud enrollment are optional. On Linux
+   the imager extends the root partition to the card and grows the filesystem when `e2fsprogs`
+   is installed, and leaves `meteor-expand-rootfs` on the boot partition so first boot can finish
+   the grow if write-time resize could not. Each enrolled device gets new host keys and sends a
+   token request that shows up under pending enrollments for approval.
 
 ## Limitations
 
