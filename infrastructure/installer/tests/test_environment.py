@@ -136,7 +136,7 @@ def test_build_ansible_extra_vars_enables_bundled_mqtt() -> None:
     assert extra["mqtt_enabled"] == "true"
     assert extra["mqtt_broker"] == "bundled"
     assert extra["mqtt_broker_port"] == "8883"
-    # Bundled keeps the role defaults (emqx in Compose, the platform host for devices).
+    # Bundled keeps the role defaults (the Compose broker alias, the platform host for devices).
     assert "mqtt_broker_host" not in extra
     assert "mqtt_public_host" not in extra
 

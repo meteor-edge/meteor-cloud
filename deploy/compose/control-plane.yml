@@ -85,7 +85,7 @@ services:
       DATA_PLANE_API_URL: ${DATA_PLANE_API_URL:-http://data-api:8092}
       DATA_PLANE_INTERNAL_TOKEN: ${DATA_PLANE_INTERNAL_TOKEN:-}
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
-      # Interpolated like EMQX's copy so the broker and API always agree.
+      # Interpolated like the broker's copy so the broker and API always agree.
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
       MQTT_CA_CERT_PATH: /certs/ca.crt
       OBJECT_STORAGE_PATH: /data/artifacts

@@ -1,0 +1,39 @@
+# Your database plus the sink. Nothing here runs MeteorCloud itself.
+#
+#   cp .env.example .env            # set METEORCLOUD_ENDPOINT and SINK_STREAMS
+#   cp ~/Downloads/token ./sink.token   # the application token, never committed
+#   docker compose up --build
+services:
+  db:
+    image: postgres:16-alpine      # PostgreSQL License
+    environment:
+      POSTGRES_DB: telemetry
+      POSTGRES_USER: sink
+      POSTGRES_PASSWORD: sink-local-only
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: [db-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sink -d telemetry"]
+      interval: 2s
+      retries: 30
+
+  sink:
+    build:
+      context: ../..                # sdk/python, so the SDK from this checkout is installed
+      dockerfile: examples/stream-to-database/Dockerfile
+    env_file: .env
+    environment:
+      SINK_DATABASE_URL: postgresql://sink:sink-local-only@db:5432/telemetry
+      METEORCLOUD_TOKEN_FILE: /run/secrets/meteorcloud-token
+    volumes:
+      - ./sink.token:/run/secrets/meteorcloud-token:ro
+    # "meteorcloud" = this machine, for a MeteorCloud running locally. A single-word
+    # host name is one the SDK accepts over plain http; use https:// for a real install.
+    extra_hosts: ["meteorcloud:host-gateway"]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+volumes:
+  db-data:

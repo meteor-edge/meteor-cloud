@@ -2,13 +2,16 @@ name: Full-stack E2E
 
 # Manual: one real environment (control plane, WireGuard gateway, devices) on AWS,
 # built from this commit by tests/e2e/meteorcloud-testenv, then the full acceptance
-# suite: DNS + HTTPS, MinIO artifacts, meteorcli onboarding, WireGuard, browser SSH,
-# release -> Docker deploy -> public app, update, second device, tenancy.
+# suite: DNS + HTTPS, MinIO artifacts, meteorcli onboarding, the Go agent itself (privilege
+# split, doctor, signed self-update and rollback, approval enrollment), WireGuard, browser SSH,
+# release -> Docker deploy -> public app, update, fleet/tenancy, progressive rollouts
+# (needs 5 devices), systemd/compose rollout kinds, cleanup.
 # Separate from the EC2 smoke test (aws-ci.yml). See docs/e2e.md.
 #
 # Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
 # Variables: E2E_DNS_ZONE_ID, E2E_DOMAIN (Route53 zone), optional AWS_REGION, E2E_ACME_EMAIL.
 # Without the DNS variables the public-domain checks are not_supported; the rest can pass.
+# Default device_count is 5 so stages 9b/9c (rollouts) run; pick 2 for a cheaper smoke.
 on:
   workflow_dispatch:
     inputs:
@@ -18,10 +21,10 @@ on:
         options: [same_host, dedicated]
         default: same_host
       device_count:
-        description: Simulated devices (2+ for the fleet and isolation checks)
+        description: Simulated devices (2+ fleet/tenancy; 5 for progressive rollouts 9b/9c)
         type: choice
-        options: ["2", "3", "1"]
-        default: "2"
+        options: ["5", "2", "3", "1"]
+        default: "5"
       keep_environment:
         description: Keep the environment after the run (destroy it later with meteorcloud-testenv down)
         type: boolean
@@ -62,9 +65,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             src/control-plane/pyproject.toml
-            src/data-plane/pyproject.toml
             infrastructure/installer/pyproject.toml
-            src/device-plane/agent/pyproject.toml
       - name: Install dependencies
         run: make install
       - name: Test
@@ -97,7 +98,8 @@ jobs:
     name: Provision, test, destroy
     needs: [test, checks]
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    # Five devices plus rollout soak/pause/rollback waves need more than a two-device run.
+    timeout-minutes: 210
     env:
       E2E_ENV_NAME: ci-${{ github.run_id }}
       E2E_PROVIDER: aws
@@ -117,6 +119,12 @@ jobs:
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
+      # The devices get meteorcli built from this commit (scripts/dist.sh), trusting a release key
+      # made for this run, plus two signed test releases for the updater checks (stage 4b).
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/device-plane/agent-go/go.mod
+          cache: false
       - name: Install Ansible
         run: |
           python -m pip install ansible

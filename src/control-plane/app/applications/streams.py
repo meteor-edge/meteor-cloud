@@ -12,7 +12,7 @@ import re
 MAX_STREAM_LENGTH = 128
 MAX_SEGMENTS = 8
 RESERVED_PREFIX = "meteor"
-_SEGMENT = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_SEGMENT = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 
 
 class StreamPatternError(ValueError):

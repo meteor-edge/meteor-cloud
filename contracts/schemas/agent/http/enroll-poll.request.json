@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/enroll/poll (request)",
+  "description": "Claim the outcome of an enrollment request. No Authorization header. Poll no faster than poll_interval_seconds (min 10 s for new agents) and honour Retry-After on 429.",
+  "type": "object",
+  "required": [
+    "request_id",
+    "claim_secret"
+  ],
+  "properties": {
+    "request_id": {
+      "$ref": "../common.json#/$defs/uuid"
+    },
+    "claim_secret": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

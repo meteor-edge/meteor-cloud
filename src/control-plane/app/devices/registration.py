@@ -8,7 +8,9 @@ are never logged.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import hmac
+import re
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -30,6 +32,9 @@ from app.devices.status import connectivity_status
 from app.devices.tokens import generate_device_token, hash_token
 from app.mqtt.credentials import issue_mqtt_credentials, mqtt_config_version
 from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
+
+# Match agent-v* / pyproject versions (X.Y.Z plus optional pre-release suffix).
+_AGENT_VERSION = re.compile(r"^\d+\.\d+\.\d+[0-9A-Za-z.+_-]*$")
 
 
 class RegistrationService:
@@ -61,9 +66,12 @@ class RegistrationService:
             mac_addresses=payload.mac_addresses,
         )
 
+        # Lock matching rows before the window/proof check so two concurrent
+        # requests cannot both consume an administrator window or rotate credentials.
         candidates = self.devices.list_candidates_for_identity(
             serial_number=identity.serial_number,
             mac_addresses=identity.mac_addresses,
+            for_update=True,
         )
         match = match_existing_device(
             identity,
@@ -85,6 +93,7 @@ class RegistrationService:
         now = datetime.now(UTC)
 
         if match.device is not None:
+            self._require_reregistration_allowed(match.device, payload, now)
             device = self._update_existing(match.device, payload, identity, token, generated, now)
         else:
             device = self._create_new(payload, identity, token, generated, now)
@@ -118,6 +127,46 @@ class RegistrationService:
             name=device.name,
             heartbeat_interval_seconds=self.settings.device_heartbeat_interval_seconds,
             mqtt=mqtt,
+        )
+
+    def _require_reregistration_allowed(self, device: Device, payload: AgentRegisterRequest, now: datetime) -> None:
+        """Known hardware may take over its device record only with proof.
+
+        Serials and MACs are not secrets, so a registration token alone must not rotate an
+        existing device's credentials. Proof is the device's current token, or a window an
+        administrator opened with "Allow re-registration". A disabled device stays disabled.
+        """
+        if not device.is_enabled:
+            raise ConflictError(
+                "device_disabled",
+                "This hardware is registered as a disabled device. An administrator must enable it first.",
+            )
+        if payload.device_token:
+            presented = hash_token(payload.device_token)
+            if device.credential_hash and hmac.compare_digest(presented, device.credential_hash):
+                return
+            # Lost-response retry: the previous rotation may have committed while the
+            # agent still holds the old token.
+            previous_until = device.previous_credential_until
+            if (
+                device.previous_credential_hash
+                and previous_until is not None
+                and hmac.compare_digest(presented, device.previous_credential_hash)
+            ):
+                if previous_until.tzinfo is None:
+                    previous_until = previous_until.replace(tzinfo=UTC)
+                if previous_until > now:
+                    return
+        allowed_until = device.reregistration_allowed_until
+        if allowed_until is not None:
+            if allowed_until.tzinfo is None:
+                allowed_until = allowed_until.replace(tzinfo=UTC)
+            if allowed_until > now:
+                return
+        raise ConflictError(
+            "device_already_registered",
+            f"This hardware is already registered as device '{device.name}'. "
+            "An administrator can allow re-registration for that device, or delete it.",
         )
 
     def _validate_token(self, plaintext: str) -> RegistrationToken:
@@ -189,6 +238,9 @@ class RegistrationService:
         device.cpu_cores = payload.cpu_cores
         device.memory_mb = payload.memory_mb
         device.local_ip = payload.local_ip
+        version = (payload.agent_version or "").strip()
+        if version and _AGENT_VERSION.match(version):
+            device.agent_version = version
         if payload.labels:
             device.labels = payload.labels
         if payload.metadata:
@@ -242,12 +294,17 @@ class RegistrationService:
         if token.device_group_id is not None:
             device.device_group_id = token.device_group_id
         self._apply_inventory(device, payload, identity)
+        if device.credential_hash:
+            device.previous_credential_hash = device.credential_hash
+            device.previous_credential_until = now + timedelta(
+                seconds=self.settings.device_registration_retry_seconds
+            )
         device.credential_hash = generated.token_hash
         device.credential_prefix = generated.display_prefix
         device.last_seen_at = now
         device.registered_at = now
         device.registration_token_id = token.id
-        device.is_enabled = True
+        device.reregistration_allowed_until = None
         return self.devices.update(device)
 
     def mqtt_status(self) -> AgentMqttStatusResponse:
@@ -307,6 +364,9 @@ class RegistrationService:
             device.memory_mb = payload.memory_mb
         if payload.local_ip:
             device.local_ip = payload.local_ip
+        version = (payload.agent_version or "").strip()
+        if version and _AGENT_VERSION.match(version):
+            device.agent_version = version
 
     def _identity_in_use(
         self,

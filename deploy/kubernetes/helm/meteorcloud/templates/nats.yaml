@@ -1,0 +1,139 @@
+{{- if .Values.nats.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $secretName := include "meteorcloud.secretName" . }}
+{{- $nats := .Values.nats }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-nats
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "nats") | nindent 4 }}
+data:
+  nats.conf: |
+{{ .Files.Get "files/nats/nats.conf" | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-nats
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "nats") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "nats") | nindent 4 }}
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+    - name: monitor
+      port: 8222
+      targetPort: monitor
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}-nats
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "nats") | nindent 4 }}
+spec:
+  serviceName: {{ $fullname }}-nats
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "nats") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "nats") | nindent 8 }}
+      annotations:
+        checksum/nats-conf: {{ .Files.Get "files/nats/nats.conf" | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: nats
+          image: {{ printf "%s:%s" $nats.image.repository $nats.image.tag }}
+          imagePullPolicy: {{ $nats.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              : "${NATS_INGEST_PASSWORD:?missing}" "${NATS_RULES_PASSWORD:?missing}" \
+                "${NATS_CHWRITER_PASSWORD:?missing}" "${NATS_ADMIN_PASSWORD:?missing}"
+              exec nats-server -c /etc/nats/nats.conf
+          ports:
+            - name: client
+              containerPort: 4222
+            - name: monitor
+              containerPort: 8222
+          env:
+            - name: NATS_INGEST_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: NATS_INGEST_PASSWORD }
+            - name: NATS_RULES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: NATS_RULES_PASSWORD }
+            - name: NATS_CHWRITER_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: NATS_CHWRITER_PASSWORD }
+            - name: NATS_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: NATS_ADMIN_PASSWORD }
+            - name: NATS_JETSTREAM_MAX_FILE_STORE
+              value: {{ $nats.jetstream.maxFileStore | quote }}
+          readinessProbe:
+            httpGet:
+              path: "/healthz?js-enabled-only=true"
+              port: monitor
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: "/healthz?js-enabled-only=true"
+              port: monitor
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml $nats.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullname }}-nats
+        {{- if not $nats.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if $nats.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $nats.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $nats.persistence.size }}
+  {{- end }}
+{{- end }}

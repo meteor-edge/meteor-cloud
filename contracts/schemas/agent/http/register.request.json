@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/register (request)",
+  "description": "Register with a one-time registration token. No Authorization header.",
+  "allOf": [
+    {
+      "$ref": "../common.json#/$defs/inventory"
+    }
+  ],
+  "type": "object",
+  "required": [
+    "token"
+  ],
+  "properties": {
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Registration token. Secret."
+    },
+    "device_token": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 512,
+      "description": "Current device token, sent only to the server that issued it; proves a re-registration."
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 255
+    },
+    "labels": {
+      "type": "object"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

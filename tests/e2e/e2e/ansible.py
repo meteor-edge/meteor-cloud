@@ -32,6 +32,12 @@ def platform_vars(cfg: Config, *, platform_archive: Path, gateway: Host | None, 
         "object_storage_provider": "s3",
         "minio_enabled": True,
         "shell_provider": "ssh_gateway",
+        # Application data API for SDK publish/subscribe/query (contracts/data-plane-v1.md).
+        "data_api_enabled": True,
+        # Device MQTT + NATS JetStream path (docs/data-plane/jetstream.md, docs/fleet/mqtt.md).
+        "mqtt_enabled": True,
+        "dataplane_storage": "clickhouse",
+        "nats_enabled": True,
         # Faster convergence for the suite (product defaults are 60s / 150s).
         "device_heartbeat_interval_seconds": 15,
         "device_offline_threshold_seconds": 45,
@@ -74,7 +80,7 @@ def render_inventory(cfg: Config, state: State, hosts: list[Host], *, platform_a
                 },
                 "devices": {
                     "hosts": {h.name: entry(h) for h in devices},
-                    "vars": {"device_source_archive": str(device_archive)},
+                    "vars": {"device_dist_archive": str(device_archive)},
                 },
             },
         }

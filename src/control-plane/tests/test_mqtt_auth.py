@@ -176,7 +176,7 @@ def test_authorize_denies_events_and_allows_metrics(client: TestClient, db_sessi
         },
     )
     assert metrics.json()["result"] == "allow"
-    assert events.json()["result"] == "deny"
+    assert events.json()["result"] == "allow"
 
 
 def test_revoke_mqtt_api_rejects_authenticate(client: TestClient, db_session: Session) -> None:

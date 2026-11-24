@@ -264,9 +264,10 @@ class MeteorClient:
 
     def close(self, timeout: float = 10.0) -> None:
         """Shut down: let running command handlers finish, then close connections."""
-        if IN_HANDLER.get():
-            # Called from a command handler: closing now would wait for this very
-            # handler and then cut off its result. Close once the handler is done.
+        if IN_HANDLER.get() or threading.current_thread() is self._thread:
+            # Called from a command handler or a subscription callback: closing now
+            # would wait for this very handler and cut off its result, or block the
+            # client's own event loop for good. Close from another thread instead.
             self._stop.set()
             threading.Thread(target=self.close, args=(timeout,), name="meteorcloud-close", daemon=True).start()
             return

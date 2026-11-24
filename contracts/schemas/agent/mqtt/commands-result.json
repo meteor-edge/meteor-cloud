@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "devices/{device_id}/commands/result (device to server)",
+  "description": "QoS 1, not retained. Answer to a command that has a command_id. ping answers {status: completed, result: {message: pong}}.",
+  "type": "object",
+  "required": [
+    "command_id",
+    "status"
+  ],
+  "properties": {
+    "command_id": {
+      "$ref": "../common.json#/$defs/uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "failed"
+      ]
+    },
+    "result": {
+      "type": "object"
+    }
+  }
+}

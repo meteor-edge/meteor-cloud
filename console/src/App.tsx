@@ -12,6 +12,7 @@ import { DeploymentDetailPage } from "@/pages/deployments/DeploymentDetailPage";
 import { DeploymentsPage } from "@/pages/deployments/DeploymentsPage";
 import { EndpointsPage } from "@/pages/endpoints/EndpointsPage";
 import { ReleasesPage } from "@/pages/releases/ReleasesPage";
+import { SoftwareDetailPage } from "@/pages/fleet/SoftwareDetailPage";
 import { DeviceDetailPage } from "@/pages/fleet/DeviceDetailPage";
 import { DeviceGroupDetailPage } from "@/pages/fleet/DeviceGroupDetailPage";
 import { DeviceGroupsPage } from "@/pages/fleet/DeviceGroupsPage";
@@ -126,6 +127,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <DeviceDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/devices/:deviceId/software/:softwareId"
+          element={
+            <ProtectedRoute>
+              <SoftwareDetailPage />
             </ProtectedRoute>
           }
         />

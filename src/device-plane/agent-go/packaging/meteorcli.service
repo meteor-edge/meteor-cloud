@@ -1,0 +1,67 @@
+# MeteorCloud device agent. Runs as the unprivileged meteor user; privileged work
+# goes through meteorcli-helper.socket. Design: docs/meteorcli-go.md.
+[Unit]
+Description=MeteorCloud device agent (meteorcli)
+Documentation=https://github.com/meteor-edge/meteor-cloud/blob/master/docs/meteorcli-go.md
+After=network-online.target meteorcli-helper.socket
+Wants=network-online.target meteorcli-helper.socket
+# Never let systemd give up restarting the agent.
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+# Applies a first-boot meteorenv file from the boot partition, as root ("+"),
+# before the unprivileged agent starts; never blocks the start ("-").
+ExecStartPre=-+/usr/local/bin/meteorcli config meteorenv
+ExecStart=/usr/local/bin/meteorcli agent
+Restart=always
+RestartSec=5
+# The agent pings only while its critical loops tick (internal/agent/supervisor.go).
+WatchdogSec=60
+MemoryMax=128M
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+User=meteor
+Group=meteor
+# Lets the agent hand agent.sock to the meteorcli group (no capability needed).
+SupplementaryGroups=meteorcli
+UMask=0077
+
+# /run/meteorcli comes from tmpfiles.d, not RuntimeDirectory=: systemd would
+# delete it (and helper.sock) whenever the agent stops, and give it to
+# meteor:meteor, which locks the meteorcli group out of agent.sock.
+StateDirectory=meteorcli
+StateDirectoryMode=0755
+ReadWritePaths=/var/lib/meteorcli /run/meteorcli
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+KeyringMode=private
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallFilter=@system-service
+SystemCallFilter=~@resources @mount @swap @reboot @raw-io @module @obsolete @cpu-emulation @debug @clock
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

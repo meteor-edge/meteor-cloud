@@ -332,6 +332,8 @@ export type DeviceSoftware = {
   progress_percent: number;
   attempt_count: number;
   last_error: string | null;
+  /** A user stopped it from the console; absent from older servers. */
+  stopped_by_user?: boolean;
   reported_at: string | null;
   created_at: string;
   updated_at: string;
@@ -410,11 +412,14 @@ export type Device = {
   cpu_cores: number | null;
   memory_mb: number | null;
   local_ip: string | null;
+  agent_version: string | null;
   labels: Record<string, unknown>;
   metadata: Record<string, unknown>;
   credential_prefix: string | null;
   last_seen_at: string | null;
   registered_at: string | null;
+  /** Until when this hardware may register again without its device token; null = not allowed. */
+  reregistration_allowed_until?: string | null;
   created_at: string;
   updated_at: string;
   mqtt_configured: boolean;

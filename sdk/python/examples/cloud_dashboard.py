@@ -22,6 +22,7 @@ with MeteorClient.from_env() as client:
             print(bucket.start.isoformat(), round(bucket.value, 1), f"({bucket.count} readings)")
 
     # Live: the next five readings from any device.
+    device_id = None
     with client.telemetry.subscribe("energy.*") as live:
         for _, event in zip(range(5), live, strict=False):
             print("live", event.device_id, event.stream, event.data)
@@ -29,6 +30,8 @@ with MeteorClient.from_env() as client:
                 device_id = event.device_id
 
     # Command: ask the meter application on that device to publish faster.
+    if device_id is None:
+        raise SystemExit("no device sent a reading, so there is nothing to command")
     try:
         result = client.commands.call("meter", "set-interval", {"seconds": 1}, device_id=device_id, timeout=30)
         print("meter answered", result)

@@ -74,6 +74,7 @@ class AuthenticationService:
             str(user.id),
             settings=self.settings,
             expires_delta=expires,
+            extra_claims={"ver": user.token_version or 0},
         )
         return TokenResponse(
             access_token=token,
@@ -137,6 +138,18 @@ class AuthenticationService:
 
     def get_user_by_id(self, user_id: uuid.UUID) -> User | None:
         return self.users.get_by_id(user_id)
+
+    def revoke_all_sessions(self, user: User) -> None:
+        """End every access token issued to this user so far (\"log out everywhere\")."""
+        user.token_version = (user.token_version or 0) + 1
+        self.session.add(user)
+        AuditRecorder(self.session).record(
+            actor=user,
+            action="auth.logout_all",
+            resource_type="user",
+            resource_id=user.id,
+        )
+        self.session.commit()
 
     def require_active_user(self, user_id: uuid.UUID) -> User:
         user = self.users.get_by_id(user_id)

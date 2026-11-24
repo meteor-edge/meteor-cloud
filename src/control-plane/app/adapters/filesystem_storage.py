@@ -23,6 +23,10 @@ class FilesystemObjectStorage:
         """Use ``OBJECT_STORAGE_PATH`` as the root; it is created on first write."""
         self._root = Path(settings.object_storage_path).resolve()
 
+    def presigned_get_url(self, key: str, *, expires_in: int, file_name: str | None = None) -> str | None:
+        """Files are streamed through the API: there is no URL to hand out."""
+        return None
+
     def put(self, key: str, data: BinaryIO, *, content_type: str | None = None) -> None:
         """Write to a temporary file and rename it so readers never see partial content."""
         path = self._path(key)

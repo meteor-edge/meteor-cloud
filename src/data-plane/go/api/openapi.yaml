@@ -29,8 +29,9 @@ paths:
     post:
       summary: Publish up to 500 messages
       description: >
-        Answers 200 only after every message with status stored or duplicate is durably
-        written. On 503 nothing from the request may be assumed stored; retry with the same ids.
+        Answers 200 only after every message with status stored, accepted or duplicate is
+        durably written (or queued, for accepted). Clients must treat stored and accepted as
+        success. On 503 nothing from the request may be assumed stored; retry with the same ids.
       requestBody:
         required: true
         content:
@@ -247,7 +248,7 @@ components:
       properties:
         index: { type: integer }
         id: { type: string }
-        status: { type: string, enum: [stored, duplicate, rejected] }
+        status: { type: string, enum: [stored, accepted, duplicate, rejected] }
         error:
           type: object
           properties:
@@ -272,16 +273,19 @@ components:
         data: { type: object }
     EventPage:
       type: object
+      required: [stream, events]
       properties:
         stream: { type: string }
         events: { type: array, items: { $ref: "#/components/schemas/Event" } }
         next_cursor: { type: string, nullable: true }
     AggregateResult:
       type: object
+      required: [stream, aggregate, buckets]
       properties:
         stream: { type: string }
         aggregate:
           type: object
+          required: [function]
           properties:
             function: { type: string }
             field: { type: string }

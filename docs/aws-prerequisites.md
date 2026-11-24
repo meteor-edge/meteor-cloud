@@ -5,7 +5,7 @@
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Python | 3.13+ | Installer |
-| Terraform | 1.5+ | AWS infrastructure |
+| Terraform 1.5+ or OpenTofu 1.6+ | | AWS infrastructure (set `EDGE_INSTALLER_TERRAFORM=tofu` to force OpenTofu; see docs/licensing.md) |
 | Ansible | 2.15+ | Host configuration |
 | OpenSSH | any recent | SSH to EC2 |
 | AWS CLI | recommended | Verify credentials |

@@ -25,9 +25,9 @@ from e2e.suite.context import Context
 from e2e.suite.framework import Fail, wait_for
 from e2e.suite.s3_artifacts import upload_artifact
 from e2e.suite.s4_onboarding import (
-    REGISTERED_RE,
     RESET,
     TOKEN_FILE,
+    register,
     start_agent_and_wait_online,
 )
 from e2e.suite.s5_wireguard import wait_tunnel
@@ -53,15 +53,11 @@ def _register(ctx: Context, index: int) -> dict:
     redact.add(created["token"])
     ctx.sh(device, RESET)
     ctx.put_secret_file(device, TOKEN_FILE, created["token"])
-    result = ctx.meteorcli(device, f"register --server {ctx.api_url} --token-file {TOKEN_FILE} --name {name}")
-    ctx.sh(device, f"rm -f {TOKEN_FILE}")
-    match = REGISTERED_RE.search(result.stdout)
-    if not match:
-        raise Fail(f"meteorcli register printed no device id: {result.text()[-500:]}")
-    ctx.data.setdefault("devices", {})[index] = {"id": match.group(1), "name": name}
+    device_id = register(ctx, device, name)
+    ctx.data.setdefault("devices", {})[index] = {"id": device_id, "name": name}
     start_agent_and_wait_online(ctx, index)
     wait_tunnel(ctx, index)
-    return {"name": name, "id": match.group(1), "host": device.address,
+    return {"name": name, "id": device_id, "host": device.address,
             "wg_address": ctx.data["devices"][index]["wg_address"]}
 
 

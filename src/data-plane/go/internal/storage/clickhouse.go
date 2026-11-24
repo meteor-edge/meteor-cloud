@@ -99,29 +99,34 @@ func OpenClickHouse(ctx context.Context, o ClickHouseOptions) (*ClickHouse, erro
 	if err := c.exec(ctx, fmt.Sprintf(clickhouseEventsDDL, c.database), nil, nil); err != nil {
 		return nil, fmt.Errorf("create events table: %w", err)
 	}
-	if err := c.applyRetention(ctx, o.RetentionDays); err != nil {
-		return nil, fmt.Errorf("retention: %w", err)
+	if err := c.ensureDeviceMetrics(ctx); err != nil {
+		return nil, fmt.Errorf("device metrics table: %w", err)
+	}
+	for _, table := range []string{"events", "device_metrics"} {
+		if err := c.applyRetention(ctx, table, o.RetentionDays); err != nil {
+			return nil, fmt.Errorf("retention of %s: %w", table, err)
+		}
 	}
 	return c, nil
 }
 
 // applyRetention sets or removes the table TTL, only when it differs from the
 // current one so a restart does not rewrite data.
-func (c *ClickHouse) applyRetention(ctx context.Context, days int) error {
+func (c *ClickHouse) applyRetention(ctx context.Context, table string, days int) error {
 	var row struct {
 		DDL string `json:"create_table_query"`
 	}
-	err := c.query(ctx, `SELECT create_table_query FROM system.tables WHERE database = {db:String} AND name = 'events'`,
-		map[string]string{"db": c.database}, func(line []byte) error { return json.Unmarshal(line, &row) })
+	err := c.query(ctx, `SELECT create_table_query FROM system.tables WHERE database = {db:String} AND name = {t:String}`,
+		map[string]string{"db": c.database, "t": table}, func(line []byte) error { return json.Unmarshal(line, &row) })
 	if err != nil {
 		return err
 	}
 	has := strings.Contains(row.DDL, " TTL ")
 	switch {
 	case days <= 0 && has:
-		return c.exec(ctx, "ALTER TABLE "+c.database+".events REMOVE TTL", nil, nil)
+		return c.exec(ctx, "ALTER TABLE "+c.database+"."+table+" REMOVE TTL", nil, nil)
 	case days > 0 && !strings.Contains(row.DDL, fmt.Sprintf("toIntervalDay(%d)", days)):
-		return c.exec(ctx, fmt.Sprintf("ALTER TABLE %s.events MODIFY TTL toDateTime(ts) + toIntervalDay(%d)", c.database, days), nil, nil)
+		return c.exec(ctx, fmt.Sprintf("ALTER TABLE %s.%s MODIFY TTL toDateTime(ts) + toIntervalDay(%d)", c.database, table, days), nil, nil)
 	}
 	return nil
 }
@@ -284,6 +289,8 @@ func (c *ClickHouse) existing(ctx context.Context, org string, ids []string) (ma
 }
 
 func (c *ClickHouse) InsertEvents(ctx context.Context, events []*envelope.Event) ([]bool, error) {
+	// Existence check then insert: safe for sequential retries. Concurrent publishes of the
+	// same (organization_id, event_id) can both insert (MergeTree has no unique key).
 	inserted := make([]bool, len(events))
 	byOrg := map[string][]string{}
 	for _, ev := range events {
@@ -306,11 +313,13 @@ func (c *ClickHouse) InsertEvents(ctx context.Context, events []*envelope.Event)
 		if _, dup := known[key]; dup {
 			continue
 		}
-		known[key] = struct{}{} // a duplicate inside the same batch counts once
-		inserted[i] = true
+		// Compact should not fail after envelope.CanonicalData; if it does, skip this
+		// row so one poison event cannot fail the rest of the batch (HTTP or JetStream).
+		// Reserve the key only after encode succeeds so a failed row cannot suppress a
+		// later valid event with the same id in this batch.
 		var data bytes.Buffer
 		if err := json.Compact(&data, ev.Data); err != nil {
-			return nil, fmt.Errorf("event %s: data is not JSON", ev.ID)
+			continue
 		}
 		if err := enc.Encode(chEventRow{
 			OrganizationID: ev.OrganizationID, EventID: ev.ID, Stream: ev.Stream, Kind: ev.Kind, Type: ev.Type,
@@ -318,8 +327,10 @@ func (c *ClickHouse) InsertEvents(ctx context.Context, events []*envelope.Event)
 			Environment: ev.Environment, TS: chTime(ev.Time), ReceivedAt: chTime(ev.ReceivedAt), Seq: ev.Seq,
 			SchemaVersion: ev.SchemaVersion, Data: data.String(),
 		}); err != nil {
-			return nil, err
+			continue
 		}
+		known[key] = struct{}{}
+		inserted[i] = true
 	}
 	if body.Len() == 0 {
 		return inserted, nil
@@ -362,6 +373,9 @@ func (c *ClickHouse) where(q *Query, params map[string]string) (string, error) {
 	}
 	if !q.End.IsZero() {
 		conds = append(conds, "ts < "+add("DateTime64(6, 'UTC')", chTime(q.End)))
+	}
+	if q.Contains != "" {
+		conds = append(conds, "positionCaseInsensitiveUTF8(JSONExtractString(data, 'message'), "+add("String", chString(q.Contains))+") > 0")
 	}
 	for key, want := range q.Filter {
 		k := add("String", chString(key))

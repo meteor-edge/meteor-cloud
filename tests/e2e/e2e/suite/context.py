@@ -18,7 +18,10 @@ from e2e.state import Host, State
 from e2e.suite.framework import Blocked, Fail
 
 COMPOSE_PROJECT = "meteorcloud"
-METEORCLI = "METEORCLI_CONFIG_DIR=/etc/meteorcli /usr/local/bin/meteorcli"
+METEORCLI = "/usr/local/bin/meteorcli"
+# Where the Go meteorcli keeps the device credential, and where its root helper writes wg0.
+DEVICE_TOKEN = "/var/lib/meteorcli/identity/device-token"
+WG_CONF = "/var/lib/meteorcli-helper/wireguard/wg0.conf"
 
 
 def new_run_id() -> str:

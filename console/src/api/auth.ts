@@ -36,3 +36,12 @@ export function loginUser(payload: LoginPayload): Promise<TokenResponse> {
 export function fetchCurrentUser(token: string): Promise<User> {
   return apiRequest<User>("/api/v1/auth/me", { token });
 }
+
+export type AuthConfig = {
+  signup_enabled: boolean;
+};
+
+/** Public: whether this platform lets people create their own account. */
+export function fetchAuthConfig(): Promise<AuthConfig> {
+  return apiRequest<AuthConfig>("/api/v1/auth/config");
+}

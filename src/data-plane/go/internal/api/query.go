@@ -37,18 +37,25 @@ func decodeCursor(s string) (*storage.Cursor, error) {
 	return &storage.Cursor{Time: time.Unix(0, nanos).UTC(), ID: id}, nil
 }
 
+const maxBucketDays = 366
+
 // parseBucket accepts "30s", "5m", "1h", "1d".
 func parseBucket(s string) (time.Duration, error) {
 	if strings.HasSuffix(s, "d") {
 		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
-		if err != nil || n < 1 {
-			return 0, errors.New("invalid bucket")
+		if err != nil || n < 1 || n > maxBucketDays {
+			return 0, errors.New("bucket must be between 1d and 366d")
 		}
 		return time.Duration(n) * 24 * time.Hour, nil
 	}
 	d, err := time.ParseDuration(s)
-	if err != nil || d < time.Second {
-		return 0, errors.New("bucket must be at least 1s, for example 30s, 5m, 1h or 1d")
+	if err != nil || d < time.Second || d > maxBucketDays*24*time.Hour {
+		return 0, errors.New("bucket must be between 1s and 366d, for example 30s, 5m, 1h or 1d")
+	}
+	// Whole seconds only: the stores bucket by second, so "1500ms" would otherwise
+	// be rounded without saying so, and a fraction below a second divides by zero.
+	if d%time.Second != 0 {
+		return 0, errors.New("bucket must be a whole number of seconds")
 	}
 	return d, nil
 }

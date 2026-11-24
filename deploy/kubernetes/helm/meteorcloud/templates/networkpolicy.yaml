@@ -37,4 +37,41 @@ spec:
         - port: 8000
           protocol: TCP
     {{- end }}
+{{- if .Values.dataApi.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-data-api
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" $ "component" "data-api") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" "data-api") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    # Public SDK traffic through the ingress controller (8082). Ops stays private.
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.ingressNamespaceSelector | nindent 12 }}
+      ports:
+        - port: 8082
+          protocol: TCP
+    # Control plane policy / command calls to the ops port.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 14 }}
+      ports:
+        - port: 8092
+          protocol: TCP
+    {{- with .Values.metrics.networkPolicyFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: 8092
+          protocol: TCP
+    {{- end }}
+{{- end }}
 {{- end }}

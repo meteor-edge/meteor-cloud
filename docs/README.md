@@ -27,17 +27,19 @@ How to use the product day to day.
 | Who did what (audit trail) | [Audit log](audit-log.md) |
 | Device types and groups | [Device types and groups](fleet/device-types.md) |
 | Admin-initiated enroll | [Registration tokens](fleet/registration-tokens.md) · [Device registration](fleet/device-registration.md) |
-| Device-initiated enroll | [Enrollment API keys](fleet/enrollment-api-keys.md) · [Request / approve / claim](fleet/device-request-enrollment.md) · [First-boot image](../src/device-plane/agent/packaging/firstboot/README.md) |
+| Device-initiated enroll | [Enrollment API keys](fleet/enrollment-api-keys.md) · [Request / approve / claim](fleet/device-request-enrollment.md) · [First-boot image](../src/device-plane/agent-go/packaging/firstboot/README.md) |
 | Device HTTP auth & heartbeat | [Device authentication](fleet/device-authentication.md) · [Heartbeat](fleet/heartbeat.md) |
 | MQTT connectivity | [MQTT](fleet/mqtt.md) |
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) · [Rollout strategies](fleet/deployments.md#rollout-strategies) |
+| Signed updates (device-side verification, key rotation) | [Signed updates](fleet/signed-updates.md) |
 | Device VPN + browser SSH | [Connectivity](fleet/connectivity.md) |
 | Device Wi-Fi from the console | [Wi-Fi](fleet/wifi.md) |
 | Restart, shut down, SSH users | [Device actions](fleet/device-actions.md) |
 | Pi / NUC / Jetson platform ports | [Device platform](fleet/device-platform.md) |
 | Settings file for a card (Wi-Fi, SSH, enrollment) | [Device settings file](fleet/device-settings-file.md) |
+| Software on a device: state, health, restart, stop, start | [Software on a device](fleet/software.md) |
 | Device logs (journal, systemd, Docker, nginx) | [Device logs](fleet/logs.md) |
 | Public app URLs | [Endpoints](fleet/endpoints.md) |
 | Application data: publish, subscribe, query, commands | [Data plane](data-plane/README.md) · [SDK for Python](../sdk/python/README.md) · [Applications and credentials](data-plane/applications.md) · [Operations](data-plane/operations.md) |
@@ -50,10 +52,12 @@ Commands and APIs you look up while working.
 | Topic | Doc |
 | --- | --- |
 | Control-plane HTTP API | [API overview](api.md) · interactive OpenAPI at `/docs` on a running API |
-| Device CLI | [meteorcli](meteorcli.md) |
+| Device CLI | [meteorcli](meteorcli.md) · [Go rewrite (in progress)](meteorcli-go.md) |
 | MQTT ↔ control-plane contract | [`contracts/mqtt-http.md`](../contracts/mqtt-http.md) |
+| Device agent ↔ MeteorCloud contract (HTTP + MQTT, JSON Schemas) | [`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md) · [contract suite](../tests/agent-contract/README.md) |
 | Architecture & providers | [Architecture](architecture.md) |
-| Bundled infra licenses (Postgres, Redis, EMQX, MinIO, …) | [Licensing](licensing.md) |
+| Bundled infra licenses (Postgres, Redis, MQTT brokers, MinIO, …) | [Licensing](licensing.md) |
+| Release images: names, tags, verifying signatures and SBOMs | [Release images](release-images.md) |
 | Planned work (not implemented yet) | [Future plans](future-plans.md) |
 
 ## Deploy and operate
@@ -62,6 +66,7 @@ Commands and APIs you look up while working.
 | --- | --- |
 | Local testing / contributor setup (`make dev`) | [Getting started](getting-started.md) · [Development](development.md) |
 | Production on a VM (`make up`) | [Install quickstart](install-quickstart.md) · [Deployment](deployment.md) |
+| Backups and restore (Compose, Ansible, Helm) | [Backups and restore](backups.md) |
 | Kubernetes (existing cluster) | [Kubernetes](kubernetes.md) |
 | DNS records to create (domain, apps, WireGuard) | [DNS records](dns.md) |
 | `installation.yaml` | [Installer configuration](installer-configuration.md) |
@@ -74,5 +79,5 @@ Commands and APIs you look up while working.
 
 ## Related code docs
 
-- Device agent package: [`src/device-plane/agent/README.md`](../src/device-plane/agent/README.md)
+- Device agent package: [`src/device-plane/agent-go/README.md`](../src/device-plane/agent-go/README.md)
 - Installer package: [`infrastructure/installer/README.md`](../infrastructure/installer/README.md)

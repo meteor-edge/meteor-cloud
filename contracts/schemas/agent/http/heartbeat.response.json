@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/heartbeat (200)",
+  "description": "heartbeat_interval_seconds is the next interval. wifi_pending / actions_pending say that work is waiting at the matching GET.",
+  "type": "object",
+  "required": [
+    "device_id",
+    "status",
+    "heartbeat_interval_seconds",
+    "server_time"
+  ],
+  "properties": {
+    "device_id": {
+      "$ref": "../common.json#/$defs/uuid"
+    },
+    "status": {
+      "$ref": "../common.json#/$defs/connectivity_status"
+    },
+    "heartbeat_interval_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "server_time": {
+      "$ref": "../common.json#/$defs/timestamp"
+    },
+    "desired_software": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "wifi_pending": {
+      "type": "boolean",
+      "default": false
+    },
+    "actions_pending": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

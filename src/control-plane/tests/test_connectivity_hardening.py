@@ -382,6 +382,11 @@ def test_shell_ticket_expired_reused_and_permission_removed(client: TestClient, 
         assert "MeteorCloud" in websocket.receive_bytes().decode()
         websocket.send_text("exit\n")
         websocket.receive_bytes()
+        # Wait for a clean close so TestClient does not cancel the handler mid-exit
+        # (same race as test_shell_session_records_ssh_result).
+        with pytest.raises(WebSocketDisconnect) as closed:
+            websocket.receive_bytes()
+        assert closed.value.code == 1000
     assert "already used" in ws_error(used)
 
     # Access removed between issuing and redeeming the ticket.
