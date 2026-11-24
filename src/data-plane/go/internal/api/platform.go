@@ -23,7 +23,7 @@ import (
 // token, and the control plane checks the user's permissions first.
 
 // writableStreams are the platform streams the control plane may write.
-var writableStreams = map[string]bool{storage.DeploymentsStream: true}
+var writableStreams = map[string]bool{storage.DeploymentsStream: true, storage.SoftwareStream: true}
 
 const maxPlatformEvents = 500
 

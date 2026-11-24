@@ -85,6 +85,15 @@
       }
     },
     {
+      "method": "POST",
+      "path": "/api/v1/agent/software/snapshots",
+      "auth": "device",
+      "request": "http/software-snapshots.request.json",
+      "responses": {
+        "200": "http/software-snapshots.response.json"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/v1/agent/signing-keys",
       "auth": "device",

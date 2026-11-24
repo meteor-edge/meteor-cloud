@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/software/snapshots (request)",
+  "description": "What one workload is made of right now, sent on change, every few minutes and for workload_snapshot. At most 64 KiB; the agent cuts lists and sets truncated. Added in v1 (additive).",
+  "type": "object",
+  "required": [
+    "snapshot"
+  ],
+  "properties": {
+    "snapshot": {
+      "properties": {
+        "workload_key": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "systemd",
+            "docker",
+            "docker_compose"
+          ],
+          "type": "string"
+        },
+        "taken_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "managed": {
+          "type": "boolean"
+        },
+        "note": {
+          "maxLength": 512,
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "stopped_services": {
+          "items": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "containers": {
+          "items": {
+            "properties": {
+              "id": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "metric": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "service": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "release": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "state": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "running": {
+                "type": "boolean"
+              },
+              "health": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "restarts": {
+                "type": "integer"
+              },
+              "exit_code": {
+                "type": "integer"
+              },
+              "oom_killed": {
+                "type": "boolean"
+              },
+              "started_at": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "finished_at": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "image": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "image_id": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "ports": {
+                "items": {
+                  "properties": {
+                    "host_ip": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "host_port": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "container": {
+                      "maxLength": 128,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "container"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 64,
+                "type": "array"
+              },
+              "mounts": {
+                "items": {
+                  "properties": {
+                    "type": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "name": {
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "destination": {
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "rw": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "destination"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 64,
+                "type": "array"
+              },
+              "networks": {
+                "items": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              }
+            },
+            "required": [
+              "name",
+              "state"
+            ],
+            "type": "object"
+          },
+          "maxItems": 20,
+          "type": "array"
+        },
+        "images": {
+          "items": {
+            "properties": {
+              "id": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              "digests": {
+                "items": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              "size": {
+                "type": "integer"
+              },
+              "created": {
+                "maxLength": 128,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "volumes": {
+          "items": {
+            "properties": {
+              "name": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "driver": {
+                "maxLength": 128,
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "networks": {
+          "items": {
+            "properties": {
+              "name": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "driver": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "scope": {
+                "maxLength": 128,
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "properties": {
+                "name": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "load_state": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "active_state": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "sub_state": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "enabled": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "result": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "restarts": {
+                  "type": "integer"
+                },
+                "exit_status": {
+                  "type": "integer"
+                },
+                "memory_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cpu_seconds": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "active_since": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "stopped_at": {
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "workload_key",
+        "kind",
+        "taken_at"
+      ],
+      "type": "object",
+      "description": "What the workload is made of. Fixed fields only: never environment variables, commands or foreign labels."
+    }
+  }
+}

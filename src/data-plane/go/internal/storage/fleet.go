@@ -11,6 +11,8 @@ import (
 const (
 	// DeploymentsStream holds every status change of a device in a Deploy.
 	DeploymentsStream = "meteor.deployments"
+	// SoftwareStream holds health changes of the workloads deployed to devices.
+	SoftwareStream = "meteor.software"
 	// DeviceStatusStream holds the agent's online message and the broker's
 	// last will (offline), as written by device-ingest.
 	DeviceStatusStream = "meteor.device.status"

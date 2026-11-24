@@ -97,6 +97,7 @@ All under `/api/v1/agent`. Request and answer schemas: `schemas/agent/http/<name
 | `GET /mqtt` | device | | `200` `mqtt.response` |
 | `POST /mqtt/credentials` | device | `{}` or no body | `200` `mqtt-credentials.response` |
 | `GET /software` | device | | `200` `software.response` |
+| `POST /software/snapshots` | device | `software-snapshots.request` | `200` `software-snapshots.response`; `404` = older server |
 | `GET /signing-keys` | device | | `200` `signing-keys.response`; `404` = server does not sign |
 | `GET /artifacts/{artifact_id}/download` | device | | `200` bytes, or `302` to storage |
 | `POST /connectivity/wireguard` | device | `connectivity-wireguard.request` | `200` `connectivity-wireguard.response` |
@@ -133,6 +134,21 @@ password stops working) and reconnects. `enabled: false` stops the MQTT session.
 
 Deploy kinds today: `systemd`, `docker`, `docker_compose`.
 
+A workload the user stopped from the console is reported `in_sync` with `health` `unknown` and
+`stopped_by_user: true` (new in v1, additive). The agent neither health-checks nor re-applies it, and
+stops it again when something else started it, until `workload_start`, `workload_restart` or a new
+release or revision.
+
+### Workload snapshots
+
+`POST /software/snapshots` (new in v1, additive) sends what one installed workload is made of: its
+containers with images, ports, mount paths and networks, or its systemd unit. One workload per request
+(the key is in the body: workload keys are free text), at most 64 KiB; what does not fit is cut and
+`truncated` is set. The agent sends one when something changed (it looks every minute), every 5 minutes,
+and for `workload_snapshot`. Environment variables, commands and labels that are not MeteorCloud's are
+never read. `managed: false` means the device would refuse restart, stop and start, because the workload
+was deployed by an older agent.
+
 ### One-off actions
 
 `GET /actions` hands each action out once and may contain passwords. Kinds today:
@@ -142,6 +158,11 @@ agent's `doctor` report). Results go to `POST /actions/report` as `done` or `fai
 (+ `error`, at most 500 characters; `run_diagnostics` adds `output`, plain text without
 secrets, at most 16000 characters). `restart_module` and `run_diagnostics` are new in v1
 (additive); an agent that does not know them reports them `failed: Unsupported…`.
+`workload_restart`, `workload_stop`, `workload_start` and `workload_snapshot` (new in v1, additive) act on
+one installed workload, `workload_key`; the first three may name one `service` of a compose workload.
+The device changes only what it can prove MeteorCloud deployed (docker: the label
+`meteorcloud.workload`; compose: the project's directory in Compose's own labels; systemd: a record the
+root helper keeps) and fails the action otherwise, or while a deploy runs.
 `reboot` and `shutdown` are reported `done` **before** they run. `update_agent` is
 reported once the update has settled, on a later heartbeat.
 
@@ -179,12 +200,13 @@ always. Only these topics; anything else is denied by the broker policy.
 - **commands:** `{"type": "ping", "command_id"}` is answered on `commands/result` with
   `{"command_id", "status": "completed", "result": {"message": "pong"}}`. `{"type": "sync_desired",
   "revision"}` is a hint that desired software changed; acting on it early is optional (the next cycle
-  fetches `GET /software` anyway). Unknown types and unparsable messages are ignored.
+  fetches `GET /software` anyway). `{"type": "sync_actions"}` (new in v1, additive) is the same hint for
+  `GET /actions`. Unknown types and unparsable messages are ignored.
 - **metrics:** best-effort readings (`cpu_percent`, `memory_percent`, `disk_percent`, `temperature_c`,
   load, network rates, `wifi_signal_dbm`, `agent_errors`) plus flat app keys `app.<name>.<field>`.
 - **events:** `{"type", "timestamp", ...}`: app lifecycle (`app.started`, `app.exited`,
   `app.restarted`, `app.oom_killed`, `app.healthy`, `app.unhealthy`, `app.crash_loop`,
-  `app.removed`, all with `app`) and journal warnings (`log`, with `message`).
+  `app.removed`, all with `app`, and `workload_key` for a container MeteorCloud deployed) and journal warnings (`log`, with `message`).
 
 ## Changing the contract
 

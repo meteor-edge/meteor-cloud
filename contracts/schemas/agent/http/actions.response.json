@@ -56,6 +56,20 @@
               "null"
             ],
             "description": "restart_module: the agent module to restart (a parked module runs again). Added in v1 (additive)."
+          },
+          "workload_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "workload_*: the workload to act on. Added in v1 (additive)."
+          },
+          "service": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "workload_restart, _stop, _start: one service of a compose workload (null: all of it). Added in v1 (additive)."
           }
         }
       }
