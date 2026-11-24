@@ -61,6 +61,7 @@ SPECS=(
   "NATS_ADMIN_PASSWORD hex 16"
   "ADMIN_EMAIL fixed admin@example.com"
   "ADMIN_PASSWORD hex 12"
+  "GRAFANA_ADMIN_PASSWORD hex 12"
 )
 
 # Parsed, not sourced: the file only holds KEY=value lines. Env set by the caller wins.

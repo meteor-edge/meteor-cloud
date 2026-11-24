@@ -6,13 +6,15 @@
 #
 #   make up PLATFORM_DOMAIN=fleet.example.com
 #   make up ARGS='--no-vpn --mqtt=off --no-data-api --storage=filesystem --no-demo'
+#   make up OBS=0              # skip Prometheus/Grafana (default on)
+#   make up ARGS='--no-observability'
 #   make up ARGS=--route53    # also create the A records in Route53 (never overwrites)
 #   make down
 #   make down ARGS=--destroy-data
 #
 # PLATFORM_DOMAIN is required (export or make up PLATFORM_DOMAIN=...).
 # On a terminal, make up shows checkboxes (arrows + space). All services on
-# by default. Non-interactive: METEORCLOUD_NONINTERACTIVE=1 plus flags.
+# by default (including observability). Non-interactive: METEORCLOUD_NONINTERACTIVE=1 plus flags.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,6 +31,8 @@ MQTT=bundled
 DATA_API=1
 STORAGE=minio
 DEMO=1
+# Prometheus + Grafana (localhost). Default on. Explicit OBS=0|1 from make/env skips the
+# checkbox override from a previous install.env.
 ROUTE53=0
 DOWN=0
 DESTROY_DATA=0
@@ -37,15 +41,21 @@ ASK_MQTT=1
 ASK_DATA_API=1
 ASK_STORAGE=1
 ASK_DEMO=1
+ASK_OBS=1
+if [[ -n "${OBS+x}" ]]; then
+  ASK_OBS=0
+fi
+OBS="${OBS:-1}"
 
 usage() {
-  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
   echo "Options:"
   echo "  --no-vpn | --vpn"
   echo "  --mqtt=off|bundled|external"
   echo "  --data-api | --no-data-api"
   echo "  --storage=filesystem|s3|minio"
   echo "  --demo | --no-demo"
+  echo "  --observability | --no-observability   Prometheus + Grafana on 127.0.0.1 (default on)"
   echo "  --route53            create A records in Route53 (AWS CLI; never overwrites)"
   echo "  --down | --destroy-data"
   exit 2
@@ -67,6 +77,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     --demo) DEMO=1; ASK_DEMO=0 ;;
     --no-demo) DEMO=0; ASK_DEMO=0 ;;
+    --observability) OBS=1; ASK_OBS=0 ;;
+    --no-observability) OBS=0; ASK_OBS=0 ;;
     --route53) ROUTE53=1 ;;
     --down) DOWN=1 ;;
     --destroy-data) DOWN=1; DESTROY_DATA=1 ;;
@@ -298,6 +310,7 @@ if [[ "${ASK_MQTT}" -eq 1 && -n "${MQTT_MODE:-}" ]]; then MQTT="${MQTT_MODE}"; f
 if [[ "${ASK_DATA_API}" -eq 1 && -n "${ENABLE_DATA_API:-}" ]]; then DATA_API="${ENABLE_DATA_API}"; fi
 if [[ "${ASK_STORAGE}" -eq 1 && -n "${STORAGE_MODE:-}" ]]; then STORAGE="${STORAGE_MODE}"; fi
 if [[ "${ASK_DEMO}" -eq 1 && -n "${ENABLE_DEMO:-}" ]]; then DEMO="${ENABLE_DEMO}"; fi
+if [[ "${ASK_OBS}" -eq 1 && -n "${ENABLE_OBSERVABILITY:-}" ]]; then OBS="${ENABLE_OBSERVABILITY}"; fi
 DOMAIN_RAW="${PLATFORM_DOMAIN:-${DOMAIN:-}}"
 if is_tty; then
   DOMAIN_RAW="$(ask_line "Domain (console and API HTTPS)" "${DOMAIN_RAW}")"
@@ -318,6 +331,7 @@ toggle_service() {
     2) if [[ "${DATA_API}" -eq 1 ]]; then DATA_API=0; else DATA_API=1; fi ;;
     3) if [[ "${STORAGE}" == filesystem ]]; then STORAGE="${PREFERRED_STORAGE}"; else STORAGE=filesystem; fi ;;
     4) if [[ "${DEMO}" -eq 1 ]]; then DEMO=0; else DEMO=1; fi ;;
+    5) if [[ "${OBS}" -eq 1 ]]; then OBS=0; else OBS=1; fi ;;
   esac
 }
 
@@ -333,8 +347,9 @@ draw_service() {
   echo
 }
 
-# 5 items x 5 lines. Redraw in place (arrows + space, no typing numbers).
-MENU_LINES=25
+# 6 items x 5 lines. Redraw in place (arrows + space, no typing numbers).
+MENU_LINES=30
+MENU_ITEMS=6
 
 draw_services_menu() {
   local idx="$1" mqtt_on=0 storage_on=0 mqtt_extra storage_extra
@@ -366,12 +381,17 @@ draw_services_menu() {
     "Demo organization" \
     "Demo Organization in the console, owned by the admin login" \
     "explore the UI after install. Devices you add yourself with meteorcli."
+  draw_service "$([[ "${idx}" -eq 5 ]] && echo 1 || echo 0)" "${OBS}" \
+    "Observability (Prometheus + Grafana)" \
+    "metrics, logs, alerts, and dashboards on this host" \
+    "operator SSH tunnel only (127.0.0.1). Not a public MeteorCloud UI." \
+    "Off = no Prometheus/Grafana containers. make up OBS=0 / --no-observability."
 }
 
 select_services() {
   local idx=0 key rest first=1
   echo
-  echo "Optional services — all on."
+  echo "Optional services — all on (including Prometheus + Grafana)."
   echo "Up/down to move, space to check or uncheck, Enter to continue."
   tput civis 2>/dev/null || true
   trap 'tput cnorm 2>/dev/null || true' RETURN
@@ -386,8 +406,8 @@ select_services() {
     if [[ "${key}" == $'\x1b' ]]; then
       read -rsn2 rest || true
       case "${rest}" in
-        '[A'|'[D') idx=$(((idx + 4) % 5)) ;;
-        '[B'|'[C') idx=$(((idx + 1) % 5)) ;;
+        '[A'|'[D') idx=$(((idx + MENU_ITEMS - 1) % MENU_ITEMS)) ;;
+        '[B'|'[C') idx=$(((idx + 1) % MENU_ITEMS)) ;;
       esac
     elif [[ "${key}" == ' ' ]]; then
       toggle_service "${idx}"
@@ -505,6 +525,7 @@ fi
   printf 'ENABLE_VPN=%s\n' "${VPN}"
   printf 'STORAGE_MODE=%s\n' "${STORAGE}"
   printf 'ENABLE_DEMO=%s\n' "${DEMO}"
+  printf 'ENABLE_OBSERVABILITY=%s\n' "${OBS}"
   printf 'MQTT_MODE=%s\n' "${MQTT}"
   printf 'MQTT_BROKER_HOST=%s\n' "${MQTT_BROKER_HOST}"
   printf 'MQTT_BROKER_PORT=%s\n' "${MQTT_BROKER_PORT}"
@@ -540,6 +561,9 @@ if [[ "${STORAGE}" == minio ]]; then
   export EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID="${EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID:-$(rand 10)}"
   export EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY="${EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY:-$(rand 12)}"
 fi
+if [[ "${OBS}" -eq 1 ]]; then
+  export EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD="${EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD:-$(rand 12)}"
+fi
 
 write_secrets() {
   umask 077
@@ -561,6 +585,9 @@ write_secrets() {
     if [[ -n "${EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID:-}" ]]; then
       printf 'EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID=%s\n' "${EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID}"
       printf 'EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY=%s\n' "${EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY}"
+    fi
+    if [[ -n "${EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+      printf 'EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD=%s\n' "${EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD}"
     fi
   } > "$1"
   chmod 600 "$1"
@@ -643,6 +670,7 @@ mqtt_broker_host: ${MQTT_BROKER_HOST}
 mqtt_broker_port: ${MQTT_BROKER_PORT}
 mqtt_public_host: ${MQTT_PUBLIC_HOST}
 data_api_enabled: $([[ "${DATA_API}" -eq 1 ]] && echo true || echo false)
+observability_enabled: $([[ "${OBS}" -eq 1 ]] && echo true || echo false)
 dataplane_bus: memory
 firewall_enabled: false
 shell_provider: ${SHELL_PROVIDER_VALUE}
@@ -677,6 +705,7 @@ PLAY_ARGS=(
   -e "mqtt_enabled=${MQTT_ENABLED}"
   -e "mqtt_broker=${MQTT_BROKER}"
   -e "data_api_enabled=$([[ "${DATA_API}" -eq 1 ]] && echo true || echo false)"
+  -e "observability_enabled=$([[ "${OBS}" -eq 1 ]] && echo true || echo false)"
   -e "demo_data=$([[ "${DEMO}" -eq 1 ]] && echo true || echo false)"
 )
 if [[ "${VPN}" -eq 1 ]]; then
@@ -693,6 +722,9 @@ if [[ "${MQTT}" != off ]]; then
 fi
 if [[ "${DATA_API}" -eq 1 ]]; then
   PLAY_ARGS+=(-e "data_plane_internal_token=${EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN}")
+fi
+if [[ "${OBS}" -eq 1 ]]; then
+  PLAY_ARGS+=(-e "grafana_admin_password=${EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD}")
 fi
 if [[ -n "${EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID:-}" ]]; then
   PLAY_ARGS+=(
@@ -715,6 +747,13 @@ echo "  password  ${EDGE_PLATFORM_ADMIN_PASSWORD}"
 if [[ "${DEMO}" -eq 1 ]]; then
   echo "  org       Demo Organization"
 fi
+if [[ "${OBS}" -eq 1 ]]; then
+  echo
+  echo "Observability (SSH tunnel to 127.0.0.1):"
+  echo "  Grafana     http://127.0.0.1:3001  (admin / see EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD)"
+  echo "  Prometheus  http://127.0.0.1:9090"
+  echo "  Disable:    make up OBS=0  or  ARGS=--no-observability"
+fi
 echo
 if [[ "${SECRETS_REUSED}" -eq 1 ]]; then
   echo "Secrets (reused; copy and keep):"
@@ -727,6 +766,9 @@ echo "  EDGE_PLATFORM_POSTGRES_PASSWORD=${EDGE_PLATFORM_POSTGRES_PASSWORD}"
 echo "  EDGE_PLATFORM_JWT_SECRET=${EDGE_PLATFORM_JWT_SECRET}"
 if [[ -n "${EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN:-}" ]]; then
   echo "  EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN=${EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN}"
+fi
+if [[ -n "${EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+  echo "  EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD=${EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD}"
 fi
 echo
 echo "Saved mode 0600 at:"

@@ -8,7 +8,8 @@ k3d, GKE, EKS, AKS, OpenShift, and customer clusters. The only exception is
 opt-in: `metrics.serviceMonitor` and `metrics.prometheusRule` (off by default)
 render Prometheus Operator objects for clusters that already run it
 ([Observability](observability.md#kubernetes-helm)). On the local k3d cluster,
-`make k8s-deploy OBS=1` installs kube-prometheus-stack next to the chart for testing.
+`make k8s-deploy` installs kube-prometheus-stack next to the chart by default
+(`OBS=0` skips it).
 
 ## What the chart deploys
 
@@ -62,15 +63,16 @@ create the Secret it references before installing. Never commit real secrets.
 ## Local cluster (k3d)
 
 ```bash
-make k8s-up && make k8s-deploy
+make k8s-up && make k8s-deploy      # includes Prometheus + Grafana (OBS=0 to skip)
 open http://localhost:8088          # admin@example.com / LocalAdmin123!
 make k8s-test                       # helm test + scripts/smoke_test.py
 make k8s-down
 ```
 
-`./scripts/k8s-smoke.sh` is what CI runs. It creates a throwaway cluster,
-installs with `values-ci.yaml`, runs `helm test` and the smoke test through the
-ingress, uninstalls, and deletes the cluster.
+Port-forward Grafana/Prometheus as printed by `make k8s-deploy` (default Grafana
+password `meteorcloud-local`). `./scripts/k8s-smoke.sh` is what CI runs. It creates a
+throwaway cluster, installs with `values-ci.yaml` (no monitoring stack), runs
+`helm test` and the smoke test through the ingress, uninstalls, and deletes the cluster.
 
 ## Production prerequisites
 

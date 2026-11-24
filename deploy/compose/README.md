@@ -32,8 +32,9 @@ COMPOSE_PROFILES="$COMPOSE_PROFILES,metrics,logs,alerting,dashboards" \
   -f docker-compose.observability.yml up -d --wait                        # production
 ```
 
-Ansible does the same with `observability_enabled: true`, the installer with
-`observability.enabled` in `installation.yaml`. See [docs/observability.md](../../docs/observability.md).
+Ansible / `make up` and the installer enable observability by default
+(`observability_enabled` / `observability.enabled`; opt out with `OBS=0` or
+`enabled: false`). See [docs/observability.md](../../docs/observability.md).
 
 `COMPOSE_PROFILES` chooses the bundled services. With no profiles, only the API,
 console, and (in production) Traefik run, and every dependency is external.
