@@ -236,6 +236,7 @@ describe("SoftwareDetailPage", () => {
     );
     renderPage();
     expect(await screen.findAllByText("Not measured on this device")).toHaveLength(2);
+    expect(screen.getAllByRole("cell", { name: "Not measured" })).toHaveLength(2);
     expect(screen.queryByRole("meter", { name: "Memory" })).toBeNull();
   });
 

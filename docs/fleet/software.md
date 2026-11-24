@@ -21,10 +21,34 @@ For containers the Overview also shows what they use: CPU (100% is one core), me
 network and disk traffic since the container started, and processes; volume sizes; network subnets; and
 Docker's storage on the device with how much of it is reclaimable as Docker counts it. CPU and the like are from the moment
 the device sent the picture. Docker's storage, volume and container sizes are measured every 30 minutes, and again
-by **Refresh now**, because measuring reads every file in the volumes. Raspberry Pi OS does not count memory per
-container by default; the page then says so (`cgroup_enable=memory` in `/boot/firmware/cmdline.txt` and a
-reboot turns it on). The storage numbers are totals of
-the whole device; names of other software are never sent. Nothing is cleaned up from here.
+by **Refresh now**, because measuring reads every file in the volumes. The storage numbers are totals of the whole device; names of other software are never sent. Nothing is cleaned up from here.
+
+### Memory says "Not measured"
+
+The kernel of the device does not count memory per container. Raspberry Pi OS is like that by default
+(`cgroup_disable=memory`); Docker cannot see it there either. Memory limits do not work without it.
+
+1. On the device, check. Without `memory` in the output it is off:
+
+   ```bash
+   cat /sys/fs/cgroup/cgroup.controllers
+   ```
+
+2. Add `cgroup_enable=memory` to the end of the one line in `/boot/firmware/cmdline.txt` (older images:
+   `/boot/cmdline.txt`). The file must stay one line. Then reboot:
+
+   ```bash
+   sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak
+   sudo sed -i '1 s/$/ cgroup_enable=memory/' /boot/firmware/cmdline.txt
+   sudo reboot
+   ```
+
+3. Check again: the first command lists `memory` (`/proc/cmdline` may still show `cgroup_disable=memory`
+   too; the later option wins), and `docker stats --no-stream` shows a value.
+4. Open the page: the value comes with the next picture (up to 5 minutes), or use **Refresh now**.
+
+The reboot stops the containers. One with the restart policy `no` (the default) does not come back by
+itself: use **Start** on its page, or set `restart: unless-stopped` in the Compose file.
 
 ## Restart, stop and start
 

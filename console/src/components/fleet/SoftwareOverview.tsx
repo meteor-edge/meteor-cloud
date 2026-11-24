@@ -118,7 +118,11 @@ function ContainerTable({
                   {c.stats ? `${c.stats.cpu_percent.toFixed(1)}%` : "—"}
                 </td>
                 <td className="whitespace-nowrap py-1.5 pr-3">
-                  {c.stats && c.stats.memory_bytes > 0 ? formatBytes(c.stats.memory_bytes) : "—"}
+                  {!c.stats
+                    ? "—"
+                    : c.stats.memory_bytes > 0
+                      ? formatBytes(c.stats.memory_bytes)
+                      : "Not measured"}
                 </td>
                 <td className="py-1.5 pr-3">{c.stats ? c.stats.pids : "—"}</td>
                 <td className="whitespace-nowrap py-1.5">
