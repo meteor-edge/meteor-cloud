@@ -66,13 +66,16 @@ create the Secret it references before installing. Never commit real secrets.
 make k8s-up && make k8s-deploy      # includes Prometheus + Grafana (OBS=0 to skip)
 open http://localhost:8088          # admin@example.com / LocalAdmin123!
 make k8s-test                       # helm test + scripts/smoke_test.py
+# While the cluster is up (before k8s-down), port-forward as printed by k8s-deploy:
+#   kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3001:80
+#   kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090
+# Grafana: admin / meteorcloud-local (or GRAFANA_ADMIN_PASSWORD)
 make k8s-down
 ```
 
-Port-forward Grafana/Prometheus as printed by `make k8s-deploy` (default Grafana
-password `meteorcloud-local`). `./scripts/k8s-smoke.sh` is what CI runs. It creates a
-throwaway cluster, installs with `values-ci.yaml` (no monitoring stack), runs
-`helm test` and the smoke test through the ingress, uninstalls, and deletes the cluster.
+`./scripts/k8s-smoke.sh` is what CI runs. It creates a throwaway cluster, installs with
+`values-ci.yaml` (no monitoring stack), runs `helm test` and the smoke test through the
+ingress, uninstalls, and deletes the cluster.
 
 ## Production prerequisites
 

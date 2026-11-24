@@ -97,6 +97,8 @@ cp -r inventory/example inventory/production
 $EDITOR inventory/production/hosts.yml inventory/production/group_vars/platform.yml
 export EDGE_PLATFORM_POSTGRES_PASSWORD="$(openssl rand -hex 16)"
 export EDGE_PLATFORM_JWT_SECRET="$(openssl rand -hex 32)"
+export EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD="$(openssl rand -hex 12)"  # default observability on
+# or set observability_enabled: false in group_vars/platform.yml
 ansible-playbook -i inventory/production/hosts.yml playbooks/site.yml
 ```
 

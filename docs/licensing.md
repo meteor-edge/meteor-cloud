@@ -39,8 +39,8 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 
 **One-line policy**
 
-> Production defaults = only **Yes**.  
-> **Yes, with limits** = customer’s (or our) ops team on that install, not end-user product UI.  
+> Production defaults = **Yes**, plus **Yes, with limits** only when the limit is met (ops on localhost / SSH, not product UI).  
+> **Yes, with limits** = customer’s (or our) ops team on that install, not end-user product UI. Grafana/Loki/Alloy may be **on by default** under that limit; operators opt out with `OBS=0` / `observability.enabled: false`.  
 > **No (as default)** / **Only with commercial license** = do not enable without an explicit decision.
 
 ## Grafana / Loki / Alloy (“Yes, with limits”)

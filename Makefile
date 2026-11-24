@@ -418,11 +418,11 @@ k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --ins
 		--from-file=server.key=$(K8S_CERTS_DIR)/server.key --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
 ifeq ($(filter 1,$(K8S_OBS)),1)
 	@pass="$${GRAFANA_ADMIN_PASSWORD:-$(K8S_GRAFANA_ADMIN_PASSWORD)}"; \
-	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null; \
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null && \
 	helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 		--version $(K8S_OBS_CHART_VERSION) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_OBS_NAMESPACE) --create-namespace \
 		-f deploy/kubernetes/k3d-monitoring.yaml --set grafana.adminPassword="$$pass" \
-		--wait --timeout 10m; \
+		--wait --timeout 10m && \
 	echo "Grafana admin password: $$pass"
 endif
 	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
