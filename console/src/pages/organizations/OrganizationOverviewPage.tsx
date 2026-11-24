@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
+import { FleetOnlineChart } from "@/components/fleet/FleetOnlineChart";
 import { Button } from "@/components/ui/button";
 import { canManageMembers, canUpdateOrganization } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
@@ -81,6 +82,8 @@ export function OrganizationOverviewPage() {
           <p className="mt-1 text-sm">{formatDateTime(organization.created_at)}</p>
         </div>
       </div>
+
+      {token ? <FleetOnlineChart token={token} organizationId={organization.id} /> : null}
 
       {canManageMembers(organization.current_user_role) && (
         <p className="text-sm text-muted-foreground">

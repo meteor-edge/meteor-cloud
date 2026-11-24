@@ -59,6 +59,12 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
         "Restart and shut down devices",
         "Restart or shut down a device from the console.",
     ),
+    PermissionDef(
+        "device",
+        "update_agent",
+        "Update device agent",
+        "Order meteorcli on a device to install the latest published release.",
+    ),
     PermissionDef("device_type", "read", "View device types", "List and open device types."),
     PermissionDef("device_type", "create", "Create device types", "Create hardware models."),
     PermissionDef("device_type", "update", "Update device types", "Edit device types."),
@@ -95,6 +101,9 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
         "Manage device SSH users",
         "Change a user's password or add an SSH user on a device. As sensitive as a shell session.",
     ),
+    PermissionDef(
+        "software", "manage", "Manage device software", "Restart, stop and start software deployed to a device."
+    ),
     PermissionDef("enrollment_key", "read", "View enrollment API keys", "List enrollment API keys."),
     PermissionDef("enrollment_key", "manage", "Manage enrollment API keys", "Create and revoke enrollment API keys."),
     PermissionDef("application", "read", "View applications", "List applications and their credentials."),
@@ -127,7 +136,7 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
 PERMISSION_BY_ID: dict[str, PermissionDef] = {item.id: item for item in PERMISSIONS}
 
 # Resources whose instances are limited by device-group scope.
-DEVICE_SCOPED_RESOURCES = frozenset({"device", "device_group", "endpoint"})
+DEVICE_SCOPED_RESOURCES = frozenset({"device", "device_group", "endpoint", "software"})
 
 _ALL = frozenset(PERMISSION_BY_ID)
 _VIEWER = frozenset(
@@ -181,8 +190,9 @@ _OPERATOR = _VIEWER | frozenset(
         "device.create",
         "device.update",
         "application.command",
-        # device.reboot / device.shell / device.users are owner/admin only.
+        # device.reboot / device.update_agent / device.shell / device.users are owner/admin only.
         "device.logs",
+        "software.manage",
         "deployment.create",
         "deployment.cancel",
         "endpoint.create",

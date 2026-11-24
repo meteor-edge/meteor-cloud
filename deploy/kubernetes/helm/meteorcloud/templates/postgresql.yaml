@@ -1,8 +1,9 @@
 {{- if eq .Values.postgresql.mode "bundled" }}
 {{- $fullname := include "meteorcloud.fullname" . }}
 {{- $pg := .Values.postgresql }}
-# Single PostgreSQL instance for evaluation and small installs. No replication
-# or backups; use postgresql.mode=external with a managed database in production.
+# Single PostgreSQL instance for evaluation and small installs. No replication;
+# backups are optional (postgresql-backup.yaml). Use postgresql.mode=external with a
+# managed database in production.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

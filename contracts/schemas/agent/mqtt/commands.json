@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "devices/{device_id}/commands (server to device)",
+  "description": "QoS 1, not retained. The agent ignores a message it cannot parse or whose type it does not know (no result is sent).",
+  "type": "object",
+  "required": [
+    "type"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ping"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "command_id"
+        ],
+        "properties": {
+          "command_id": {
+            "$ref": "../common.json#/$defs/uuid"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "sync_desired"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  ]
+}

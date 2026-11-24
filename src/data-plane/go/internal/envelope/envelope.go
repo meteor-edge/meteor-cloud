@@ -6,7 +6,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -132,17 +135,9 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 	} else if !ValidID(eventID) {
 		return nil, &Rejection{CodeInvalidID, "id must be 1-64 characters of A-Z a-z 0-9 . _ : -"}
 	}
-	if len(msg.Data) > lim.MaxPayloadBytes {
-		return nil, &Rejection{CodePayloadTooLarge, fmt.Sprintf("data is larger than %d bytes", lim.MaxPayloadBytes)}
-	}
-	data := bytes.TrimSpace(msg.Data)
-	if len(data) == 0 || data[0] != '{' || !json.Valid(data) {
-		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
-	}
-	// No store can hold a NUL character inside a JSON text; one such message must not
-	// fail the batch it travels in.
-	if hasEscapedNUL(data) {
-		return nil, &Rejection{CodeInvalidPayload, "data must not contain the character \\u0000"}
+	data, rej := CanonicalData(msg.Data, lim.MaxPayloadBytes)
+	if rej != nil {
+		return nil, rej
 	}
 	ts := now
 	if msg.Time != nil {
@@ -159,6 +154,8 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 		typ = msg.Stream
 	} else if len(typ) > 128 {
 		return nil, &Rejection{CodeInvalidKind, "type is longer than 128 characters"}
+	} else if strings.ContainsRune(typ, 0) || !utf8.ValidString(typ) {
+		return nil, &Rejection{CodeInvalidKind, "type must be valid text without the character \\u0000"}
 	}
 	return &Event{
 		ID:             eventID,
@@ -174,21 +171,90 @@ func Normalize(msg *Message, id *identity.Identity, now time.Time, lim Limits) (
 		Time:           ts,
 		ReceivedAt:     now.UTC(),
 		Seq:            msg.Seq,
-		Data:           json.RawMessage(data),
+		Data:           data,
 	}, nil
 }
 
-// hasEscapedNUL reports whether valid JSON contains the escape \u0000 (a backslash
-// that is itself escaped does not count).
-func hasEscapedNUL(data []byte) bool {
-	for i := 0; i+5 < len(data); i++ {
+// CanonicalData checks that data is a single JSON object that ClickHouse (and
+// PostgreSQL) can store, and returns a compact form. Invalid payloads are rejected
+// here so one bad message never fails a whole insert batch.
+//
+// Energy readings and similar telemetry are free-form objects (any keys/numbers);
+// only shape and storability are enforced — not a fixed schema.
+func CanonicalData(data []byte, maxBytes int) (json.RawMessage, *Rejection) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || data[0] != '{' {
+		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
+	}
+	if maxBytes > 0 && len(data) > maxBytes {
+		return nil, &Rejection{CodePayloadTooLarge, fmt.Sprintf("data is larger than %d bytes", maxBytes)}
+	}
+	if !json.Valid(data) {
+		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
+	}
+	// No store can hold a NUL character inside a JSON text; one such message must not
+	// fail the batch it travels in.
+	if hasUnstorableEscape(data) {
+		return nil, &Rejection{CodeInvalidPayload, "data must not contain \\u0000 or an unpaired surrogate escape"}
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var obj map[string]json.RawMessage
+	if err := dec.Decode(&obj); err != nil {
+		return nil, &Rejection{CodeInvalidPayload, "data must be a JSON object"}
+	}
+	if dec.More() {
+		return nil, &Rejection{CodeInvalidPayload, "data must be a single JSON object"}
+	}
+	var encoded bytes.Buffer
+	enc := json.NewEncoder(&encoded)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(obj); err != nil {
+		return nil, &Rejection{CodeInvalidPayload, "data could not be re-encoded"}
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, bytes.TrimSpace(encoded.Bytes())); err != nil {
+		return nil, &Rejection{CodeInvalidPayload, "data could not be re-encoded"}
+	}
+	if maxBytes > 0 && compact.Len() > maxBytes {
+		return nil, &Rejection{CodePayloadTooLarge, fmt.Sprintf("data is larger than %d bytes", maxBytes)}
+	}
+	return json.RawMessage(compact.Bytes()), nil
+}
+
+// hasUnstorableEscape reports whether valid JSON contains an escape that no store
+// accepts inside a JSON text: \u0000, or a surrogate that is not half of a pair
+// (a backslash that is itself escaped does not count).
+func hasUnstorableEscape(data []byte) bool {
+	hex := func(i int) (rune, bool) {
+		if i+6 > len(data) || data[i] != '\\' || data[i+1] != 'u' {
+			return 0, false
+		}
+		v, err := strconv.ParseUint(string(data[i+2:i+6]), 16, 16)
+		return rune(v), err == nil
+	}
+	for i := 0; i+1 < len(data); i++ {
 		if data[i] != '\\' {
 			continue
 		}
-		if bytes.HasPrefix(data[i+1:], []byte("u0000")) {
-			return true
+		r, ok := hex(i)
+		if !ok {
+			i++ // skip the escaped character
+			continue
 		}
-		i++ // skip the escaped character
+		switch {
+		case r == 0:
+			return true
+		case r >= 0xD800 && r <= 0xDBFF: // high surrogate: a low one must follow
+			low, ok := hex(i + 6)
+			if !ok || low < 0xDC00 || low > 0xDFFF {
+				return true
+			}
+			i += 11
+		case r >= 0xDC00 && r <= 0xDFFF: // low surrogate without a high one
+			return true
+		default:
+			i += 5
+		}
 	}
 	return false
 }

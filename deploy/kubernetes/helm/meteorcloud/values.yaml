@@ -16,6 +16,9 @@ config:
   logLevel: INFO
   logFormat: json
   registrationRequireHttps: true
+  # Anyone who reaches the console may create an account. Set false once your first
+  # administrator exists (secrets.admin); people then join only when an admin adds them.
+  allowSignup: true
   # Proxies whose X-Forwarded-Proto/For the API trusts (uvicorn FORWARDED_ALLOW_IPS).
   # The ingress terminates TLS, so without this every request looks like plain HTTP
   # and device registration fails with https_required. "*" also trusts any other pod
@@ -35,12 +38,19 @@ config:
 #   REDIS_URL                                        cache.provider=redis
 #   OBJECT_STORAGE_ACCESS_KEY_ID/SECRET_ACCESS_KEY   s3 with static keys (optional)
 #   MQTT_PLATFORM_PASSWORD, MQTT_INTERNAL_TOKEN      mqtt.enabled
-#   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled broker
+#   EMQX_DASHBOARD_PASSWORD, EMQX_NODE_COOKIE        bundled EMQX (mqtt.provider=emqx)
+#   DATA_PLANE_INTERNAL_TOKEN                        dataApi.enabled or nats.enabled
+#   DATAPLANE_DATABASE_URL                           dataApi.storage=postgres (postgres://..., not +psycopg)
+#   DATAPLANE_MQTT_JWT_SECRET                        dataApi.mqtt.direct (32+ characters)
+#   CLICKHOUSE_PASSWORD                              clickhouse.enabled or nats.enabled
+#   NATS_*_PASSWORD                                  nats.enabled
 #   EDGE_PLATFORM_ADMIN_EMAIL/PASSWORD               optional first administrator
 #   CONNECTIVITY_INTERNAL_TOKEN                      connectivity.provider=wireguard
 secrets:
   existingSecret: ""
   jwtSecret: ""
+  # Shared by the control plane policy feed and the Go data API. Empty: generated.
+  dataPlaneInternalToken: ""
   # Shared with the WireGuard gateway agent (EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN).
   # Empty: generated once; read it back from the Secret for the gateway.
   connectivityInternalToken: ""
@@ -126,7 +136,7 @@ connectivity:
 
 # --- PostgreSQL (required) -------------------------------------------------
 postgresql:
-  # bundled: single-instance StatefulSet in this release (no HA, no backups).
+  # bundled: single-instance StatefulSet in this release (no HA; optional nightly pg_dump below).
   # external: managed or customer PostgreSQL (Cloud SQL, RDS, Azure, on-prem).
   mode: bundled
   database: edge_platform
@@ -143,6 +153,19 @@ postgresql:
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits: { memory: 1Gi }
+    # Nightly pg_dump into its own volume (kept on helm uninstall), docs/backups.md.
+    # Off by default because `helm install --wait` waits for the new volume, which many
+    # storage classes bind only when the first backup job runs.
+    backup:
+      enabled: false
+      schedule: "15 3 * * *"
+      retentionDays: 7
+      # Abort a stalled pg_dump so concurrencyPolicy: Forbid cannot skip forever.
+      activeDeadlineSeconds: 3600
+      persistence:
+        size: 8Gi
+        storageClass: ""
+      resources: {}
   external:
     # Either a full SQLAlchemy URL (postgresql+psycopg://user:pass@host:5432/db?sslmode=require)
     url: ""
@@ -186,6 +209,10 @@ objectStorage:
     keep: true
   s3:
     endpointUrl: ""          # empty for AWS S3; https://storage.googleapis.com for GCS
+    # Endpoint devices download from through presigned URLs. AWS S3 needs nothing here.
+    # Other endpoints: set the address devices can reach (GCS, R2: same as endpointUrl).
+    # Empty with a custom endpointUrl: downloads are streamed through the API.
+    publicEndpointUrl: ""
     region: us-east-1
     bucket: ""
     autoCreateBucket: false
@@ -196,9 +223,15 @@ objectStorage:
 # --- Device MQTT (optional) ------------------------------------------------
 mqtt:
   enabled: false
-  # bundled: single EMQX broker in this release. external: your EMQX cluster,
-  # configured for HTTP authn/authz against the API's /internal/mqtt endpoints.
+  # bundled: one broker in this release. external: your own broker (or cluster),
+  # configured to ask the API's /internal/mqtt endpoints for logins and topic
+  # permissions (docs/fleet/mqtt.md).
   broker: bundled
+  # Which broker software: mosquitto (default) | emqx | vernemq.
+  #   mosquitto  Eclipse Mosquitto + meteorcloud_auth plugin, single node.
+  #   emqx       EMQX 5.8.6 (Apache 2.0). Do not bump past 5.8 (docs/licensing.md).
+  #   vernemq    external only: run VerneMQ yourself and set broker: external.
+  provider: mosquitto
   # Hostname devices connect to (must be in the server certificate).
   publicHost: ""
   port: 8883
@@ -207,10 +240,27 @@ mqtt:
   internalToken: ""
   tls:
     # Secret with ca.crt (+ server.crt, server.key for the bundled broker). The
-    # server certificate needs SANs for publicHost and <release>-emqx.
+    # server certificate needs SANs for publicHost and the broker Service:
+    # <release>-mqtt (mosquitto) or <release>-emqx (emqx).
     existingSecret: ""
   external:
     host: ""
+  mosquitto:
+    image:
+      repository: ghcr.io/meteor-edge/meteorcloud-mosquitto
+      tag: ""                  # defaults to the chart appVersion
+      pullPolicy: IfNotPresent
+    # How long the broker reuses an "allowed" topic decision (0 asks the API every time).
+    aclCacheSeconds: 60
+    service:
+      # Devices reach 8883 through this Service. LoadBalancer needs a cloud or
+      # bare-metal load balancer (MetalLB, k3s servicelb).
+      type: LoadBalancer
+      annotations: {}
+      loadBalancerSourceRanges: []
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 512Mi }
   emqx:
     image:
       repository: emqx/emqx
@@ -230,7 +280,7 @@ mqtt:
 # --- Workloads --------------------------------------------------------------
 backend:
   image:
-    repository: meteorcloud/backend
+    repository: ghcr.io/meteor-edge/meteorcloud-backend
     tag: ""                  # defaults to the chart appVersion
     pullPolicy: IfNotPresent
   replicaCount: 1
@@ -249,7 +299,7 @@ backend:
 
 console:
   image:
-    repository: meteorcloud/console
+    repository: ghcr.io/meteor-edge/meteorcloud-console
     tag: ""
     pullPolicy: IfNotPresent
   replicaCount: 1
@@ -260,14 +310,122 @@ console:
   tolerations: []
   affinity: {}
 
+# MQTT gateway ("data-plane" Service on 8081, needs mqtt.enabled): device messages to the
+# control plane, publish/watch API for it (contracts/mqtt-http.md).
 dataPlane:
-  image:
-    repository: meteorcloud/data-plane
-    tag: ""
-    pullPolicy: IfNotPresent
+  # The Go MQTT forwarder, run from dataApi.image. Always one replica, replaced with
+  # Recreate: see "One forwarder" in docs/data-plane/mqtt-forwarder.md.
+  # MQTT_FORWARDER_* settings (docs/data-plane/mqtt-forwarder.md). Keys become
+  # upper snake case, e.g. queueSize -> MQTT_FORWARDER_QUEUE_SIZE.
+  forwarder: {}
+    # workers: 16
+    # queueSize: 4096
+    # batchSize: 32
+    # maxAttempts: 10
+    # drainTimeout: 20s
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 384Mi }
+
+# Application data API (Go): publish / subscribe / query / commands for the SDK.
+# Off by default. Contract: contracts/data-plane-v1.md. Ingress PathPrefix /v1
+# reaches port 8082; ops (8092: /readyz, /metrics, internal) stays ClusterIP only.
+dataApi:
+  enabled: false
+  image:
+    repository: ghcr.io/meteor-edge/meteorcloud-data-api
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  # memory: single replica, no MQTT. mqtt: fan-out via the broker (needs mqtt.enabled).
+  bus: memory
+  # postgres: uses DATAPLANE_DATABASE_URL in the chart Secret (same DB, schema dataplane).
+  # memory: in-process store (dev / tests only).
+  storage: postgres
+  mqtt:
+    # Direct MQTT for applications (optional; the SDK works over HTTPS/WebSocket on
+    # /v1 without it). The data API signs short-lived broker tokens that EMQX
+    # verifies, so it needs bus=mqtt, mqtt.enabled and mqtt.provider=emqx: Mosquitto
+    # and VerneMQ refuse app_ logins. A bundled EMQX gets the JWT authenticator;
+    # an external EMQX needs the same secret configured by you (docs/kubernetes.md).
+    direct: false
+    # Signing secret, 32+ characters. Empty: generated once and kept across upgrades
+    # (or DATAPLANE_MQTT_JWT_SECRET from secrets.existingSecret).
+    jwtSecret: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# --- ClickHouse (optional; device history / data API storage) ---------------
+# Off by default. Bundled single node for evaluation and small installs; set
+# external.url for a managed ClickHouse. Apache 2.0 image (docs/licensing.md).
+clickhouse:
+  enabled: false
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "25.8-alpine"
+    pullPolicy: IfNotPresent
+  database: meteorcloud
+  username: meteorcloud
+  password: ""                 # empty: generated once
+  external:
+    url: ""                    # e.g. http://clickhouse.example:8123
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 2Gi }
+
+# --- NATS JetStream device event path (optional) ----------------------------
+# MQTT → device-ingest → JetStream METEOR_DEVICE → rule-processor / clickhouse-writer.
+# Needs mqtt.enabled and ClickHouse (bundled or external). Docs: docs/data-plane/jetstream.md.
+# Images come from dataApi.image (same meteorcloud/data-api binary).
+nats:
+  enabled: false
+  image:
+    repository: nats
+    tag: "2.15.3-alpine"
+    pullPolicy: IfNotPresent
+  jetstream:
+    maxFileStore: 20GB
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  stream:
+    replicas: 1
+    maxBytes: 10GB
+    maxAge: 168h
+    storage: file
+    retention: limits
+    discard: old
+  passwords:
+    ingest: ""
+    rules: ""
+    chwriter: ""
+    admin: ""
+  deviceIngest:
+    replicaCount: 1
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+  ruleProcessor:
+    replicaCount: 1
+    workers: 8
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+  clickhouseWriter:
+    replicaCount: 1
+    retentionDays: 0
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 512Mi }
 
 # --- Metrics (optional) -----------------------------------------------------
 # The API and data plane serve Prometheus metrics on GET /metrics (their own
@@ -300,9 +458,10 @@ serviceAccount:
   annotations: {}
 
 # --- Ingress ----------------------------------------------------------------
-# Routes /api and /health to the API and everything else to the console.
-# /internal and /metrics are never routed. Needs an ingress controller in the
-# cluster (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
+# Routes /api and /health to the API, /v1 to the application data API when
+# dataApi.enabled, and everything else to the console. /internal, ops :8092 and
+# /metrics are never routed. Needs an ingress controller in the cluster
+# (Traefik, ingress-nginx, GKE, AWS Load Balancer Controller, ...).
 # Lets only this release's pods and the ingress controller's namespace reach the
 # API, so a forwardedAllowIps of "*" cannot be abused from elsewhere in the cluster.
 # Off by default: it needs a CNI that enforces NetworkPolicy and the right selector.

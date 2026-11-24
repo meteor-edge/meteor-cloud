@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/register (201)",
+  "description": "The device identity. device_token and mqtt.password are secrets.",
+  "type": "object",
+  "required": [
+    "device_id",
+    "device_token",
+    "organization_id",
+    "name",
+    "heartbeat_interval_seconds"
+  ],
+  "properties": {
+    "device_id": {
+      "$ref": "../common.json#/$defs/uuid"
+    },
+    "device_token": {
+      "type": "string",
+      "minLength": 1
+    },
+    "organization_id": {
+      "$ref": "../common.json#/$defs/uuid"
+    },
+    "name": {
+      "type": "string"
+    },
+    "heartbeat_interval_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "mqtt": {
+      "anyOf": [
+        {
+          "$ref": "../common.json#/$defs/mqtt_connect"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

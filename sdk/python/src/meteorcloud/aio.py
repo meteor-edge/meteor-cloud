@@ -77,17 +77,34 @@ class AsyncSubscription:
         self._consumer: asyncio.Task[None] | None = None
         self._error: exc.MeteorCloudError | None = None
         self._closed = False
+        self._ended = asyncio.Event()
 
     @property
     def closed(self) -> bool:
         return self._closed
 
     async def _deliver(self, raw: dict[str, Any]) -> None:
-        if not self._closed:
-            # A full buffer makes the connection wait, so events are never dropped
-            # here. A reader that stays too slow is disconnected by the service and
-            # the SDK reconnects.
-            await self._queue.put(Event.from_dict(raw))
+        if self._closed:
+            return
+        event = Event.from_dict(raw)
+        try:
+            self._queue.put_nowait(event)
+            return
+        except asyncio.QueueFull:
+            pass
+        # A full buffer makes the connection wait, so events are never dropped
+        # here. A reader that stays too slow is disconnected by the service and
+        # the SDK reconnects. The wait ends when the subscription is closed, so
+        # one abandoned subscription cannot hold up the whole connection.
+        put = asyncio.ensure_future(self._queue.put(event))
+        ended = asyncio.ensure_future(self._ended.wait())
+        try:
+            await asyncio.wait({put, ended}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in (put, ended):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(put, ended, return_exceptions=True)
 
     def _fail(self, error: exc.MeteorCloudError) -> None:
         self._error = error
@@ -97,6 +114,7 @@ class AsyncSubscription:
         if self._closed:
             return
         self._closed = True
+        self._ended.set()
         self._client._subscriptions.discard(self)
         try:
             self._queue.put_nowait(_CLOSED)
@@ -188,7 +206,7 @@ class AsyncStreams:
         seq: int | None = None,
         type: str | None = None,
     ) -> PublishResult:
-        """Publish one message and return once it is durably stored.
+        """Publish one message and return once it is durably stored or queued.
 
         Raises :class:`PublishError` if the service rejects it and
         :class:`UnavailableError` if it could not be stored in time. Give your own
@@ -357,6 +375,7 @@ class AsyncCommands:
     def __init__(self, client: AsyncMeteorClient) -> None:
         self._client = client
         self._handlers: dict[str, CommandHandler] = {}
+        self._closing = False
         self._running: dict[str, asyncio.Task[None]] = {}
         self._finished: OrderedDict[str, tuple[str, dict[str, Any] | None, str]] = OrderedDict()
         self._slots = asyncio.Semaphore(8)
@@ -401,8 +420,16 @@ class AsyncCommands:
         """Wait until the command ends in SUCCEEDED, FAILED or TIMEOUT and return it."""
         deadline = None if timeout is None else time.monotonic() + timeout
         pause = 0.2
+        command: Command | None = None
         while True:
-            command = await self.get(command_id)
+            try:
+                # The deadline also bounds each request, not only the pauses between them.
+                remaining = None if deadline is None else max(deadline - time.monotonic(), 0.05)
+                command = await asyncio.wait_for(self.get(command_id), remaining)
+            except asyncio.TimeoutError:
+                raise exc.CommandTimeoutError(
+                    f"Command {command_id} did not finish within {timeout} seconds",
+                    command=command, code="wait_timeout") from None
             if command.done:
                 return command
             if deadline is not None and time.monotonic() + pause > deadline:
@@ -460,7 +487,9 @@ class AsyncCommands:
 
     async def _on_command(self, raw: dict[str, Any]) -> None:
         command = Command.from_dict(raw)
-        if command.id in self._running:
+        if self._closing or command.id in self._running:
+            # Closing: commands already admitted finish; a new one is left unacknowledged
+            # and MeteorCloud delivers it again to the next connection.
             return
         if command.id in self._finished:
             # Delivered again because the final acknowledgement was lost: repeat the
@@ -504,7 +533,7 @@ class AsyncCommands:
                         IN_HANDLER.reset(token)
                     if result is not None and not isinstance(result, dict):
                         result = {"value": result}
-                    json.dumps(result)
+                    json.dumps(result, allow_nan=False)  # NaN and Infinity are not JSON
                     outcome = ("succeeded", result, "")
                 except Exception as err:  # noqa: BLE001 - the failure is reported to the sender
                     log.exception("command handler failed",
@@ -534,9 +563,18 @@ class AsyncCommands:
         return True
 
     async def _drain(self, timeout: float) -> None:
+        self._closing = True
         tasks = list(self._running.values())
-        if tasks:
-            await asyncio.wait(tasks, timeout=timeout)
+        if not tasks:
+            return
+        _, pending = await asyncio.wait(tasks, timeout=timeout)
+        # A handler that outlasts the deadline must not keep working, or acknowledge,
+        # after the connection is closed. It is cancelled; the command stays
+        # unfinished on the service, which delivers it again or times it out.
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=5)
 
 
 class AsyncMeteorClient:

@@ -1,16 +1,17 @@
 {{- if .Values.metrics.serviceMonitor.enabled }}
 {{- $fullname := include "meteorcloud.fullname" . }}
-{{- $components := list "backend" }}
-{{- if .Values.mqtt.enabled }}{{ $components = append $components "data-plane" }}{{ end }}
+{{- $components := list (dict "name" "backend" "port" "http") }}
+{{- if .Values.mqtt.enabled }}{{ $components = append $components (dict "name" "data-plane" "port" "http") }}{{ end }}
+{{- if .Values.dataApi.enabled }}{{ $components = append $components (dict "name" "data-api" "port" "ops") }}{{ end }}
 {{- range $component := $components }}
 ---
-# job="{{ $component }}" matches the bundled rules and dashboards.
+# job="{{ $component.name }}" matches the bundled rules and dashboards.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ $fullname }}-{{ $component }}
+  name: {{ $fullname }}-{{ $component.name }}
   labels:
-    {{- include "meteorcloud.componentLabels" (dict "ctx" $ "component" $component) | nindent 4 }}
+    {{- include "meteorcloud.componentLabels" (dict "ctx" $ "component" $component.name) | nindent 4 }}
     {{- with $.Values.metrics.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -19,13 +20,13 @@ spec:
     matchNames: [{{ $.Release.Namespace | quote }}]
   selector:
     matchLabels:
-      {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" $component) | nindent 6 }}
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" $ "component" $component.name) | nindent 6 }}
   endpoints:
-    - port: http
+    - port: {{ $component.port }}
       path: /metrics
       interval: {{ $.Values.metrics.serviceMonitor.interval }}
       relabelings:
         - targetLabel: job
-          replacement: {{ $component }}
+          replacement: {{ $component.name }}
 {{- end }}
 {{- end }}

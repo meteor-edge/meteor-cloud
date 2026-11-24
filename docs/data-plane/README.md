@@ -7,7 +7,10 @@ The data plane lets applications publish data, subscribe to live data, query his
 | Write an application | [SDK guide](../../sdk/python/README.md) |
 | Register applications, permissions and credentials | [Applications and credentials](applications.md) |
 | Run, configure, monitor and troubleshoot it | [Operations](operations.md) |
+| Understand how device MQTT reaches the control plane (`data-plane` service, shared subscription, backpressure) | [MQTT forwarder](mqtt-forwarder.md) |
 | Understand the device event path (MQTT → NATS JetStream → rule processor, ClickHouse writer) | [Device event path](jetstream.md) |
+| Understand device CPU, memory, disk and temperature history (ClickHouse, console charts) | [Device telemetry history](device-telemetry.md) |
+| Understand online/offline, deployment, app lifecycle and saved-warning history | [Platform history](platform-history.md) |
 | Write a client in another language, or use MQTT directly | [Protocol contract](../../contracts/data-plane-v1.md) · [OpenAPI](../../src/data-plane/go/api/openapi.yaml) |
 
 ## Try it
@@ -25,8 +28,6 @@ make dev        # the data-api profile is on in deploy/compose/.env.example
    pip install ./sdk/python && python sdk/python/examples/quickstart.py
    ```
 
-To check a whole installation, `python scripts/data-plane-e2e.py` runs the full developer workflow: it registers a device and two applications, deploys a Docker release bound to an application, runs the real agent, and verifies publish, subscribe, history, commands, token rotation, revocation, tenant isolation and the audit trail.
-
 ## Architecture
 
 ```
@@ -40,19 +41,19 @@ To check a whole installation, `python scripts/data-plane-e2e.py` runs the full 
                   └──────┬──────────┬──────┘
              fan-out bus │          │ storage
                          ▼          ▼
-                      EMQX      ClickHouse (data) + PostgreSQL (commands)
-                                             (optional: MQTT clients ─▶ EMQX)
+                      MQTT brokerClickHouse (data) + PostgreSQL (commands)
+                                             (optional: MQTT clients, EMQX only)
 ```
 
 - **Control plane** owns organizations, devices, applications, permissions and credentials. It is the only place they are changed, and every change is in the audit log.
 - **Data API** (`src/data-plane/go`, one Go binary) authenticates applications, validates and stores messages, fans them out to live subscribers, answers queries and delivers commands. It is deployed and scaled on its own.
 - **No call to the control plane per message.** The data API pulls a policy snapshot (applications, permissions, credential hashes) every few seconds and works from memory. If the control plane is down, ingestion, queries and live data keep working with the last snapshot.
-- **EMQX** carries events and commands between data API replicas, and serves clients that choose to speak MQTT. Applications using the SDK do not connect to it.
+- **The MQTT broker** (Mosquitto by default, EMQX or VerneMQ optional) carries events and commands between data API replicas. Clients that choose to speak MQTT directly need EMQX, because only its token check accepts application logins; Mosquitto and VerneMQ refuse them. Applications using the SDK do not connect to it.
 - **ClickHouse** stores the data: telemetry, events and inference results. It is a column store built for this shape of data: append only, read by time range, aggregated. The data API creates its database and table at start.
 - **PostgreSQL** keeps what changes after it is written: commands and their state, and dead letters, in a `dataplane` schema with its own migrations. The control plane keeps using PostgreSQL for everything it owns.
 - Storage sits behind an interface. A small installation can keep everything in PostgreSQL with `DATAPLANE_STORAGE=postgres` and run no ClickHouse.
 
-Inside the binary, each concern is a package behind an interface: `identity` (policy), `envelope` (validation), `ingest` (bounded queue, batching, retries), `storage`, `bus` (EMQX or in-memory), `live` (subscriptions), `commands`, `api` (HTTP and WebSocket), `mqttgw` (MQTT ingestion).
+Inside the binary, each concern is a package behind an interface: `identity` (policy), `envelope` (validation), `ingest` (bounded queue, batching, retries), `storage`, `bus` (MQTT broker or in-memory), `live` (subscriptions), `commands`, `api` (HTTP and WebSocket), `mqttgw` (MQTT ingestion).
 
 ### Design decisions
 
@@ -65,14 +66,14 @@ These differ from the first plan. Each was chosen to keep the system simple to r
 | ClickHouse for data, PostgreSQL for commands | Measurements are written once and read by time range, which is what ClickHouse is fast and cheap at (it compresses them to a fraction of the size). A command changes state several times and needs row locks, which is what PostgreSQL is good at. Each store does the job it fits |
 | ClickHouse is reached over its HTTP interface, with no driver library | No new dependency in the binary. Values travel as typed query parameters, never inside the SQL text |
 | Small publishes are grouped by ClickHouse, and still confirmed | ClickHouse dislikes many tiny inserts. The data API uses its asynchronous inserts and waits for the flush, so a publish still answers only when the data is stored |
-| No Kafka | The ingestion queue is bounded and in process, with backpressure to the caller, and EMQX shared subscriptions split MQTT load between replicas. Kafka becomes worthwhile for replaying streams into several independent consumers or ingestion that must outlive long storage outages. Neither is needed yet |
+| No Kafka | The ingestion queue is bounded and in process, with backpressure to the caller, and MQTT shared subscriptions split MQTT load between replicas. Kafka becomes worthwhile for replaying streams into several independent consumers or ingestion that must outlive long storage outages. Neither is needed yet |
 | Direct MQTT uses a short-lived signed token with the topic list inside | EMQX 5.8 allows one HTTP authorization source, which the device fleet uses. A signed token needs no call from the broker to the data API and expires on its own |
-| The Go service lives beside the Python data plane | `src/data-plane/data_plane` keeps serving device management topics (`devices/...`). The Go service owns `meteor/v1/...`. Nothing was migrated or broken |
+| Two Go services | The MQTT forwarder (`cmd/mqtt-forwarder`) serves the device management topics (`devices/...`); the data API owns `meteor/v1/...` |
 
 ## Guarantees in short
 
 - A publish answers success only after the message is durably stored. Overload and storage failures are reported, never hidden.
-- Publishing the same message id twice stores it once.
+- Publishing the same message id twice stores it once when the second publish starts after the first has finished. Two overlapping publishes of the same `(organization, id)` can both pass the existence check on ClickHouse (`MergeTree` has no unique key); sequential retries are safe. See [operations](operations.md#scaling).
 - Late and out of order data is accepted (30 days back, 5 minutes ahead).
 - Identity comes from the token. An organization, device or application named in a request body is ignored.
 - One organization can never read, subscribe to or command another organization's data.

@@ -158,11 +158,21 @@ func (s *Subscriber) Run(ctx context.Context) error {
 			for _, t := range s.cfg.Topics() {
 				subs = append(subs, paho.SubscribeOptions{Topic: t, QoS: 1})
 			}
-			sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if _, err := cm.Subscribe(sctx, &paho.Subscribe{Subscriptions: subs}); err != nil {
-				s.log.Error("MQTT subscribe failed", "error", err.Error())
-				return
+			// Retry until subscribed or the connection context ends. A single failed
+			// Subscribe with the connection still up would never call OnConnectionUp again.
+			for attempt := 1; ; attempt++ {
+				sctx, cancel := context.WithTimeout(connCtx, 10*time.Second)
+				_, err := cm.Subscribe(sctx, &paho.Subscribe{Subscriptions: subs})
+				cancel()
+				if err == nil {
+					break
+				}
+				s.log.Error("MQTT subscribe failed; retrying", "attempt", attempt, "error", err.Error())
+				select {
+				case <-connCtx.Done():
+					return
+				case <-time.After(min(time.Duration(attempt)*time.Second, 15*time.Second)):
+				}
 			}
 			s.up.Store(true)
 			s.metrics.MQTTConnected.Set(1)
@@ -178,8 +188,18 @@ func (s *Subscriber) Run(ctx context.Context) error {
 			EnableManualAcknowledgment: true,
 			OnPublishReceived: []func(paho.PublishReceived) (bool, error){
 				func(pr paho.PublishReceived) (bool, error) {
-					// The queue is as large as Receive Maximum, so this never blocks for
-					// long: the broker stops sending when the window is full.
+					// QoS 1/2: queue size matches Receive Maximum, so the broker stops
+					// before this blocks for long. QoS 0 is not covered by that window —
+					// never block the paho router; count and drop if the queue is full.
+					if pr.Packet != nil && pr.Packet.QoS == 0 {
+						select {
+						case s.queue <- work{pub: pr.Packet, client: pr.Client}:
+						default:
+							s.metrics.Rejected.WithLabelValues("queue_full").Inc()
+							s.log.Warn("QoS 0 device message dropped; ingestion queue full")
+						}
+						return true, nil
+					}
 					s.queue <- work{pub: pr.Packet, client: pr.Client}
 					return true, nil
 				},

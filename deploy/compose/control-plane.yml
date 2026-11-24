@@ -87,7 +87,7 @@ services:
       # Rule processor internal API (rule tests, evaluation status; profile nats).
       RULES_ENGINE_URL: ${RULES_ENGINE_URL:-http://rule-processor:8095}
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-emqx}
-      # Interpolated like EMQX's copy so the broker and API always agree.
+      # Interpolated like the broker's copy so the broker and API always agree.
       MQTT_INTERNAL_TOKEN: ${MQTT_INTERNAL_TOKEN:-}
       MQTT_CA_CERT_PATH: /certs/ca.crt
       OBJECT_STORAGE_PATH: /data/artifacts

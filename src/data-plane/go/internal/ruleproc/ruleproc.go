@@ -12,6 +12,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,11 +72,20 @@ type Processor struct {
 }
 
 // worker index for a message: same organization and device, same worker, so one
-// device's events are handled in stream order within this replica.
+// device's metrics and status share a lane within this replica.
 func (p *Processor) slot(subject string, n int) int {
 	h := fnv.New32a()
-	h.Write([]byte(subject))
+	h.Write([]byte(orgDeviceKey(subject)))
 	return int(h.Sum32() % uint32(n))
+}
+
+// orgDeviceKey is "<org>.<device>" from a producer subject (….<org>.<device>).
+func orgDeviceKey(subject string) string {
+	parts := strings.Split(subject, ".")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "." + parts[len(parts)-1]
+	}
+	return subject
 }
 
 // Run processes until ctx ends; the batch in progress is finished first.
@@ -152,45 +162,63 @@ func (p *Processor) one(msg jetstream.Msg) {
 
 // Dedupe skips events whose id was handled successfully recently. It protects a
 // non-idempotent handler from JetStream redeliveries in one process; durable,
-// cross-replica de-duplication belongs in the handler's own state.
+// cross-replica de-duplication belongs in the handler's own state. Matching keys
+// are serialized so two workers cannot both call next.Handle for the same id.
 func Dedupe(next Handler, size int) Handler {
 	if size <= 0 {
 		size = 100000
 	}
-	d := &dedupe{next: next, size: size, seen: make(map[string]struct{}, size)}
+	d := &dedupe{
+		next: next, size: size,
+		seen: make(map[string]struct{}, size), inflight: make(map[string]struct{}),
+	}
+	d.cond = sync.NewCond(&d.mu)
 	return d
 }
 
 type dedupe struct {
-	next  Handler
-	size  int
-	mu    sync.Mutex
-	seen  map[string]struct{}
-	order []string
+	next     Handler
+	size     int
+	mu       sync.Mutex
+	cond     *sync.Cond
+	seen     map[string]struct{}
+	inflight map[string]struct{}
+	order    []string
 }
 
 func (d *dedupe) Handle(ctx context.Context, ev *envelope.Event) error {
 	key := ev.OrganizationID + "/" + ev.ID
 	d.mu.Lock()
-	_, dup := d.seen[key]
+	for {
+		if _, dup := d.seen[key]; dup {
+			d.mu.Unlock()
+			return nil
+		}
+		if _, busy := d.inflight[key]; !busy {
+			break
+		}
+		d.cond.Wait()
+	}
+	d.inflight[key] = struct{}{}
 	d.mu.Unlock()
-	if dup {
-		return nil
-	}
-	if err := d.next.Handle(ctx, ev); err != nil {
-		return err
-	}
+
+	err := d.next.Handle(ctx, ev)
+
 	d.mu.Lock()
-	if _, ok := d.seen[key]; !ok {
-		d.seen[key] = struct{}{}
-		d.order = append(d.order, key)
-		if len(d.order) > d.size {
-			delete(d.seen, d.order[0])
-			d.order = d.order[1:]
+	delete(d.inflight, key)
+	if err == nil {
+		if _, ok := d.seen[key]; !ok {
+			d.seen[key] = struct{}{}
+			d.order = append(d.order, key)
+			if len(d.order) > d.size {
+				delete(d.seen, d.order[0])
+				d.order = d.order[1:]
+			}
 		}
 	}
+	d.cond.Broadcast()
 	d.mu.Unlock()
-	return nil
+	return err
 }
 
 // LogHandler is the default handler until a rule engine is plugged in: it counts

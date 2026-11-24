@@ -7,7 +7,7 @@ Short model of how MeteorCloud is put together. Deeper wiring: [Architecture](ar
 | Plane | Runs where | Job |
 | --- | --- | --- |
 | **Device plane** | On each Linux device (`meteorcli`) | Enroll, heartbeat, inventory, MQTT client |
-| **Data plane** | In your cloud deployment | Platform MQTT session to EMQX; forward inbound messages to the control plane |
+| **Data plane** | In your cloud deployment | Platform MQTT session to the broker; forward inbound messages to the control plane |
 | **Control plane** | In your cloud deployment | Identity, organizations, device registry, artifacts, MQTT policy, operator API, PostgreSQL |
 
 The **console** is the operator UI. The browser talks only to the control-plane API.

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/connectivity/wireguard (request)",
+  "description": "Register this device's WireGuard public key (the private key never leaves the device) and its SSH facts.",
+  "type": "object",
+  "required": [
+    "public_key"
+  ],
+  "properties": {
+    "public_key": {
+      "type": "string",
+      "minLength": 40,
+      "maxLength": 64
+    },
+    "ssh_user": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 32,
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$",
+      "description": "Login name; never starts with '-', no '/', '.' or spaces."
+    },
+    "ssh_host_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2048,
+      "pattern": "^(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) [A-Za-z0-9+/]+={0,2}( .*)?$",
+      "description": "sshd host public key '<type> <base64> [comment]'; the server checks that the blob matches the type."
+    },
+    "ssh_ca_public_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2048,
+      "pattern": "^(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) [A-Za-z0-9+/]+={0,2}( .*)?$",
+      "description": "The SSH CA this device already trusts, if any."
+    }
+  }
+}

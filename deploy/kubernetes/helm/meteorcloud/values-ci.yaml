@@ -1,6 +1,7 @@
 # Pull-request CI on a temporary k3d cluster: the smallest install that still
 # exercises the API, console, database, migrations, ingress, and artifact
-# storage. No Redis, Kafka, ClickHouse, MinIO, or MQTT.
+# storage, plus the application data API (/v1). No Redis, Kafka, ClickHouse,
+# MinIO, or MQTT.
 config:
   appEnv: ci
   publicUrl: http://localhost:8088
@@ -33,6 +34,13 @@ objectStorage:
 
 mqtt:
   enabled: false
+
+# Single replica, in-process bus, events in the bundled PostgreSQL.
+dataApi:
+  enabled: true
+  bus: memory
+  storage: postgres
+  image: { repository: meteorcloud/data-api, tag: ci, pullPolicy: IfNotPresent }
 
 ingress:
   enabled: true

@@ -32,7 +32,7 @@ DEVICE = {
     "journal-meteorcli.txt": "journalctl -u meteorcli --no-pager -n 400",
     "wg-show.txt": "wg show all",
     "docker-ps.txt": "docker ps -a --format 'table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}'",
-    "meteorcli-files.txt": "ls -la /etc/meteorcli /etc/meteorcli/wireguard 2>&1",
+    "meteorcli-files.txt": "ls -la /etc/meteorcli /var/lib/meteorcli/identity /var/lib/meteorcli-helper/wireguard 2>&1",
 }
 
 

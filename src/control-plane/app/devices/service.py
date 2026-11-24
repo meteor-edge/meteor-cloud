@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ from app.artifacts.repository import ArtifactRepository
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.devices.device_config import (
     DEVICE_CONFIG_FILE_NAME,
     DeviceConfigRequest,
@@ -953,8 +953,8 @@ class FleetService:
         architecture: str | None = None,
         enabled: bool | None = None,
         status: str | None = None,
-        sort: str = "name",
-        order: str = "asc",
+        sort: str = "last_seen_at",
+        order: str = "desc",
         page: int = 1,
         page_size: int = 20,
     ) -> Page[DeviceResponse]:
@@ -990,6 +990,24 @@ class FleetService:
             page=page,
             page_size=page_size,
         )
+
+    def fleet_counts(self, *, actor: User, organization_id: uuid.UUID) -> tuple[int, int]:
+        """(registered devices, online now) for the whole organization; needs org-wide device.read."""
+        membership = self._require_membership(organization_id, actor.id)
+        self.authz.require_role_permission(membership, "device.read")
+        if self.authz.scope_for(membership).mode == "device_groups":
+            raise ForbiddenError("fleet_scope_required", "Fleet history needs access to the whole organization.")
+        total = self.list_devices(actor=actor, organization_id=organization_id, page_size=1).total
+        online = self.list_devices(actor=actor, organization_id=organization_id, status="online", page_size=1).total
+        return total, online
+
+    def require_device_permission(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID, permission: str
+    ) -> None:
+        """404 for a device outside the organization, 403 without ``permission`` on its group."""
+        membership = self._require_membership(organization_id, actor.id)
+        device = self._require_device(organization_id, device_id)
+        self._require(membership, permission, device_group_id=device.device_group_id)
 
     def get_device(
         self,
@@ -1087,6 +1105,12 @@ class FleetService:
         )
         self.session.commit()
 
+    def _mark_mqtt_offline(self, device: Device) -> None:
+        if device.mqtt_status == "online":
+            device.mqtt_status = "offline"
+            device.mqtt_status_at = datetime.now(UTC)
+            self.session.add(device)
+
     def set_device_enabled(
         self,
         *,
@@ -1100,6 +1124,9 @@ class FleetService:
         self._require(membership, "device.update", device_group_id=device.device_group_id)
         changed = device.is_enabled != enabled
         device.is_enabled = enabled
+        if changed and not enabled:
+            # MQTT access ends now, so the device's own "offline" will is refused.
+            self._mark_mqtt_offline(device)
         self.devices.update(device)
         if changed:
             self._record_audit(
@@ -1110,6 +1137,36 @@ class FleetService:
                 resource_id=device.id,
                 metadata={"name": device.name},
             )
+        self.session.commit()
+        self.session.refresh(device)
+        return self._to_device_response(device)
+
+    def allow_device_reregistration(
+        self,
+        *,
+        actor: User,
+        organization_id: uuid.UUID,
+        device_id: uuid.UUID,
+    ) -> DeviceResponse:
+        """Let this hardware register again with a registration token, for a limited time.
+
+        Needed after a card is re-flashed and the device lost its token; without it, a
+        registration token plus a known serial or MAC cannot take over the device record.
+        """
+        membership = self._require_membership(organization_id, actor.id)
+        device = self._require_device(organization_id, device_id)
+        self._require(membership, "device.update", device_group_id=device.device_group_id)
+        window = timedelta(seconds=self.settings.device_reregistration_window_seconds)
+        device.reregistration_allowed_until = datetime.now(UTC) + window
+        self.devices.update(device)
+        self._record_audit(
+            actor=actor,
+            organization_id=organization_id,
+            action="device.reregistration_allowed",
+            resource_type="device",
+            resource_id=device.id,
+            metadata={"name": device.name, "until": device.reregistration_allowed_until.isoformat()},
+        )
         self.session.commit()
         self.session.refresh(device)
         return self._to_device_response(device)
@@ -1184,6 +1241,7 @@ class FleetService:
         if cred.revoked_at is None:
             cred.revoked_at = datetime.now(UTC)
             self.session.add(cred)
+            self._mark_mqtt_offline(device)
             self._record_audit(
                 actor=actor,
                 organization_id=organization_id,
@@ -1265,6 +1323,7 @@ class FleetService:
                 raise ValidationAppError("mqtt_topic_required", "A topic is required.")
             resolved = topic
         resolved = validate_mqtt_topic(resolved, allow_wildcards=False)
+        self._require_test_publish_topic_in_scope(organization_id, resolved)
         if isinstance(payload, dict):
             text = json.dumps(payload)
         elif payload is None:
@@ -1288,6 +1347,29 @@ class FleetService:
         )
         self.session.commit()
         return MqttTestPublishResponse(topic=resolved, payload=text)
+
+    def _require_test_publish_topic_in_scope(self, organization_id: uuid.UUID, topic: str) -> None:
+        """Keep console test publishes inside the caller's organization.
+
+        The console publishes with the platform (superuser) identity, so the broker
+        does not check these topics. Block the platform control namespace and any
+        ``devices/{id}/...`` topic whose device is not in this organization.
+        """
+        from app.core.exceptions import ValidationAppError
+        from app.mqtt.policy import CONTROL_TOPIC_PREFIX
+
+        denied = ValidationAppError("mqtt_topic_invalid", "That MQTT topic is not allowed.")
+        if topic.startswith(CONTROL_TOPIC_PREFIX):
+            raise denied
+        parts = topic.split("/")
+        if parts[0] != "devices":
+            return
+        try:
+            target = uuid.UUID(parts[1]) if len(parts) > 1 else None
+        except ValueError:
+            target = None
+        if target is None or self.devices.get(organization_id=organization_id, device_id=target) is None:
+            raise denied
 
     def _require_device(self, organization_id: uuid.UUID, device_id: uuid.UUID) -> Device:
         device = self.devices.get(organization_id=organization_id, device_id=device_id)
@@ -1320,11 +1402,13 @@ class FleetService:
             cpu_cores=device.cpu_cores,
             memory_mb=device.memory_mb,
             local_ip=device.local_ip,
+            agent_version=device.agent_version,
             labels=device.labels,
             metadata=device.metadata_,
             credential_prefix=device.credential_prefix,
             last_seen_at=device.last_seen_at,
             registered_at=device.registered_at,
+            reregistration_allowed_until=device.reregistration_allowed_until,
             created_at=device.created_at,
             updated_at=device.updated_at,
             mqtt_configured=self._mqtt_configured(device.id),

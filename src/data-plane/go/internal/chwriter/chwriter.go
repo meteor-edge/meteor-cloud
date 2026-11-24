@@ -7,8 +7,10 @@
 //     dropped: the batch is retried in process (keeping the messages' ack timers
 //     alive), then handed back to JetStream for later redelivery. The stream's
 //     retention limits are the only bound on how long an outage can last.
-//   - Inserts are idempotent on (organization, event id), so a redelivered
-//     message is never stored twice.
+//   - Sequential retries are idempotent on (organization, event id): the writer
+//     skips ids already stored. Concurrent writer replicas can both insert the
+//     same id (ClickHouse MergeTree has no unique key); that race is documented
+//     with the rest of the ClickHouse store.
 package chwriter
 
 import (

@@ -235,11 +235,13 @@ class DeviceRepository:
         *,
         serial_number: str | None,
         mac_addresses: Sequence[str],
+        for_update: bool = False,
     ) -> list[Device]:
         """Return devices that could match an incoming identity (any org).
 
         Cross-organization candidates are included so the caller can reject
-        registrations that collide with another tenant.
+        registrations that collide with another tenant. ``for_update`` locks the
+        rows so concurrent re-registrations cannot both pass the same window.
         """
         conditions = []
         if serial_number:
@@ -249,6 +251,8 @@ class DeviceRepository:
         if not conditions:
             return []
         statement = select(Device).where(or_(*conditions))
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
         return list(self.session.scalars(statement).all())
 
     def create(self, device: Device) -> Device:
@@ -323,8 +327,8 @@ class DeviceRepository:
         enabled: bool | None = None,
         status: str | None = None,
         online_cutoff: datetime | None = None,
-        sort: str = "name",
-        order: str = "asc",
+        sort: str = "last_seen_at",
+        order: str = "desc",
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Device], int]:
@@ -351,9 +355,13 @@ class DeviceRepository:
             "last_seen_at": Device.last_seen_at,
             "created_at": Device.created_at,
             "registered_at": Device.registered_at,
-        }.get(sort, Device.name)
+        }.get(sort, Device.last_seen_at)
         direction = desc if order == "desc" else asc
-        statement = statement.order_by(direction(sort_column), Device.id.asc())
+        # Never-seen devices (null last_seen_at) stay at the end when sorting by activity.
+        ordered = direction(sort_column)
+        if sort_column is Device.last_seen_at:
+            ordered = ordered.nulls_last()
+        statement = statement.order_by(ordered, Device.id.asc())
         statement = statement.offset((page - 1) * page_size).limit(page_size)
 
         devices = list(self.session.scalars(statement).all())

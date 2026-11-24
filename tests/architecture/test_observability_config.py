@@ -22,7 +22,7 @@ RULE_FILES = sorted((OBS / "rules").glob("*.yml"))
 METRIC_SOURCES = [
     REPO / "src" / "control-plane" / "app" / "core" / "metrics.py",
     REPO / "src" / "control-plane" / "app" / "devices" / "fleet_metrics.py",
-    REPO / "src" / "data-plane" / "data_plane" / "metrics.py",
+    REPO / "src" / "data-plane" / "go" / "internal" / "mqttfwd" / "metrics.go",
 ]
 
 # Exporters we do not own: node_exporter, Prometheus' own `up`.

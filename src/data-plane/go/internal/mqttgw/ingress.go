@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"meteorcloud/dataplane/internal/bus"
@@ -75,6 +76,20 @@ func (g *Ingress) identityFor(t bus.Topic) (*identity.Identity, bool) {
 	}
 	return &identity.Identity{OrganizationID: t.OrgID, ApplicationID: app.ID, Application: app.Slug,
 		DeviceID: t.Device, Permissions: app.Permissions}, true
+}
+
+// Invalid dead-letters a message whose topic is not a v1 topic. The organization is
+// read from the topic when it has the v1 prefix: the broker's ACL restricted the
+// publisher to its own organization there.
+func (g *Ingress) Invalid(ctx context.Context, topic string, payload []byte) bool {
+	t := bus.Topic{}
+	if rest, ok := strings.CutPrefix(topic, bus.TopicPrefix); ok {
+		t.OrgID, _, _ = strings.Cut(rest, "/")
+	}
+	if len(topic) > 512 {
+		topic = topic[:512]
+	}
+	return g.deadLetter(ctx, t, "invalid_topic", "not a v1 topic: "+strings.ToValidUTF8(topic, "?"), payload)
 }
 
 // Message stores one client message, or dead-letters it.

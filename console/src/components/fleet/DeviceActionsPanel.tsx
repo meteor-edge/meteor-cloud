@@ -23,6 +23,8 @@ type Props = {
   deviceId: string;
   canPower: boolean;
   canUsers: boolean;
+  /** Action kinds the device's agent can run (null: it never said, so all are offered). */
+  supportedActions?: string[] | null;
 };
 
 const KIND_LABEL: Record<DeviceAction["kind"], string> = {
@@ -30,7 +32,25 @@ const KIND_LABEL: Record<DeviceAction["kind"], string> = {
   shutdown: "Shut down",
   set_password: "Change password",
   add_user: "Add user",
+  update_agent: "Agent update",
+  restart_module: "Restart module",
+  run_diagnostics: "Diagnostics",
+  workload_restart: "Restart software",
+  workload_stop: "Stop software",
+  workload_start: "Start software",
+  workload_snapshot: "Refresh software",
 };
+
+// Shown by their own panels (agent update, agent modules, software).
+const OTHER_PANELS = new Set<DeviceAction["kind"]>([
+  "update_agent",
+  "restart_module",
+  "run_diagnostics",
+  "workload_restart",
+  "workload_stop",
+  "workload_start",
+  "workload_snapshot",
+]);
 
 function note(action: DeviceAction): { text: string; tone: string } {
   if (action.state === "pending") {
@@ -60,7 +80,16 @@ function isInFlight(action: DeviceAction): boolean {
 }
 
 /** Restart, shut down, and SSH user changes ordered from the console. */
-export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, canUsers }: Props) {
+export function DeviceActionsPanel({
+  token,
+  organizationId,
+  deviceId,
+  canPower,
+  canUsers,
+  supportedActions = null,
+}: Props) {
+  const supported = (kind: DeviceAction["kind"]) =>
+    supportedActions === null || supportedActions.includes(kind);
   const queryClient = useQueryClient();
   const queryKey = ["device-actions", organizationId, deviceId];
   const deviceKey = ["device", organizationId, deviceId];
@@ -159,7 +188,9 @@ export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, 
     ]);
   };
 
-  const actions = actionsQuery.data?.actions ?? [];
+  const actions = (actionsQuery.data?.actions ?? []).filter(
+    (action) => !OTHER_PANELS.has(action.kind),
+  );
   const busy =
     rebootMutation.isPending ||
     shutdownMutation.isPending ||
@@ -192,45 +223,53 @@ export function DeviceActionsPanel({ token, organizationId, deviceId, canPower, 
         </Button>
       </div>
 
-      {canPower && (
+      {canPower && (supported("reboot") || supported("shutdown")) && (
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => {
-              if (window.confirm("Restart this device? It will be offline for a short time.")) {
-                rebootMutation.mutate();
-              }
-            }}
-          >
-            Restart
-          </Button>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => {
-              if (
-                window.confirm(
-                  "Shut this device down? Someone will need to power it on again at the site.",
-                )
-              ) {
-                shutdownMutation.mutate();
-              }
-            }}
-          >
-            Shut down
-          </Button>
+          {supported("reboot") && (
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm("Restart this device? It will be offline for a short time.")) {
+                  rebootMutation.mutate();
+                }
+              }}
+            >
+              Restart
+            </Button>
+          )}
+          {supported("shutdown") && (
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Shut this device down? Someone will need to power it on again at the site.",
+                  )
+                ) {
+                  shutdownMutation.mutate();
+                }
+              }}
+            >
+              Shut down
+            </Button>
+          )}
         </div>
       )}
 
-      {canUsers && (
+      {canUsers && (supported("set_password") || supported("add_user")) && (
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={busy} onClick={() => startForm("password")}>
-            Change SSH password
-          </Button>
-          <Button variant="outline" disabled={busy} onClick={() => startForm("add")}>
-            Add SSH user
-          </Button>
+          {supported("set_password") && (
+            <Button variant="outline" disabled={busy} onClick={() => startForm("password")}>
+              Change SSH password
+            </Button>
+          )}
+          {supported("add_user") && (
+            <Button variant="outline" disabled={busy} onClick={() => startForm("add")}>
+              Add SSH user
+            </Button>
+          )}
         </div>
       )}
 

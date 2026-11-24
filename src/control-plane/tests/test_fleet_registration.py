@@ -124,7 +124,12 @@ def test_reregistration_updates_and_rotates_credential(client: TestClient, db_se
     ).json()
     second = client.post(
         "/api/v1/agent/register",
-        json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"], "hostname": "new"},
+        json={
+            "token": token,
+            "device_token": first["device_token"],
+            "mac_addresses": ["aa:bb:cc:dd:ee:01"],
+            "hostname": "new",
+        },
     ).json()
 
     # Same device, rotated credential.
@@ -143,6 +148,138 @@ def test_reregistration_updates_and_rotates_credential(client: TestClient, db_se
         json={},
     )
     assert old_hb.status_code == 401
+
+
+def test_reregistration_without_proof_cannot_take_over_a_device(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers, max_uses=5)
+
+    first = client.post(
+        "/api/v1/agent/register",
+        json={"token": token, "serial_number": "SN-1", "mac_addresses": ["aa:bb:cc:dd:ee:01"]},
+    ).json()
+
+    # Someone else with a token and the (non-secret) MAC or serial.
+    for identity in ({"mac_addresses": ["aa:bb:cc:dd:ee:01"]}, {"serial_number": "SN-1"}):
+        takeover = client.post("/api/v1/agent/register", json={"token": token, **identity})
+        assert takeover.status_code == 409
+        assert takeover.json()["error"]["code"] == "device_already_registered"
+
+    wrong_proof = client.post(
+        "/api/v1/agent/register",
+        json={"token": token, "device_token": "dev_wrong", "mac_addresses": ["aa:bb:cc:dd:ee:01"]},
+    )
+    assert wrong_proof.status_code == 409
+
+    # The real device keeps working.
+    heartbeat = client.post(
+        "/api/v1/agent/heartbeat",
+        headers={"Authorization": f"Bearer {first['device_token']}"},
+        json={},
+    )
+    assert heartbeat.status_code == 200
+
+
+def test_lost_register_response_can_retry_with_previous_device_token(
+    client: TestClient, db_session: Session
+) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers, max_uses=5)
+    body = {"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]}
+
+    first = client.post("/api/v1/agent/register", json=body).json()
+    second = client.post(
+        "/api/v1/agent/register",
+        json={**body, "device_token": first["device_token"]},
+    ).json()
+    # Simulate a lost response: the agent still has the pre-rotation token.
+    retry = client.post(
+        "/api/v1/agent/register",
+        json={**body, "device_token": first["device_token"]},
+    )
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["device_id"] == first["device_id"]
+    assert retry.json()["device_token"] != first["device_token"]
+    assert retry.json()["device_token"] != second["device_token"]
+    assert (
+        client.post(
+            "/api/v1/agent/heartbeat",
+            headers={"Authorization": f"Bearer {retry.json()['device_token']}"},
+            json={},
+        ).status_code
+        == 200
+    )
+
+
+def test_admin_window_allows_reregistration_once(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers, max_uses=5)
+    body = {"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]}
+
+    first = client.post("/api/v1/agent/register", json=body).json()
+    device_id = first["device_id"]
+
+    allowed = client.post(
+        f"/api/v1/organizations/{org.id}/devices/{device_id}/allow-reregistration",
+        headers=headers,
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["reregistration_allowed_until"] is not None
+
+    # Re-flashed card: no device token any more.
+    second = client.post("/api/v1/agent/register", json=body)
+    assert second.status_code == 201, second.text
+    assert second.json()["device_id"] == device_id
+
+    # The window closes after use.
+    device = client.get(f"/api/v1/organizations/{org.id}/devices/{device_id}", headers=headers).json()
+    assert device["reregistration_allowed_until"] is None
+    third = client.post("/api/v1/agent/register", json=body)
+    assert third.status_code == 409
+
+
+def test_reregistration_never_enables_a_disabled_device(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers, max_uses=5)
+    body = {"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]}
+
+    first = client.post("/api/v1/agent/register", json=body).json()
+    device_id = first["device_id"]
+    disabled = client.post(f"/api/v1/organizations/{org.id}/devices/{device_id}/disable", headers=headers)
+    assert disabled.status_code == 200
+    client.post(f"/api/v1/organizations/{org.id}/devices/{device_id}/allow-reregistration", headers=headers)
+
+    again = client.post("/api/v1/agent/register", json={**body, "device_token": first["device_token"]})
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "device_disabled"
+    device = client.get(f"/api/v1/organizations/{org.id}/devices/{device_id}", headers=headers).json()
+    assert device["is_enabled"] is False
+
+
+def test_allow_reregistration_needs_device_update_permission(client: TestClient, db_session: Session) -> None:
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = _create_token(client, org.id, headers)
+    device_id = client.post(
+        "/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]}
+    ).json()["device_id"]
+
+    create_user(db_session, email="outsider@example.com")
+    outsider = auth_header(client, "outsider@example.com")
+    response = client.post(
+        f"/api/v1/organizations/{org.id}/devices/{device_id}/allow-reregistration",
+        headers=outsider,
+    )
+    assert response.status_code in (403, 404)
 
 
 def test_registration_cross_organization_rejected(client: TestClient, db_session: Session) -> None:
@@ -203,6 +340,7 @@ def test_heartbeat_refreshes_serial_cpu_and_local_ip(client: TestClient, db_sess
             "cpu_model": "ARM Cortex-A76",
             "cpu_cores": 4,
             "local_ip": "192.168.1.20",
+            "agent_version": "0.3.4",
             "hardware_model": "Raspberry Pi 5 Model B Rev 1.0",
         },
     )
@@ -213,6 +351,7 @@ def test_heartbeat_refreshes_serial_cpu_and_local_ip(client: TestClient, db_sess
     assert detail["cpu_model"] == "ARM Cortex-A76"
     assert detail["cpu_cores"] == 4
     assert detail["local_ip"] == "192.168.1.20"
+    assert detail["agent_version"] == "0.3.4"
     assert detail["hardware_model"] == "Raspberry Pi 5 Model B Rev 1.0"
 
     # A later heartbeat that omits inventory, or sends a value that is not an IP, keeps what we have.
@@ -226,6 +365,13 @@ def test_heartbeat_refreshes_serial_cpu_and_local_ip(client: TestClient, db_sess
     assert detail["serial_number"] == "10000000abcd1234"
     assert detail["cpu_model"] == "ARM Cortex-A76"
     assert detail["local_ip"] == "192.168.1.20"
+    assert detail["agent_version"] == "0.3.4"
+
+    # A development build names its commit as semver build metadata; text that is no version is ignored.
+    for sent in ("0.0.0-e2e.2+b0c96c9", "latest"):
+        response = client.post("/api/v1/agent/heartbeat", headers=device_headers, json={"agent_version": sent})
+        assert response.status_code == 200, response.text
+        assert client.get(device_url, headers=headers).json()["agent_version"] == "0.0.0-e2e.2+b0c96c9"
 
     # Whitespace is not a serial, and a non-string address is not an IP. Neither clears inventory.
     blank = client.post(

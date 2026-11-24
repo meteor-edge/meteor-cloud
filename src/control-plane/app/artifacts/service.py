@@ -14,7 +14,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, BinaryIO
 
-from jose import JWTError, jwt
+import jwt
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -469,6 +469,27 @@ class ArtifactService:
         artifact = self._require_artifact(organization_id, artifact_id)
         return artifact, self._open(artifact)
 
+    def presigned_download(self, *, organization_id: uuid.UUID, artifact_id: uuid.UUID) -> tuple[Artifact, str | None]:
+        """The artifact and a short-lived storage URL for an already-authorized caller.
+
+        The URL is None when the content has to be streamed (filesystem storage, a
+        bucket devices cannot reach, or signing failed).
+        """
+        artifact = self._require_artifact(organization_id, artifact_id)
+        presign = getattr(self.storage, "presigned_get_url", None)
+        if presign is None:
+            return artifact, None
+        try:
+            url = presign(
+                artifact.storage_key,
+                expires_in=self.settings.artifact_download_url_ttl_seconds,
+                file_name=artifact.file_name,
+            )
+        except Exception:
+            logger.exception("Could not presign an artifact download; streaming it instead")
+            return artifact, None
+        return artifact, url
+
     def create_download_link(
         self, *, actor: User, organization_id: uuid.UUID, artifact_id: uuid.UUID
     ) -> ArtifactDownloadLinkResponse:
@@ -524,7 +545,7 @@ class ArtifactService:
         try:
             claims = jwt.decode(ticket, self.settings.jwt_secret_key, algorithms=[self.settings.jwt_algorithm])
             user_id = uuid.UUID(str(claims["uid"]))
-        except (JWTError, KeyError, ValueError) as exc:
+        except (jwt.PyJWTError, KeyError, ValueError) as exc:
             raise invalid from exc
         if (
             claims.get("typ") != DOWNLOAD_TICKET_TYPE

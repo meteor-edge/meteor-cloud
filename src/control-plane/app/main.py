@@ -29,6 +29,7 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.metrics import BUILD_INFO, MetricsMiddleware, configure_metrics, metrics_enabled, metrics_response
 from app.core.request_id import RequestIdMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.deployments.router import router as deployments_router
 from app.deployments.sweeper import run_sweeper
 from app.device_actions.router import router as device_actions_router
@@ -37,14 +38,18 @@ from app.devices.fleet_metrics import register_fleet_metrics
 from app.devices.router import router as fleet_router
 from app.endpoints.router import router as endpoints_router
 from app.endpoints.routing import router as routing_internal_router
+from app.history import recorder as history_recorder
+from app.history.relay import run_relay
 from app.identity.router import router as identity_router
 from app.mqtt.internal_router import router as mqtt_internal_router
 from app.mqtt.runtime import start_mqtt_runtime, stop_mqtt_runtime
+from app.mqtt.vernemq_router import router as mqtt_vernemq_router
 from app.network.router import router as network_router
 from app.releases.router import router as releases_router
 from app.rules.internal_router import router as rules_internal_router
 from app.rules.router import router as rules_router
 from app.shell.router import router as shell_router
+from app.signing.router import router as signing_router
 from app.tenancy.router import router as organizations_router
 
 logger = logging.getLogger(__name__)
@@ -59,11 +64,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     sweeper: asyncio.Task[None] | None = None
     if settings.deploy_tick_interval_seconds > 0 and settings.deployment_provider == "native":
         sweeper = asyncio.create_task(run_sweeper(settings.deploy_tick_interval_seconds))
+    relay: asyncio.Task[None] | None = None
+    if history_recorder.history_enabled():
+        relay = asyncio.create_task(run_relay(settings.history_relay_interval_seconds))
     yield
-    if sweeper is not None:
-        sweeper.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await sweeper
+    for task in (sweeper, relay):
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
     stop_mqtt_runtime()
     logger.info("Shutting down %s", settings.app_name)
 
@@ -74,6 +83,7 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level, settings.log_format)
 
     configure_metrics(metrics_backend(settings))
+    history_recorder.install()
 
     application = FastAPI(
         title=settings.app_name,
@@ -88,6 +98,7 @@ def create_app() -> FastAPI:
     if settings.access_log_enabled:
         application.add_middleware(AccessLogMiddleware)
     application.add_middleware(RequestIdMiddleware)
+    application.add_middleware(SecurityHeadersMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -117,8 +128,10 @@ def create_app() -> FastAPI:
     application.include_router(network_router)
     application.include_router(device_actions_router)
     application.include_router(audit_router)
+    application.include_router(signing_router)
     application.include_router(agent_router)
     application.include_router(mqtt_internal_router)
+    application.include_router(mqtt_vernemq_router)
     application.include_router(connectivity_internal_router)
     application.include_router(routing_internal_router)
     if metrics_enabled():

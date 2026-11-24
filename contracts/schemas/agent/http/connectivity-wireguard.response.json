@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/connectivity/wireguard (200)",
+  "description": "Tunnel settings. Error codes connectivity_disabled and connectivity_revoked mean: stop the tunnel and stop asking until the next refresh.",
+  "type": "object",
+  "required": [
+    "status",
+    "provider",
+    "wg_address",
+    "server_public_key",
+    "server_endpoint",
+    "allowed_ips",
+    "persistent_keepalive",
+    "ssh_user"
+  ],
+  "properties": {
+    "status": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "wg_address": {
+      "type": "string"
+    },
+    "server_public_key": {
+      "type": "string"
+    },
+    "server_endpoint": {
+      "type": "string"
+    },
+    "allowed_ips": {
+      "type": "string"
+    },
+    "persistent_keepalive": {
+      "type": "integer"
+    },
+    "ssh_user": {
+      "type": "string"
+    },
+    "ssh_gateway_public_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ssh_gateway_key_retired": {
+      "type": "boolean",
+      "default": false
+    },
+    "ssh_ca_public_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ssh_principal": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

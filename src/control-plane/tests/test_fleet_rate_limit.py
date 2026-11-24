@@ -26,9 +26,10 @@ def test_registration_is_rate_limited(client: TestClient, db_session: Session) -
     limiter = InMemoryRateLimiter(limit=2, window_seconds=10**10)
     client.app.dependency_overrides[get_rate_limiter] = lambda: limiter
 
+    # Distinct hardware each time: re-registering a known device needs its device token.
     first = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]})
-    second = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]})
-    third = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:01"]})
+    second = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:02"]})
+    third = client.post("/api/v1/agent/register", json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:03"]})
 
     assert first.status_code == 201
     assert second.status_code == 201
@@ -44,3 +45,18 @@ def test_in_memory_limiter_allows_within_limit() -> None:
     assert limiter.allow("1.2.3.4") is False
     # Different identifiers are tracked independently.
     assert limiter.allow("5.6.7.8") is True
+
+
+def test_registration_allows_when_redis_counters_fail(monkeypatch) -> None:
+    from unittest.mock import Mock
+
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from app.adapters import rate_limiter
+    from app.core.config import Settings
+
+    redis_client = Mock()
+    redis_client.incr.side_effect = RedisConnectionError("unavailable")
+    monkeypatch.setattr("redis.Redis.from_url", lambda *_: redis_client)
+    limiter = rate_limiter(Settings(CACHE_PROVIDER="redis"), limit=2, window_seconds=60, prefix="reg_rl")
+    assert limiter.allow("1.2.3.4") is True

@@ -18,10 +18,11 @@ prepares the server and runs those same files; it does not keep its own copy.
 | `redis` | profile `redis` | Only with `CACHE_PROVIDER=redis` |
 | `minio` | profile `minio` | Only with `OBJECT_STORAGE_PROVIDER=s3` and no other S3 service |
 | `data-plane` | profile `mqtt` | Needed whenever `MQTT_ENABLED=true` |
-| `emqx` | profile `emqx` | Bundled broker on 8883 (TLS), image `emqx/emqx:5.8.6`; omit to use an external EMQX. Licensing: [MQTT](fleet/mqtt.md#emqx-version-and-licensing) |
+| `data-api` | profile `data-api` | Application data API for the SDK (`/v1`). Ansible: `data_api_enabled: true` |
+| `mosquitto` | profile `mosquitto` | Bundled broker on 8883 (TLS), default. Use profile `emqx` or `vernemq` instead for that broker, or omit all three for an external one. [MQTT brokers](fleet/mqtt-brokers.md) |
 | Prometheus, node-exporter, Loki, Alloy, Alertmanager, Grafana | `docker-compose.observability.yml`, profiles `metrics`, `logs`, `alerting`, `dashboards` | Each optional, bound to 127.0.0.1; see [Observability](observability.md) |
 
-`/internal/*` (broker callbacks) and `/metrics` are never routed by Traefik.
+`/internal/*` (broker callbacks), data-api ops (`:8092`), and `/metrics` are never routed by Traefik. PathPrefix `/v1` reaches the data API when the `data-api` profile is on.
 
 ## Configuration
 
@@ -131,10 +132,9 @@ the smoke test, and removes it again.
 
 ## Backups
 
-Back up PostgreSQL and the artifact store. Nothing else holds state:
-
-```bash
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > postgres.dump
-```
-
-Artifact files live in `/opt/edge-platform/data/artifacts` or your bucket.
+Installs from `make up` / Ansible back up PostgreSQL, ClickHouse and artifacts every
+night into `/opt/edge-platform/backups` (7 days kept, optional copy to S3). Run one now
+with `sudo systemctl start meteorcloud-backup`; restore with
+`sudo meteorcloud-restore --yes /opt/edge-platform/backups/<timestamp>` after loading
+the settings from `/opt/edge-platform/backup.env`. Details, settings and the Kubernetes
+CronJob: [Backups and restore](backups.md).

@@ -73,6 +73,8 @@ class ApplicationCredential(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     token_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When the secret was last replaced by hand; the lifetime is counted from here.
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Set when the device agent minted this credential for a deployed workload.
     workload_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(

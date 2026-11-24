@@ -1,6 +1,7 @@
 package envelope
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -83,5 +84,87 @@ func TestOldButAcceptableTimestampKept(t *testing.T) {
 	}
 	if !ev.Time.Equal(ts) || !ev.ReceivedAt.After(ev.Time) {
 		t.Fatal("source time must be preserved and received_at set by the server")
+	}
+}
+
+func TestUnstorableEscapes(t *testing.T) {
+	cases := map[string]bool{
+		`{"v":"a\u0000b"}`:         true,
+		`{"v":"a\\u0000b"}`:        false, // an escaped backslash, not a NUL
+		`{"v":"\ud800"}`:           true,  // high surrogate alone
+		`{"v":"\udc00"}`:           true,  // low surrogate alone
+		`{"v":"😀"}`:                false, // a pair
+		`{"v":"\ud83dx"}`:          true,
+		`{"v":"\ud83d\\ude00"}`:    true,
+		`{"v":"é \\ud800"}`:        false,
+		`{"v":"plain \"quoted\""}`: false,
+	}
+	for in, want := range cases {
+		if got := hasUnstorableEscape([]byte(in)); got != want {
+			t.Errorf("%s: got %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestNormalizeAcceptsEnergyConsumption(t *testing.T) {
+	now := time.Now().UTC()
+	msg := Message{
+		Stream: "energy.metrics",
+		Kind:   KindTelemetry,
+		Data: json.RawMessage(`{
+			"power": 1234.5,
+			"voltage": 230,
+			"energy_kwh": 12.25,
+			"phases": {"l1": 410.1, "l2": 405.0, "l3": 419.4},
+			"meter_id": "m-42"
+		}`),
+	}
+	ev, rej := Normalize(&msg, ident(), now, DefaultLimits())
+	if rej != nil {
+		t.Fatal(rej)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(ev.Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["power"].(float64) != 1234.5 || got["energy_kwh"].(float64) != 12.25 {
+		t.Fatalf("energy fields lost: %s", ev.Data)
+	}
+	// Canonical form is compact single-line JSON safe for ClickHouse String.
+	if bytes.Contains(ev.Data, []byte{'\n'}) || ev.Data[0] != '{' {
+		t.Fatalf("data not canonical: %q", ev.Data)
+	}
+}
+
+func TestCanonicalDataRejectsUnstorableAndNonObjects(t *testing.T) {
+	cases := []struct {
+		name, data, code string
+	}{
+		{"array", `[1,2]`, CodeInvalidPayload},
+		{"string", `"x"`, CodeInvalidPayload},
+		{"nul", `{"v":"a\u0000b"}`, CodeInvalidPayload},
+		{"trailing", `{"a":1}{"b":2}`, CodeInvalidPayload},
+		{"broken", `{"a":`, CodeInvalidPayload},
+	}
+	for _, c := range cases {
+		_, rej := CanonicalData([]byte(c.data), DefaultLimits().MaxPayloadBytes)
+		if rej == nil || rej.Code != c.code {
+			t.Errorf("%s: want %s, got %v", c.name, c.code, rej)
+		}
+	}
+}
+
+func TestNormalizeRejectsUnstorableWithoutFailingSiblingSemantics(t *testing.T) {
+	// One bad message is rejected; a good energy reading in the same conceptual
+	// batch is accepted (HTTP handler loops Normalize per message).
+	now := time.Now()
+	bad := Message{Stream: "energy.metrics", Data: json.RawMessage(`{"note":"a\u0000b"}`)}
+	good := Message{Stream: "energy.metrics", Data: json.RawMessage(`{"power":100,"energy_kwh":0.5}`)}
+	if _, rej := Normalize(&bad, ident(), now, DefaultLimits()); rej == nil || rej.Code != CodeInvalidPayload {
+		t.Fatalf("bad: %v", rej)
+	}
+	ev, rej := Normalize(&good, ident(), now, DefaultLimits())
+	if rej != nil || ev == nil {
+		t.Fatalf("good: %v", rej)
 	}
 }
