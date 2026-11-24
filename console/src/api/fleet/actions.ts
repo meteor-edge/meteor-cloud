@@ -7,7 +7,11 @@ export type DeviceActionKind =
   | "add_user"
   | "update_agent"
   | "restart_module"
-  | "run_diagnostics";
+  | "run_diagnostics"
+  | "workload_restart"
+  | "workload_stop"
+  | "workload_start"
+  | "workload_snapshot";
 export type DeviceActionState = "pending" | "sent" | "done" | "failed";
 
 export type DeviceAction = {

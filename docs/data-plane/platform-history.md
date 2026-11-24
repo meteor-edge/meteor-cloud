@@ -6,6 +6,7 @@ Besides the CPU, memory and disk charts ([device telemetry](device-telemetry.md)
 | --- | --- | --- | --- |
 | Online/offline changes | `meteor.device.status` | agent (online on connect) and the broker (last will: offline) | Device page, Overview tab: availability strip with uptime % and how often it went offline |
 | Devices online over time | `meteor.device.metrics` (distinct devices per bucket) | agent, every 60 s | Organization overview: **Devices online** |
+| Workload health changes | `meteor.software` | control plane (outbox) | Software page, **Health** tab |
 | Deployment status changes | `meteor.deployments` | control plane (outbox) | Device page, Software tab: **Deployment history** |
 | App lifecycle (started, exited with exit code, OOM kill, restarted, crash loop, health check failing/healthy, removed) | `meteor.device.events` (`app.*` types) | agent | Device page, Overview tab: **Apps** (recent changes) |
 | Per-app CPU, memory, restarts, health and health-check latency | `meteor.device.metrics` (`app.<name>.cpu`, `.mem`, `.restarts`, `.up`, `.healthy`, `.health_ms`) | agent | **Apps** table (latest values); full history in `device_metrics` |
@@ -53,7 +54,7 @@ GET /internal/v1/organizations/{org}/devices/online?start=&end=&bucket=5m
 -> {"organization_id": "...", "start": "...", "end": "...", "bucket_seconds": 300, "buckets": [{"t": "...", "devices": 12}]}
 ```
 
-Only `meteor.deployments` can be written; any `meteor.*` stream can be read. `q` matches the `message` field, ignoring case. `previous=1` also returns the last event before `start` (the state the availability strip starts in).
+Only `meteor.deployments` and `meteor.software` can be written; any `meteor.*` stream can be read. `q` matches the `message` field, ignoring case. `previous=1` also returns the last event before `start` (the state the availability strip starts in).
 
 Console-facing (control plane, `/api/v1/organizations/{org}`):
 

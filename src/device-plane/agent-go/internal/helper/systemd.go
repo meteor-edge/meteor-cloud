@@ -86,6 +86,9 @@ func (h Host) installUnit(ctx context.Context, _ localrpc.Peer, raw json.RawMess
 	if err := config.WriteFileAtomic(dest, bytes.Clone([]byte(req.Content)), 0o644); err != nil {
 		return nil, err
 	}
+	if err := h.recordUnit(req.Name); err != nil {
+		return nil, err
+	}
 	steps := [][]string{{"daemon-reload"}, {"enable", "--", req.Name}}
 	if !req.NoStart {
 		steps = append(steps, []string{"restart", "--", req.Name})
@@ -153,6 +156,9 @@ func (h Host) systemdControl(ctx context.Context, _ localrpc.Peer, raw json.RawM
 			if err := os.Remove(dest); err != nil {
 				return nil, err
 			}
+		}
+		if err := h.forgetUnit(req.Unit); err != nil {
+			return nil, err
 		}
 		_, err := h.Run(ctx, "systemctl", "daemon-reload")
 		return SystemdControlReply{}, err

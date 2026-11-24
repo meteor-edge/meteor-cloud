@@ -35,13 +35,21 @@ const KIND_LABEL: Record<DeviceAction["kind"], string> = {
   update_agent: "Agent update",
   restart_module: "Restart module",
   run_diagnostics: "Diagnostics",
+  workload_restart: "Restart software",
+  workload_stop: "Stop software",
+  workload_start: "Start software",
+  workload_snapshot: "Refresh software",
 };
 
-// Shown by their own panels (agent update, agent modules).
+// Shown by their own panels (agent update, agent modules, software).
 const OTHER_PANELS = new Set<DeviceAction["kind"]>([
   "update_agent",
   "restart_module",
   "run_diagnostics",
+  "workload_restart",
+  "workload_stop",
+  "workload_start",
+  "workload_snapshot",
 ]);
 
 function note(action: DeviceAction): { text: string; tone: string } {

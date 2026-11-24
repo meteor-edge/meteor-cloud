@@ -111,7 +111,11 @@
               "add_user",
               "update_agent",
               "restart_module",
-              "run_diagnostics"
+              "run_diagnostics",
+              "workload_restart",
+              "workload_stop",
+              "workload_start",
+              "workload_snapshot"
             ],
             "deploy_kinds": [
               "systemd",
@@ -165,6 +169,11 @@
                 "since": "<timestamp>"
               },
               "wireguard": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "workloads": {
                 "state": "running",
                 "restarts": 0,
                 "since": "<timestamp>"
@@ -200,28 +209,6 @@
     },
     {
       "request": {
-        "method": "GET",
-        "path": "/api/v1/agent/software",
-        "headers": {
-          "authorization": "Bearer <device_token>",
-          "user-agent": "meteorcli/<version>",
-          "x-meteor-agent-protocol": "1"
-        },
-        "body": null
-      },
-      "response": {
-        "status": 404,
-        "headers": {},
-        "body": {
-          "error": {
-            "code": "not_found",
-            "message": "GET /api/v1/agent/software is not scripted"
-          }
-        }
-      }
-    },
-    {
-      "request": {
         "method": "POST",
         "path": "/api/v1/agent/connectivity/wireguard",
         "headers": {
@@ -242,6 +229,28 @@
           "error": {
             "code": "not_found",
             "message": "POST /api/v1/agent/connectivity/wireguard is not scripted"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/agent/software",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 404,
+        "headers": {},
+        "body": {
+          "error": {
+            "code": "not_found",
+            "message": "GET /api/v1/agent/software is not scripted"
           }
         }
       }
@@ -271,7 +280,11 @@
               "add_user",
               "update_agent",
               "restart_module",
-              "run_diagnostics"
+              "run_diagnostics",
+              "workload_restart",
+              "workload_stop",
+              "workload_start",
+              "workload_snapshot"
             ],
             "deploy_kinds": [
               "systemd",
@@ -325,6 +338,11 @@
                 "since": "<timestamp>"
               },
               "wireguard": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "workloads": {
                 "state": "running",
                 "restarts": 0,
                 "since": "<timestamp>"

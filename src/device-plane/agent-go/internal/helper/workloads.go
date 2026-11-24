@@ -68,6 +68,9 @@ type DockerRunRequest struct {
 	// PullNever runs only an image already on the device (one loaded from a
 	// verified artifact): docker run never pulls it from a registry.
 	PullNever bool `json:"pull_never,omitempty"`
+	// Workload and Release become labels: workload.* finds the container by them.
+	Workload string `json:"workload,omitempty"`
+	Release  string `json:"release,omitempty"`
 }
 
 func (r *DockerRunRequest) validate(h Host) error {
@@ -78,6 +81,8 @@ func (r *DockerRunRequest) validate(h Host) error {
 		return badRequest("%q is not an image reference", r.Image)
 	case r.Restart != "" && !restartRe.MatchString(r.Restart):
 		return badRequest("%q is not a restart policy", r.Restart)
+	case r.Workload != "" && !labelRe.MatchString(r.Workload), r.Release != "" && !labelRe.MatchString(r.Release):
+		return badRequest("%q, %q are not workload and release labels", r.Workload, r.Release)
 	case len(r.Ports) > maxPorts || len(r.Env) > maxEnv || len(r.Command) > maxCommand:
 		return badRequest("too many ports, env entries or command arguments")
 	}
@@ -171,6 +176,12 @@ func (h Host) dockerRunContainer(ctx context.Context, _ localrpc.Peer, raw json.
 	args := []string{"run", "-d", "--name", r.Name}
 	if r.PullNever {
 		args = append(args, "--pull", "never")
+	}
+	if r.Workload != "" {
+		args = append(args, "--label", LabelWorkload+"="+r.Workload)
+	}
+	if r.Release != "" {
+		args = append(args, "--label", LabelRelease+"="+r.Release)
 	}
 	if r.Restart != "" {
 		args = append(args, "--restart", r.Restart)

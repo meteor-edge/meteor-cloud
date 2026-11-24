@@ -92,7 +92,7 @@ def test_deployment_status_changes_are_written_to_the_outbox(
     client: TestClient, db_session: Session, history_on: None
 ) -> None:
     org, _, reg, release, deployment = _deploy_and_succeed(client, db_session)
-    rows = _outbox(db_session)
+    rows = [row for row in _outbox(db_session) if row.stream == "meteor.deployments"]
     statuses = [row.data["status"] for row in rows]
     assert statuses[0] == "pending" and statuses[-1] == "succeeded", statuses
     last = rows[-1]

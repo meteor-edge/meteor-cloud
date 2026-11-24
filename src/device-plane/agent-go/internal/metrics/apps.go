@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -33,16 +34,20 @@ type appState struct {
 	startedAt string
 	health    string
 	healthMS  *float64
+	// workload is the MeteorCloud workload the container belongs to, "" for none.
+	workload string
 }
 
 // apps watches the Docker containers once per metrics interval and reports what
 // changed since the last look. The first look sets the baseline (no events).
 type apps struct {
-	helper   caller
-	now      func() time.Time
-	previous map[string]appState
-	restarts map[string][]time.Time // restart times in the crash-loop window
-	looping  map[string]bool
+	helper caller
+	// composeDir tells MeteorCloud's compose projects from others.
+	composeDir string
+	now        func() time.Time
+	previous   map[string]appState
+	restarts   map[string][]time.Time // restart times in the crash-loop window
+	looping    map[string]bool
 }
 
 func newApps(h caller) *apps {
@@ -113,7 +118,7 @@ func (a *apps) states(ctx context.Context) (map[string]appState, bool) {
 		return nil, false
 	}
 	for _, line := range strings.Split(out.Output, "\n") {
-		if s, ok := parseInspect(line); ok {
+		if s, ok := parseInspect(line, a.composeDir); ok {
 			states[s.name] = s
 		}
 	}
@@ -136,6 +141,13 @@ func (a *apps) changes(before, now map[string]appState) []map[string]any {
 		e := map[string]any{"type": kind, "app": app}
 		for i := 0; i+1 < len(kv); i += 2 {
 			e[kv[i].(string)] = kv[i+1]
+		}
+		s, ok := now[app]
+		if !ok {
+			s = before[app]
+		}
+		if s.workload != "" {
+			e["workload_key"] = s.workload
 		}
 		events = append(events, e)
 	}
@@ -194,8 +206,14 @@ func (a *apps) changes(before, now map[string]appState) []map[string]any {
 	return events
 }
 
-// parseInspect reads one line of helper.InspectTemplate.
-func parseInspect(line string) (appState, bool) {
+// AppName is how a container is called in metric keys (app.<name>.<field>).
+func AppName(container string) string { return metricName(container) }
+
+// parseInspect reads one line of helper.InspectTemplate. composeDir is where
+// the deploy module keeps its compose projects.
+func parseInspect(line, composeDir string) (appState, bool) {
+	fields := append(strings.Split(strings.Trim(line, " \r\n"), "\t"), "", "", "")
+	line = fields[0]
 	parts := strings.Split(strings.TrimSpace(line), "|")
 	if len(parts) < 7 {
 		return appState{}, false
@@ -212,6 +230,10 @@ func parseInspect(line string) (appState, bool) {
 	}
 	if n, err := strconv.Atoi(parts[3]); err == nil {
 		s.exitCode = &n
+	}
+	s.workload = fields[1]
+	if s.workload == "" && fields[2] != "" && composeDir != "" && filepath.Dir(fields[3]) == composeDir {
+		s.workload = fields[2]
 	}
 	s.restarts, _ = strconv.Atoi(parts[5])
 	if len(parts) >= 8 && parts[7] != "" {

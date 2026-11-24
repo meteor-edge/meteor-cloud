@@ -198,7 +198,11 @@
         "add_user",
         "update_agent",
         "restart_module",
-        "run_diagnostics"
+        "run_diagnostics",
+        "workload_restart",
+        "workload_stop",
+        "workload_start",
+        "workload_snapshot"
       ],
       "description": "One-off action kinds the server hands out today. A new kind is an additive change; an agent that does not know it reports the action failed with an error that starts with 'Unsupported'."
     },
@@ -335,6 +339,11 @@
             "null"
           ],
           "maxLength": 2000
+        },
+        "stopped_by_user": {
+          "type": "boolean",
+          "default": false,
+          "description": "The user stopped the workload, or a service of it, from the console; health is then unknown. Added in v1 (additive)."
         }
       }
     },

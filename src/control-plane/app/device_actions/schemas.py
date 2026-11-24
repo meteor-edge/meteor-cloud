@@ -102,6 +102,42 @@ class RestartModuleRequest(BaseModel):
         return value
 
 
+# Compose service names.
+_SERVICE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+class SoftwareActionRequest(BaseModel):
+    """Restart, stop or start a deployed workload, or ask the device to look at it again."""
+
+    kind: Literal["workload_restart", "workload_stop", "workload_start", "workload_snapshot"]
+    service: str | None = Field(default=None, description="One service of a compose workload; all of it when empty")
+
+    @field_validator("service")
+    @classmethod
+    def _valid_service(cls, value: str | None) -> str | None:
+        value = (value or "").strip()
+        if not value:
+            return None
+        if not _SERVICE.match(value):
+            raise ValueError("The service must be a compose service name")
+        return value
+
+
+class SoftwareActionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: str
+    state: str
+    service: str | None
+    last_error: str | None
+    # Who ordered it; only for callers who may see members.
+    requested_by: str | None = None
+    created_at: datetime
+    sent_at: datetime | None
+    reported_at: datetime | None
+
+
 class DeviceActionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -128,7 +164,19 @@ class DeviceActionsResponse(BaseModel):
 # ------------------------------------------------------------------ agent side
 class AgentDeviceAction(BaseModel):
     id: uuid.UUID
-    kind: Literal["reboot", "shutdown", "set_password", "add_user", "update_agent", "restart_module", "run_diagnostics"]
+    kind: Literal[
+        "reboot",
+        "shutdown",
+        "set_password",
+        "add_user",
+        "update_agent",
+        "restart_module",
+        "run_diagnostics",
+        "workload_restart",
+        "workload_stop",
+        "workload_start",
+        "workload_snapshot",
+    ]
     username: str | None = None
     password: str | None = None
     sudo: bool = False
@@ -137,6 +185,9 @@ class AgentDeviceAction(BaseModel):
     from_version: str | None = None
     # restart_module: which module.
     module: str | None = None
+    # workload_*: which workload, and which compose service of it (None: all).
+    workload_key: str | None = None
+    service: str | None = None
 
 
 class AgentDeviceActionsResponse(BaseModel):

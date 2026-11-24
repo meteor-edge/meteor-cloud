@@ -18,6 +18,8 @@ from app.device_actions.schemas import (
     DeviceActionsResponse,
     RestartModuleRequest,
     SetPasswordRequest,
+    SoftwareActionRequest,
+    SoftwareActionResponse,
 )
 from app.device_actions.service import DeviceActionService
 from app.devices.dependencies import CurrentDevice
@@ -115,6 +117,42 @@ def add_device_user(
 ) -> DeviceActionsResponse:
     """Add a user who can log in over SSH."""
     return service.add_user(actor=current_user, organization_id=organization_id, device_id=device_id, payload=payload)
+
+
+_SOFTWARE = "/api/v1/organizations/{organization_id}/devices/{device_id}/software/{software_id}/actions"
+
+
+@router.get(_SOFTWARE, response_model=list[SoftwareActionResponse])
+def list_software_actions(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    software_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: ActionSvc,
+) -> list[SoftwareActionResponse]:
+    """Recent restart, stop, start and refresh actions on one deployed workload."""
+    return service.list_software_actions(
+        actor=current_user, organization_id=organization_id, device_id=device_id, software_id=software_id
+    )
+
+
+@router.post(_SOFTWARE, response_model=SoftwareActionResponse)
+def order_software_action(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    software_id: uuid.UUID,
+    payload: SoftwareActionRequest,
+    current_user: CurrentUser,
+    service: ActionSvc,
+) -> SoftwareActionResponse:
+    """Restart, stop or start a deployed workload, or ask the device to look at it again."""
+    return service.order_software_action(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+        software_id=software_id,
+        payload=payload,
+    )
 
 
 @router.get("/api/v1/agent/actions", response_model=AgentDeviceActionsResponse)

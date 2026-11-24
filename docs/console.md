@@ -36,4 +36,5 @@ If you add a third-party script or font to the console, extend the CSP in `nginx
 
 - **Public app addresses** — on a device's page, under its public URLs; a deployed app's address also appears as a link in the device's software list once it is ready. Addresses are suggested (`app.device.org.<domain>`) or a custom `name.<org>.<domain>`, checked for availability as you type. Create from a device page or optionally when deploying to a single device. See [Endpoints](fleet/endpoints.md).
 - **Device → Terminal** — browser SSH over WireGuard (`device.shell`). See [Connectivity](fleet/connectivity.md).
+- **Device → Software → a workload** — what runs, health history, its logs, and restart, stop and start (`software.manage`). See [Software on a device](fleet/software.md).
 - **Device → Logs** — follow and search systemd, Docker, nginx and journal logs over WireGuard (`device.logs`). See [Device logs](fleet/logs.md).

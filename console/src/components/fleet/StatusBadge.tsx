@@ -60,6 +60,15 @@ const HEALTH_LABELS: Record<string, string> = {
   stale: "Stale",
 };
 
+/** A user stopped the workload, or only ``services`` of it, from the console. */
+export function StoppedBadge({ services = [] }: { services?: string[] }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-horizon px-2.5 py-0.5 text-xs font-medium text-star-dust">
+      {services.length > 0 ? `Stopped by user: ${services.join(", ")}` : "Stopped by user"}
+    </span>
+  );
+}
+
 /** Runtime health of a workload. ``stale``: the device is offline, so the last report may be old. */
 export function HealthBadge({ status, stale = false }: { status: string | null; stale?: boolean }) {
   const key = stale ? "stale" : (status ?? "unknown");

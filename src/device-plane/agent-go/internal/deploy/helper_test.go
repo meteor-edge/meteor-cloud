@@ -139,6 +139,12 @@ func (f *fakeHost) Call(ctx context.Context, op string, params, out any) error {
 		_ = json.Unmarshal(raw, &r)
 		_, ok := f.units[r.Unit]
 		result = helper.SystemdControlReply{Active: ok && !f.broken[r.Unit]}
+	case "workload.inspect":
+		var r helper.WorkloadRequest
+		_ = json.Unmarshal(raw, &r)
+		image, ok := f.containers[r.Name]
+		result = helper.WorkloadState{Managed: ok, Containers: []helper.WorkloadContainer{{Name: r.Name, Running: ok && !f.broken[image]}}}
+	case "workload.control":
 	default:
 		return fmt.Errorf("unexpected helper op %s", op)
 	}

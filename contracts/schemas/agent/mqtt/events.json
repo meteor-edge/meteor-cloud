@@ -17,6 +17,10 @@
     },
     "app": {
       "type": "string"
+    },
+    "workload_key": {
+      "type": "string",
+      "description": "app.*: the MeteorCloud workload the container belongs to; absent for other containers. Added in v1 (additive)."
     }
   },
   "allOf": [

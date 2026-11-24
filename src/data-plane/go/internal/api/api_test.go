@@ -984,6 +984,12 @@ func TestInternalPlatformEvents(t *testing.T) {
 		}
 	}
 
+	health := ev("h1", dev1, "software.health.changed", now.Add(-time.Minute), `{"workload_key":"web","from":"healthy","to":"unhealthy"}`)
+	health["stream"] = "meteor.software"
+	if code, body := e.internal("POST", "/internal/v1/events", internalTok, map[string]any{"events": []any{health}}); code != 200 || body["inserted"] != float64(1) {
+		t.Fatalf("workload health: %d %v", code, body)
+	}
+
 	q := "/internal/v1/organizations/" + orgA + "/events?stream=meteor.deployments"
 	_, body = e.internal("GET", q+"&device_id="+dev1+"&order=desc", internalTok, nil)
 	if evs := body["events"].([]any); len(evs) != 2 || evs[0].(map[string]any)["type"] != "deployment.device.succeeded" {

@@ -93,14 +93,14 @@ func TestCrashLoopReportedOnceUntilCalm(t *testing.T) {
 }
 
 func TestParsers(t *testing.T) {
-	s, ok := parseInspect("/web|running|true|0|false|2|2026-01-01T00:00:00Z|healthy|1000000,3500000;5000000,7500000;")
+	s, ok := parseInspect("/web|running|true|0|false|2|2026-01-01T00:00:00Z|healthy|1000000,3500000;5000000,7500000;", "")
 	if !ok || s.name != "web" || !s.running || s.restarts != 2 || s.health != "healthy" || *s.healthMS != 2.5 || *s.exitCode != 0 {
 		t.Errorf("inspect = %+v", s)
 	}
-	if s, _ := parseInspect("/r|restarting|true|1|false|5|t|"); s.running {
+	if s, _ := parseInspect("/r|restarting|true|1|false|5|t|", ""); s.running {
 		t.Error("a restarting container is not running")
 	}
-	if _, ok := parseInspect("short|line"); ok {
+	if _, ok := parseInspect("short|line", ""); ok {
 		t.Error("short line parsed")
 	}
 	st := parseStats("web|12.345%|45.5MiB / 1.9GiB\nbad\ndb|--|1kB / 2kB\n")
@@ -116,5 +116,26 @@ func TestParsers(t *testing.T) {
 	}
 	if metricName("short") != "short" {
 		t.Error("short names stay as they are")
+	}
+}
+
+func TestWorkloadOfAContainer(t *testing.T) {
+	base := "/web|running|true|0|false|2|t|"
+	for line, want := range map[string]string{
+		base + "\t\t\t":                        "",
+		base + "\tweb\t\t":                     "web",
+		base + "\t\tshop\t/var/compose/shop":   "shop",
+		base + "\t\tshop\t/home/pi/shop":       "", // a project the customer runs
+		base + "\t\tshop\t/var/compose/a/shop": "",
+	} {
+		s, ok := parseInspect(line, "/var/compose")
+		if !ok || s.workload != want {
+			t.Errorf("%q: workload %q, want %q", line, s.workload, want)
+		}
+	}
+	a := newApps(nil)
+	events := a.changes(map[string]appState{"web": {name: "web", running: true, workload: "shop"}}, map[string]appState{})
+	if len(events) != 1 || events[0]["workload_key"] != "shop" {
+		t.Errorf("events %v", events)
 	}
 }

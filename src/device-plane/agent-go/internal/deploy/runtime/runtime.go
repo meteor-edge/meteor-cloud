@@ -50,6 +50,8 @@ type Workload struct {
 	Key string
 	// Kind is the deploy kind.
 	Kind string
+	// Release is the release id (a container label).
+	Release string
 	// Spec is the release's kind-specific settings.
 	Spec Spec
 	// Artifact is the downloaded artifact's path, "" when the release has none.

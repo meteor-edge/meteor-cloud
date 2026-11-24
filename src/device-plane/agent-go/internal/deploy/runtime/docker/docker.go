@@ -64,6 +64,12 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 		Env:     runtime.BoundEnv(w.Spec.Env("env"), w.App),
 		Restart: restart(w.Spec),
 	}
+	if helper.ValidLabel(w.Key) {
+		req.Workload = w.Key
+		if helper.ValidLabel(w.Release) {
+			req.Release = w.Release
+		}
+	}
 	if w.App != nil {
 		req.TokenFile = w.App.TokenFile
 	}

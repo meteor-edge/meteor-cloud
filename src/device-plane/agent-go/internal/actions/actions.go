@@ -111,7 +111,7 @@ func (r *runner) now() time.Time {
 
 func (r *runner) env() env {
 	return env{
-		helper: r.helper, state: r.d.State, version: r.d.Version, now: r.now,
+		d: r.d, helper: r.helper, state: r.d.State, version: r.d.Version, now: r.now,
 		restart: func(name string) error {
 			if _, ok := r.d.Health.Get(name); !ok {
 				return fmt.Errorf("restart_module: this agent has no module %q", name)

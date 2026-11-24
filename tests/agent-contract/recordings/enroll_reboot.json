@@ -137,7 +137,11 @@
               "add_user",
               "update_agent",
               "restart_module",
-              "run_diagnostics"
+              "run_diagnostics",
+              "workload_restart",
+              "workload_stop",
+              "workload_start",
+              "workload_snapshot"
             ],
             "deploy_kinds": [
               "systemd",
@@ -191,6 +195,11 @@
                 "since": "<timestamp>"
               },
               "wireguard": {
+                "state": "running",
+                "restarts": 0,
+                "since": "<timestamp>"
+              },
+              "workloads": {
                 "state": "running",
                 "restarts": 0,
                 "since": "<timestamp>"

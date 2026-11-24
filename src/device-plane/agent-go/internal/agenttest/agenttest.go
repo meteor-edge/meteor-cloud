@@ -25,6 +25,7 @@ import (
 	"meteorcloud/meteorcli/internal/identity"
 	"meteorcloud/meteorcli/internal/platform"
 	"meteorcloud/meteorcli/internal/state"
+	"meteorcloud/meteorcli/internal/workload"
 )
 
 // DeviceID and Token are the identity Deps sets up.
@@ -75,7 +76,8 @@ func Deps(t *testing.T, cp *fakecp.Server, mq *MQTT, files map[string]string) ag
 	log := agent.NewCountingLogger(io.Discard, slog.LevelDebug, errs)
 	return agent.Deps{
 		Version: "1.2.3", Paths: p, API: client, Identity: src, Outbox: outbox, State: store,
-		Health: agent.NewHealth(), Signals: agent.NewSignals(), Log: log,
+		Workloads: workload.NewLock(),
+		Health:    agent.NewHealth(), Signals: agent.NewSignals(), Log: log,
 		Bus: bus.NewRouter(log), Errors: errs,
 		Host: &platform.Host{
 			Root:     root,

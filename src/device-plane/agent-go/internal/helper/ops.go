@@ -217,6 +217,11 @@ func Ops(h Host) map[string]localrpc.Handler {
 		"compose.up":       {Timeout: deployTimeout, Run: h.composeUp, Audit: auditCompose},
 		"compose.ps":       {Timeout: 30 * time.Second, Run: h.composePS},
 		"compose.down":     {Timeout: 5 * time.Minute, Run: h.composeDown, Audit: auditCompose},
+		// Looking at and managing deployed workloads (workload_manage.go).
+		"workload.inspect": {Timeout: time.Minute, Run: h.workloadInspect},
+		"workload.stats":   {Timeout: time.Minute, Run: h.workloadStats},
+		"docker.disk":      {Timeout: 2 * time.Minute, Run: h.dockerDisk},
+		"workload.control": {Timeout: 2 * time.Minute, Run: h.workloadControl, Audit: auditWorkloadControl},
 		// Logs for `meteorcli logs` and the console (internal/helper/logsources.go).
 		"logs.list": {Timeout: time.Minute, Run: h.logsList},
 		"logs.show": {Timeout: maxFollow, Stream: h.logsShow, Audit: auditShow},

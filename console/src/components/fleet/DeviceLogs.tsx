@@ -19,6 +19,8 @@ type DeviceLogsProps = {
   organizationId: string;
   deviceId: string;
   deviceName?: string;
+  /** Show only these sources (one workload); a single one opens by itself. */
+  only?: (source: LogSource) => boolean;
 };
 
 type Status = "idle" | "connecting" | "streaming" | "ended";
@@ -34,7 +36,7 @@ const SINCE_OPTIONS: { value: Since; label: string }[] = [
   { value: "7d", label: "Last 7 days" },
 ];
 
-export function DeviceLogs({ token, organizationId, deviceId, deviceName }: DeviceLogsProps) {
+export function DeviceLogs({ token, organizationId, deviceId, deviceName, only }: DeviceLogsProps) {
   // Listed on the device over SSH, so only when this window is opened and on Refresh.
   // The token is left out of the key so a token refresh does not list again.
   const sourcesQuery = useQuery({
@@ -173,6 +175,17 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
     [deviceId, follow, grep, lines, organizationId, since, stop, token],
   );
 
+  // One workload with one log: nothing to pick.
+  const own = only ? (sourcesQuery.data?.sources ?? []).filter(only) : [];
+  const single = own.length === 1 ? own[0] : null;
+  const singleKey = single ? sourceKey(single) : null;
+  useEffect(() => {
+    if (single) {
+      setSelected((current) => current ?? single);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [singleKey]);
+
   // Changing the source or a device-side option starts a new session.
   useEffect(() => {
     if (selected) {
@@ -205,7 +218,9 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
   const needle = sourceFilter.trim().toLowerCase();
   const groups = groupSources(
     (data?.sources ?? []).filter(
-      (s) => !needle || `${sourceLabel(s)} ${s.project ?? ""}`.toLowerCase().includes(needle),
+      (s) =>
+        (!only || only(s)) &&
+        (!needle || `${sourceLabel(s)} ${s.project ?? ""}`.toLowerCase().includes(needle)),
     ),
     data?.deployed ?? [],
   );
@@ -240,7 +255,7 @@ export function DeviceLogs({ token, organizationId, deviceId, deviceName }: Devi
               Showing logs of software deployed by MeteorCloud. System logs need terminal access.
             </p>
           )}
-          {data && data.sources.length === 0 && (
+          {data && groups.length === 0 && !needle && (
             <p className="text-xs text-muted-foreground">No logs to show on this device.</p>
           )}
           {sourcesQuery.isError && (
