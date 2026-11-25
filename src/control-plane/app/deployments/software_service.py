@@ -326,7 +326,15 @@ class DeviceSoftwareService:
                 row.last_error = report.last_error
             row.reported_at = now
 
-            if report.sync_status is not None:
+            if (
+                report.sync_status == SoftwareSyncStatus.IN_SYNC
+                and report.installed_release_id is not None
+                and row.desired_release_id is not None
+                and report.installed_release_id != row.desired_release_id
+            ):
+                # In sync with a release that was replaced while the agent installed it.
+                row.sync_status = SoftwareSyncStatus.UPDATING.value
+            elif report.sync_status is not None:
                 row.sync_status = report.sync_status.value
             elif (
                 row.desired_release_id is not None

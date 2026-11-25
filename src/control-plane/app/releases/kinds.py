@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.artifacts.models import ArtifactType
 from app.core.exceptions import ValidationAppError
@@ -71,6 +71,9 @@ _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}")
 
 
 class DockerResources(BaseModel):
+    # A misspelled limit must not be dropped silently.
+    model_config = ConfigDict(extra="forbid")
+
     # Whole numbers: the spec is signed, and floats are not written the same everywhere.
     memory_mb: int | None = Field(default=None, ge=16, le=4_194_304)
     # 1000 = one CPU.
