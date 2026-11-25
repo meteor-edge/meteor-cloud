@@ -4,8 +4,8 @@ An organization can push its container images to MeteorCloud with plain `docker 
 registry is [CNCF Distribution](https://distribution.github.io/distribution/) v3 (`registry:3.1.2`,
 Apache 2.0). It stores images; the control plane decides who may push and pull.
 
-It is **off by default**. Today you can push, pull and browse images. Devices pulling private images
-come in a later release ([#143](https://github.com/meteor-edge/meteor-cloud/issues/143)).
+It is **off by default**. You can push, pull and browse images, and deploy them to devices. More is
+planned ([#143](https://github.com/meteor-edge/meteor-cloud/issues/143)).
 
 ## Push an image
 
@@ -33,6 +33,26 @@ The list is a copy of what the registry holds. The registry tells the API about 
 delete, and the API compares both at start and every hour (`REGISTRY_RECONCILE_INTERVAL_SECONDS`, 0
 turns it off), or now with `python -m app.cli registry-reconcile`. Deleting removes the tag; the data
 stays in storage, and the image can still be pulled by digest.
+
+## Deploy to devices
+
+A `docker` release uses the registry when its spec has `"registry": "meteorcloud"`. `image` is a name
+in the organization (`my-app:1.0`) or the full name:
+
+```json
+{"container_name": "my-app", "image": "my-app:1.0", "registry": "meteorcloud", "ports": ["8080:8080"]}
+```
+
+Saving the release fixes the digest (`image_digest`); it fails when the image is not there. Moving the
+tag later does not change the release. A Deploy skips devices whose CPU (with its ARM version, such as
+`arm/v7`) the image was not built for,
+and fails with `image_platform_mismatch` when that is all of them.
+
+Devices need no registry token. For a desired release the agent asks for a password that works for
+30 minutes, only for that repository, only to pull, and only while the release stays desired on that
+device. It exists on the device only while the image is pulled, in a private temporary Docker config.
+An image that is already on the device is not pulled again. The device must reach the registry host, and
+needs an agent from this version on; an older agent fails with Docker's "denied" or "unauthorized".
 
 ## Tokens
 

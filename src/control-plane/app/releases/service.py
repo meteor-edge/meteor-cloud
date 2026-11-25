@@ -17,6 +17,7 @@ from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.deployments.models import Deployment
 from app.devices.schemas import Page
 from app.identity.models import User
+from app.registry.images import RegistryImages
 from app.releases.image_digest import DigestResolutionError, parse_reference, resolve_image_digest
 from app.releases.kinds import (
     ReleaseKind,
@@ -44,11 +45,16 @@ class ReleaseService:
     def _require_membership(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMembership:
         return self.authz.require_membership(user_id=user_id, organization_id=organization_id)
 
-    def _pin_image(self, kind: ReleaseKind, spec: dict, previous: dict | None = None) -> dict:
+    def _pin_image(
+        self, membership: OrganizationMembership, kind: ReleaseKind, spec: dict, previous: dict | None = None
+    ) -> dict:
         """Add ``image_digest`` to a docker spec that names an image by tag."""
         image = spec.get("image")
         if kind != ReleaseKind.DOCKER or not image:
             return spec
+        if spec.get("registry"):
+            self.authz.require(membership, "image.read")
+            return RegistryImages(self.session, self.settings).pin(membership.organization_id, spec, previous)
         try:
             reference = parse_reference(image)
         except DigestResolutionError as exc:
@@ -142,7 +148,9 @@ class ReleaseService:
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.create")
 
-        normalized_spec = self._pin_image(payload.kind, validate_release_spec(payload.kind, payload.spec))
+        normalized_spec = self._pin_image(
+            membership, payload.kind, validate_release_spec(payload.kind, payload.spec)
+        )
 
         artifact = None
         artifact_type = None
@@ -220,7 +228,7 @@ class ReleaseService:
             release.description = payload.description
         if payload.spec is not None:
             normalized = self._pin_image(
-                release.kind, validate_release_spec(release.kind, payload.spec), previous=release.spec
+                membership, release.kind, validate_release_spec(release.kind, payload.spec), previous=release.spec
             )
             artifact = None
             artifact_type = None

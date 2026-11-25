@@ -457,3 +457,28 @@ func TestAHungPullDoesNotDelayHeartbeats(t *testing.T) {
 		t.Errorf("deploy health %v", h)
 	}
 }
+
+func TestRegistryImageIsPulledWithAWorkloadToken(t *testing.T) {
+	e := newEnv(t)
+	d := "sha256:" + strings.Repeat("ab", 32)
+	e.desire(dockerItem("11111111-1111-1111-1111-111111111111", "1.0", 1, map[string]any{
+		"container_name": "web", "image": "registry.example.com/acme/web:1.0", "image_digest": d, "registry": "meteorcloud"}))
+	path := "/api/v1/agent/registry/pull-token"
+	e.cp.On("POST", path, fakecp.Fail(404, "registry_image_not_desired"))
+	if rep := e.cycle(); rep["demo-app"].status() != statusFailed || e.host.count("docker.run") != 0 {
+		t.Fatalf("report %v", rep)
+	}
+	e.cp.On("POST", path, fakecp.OK(map[string]any{
+		"registry": "registry.example.com", "username": "device", "password": "pw", "expires_at": "2030-01-01T00:00:00Z"}))
+	if rep := e.cycle(); rep["demo-app"].status() != statusInSync {
+		t.Fatalf("report %v", rep)
+	}
+	var pull helper.DockerPullRequest
+	e.host.last(t, "docker.pull", &pull)
+	if pull.Image != "registry.example.com/acme/web@"+d || pull.Password != "pw" {
+		t.Errorf("pull %+v", pull)
+	}
+	if calls := e.cp.Calls("POST", path); calls[len(calls)-1].Body["workload_key"] != "demo-app" {
+		t.Errorf("calls %v", calls)
+	}
+}

@@ -47,3 +47,43 @@ def events_secret(settings: Settings) -> str:
         .derive(settings.app_secret_key.encode())
         .hex()
     )
+
+
+# Not the registry's audience: a pull password is no access token, and an access token no password.
+_PULL_AUDIENCE = "meteorcloud-registry-pull"
+
+
+def sign_pull_password(
+    session: Session, settings: Settings, *, device_id: uuid.UUID, workload_key: str, ttl: int
+) -> tuple[str, datetime]:
+    """What a device signs in with. Not stored; its reach is checked again on every use."""
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(seconds=ttl)
+    key_id, private_key = RegistryKeys(session, settings).signing_key()
+    password = jwt.encode(
+        {
+            "iss": TOKEN_ISSUER,
+            "aud": _PULL_AUDIENCE,
+            "sub": str(device_id),
+            "workload_key": workload_key,
+            "iat": now,
+            "exp": expires_at,
+        },
+        private_key,
+        algorithm="ES256",
+        headers={"kid": key_id},
+    )
+    return password, expires_at
+
+
+def verify_pull_password(session: Session, settings: Settings, password: str) -> dict[str, Any]:
+    """Raises ``jwt.PyJWTError`` for anything but a current pull password."""
+    jwk = RegistryKeys(session, settings).jwks()["keys"][0]
+    return jwt.decode(
+        password,
+        jwt.PyJWK(jwk).key,
+        algorithms=["ES256"],
+        audience=_PULL_AUDIENCE,
+        issuer=TOKEN_ISSUER,
+        options={"require": ["exp", "sub", "aud", "iss"]},
+    )

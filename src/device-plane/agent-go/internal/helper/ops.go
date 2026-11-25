@@ -33,6 +33,8 @@ const maxOutput = 1 << 20
 
 // Host is what operations act on. SystemHost is the real machine; tests use a fake.
 type Host struct {
+	// Engine is the container engine; the zero value is Docker.
+	Engine Engine
 	// Run executes a tool with an argument list (never a shell) and returns up to
 	// 1 MiB of its combined output. It must honour ctx.
 	Run func(ctx context.Context, name string, args ...string) ([]byte, error)
@@ -210,6 +212,8 @@ func Ops(h Host) map[string]localrpc.Handler {
 		// Deploys (internal/deploy). docker.run and compose.up may pull images.
 		"systemd.control":  {Timeout: 2 * time.Minute, Run: h.systemdControl, Audit: auditSystemdControl},
 		"docker.load":      {Timeout: deployTimeout, Run: h.dockerLoad},
+		"docker.has_image": {Timeout: 30 * time.Second, Run: h.dockerHasImage},
+		"docker.pull":      {Timeout: deployTimeout, Run: h.dockerPull, Audit: auditDockerPull},
 		"docker.run":       {Timeout: deployTimeout, Run: h.dockerRunContainer, Audit: auditDockerRun},
 		"docker.health":    {Timeout: 30 * time.Second, Run: h.dockerHealth},
 		"docker.remove":    {Timeout: 2 * time.Minute, Run: h.dockerRemove, Audit: auditDockerName},

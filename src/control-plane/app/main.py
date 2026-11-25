@@ -46,6 +46,7 @@ from app.mqtt.runtime import start_mqtt_runtime, stop_mqtt_runtime
 from app.mqtt.vernemq_router import router as mqtt_vernemq_router
 from app.network.router import router as network_router
 from app.registry.catalog import run_reconciler
+from app.registry.router import agent_router as registry_agent_router
 from app.registry.router import internal_router as registry_internal_router
 from app.registry.router import router as registry_router
 from app.registry.router import token_router as registry_token_router
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     application.include_router(public_os_images_router)
     application.include_router(registry_token_router)
     application.include_router(registry_router)
+    application.include_router(registry_agent_router)
     application.include_router(releases_router)
     application.include_router(deployments_router)
     application.include_router(endpoints_router)

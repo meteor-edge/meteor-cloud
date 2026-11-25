@@ -59,6 +59,7 @@ from app.endpoints.models import ApplicationEndpoint
 from app.endpoints.repository import EndpointRepository
 from app.identity.models import User
 from app.ports.deployment import DeploymentProvider
+from app.registry.images import RegistryImages
 from app.releases.kinds import ReleaseKind, docker_host_ports, workload_key_from_spec
 from app.releases.models import Release
 from app.releases.repository import ReleaseRepository
@@ -406,7 +407,20 @@ class DeploymentService:
             )
         # Devices without the release's runtime (or whose agent cannot install
         # the kind) are skipped: they change no workload and bind nothing.
-        capable = [device for device in devices if self.device_supports_kind(device, release.kind)]
+        mismatches: dict[uuid.UUID, str] = {}
+        images = RegistryImages(self.session)
+        platforms = images.platforms(organization_id, release.spec)
+        for device in devices:
+            mismatch = images.platform_mismatch(platforms, device)
+            if mismatch is not None:
+                mismatches[device.id] = mismatch
+        if mismatches and len(mismatches) == len(devices):
+            raise ValidationAppError("image_platform_mismatch", next(iter(mismatches.values())))
+        capable = [
+            device
+            for device in devices
+            if device.id not in mismatches and self.device_supports_kind(device, release.kind)
+        ]
         self._reject_kind_change(release=release, workload_key=workload_key, devices=capable)
         self._reject_port_conflicts(
             release=release,
@@ -441,7 +455,7 @@ class DeploymentService:
                 device_id=device.id, workload_key=workload_key
             )
             previous_desired = existing.desired_release_id if existing else None
-            unsupported = self.unsupported_reason(device, release.kind)
+            unsupported = mismatches.get(device.id) or self.unsupported_reason(device, release.kind)
             if unsupported is not None:
                 status = DeploymentDeviceStatus.SKIPPED.value
                 last_error = unsupported

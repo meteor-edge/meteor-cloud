@@ -44,6 +44,13 @@ type App struct {
 	Env       map[string]string
 }
 
+// PullAuth signs in to the registry an image is pulled from. Password is a secret.
+type PullAuth struct {
+	Registry string
+	Username string
+	Password string
+}
+
 // Workload is one desired item, ready to apply.
 type Workload struct {
 	// Key is the workload_key; names default to it.
@@ -58,6 +65,10 @@ type Workload struct {
 	Artifact string
 	// App is set when the release is bound to an application.
 	App *App
+	// PullAuth obtains a short-lived credential for the image's registry; nil
+	// unless the image is in MeteorCloud's own registry. Called only when the
+	// image is not on the device yet.
+	PullAuth func(ctx context.Context) (PullAuth, error)
 	// ForceRecreate creates containers again although nothing changed (a
 	// mounted token file was replaced).
 	ForceRecreate bool
