@@ -75,6 +75,20 @@ make restore BACKUP=deploy/compose/backups/20261116T101500Z
 from the directory with `docker-compose.yml`, or set `COMPOSE_DIR` and `COMPOSE` (the
 full `docker compose -f … -f …` command). See the header of each script for all settings.
 
+If the container registry is on, its storage must be restored from the same time as the database, or
+emptied, before the API starts again ([why](registry.md#storage)). Stop the registry and change its
+storage first. `make restore` starts only what was running when it began, so start the registry
+afterwards, with the `docker compose -f … -f …` command of your deployment:
+
+```bash
+cd deploy/compose
+compose="docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+$compose stop registry
+# restore or empty the registry's storage, then run the restore from the repository root
+(cd ../.. && make restore BACKUP=deploy/compose/backups/20261116T101500Z)
+$compose up -d --wait registry
+```
+
 ## Kubernetes (Helm)
 
 With the bundled PostgreSQL, turn on the nightly dump:
@@ -102,6 +116,11 @@ kubectl create job --from=cronjob/<release>-postgresql-backup backup-now
 ```
 
 The CronJob name is truncated to 52 characters when the release name is long.
+
+If the [container registry](registry.md#storage) is on, its images must be restored from the same
+time as the database or emptied, so an old organization's images cannot end up under a new one. Stop
+it with the API (`kubectl scale deploy/meteorcloud-registry --replicas=0`), restore or empty its
+claim or bucket prefix before the last command below, and scale it up again after the API is ready.
 
 Restore (release `meteorcloud`, default database names): stop the API, start a helper pod
 that mounts the backup volume, and run `pg_restore` from it.

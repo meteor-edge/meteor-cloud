@@ -66,6 +66,23 @@ func TestDockerPullRejects(t *testing.T) {
 	}
 }
 
+func TestWhatCanBePulledCanRun(t *testing.T) {
+	digest := "@sha256:" + strings.Repeat("a", 64)
+	image := "registry.example.com/" + strings.Repeat("a", 512-len("registry.example.com/")-len(digest)) + digest
+	pull := DockerPullRequest{Image: image, Registry: "registry.example.com", Username: "u", Password: "p"}
+	run := DockerRunRequest{Name: "web", Image: image}
+	if err := pull.validate(); err != nil {
+		t.Error(err)
+	}
+	if err := run.validate(Host{}); err != nil {
+		t.Error(err)
+	}
+	pull.Image, run.Image = image[:21]+"a"+image[21:], image[:21]+"a"+image[21:]
+	if pull.validate() == nil || run.validate(Host{}) == nil {
+		t.Error("513 characters accepted")
+	}
+}
+
 func TestEngineEndpointAndCLI(t *testing.T) {
 	h := Host{}
 	if cli, args := h.engineArgs("ps"); cli != "docker" || !slices.Equal(args, []string{"ps"}) {
