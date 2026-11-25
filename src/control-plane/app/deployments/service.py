@@ -206,6 +206,21 @@ class DeploymentService:
             return None
         return f"Device lacks {required} capability."
 
+    @staticmethod
+    def missing_feature(device: Device, spec: dict[str, Any]) -> str | None:
+        """Why the device's agent would ignore a setting of the release, or None (also when it never said)."""
+        caps = (device.metadata_ or {}).get("capabilities")
+        if not isinstance(caps, dict) or not isinstance(caps.get("deploy_kinds"), list):
+            return None
+        needed = set()
+        if spec.get("registry"):
+            needed.add("registry")
+        if any(spec.get(key) for key in ("volumes", "resources", "secret_env")):
+            needed.add("run_options")
+        if needed - set(caps.get("deploy_features") or []):
+            return f"The agent on {device.name} is too old for this release. Update meteorcli on the device."
+        return None
+
     def expand_targets(
         self,
         *,
@@ -409,11 +424,15 @@ class DeploymentService:
         # the kind) are skipped: they change no workload and bind nothing.
         mismatches: dict[uuid.UUID, str] = {}
         for device in devices:
-            mismatch = RegistryImages(self.session).platform_mismatch(organization_id, release.spec, device)
+            mismatch = self.missing_feature(device, release.spec)
+            code = "agent_update_needed"
+            if mismatch is None:
+                code = "image_platform_mismatch"
+                mismatch = RegistryImages(self.session).platform_mismatch(organization_id, release.spec, device)
             if mismatch is not None:
                 mismatches[device.id] = mismatch
         if mismatches and len(mismatches) == len(devices):
-            raise ValidationAppError("image_platform_mismatch", next(iter(mismatches.values())))
+            raise ValidationAppError(code, next(reversed(mismatches.values())))
         capable = [
             device
             for device in devices

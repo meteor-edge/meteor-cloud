@@ -161,3 +161,19 @@ def test_a_full_quota_stops_pushes_only(
             db_session, registry_settings(registry_org_quota_bytes=q)
         )
         assert _access(registry, db_session, token, scope) == {"acme/team/web": actions}
+
+
+def test_an_agent_that_would_ignore_settings_is_refused(registry: TestClient, ready) -> None:  # noqa: F811
+    org, headers, device_id, device_headers = ready
+    caps = {"docker": True, "deploy_kinds": ["docker"]}
+    for features, options, status in (
+        ([], {}, 422),
+        (["registry"], {"volumes": ["data:/data"]}, 422),
+        (["registry", "run_options"], {"volumes": ["data:/data"]}, 201),
+    ):
+        body = {"capabilities": {**caps, "deploy_features": features}}
+        assert registry.post("/api/v1/agent/heartbeat", headers=device_headers, json=body).status_code == 200
+        response = _run(registry, org, headers, device_id, **options)
+        assert response.status_code == status, response.text
+        if status == 422:
+            assert response.json()["error"]["code"] == "agent_update_needed"

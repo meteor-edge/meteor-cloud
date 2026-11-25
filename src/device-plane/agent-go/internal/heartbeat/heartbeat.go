@@ -41,6 +41,8 @@ type Module struct {
 	// registries, so this package imports neither.
 	Actions     []string
 	DeployKinds []string
+	// DeployFeatures are the optional release settings it applies.
+	DeployFeatures []string
 }
 
 // Name implements agent.Module.
@@ -158,7 +160,7 @@ func (l *loop) capabilities(ctx context.Context) *api.Capabilities {
 	return &api.Capabilities{
 		Systemd: t.Systemd, Docker: t.Docker, DockerCompose: t.DockerCompose,
 		WireGuard: t.WireGuard, SSH: t.SSH,
-		Actions: l.m.Actions, DeployKinds: l.m.DeployKinds,
+		Actions: l.m.Actions, DeployKinds: l.m.DeployKinds, DeployFeatures: l.m.DeployFeatures,
 		Modules: l.d.Health.Snapshot(),
 	}
 }

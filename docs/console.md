@@ -38,3 +38,6 @@ If you add a third-party script or font to the console, extend the CSP in `nginx
 - **Device → Terminal** — browser SSH over WireGuard (`device.shell`). See [Connectivity](fleet/connectivity.md).
 - **Device → Software → a workload** — what runs, health history, its logs, and restart, stop and start (`software.manage`). See [Software on a device](fleet/software.md).
 - **Device → Logs** — follow and search systemd, Docker, nginx and journal logs over WireGuard (`device.logs`). See [Device logs](fleet/logs.md).
+
+**Images** lists the organization's container images ([registry](registry.md)); **Run** on a tag opens
+the [Run an app](registry.md#run-an-app) sheet. The same sheet is on a device's Software tab.

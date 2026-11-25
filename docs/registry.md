@@ -51,7 +51,7 @@ operators can run apps without being able to manage releases. A device has one a
 | Volumes | `name:/path` or `name:/path:ro`. Docker volumes named `<app>-<name>`, kept when the app is updated or removed. Paths on the device cannot be mounted |
 | Memory, CPU | Limits of the container |
 
-These need an agent with the `software/secrets` call; older agents ignore them and start the app without.
+An agent too old for the registry or for these settings is refused (`agent_update_needed`).
 
 **device → Software → Apps** lists running apps. **Edit** changes settings and deploys again;
 **Update** appears when the tag points to a newer image or a newer tag was pushed. Each makes a new
