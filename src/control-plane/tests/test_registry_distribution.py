@@ -16,6 +16,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.adapters.distribution_registry import DistributionRegistry
+from app.core.config import get_settings
+from app.registry.catalog import CatalogService
 from app.registry.keys import RegistryKeys
 from tests.test_registry import _login, _setup, _token, registry, registry_settings  # noqa: F401
 
@@ -29,6 +31,7 @@ def distribution(db_session: Session, tmp_path):
         (tmp_path / name).write_text(content)
     tmp_path.chmod(0o755)
     db_session.commit()
+    # Nothing listens there: notifications are tested separately.
     name = f"meteorcloud-registry-test-{uuid.uuid4().hex[:8]}"
     run = ["docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1::5000"]
     subprocess.run([*run, "-v", f"{tmp_path}:/etc/distribution:ro", "registry:3"], check=True, capture_output=True)
@@ -49,7 +52,7 @@ def distribution(db_session: Session, tmp_path):
 
 def _push(base: str, repository: str, headers: dict[str, str]) -> int:
     """Push a one-blob image the way a client does. Returns the last status."""
-    blob = b"{}"
+    blob = b'{"os": "linux", "architecture": "arm64", "variant": "v8"}'
     digest = f"sha256:{hashlib.sha256(blob).hexdigest()}"
     start = httpx.post(f"{base}/v2/{repository}/blobs/uploads/", headers=headers)
     if start.status_code != 202:
@@ -91,3 +94,31 @@ def test_registry_enforces_our_tokens(registry: TestClient, db_session: Session,
     stranger = _token(registry, stranger_org, stranger_headers)["token"]
     refused = httpx.get(f"{distribution}/v2/acme/app/manifests/1", headers=bearer(stranger, "acme/app"))
     assert refused.status_code == 401
+
+
+def test_catalog_reads_the_registry(registry: TestClient, db_session: Session, distribution: str) -> None:  # noqa: F811
+    org, headers = _setup(registry, db_session)
+    secret = _token(registry, org, headers)["token"]
+    token = _login(registry, secret, "repository:acme/team/app:pull,push").json()["token"]
+    assert _push(distribution, "acme/team/app", {"Authorization": f"Bearer {token}"}) == 201
+
+    settings = registry_settings(registry_internal_url=distribution)
+    catalog = CatalogService(db_session, settings)
+    assert catalog.reconcile() == 1
+    base = f"/api/v1/organizations/{org.id}/registry/images"
+    assert [i["repository"] for i in registry.get(base, headers=headers).json()["items"]] == ["team/app"]
+    (tag,) = registry.get(f"{base}/tags", headers=headers, params={"repository": "team/app"}).json()["items"]
+    assert tag["tag"] == "1"
+    assert tag["digest"] == catalog.registry.digest("acme/team/app", "1")
+    (platform,) = tag["platforms"]
+    assert (platform["os"], platform["architecture"], platform["variant"]) == ("linux", "arm64", "v8")
+    assert tag["size_bytes"] == platform["size_bytes"] > 0
+    assert catalog.registry.manifest("acme/team/app", "nope") is None
+
+    registry.app.dependency_overrides[get_settings] = lambda: settings
+    assert registry.delete(base, headers=headers, params={"repository": "team/app", "tag": "1"}).status_code == 204
+    assert catalog.registry.list_tags("acme/team/app") == []
+    assert registry.get(base, headers=headers).json()["total"] == 0
+    # Reconciling again does not bring it back, and an empty repository is not an error.
+    catalog.reconcile()
+    assert registry.get(base, headers=headers).json()["total"] == 0

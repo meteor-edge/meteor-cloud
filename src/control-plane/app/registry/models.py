@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -15,7 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -82,4 +84,30 @@ class RegistryToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class ContainerImage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A tag in the registry. The registry is the source of truth; this copy is for listing."""
+
+    __tablename__ = "container_images"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "repository", "tag", name="uq_container_images_repository_tag"),
+        Index("ix_container_images_organization_id_digest", "organization_id", "digest"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    # Without the organization's namespace.
+    repository: Mapped[str] = mapped_column(String(255), nullable=False)
+    tag: Mapped[str] = mapped_column(String(128), nullable=False)
+    digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # [{os, architecture, variant, size_bytes}]
+    platforms: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    pushed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    pushed_by_token_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("registry_tokens.id", ondelete="SET NULL"), nullable=True
     )

@@ -6,6 +6,8 @@ Unsupported provider names fail fast. Future providers are not implemented.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -43,13 +45,15 @@ def mqtt_gateway(settings: Settings) -> MQTTGateway:
     return DataPlaneMQTTGateway(settings)
 
 
-def container_registry(settings: Settings) -> ContainerRegistry | None:
-    """The bundled registry, or None when the registry is off."""
+def container_registry(
+    settings: Settings, sign: Callable[[list[dict[str, Any]]], str] | None = None
+) -> ContainerRegistry | None:
+    """The bundled registry, or None when it is off. ``sign`` makes access tokens for its API."""
     if settings.registry_provider == "none":
         return None
     from app.adapters.distribution_registry import DistributionRegistry
 
-    return DistributionRegistry(settings)
+    return DistributionRegistry(settings, sign)
 
 
 def metrics_backend(settings: Settings) -> Metrics:

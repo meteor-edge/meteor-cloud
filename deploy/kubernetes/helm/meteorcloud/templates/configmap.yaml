@@ -65,6 +65,8 @@ data:
   REGISTRY_PROVIDER: distribution
   REGISTRY_PUBLIC_HOST: {{ .Values.registry.host | quote }}
   REGISTRY_TOKEN_REALM: {{ printf "%s/api/v1/registry/token" (trimSuffix "/" .Values.config.publicUrl) | quote }}
+  REGISTRY_INTERNAL_URL: {{ printf "http://%s-registry:5000" (include "meteorcloud.fullname" .) | quote }}
+  REGISTRY_EVENTS_URL: {{ printf "http://%s-backend:8000/internal/registry/events" (include "meteorcloud.fullname" .) | quote }}
   REGISTRY_STORAGE_BUCKET: {{ .Values.registry.s3.bucket | quote }}
   REGISTRY_STORAGE_PREFIX: {{ .Values.registry.s3.prefix | quote }}
   {{- end }}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -81,3 +81,37 @@ class RegistryAccessTokenResponse(BaseModel):
     access_token: str
     expires_in: int
     issued_at: datetime
+
+
+class ImageRepositoryResponse(BaseModel):
+    # Without host and namespace.
+    repository: str
+    tag_count: int
+    pushed_at: datetime
+
+
+class ImagePlatform(BaseModel):
+    os: str
+    architecture: str
+    variant: str | None = None
+    size_bytes: int
+
+
+class ImageTagResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    repository: str
+    tag: str
+    digest: str
+    media_type: str
+    size_bytes: int
+    platforms: list[ImagePlatform]
+    pushed_at: datetime
+    # Name of the registry token it was pushed with.
+    pushed_by: str | None = None
+
+
+class RegistryEvents(BaseModel):
+    """Notification envelope of CNCF Distribution; the events are read leniently."""
+
+    events: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)

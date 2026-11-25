@@ -261,7 +261,12 @@ def registry_config(directory: str, *, rotate: bool = False) -> int:
             except BaseException:
                 Path(partial).unlink(missing_ok=True)
                 raise
-        session.commit()
+        try:
+            session.commit()
+        except Exception:
+            # The files may hold a key that was not saved. Rerunning writes the saved one, whatever the outcome.
+            logger.error("Run registry-config again, without --rotate-key, before the registry restarts.")
+            raise
     finally:
         session.close()
     logger.info("Wrote registry configuration to %s", target)
@@ -276,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("create-admin", help="Create the initial administrator if missing.")
     subparsers.add_parser("create-demo", help="Create Demo Organization for the administrator.")
+    subparsers.add_parser("registry-reconcile", help="Compare the image list with the registry now.")
     target_parser = subparsers.add_parser("shell-target", help="Resolve a device for meteorcloud-ssh.")
     target_parser.add_argument("target", help="Device ID or WireGuard address")
     sign_parser = subparsers.add_parser(
@@ -301,6 +307,12 @@ def main(argv: list[str] | None = None) -> int:
         return sign_ssh_cert(args.target, args.identity, sys.stdin.read(4096))
     if args.command == "registry-config":
         return registry_config(args.directory, rotate=args.rotate_key)
+    if args.command == "registry-reconcile":
+        from app.registry.catalog import CatalogService
+
+        with SessionLocal() as session:
+            logger.info("Compared %d repositories", CatalogService(session).reconcile())
+        return 0
     parser.error(f"Unknown command: {args.command}")
     return 1
 

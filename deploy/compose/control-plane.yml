@@ -156,6 +156,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+        # The backend rewrites the configuration, which the registry reads only when it starts.
+        restart: true
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000/"]
       interval: 10s

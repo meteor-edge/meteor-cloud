@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircuitBoard,
+  Container,
   HardDrive,
   House,
   Layers,
@@ -283,10 +284,13 @@ export function Sidebar() {
                 <NavSection
                   icon={Rocket}
                   label="Software"
-                  active={["releases", "deployments"].some(isPage)}
+                  active={["images", "releases", "deployments"].some(isPage)}
                   collapsed={collapsed}
                   onExpand={() => setCollapsed(false)}
                 >
+                  <SubLink to={`${orgPath}/images`} icon={Container} active={isPage("images")}>
+                    Images
+                  </SubLink>
                   <SubLink to={`${orgPath}/releases`} icon={Tag} active={isPage("releases")}>
                     Releases
                   </SubLink>

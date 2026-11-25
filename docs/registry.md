@@ -4,8 +4,8 @@ An organization can push its container images to MeteorCloud with plain `docker 
 registry is [CNCF Distribution](https://distribution.github.io/distribution/) v3 (`registry:3.1.2`,
 Apache 2.0). It stores images; the control plane decides who may push and pull.
 
-It is **off by default**. Today you can push and pull. An image list in the console, and devices
-pulling private images, come in later releases ([#143](https://github.com/meteor-edge/meteor-cloud/issues/143)).
+It is **off by default**. Today you can push, pull and browse images. Devices pulling private images
+come in a later release ([#143](https://github.com/meteor-edge/meteor-cloud/issues/143)).
 
 ## Push an image
 
@@ -22,6 +22,17 @@ docker push registry.example.com/acme/my-app:1.0
 slug and never changes, so renaming the organization does not move its images. A deleted
 organization's namespace is never given to another one (a new organization with that slug gets
 `acme-2`).
+
+## Images page
+
+Console → **Software → Images** lists the organization's images with tags, digest, platforms, size,
+who pushed them, and the pull command. Owners and admins can delete a tag or a whole image. The same
+is in the API under `/api/v1/organizations/{id}/registry/images`.
+
+The list is a copy of what the registry holds. The registry tells the API about every push and
+delete, and the API compares both at start and every hour (`REGISTRY_RECONCILE_INTERVAL_SECONDS`, 0
+turns it off), or now with `python -m app.cli registry-reconcile`. Deleting removes the tag; the data
+stays in storage, and the image can still be pulled by digest.
 
 ## Tokens
 
@@ -64,6 +75,8 @@ You need a host name for the registry, normally `registry.<domain>` ([DNS](dns.m
 | `REGISTRY_TOKEN_REALM` | `https://example.com/api/v1/registry/token` | Public address of the token endpoint |
 | `REGISTRY_STORAGE_BUCKET` | | S3 only. Empty: the artifact bucket |
 | `REGISTRY_STORAGE_PREFIX` | `registry` | S3 only. Prefix in the bucket |
+| `REGISTRY_INTERNAL_URL` | `http://registry:5000` | How the API reaches the registry (default fits Compose; Helm sets it) |
+| `REGISTRY_EVENTS_URL` | `http://backend:8000/internal/registry/events` | Where the registry sends push notifications (default fits Compose; Helm sets it) |
 | `REGISTRY_TOKEN_TTL_SECONDS` | `300` | Lifetime of access tokens |
 | `REGISTRY_TOKEN_RATE_LIMIT_REQUESTS` | `600` | Token requests per source IP per minute |
 
