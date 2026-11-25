@@ -337,7 +337,9 @@ class RegistryService:
         membership = self.authz.require_membership(user_id=actor.id, organization_id=organization_id)
         manages = self.authz.has_permission(membership, "organization.update")
         row = self.session.scalar(
-            select(RegistryToken).where(RegistryToken.id == token_id, RegistryToken.organization_id == organization_id)
+            select(RegistryToken)
+            .where(RegistryToken.id == token_id, RegistryToken.organization_id == organization_id)
+            .with_for_update()  # two revocations at once are one audit event
         )
         if row is None:
             raise NotFoundError("registry_token_not_found", "Registry token was not found.")
