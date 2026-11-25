@@ -18,6 +18,17 @@ updates:
     directory: /console
     schedule:
       interval: weekly
+    ignore:
+      # Planned by hand: Tailwind 4 (with tailwind-merge 3) is a migration, typescript-eslint does
+      # not support TypeScript 7 yet, and @types/node follows the Node version in the Dockerfile.
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwind-merge"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       console:
         patterns: ["*"]

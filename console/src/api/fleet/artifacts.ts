@@ -138,7 +138,7 @@ export function uploadArtifact(
       }
     };
     xhr.onload = () => {
-      let data: unknown = null;
+      let data: unknown;
       try {
         data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
       } catch {
