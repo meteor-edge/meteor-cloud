@@ -54,6 +54,7 @@ Commands and APIs you look up while working.
 | Control-plane HTTP API | [API overview](api.md) · interactive OpenAPI at `/docs` on a running API |
 | Device CLI | [meteorcli](meteorcli.md) · [Go rewrite (in progress)](meteorcli-go.md) |
 | MQTT ↔ control-plane contract | [`contracts/mqtt-http.md`](../contracts/mqtt-http.md) |
+| Rule definition and engine contract (v1) | [`contracts/rules-v1.md`](../contracts/rules-v1.md) |
 | Device agent ↔ MeteorCloud contract (HTTP + MQTT, JSON Schemas) | [`contracts/device-agent-v1.md`](../contracts/device-agent-v1.md) · [contract suite](../tests/agent-contract/README.md) |
 | Architecture & providers | [Architecture](architecture.md) |
 | Bundled infra licenses (Postgres, Redis, MQTT brokers, MinIO, …) | [Licensing](licensing.md) |

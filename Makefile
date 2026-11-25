@@ -214,7 +214,7 @@ backend-test: ## Run control-plane tests (dedicated *_test database, never the a
 	@python -c "import sqlalchemy" >/dev/null 2>&1 || (echo "Control-plane deps missing. Run: make install-backend" && exit 1)
 	cd $(BACKEND_DIR) && python -m pytest -q
 
-data-api-test: ## Run application data plane (Go) tests; DATAPLANE_TEST_DATABASE_URL and DATAPLANE_TEST_CLICKHOUSE_URL add the PostgreSQL and ClickHouse suites
+data-api-test: ## Run data plane (Go) tests; DATAPLANE_TEST_DATABASE_URL, DATAPLANE_TEST_CLICKHOUSE_URL and RULES_TEST_DATABASE_URL add the PostgreSQL, ClickHouse and rule engine store suites
 	cd $(DATA_API_DIR) && go vet ./... && go test -race ./...
 
 sdk-test: ## Run Python SDK tests against the real data plane binary (needs Go)
