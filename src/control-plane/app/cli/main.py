@@ -228,6 +228,8 @@ def sign_ssh_cert(target: str, identity: str, public_key: str) -> int:
 
 def registry_config(directory: str, *, rotate: bool = False) -> int:
     """Write the registry's configuration and public keys. Does nothing while the registry is off."""
+    import os
+    import tempfile
     from pathlib import Path
 
     from app.adapters import container_registry
@@ -241,6 +243,8 @@ def registry_config(directory: str, *, rotate: bool = False) -> int:
     session = SessionLocal()
     try:
         keys = RegistryKeys(session, settings)
+        # Held until the commit: a refresh cannot overwrite the keys of a rotation.
+        keys.lock()
         if rotate:
             keys.rotate()
         files = registry.config_files(keys.jwks())
@@ -249,10 +253,14 @@ def registry_config(directory: str, *, rotate: bool = False) -> int:
         target.mkdir(parents=True, exist_ok=True)
         for name, content in files.items():
             # Replaced in one step: the registry never reads half a file.
-            partial = target / f".{name}.tmp"
-            partial.touch(mode=0o600)
-            partial.write_text(content, encoding="utf-8")
-            partial.replace(target / name)
+            handle, partial = tempfile.mkstemp(dir=target, prefix=f".{name}.")  # 0600
+            try:
+                with os.fdopen(handle, "w", encoding="utf-8") as out:
+                    out.write(content)
+                os.replace(partial, target / name)
+            except BaseException:
+                Path(partial).unlink(missing_ok=True)
+                raise
         session.commit()
     finally:
         session.close()
