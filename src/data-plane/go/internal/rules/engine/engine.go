@@ -299,7 +299,6 @@ func (e *Engine) reconcileVersion(st *state.RuleState, r *Rule, now time.Time) [
 	var out []Transition
 	if st.Phase == state.PhaseFiring {
 		out = append(out, Transition{Kind: TransitionResolved, Reason: ReasonUpdated, Episode: st.Episode, At: now})
-		e.firing.Add(-1)
 	}
 	st.ConditionHash = r.Hash
 	st.Nodes = eval.State{}
@@ -320,7 +319,6 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 		st.Phase, st.PhaseSince, st.ActiveAlerts = state.PhaseFiring, now, 1
 		st.LastValues = out.Values
 		ts = append(ts, Transition{Kind: TransitionFiring, Episode: st.Episode, At: now, EventID: eventID, Values: out.Values})
-		e.firing.Add(1)
 	}
 	if st.Phase == state.PhaseCooldown && !now.Before(st.CooldownUntil) {
 		st.Phase, st.PhaseSince, st.CooldownUntil = state.PhaseNormal, now, time.Time{}
@@ -345,7 +343,6 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 		}
 		if resolve {
 			ts = append(ts, Transition{Kind: TransitionResolved, Reason: ReasonCleared, Episode: st.Episode, At: now, EventID: eventID, Values: out.Values})
-			e.firing.Add(-1)
 			st.ActiveAlerts = 0
 			if cd := r.Def.Cooldown.D(); cd > 0 {
 				st.Phase, st.PhaseSince, st.CooldownUntil = state.PhaseCooldown, now, now.Add(cd)
@@ -357,10 +354,6 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 			ts = append(ts, Transition{Kind: TransitionFiring, Episode: st.Episode, Fingerprint: ev.ID, At: now, EventID: ev.ID, Values: out.Values})
 		}
 	}
-	for _, t := range ts {
-		e.metrics.Transitions.WithLabelValues(t.Kind).Inc()
-	}
-	e.metrics.ActiveAlerts.Set(float64(e.firing.Load()))
 	return ts
 }
 
@@ -440,8 +433,16 @@ func (e *Engine) enqueue(b *state.Batch, ts []pending) {
 	}
 }
 
+// afterCommit counts and logs transitions, once they are durable.
 func (e *Engine) afterCommit(ts []pending) {
 	for _, p := range ts {
+		e.metrics.Transitions.WithLabelValues(p.t.Kind).Inc()
+		switch {
+		case p.t.Kind == TransitionResolved:
+			e.firing.Add(-1)
+		case p.t.Fingerprint == "": // further alerts of an episode do not count again
+			e.firing.Add(1)
+		}
 		for _, a := range p.rule.Actions {
 			if contains(a.On, p.t.Kind) {
 				e.metrics.ActionsQueued.WithLabelValues(a.Type).Inc()
@@ -450,6 +451,7 @@ func (e *Engine) afterCommit(ts []pending) {
 		e.log.Info("alert transition", "organization_id", p.st.OrgID, "device_id", p.st.DeviceID, "rule_id", p.rule.ID,
 			"rule_version", p.rule.Version, "transition", p.t.Kind, "reason", p.t.Reason, "episode", p.t.Episode, "event_id", p.t.EventID)
 	}
+	e.metrics.ActiveAlerts.Set(float64(e.firing.Load()))
 }
 
 func contains(list []string, s string) bool {

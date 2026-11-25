@@ -45,10 +45,7 @@
           "type": "array",
           "maxItems": 10,
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128,
-            "pattern": "^[a-z0-9][a-z0-9_-]*(\\.[a-z0-9][a-z0-9_-]*)*$"
+            "$ref": "#/$defs/stream"
           }
         }
       }
@@ -77,6 +74,23 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        }
+      },
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "per_event"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "max_active"
+          ]
         }
       }
     },
@@ -216,10 +230,7 @@
           "type": "array",
           "maxItems": 10,
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128,
-            "pattern": "^[a-z0-9][a-z0-9_-]*(\\.[a-z0-9][a-z0-9_-]*)*$"
+            "$ref": "#/$defs/stream"
           }
         }
       },
@@ -405,6 +416,22 @@
                 "min",
                 "max"
               ]
+            },
+            "properties": {
+              "operator": {
+                "enum": [
+                  "eq",
+                  "ne",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "between"
+                ]
+              },
+              "value": {
+                "type": "number"
+              }
             }
           }
         },
@@ -434,6 +461,91 @@
             "properties": {
               "operator": {
                 "enum": [
+                  "eq",
+                  "ne"
+                ]
+              }
+            },
+            "required": [
+              "operator"
+            ]
+          },
+          "then": {
+            "required": [
+              "value"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "values"
+                  ]
+                },
+                {
+                  "required": [
+                    "min"
+                  ]
+                },
+                {
+                  "required": [
+                    "max"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "enum": [
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte"
+                ]
+              }
+            },
+            "required": [
+              "operator"
+            ]
+          },
+          "then": {
+            "required": [
+              "value"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "values"
+                  ]
+                },
+                {
+                  "required": [
+                    "min"
+                  ]
+                },
+                {
+                  "required": [
+                    "max"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "value": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "enum": [
                   "between"
                 ]
               }
@@ -446,7 +558,21 @@
             "required": [
               "min",
               "max"
-            ]
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "value"
+                  ]
+                },
+                {
+                  "required": [
+                    "values"
+                  ]
+                }
+              ]
+            }
           }
         },
         {
@@ -466,7 +592,26 @@
           "then": {
             "required": [
               "values"
-            ]
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "value"
+                  ]
+                },
+                {
+                  "required": [
+                    "min"
+                  ]
+                },
+                {
+                  "required": [
+                    "max"
+                  ]
+                }
+              ]
+            }
           }
         },
         {
@@ -474,12 +619,8 @@
             "properties": {
               "operator": {
                 "enum": [
-                  "eq",
-                  "ne",
-                  "gt",
-                  "gte",
-                  "lt",
-                  "lte"
+                  "exists",
+                  "not_exists"
                 ]
               }
             },
@@ -488,9 +629,30 @@
             ]
           },
           "then": {
-            "required": [
-              "value"
-            ]
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "value"
+                  ]
+                },
+                {
+                  "required": [
+                    "values"
+                  ]
+                },
+                {
+                  "required": [
+                    "min"
+                  ]
+                },
+                {
+                  "required": [
+                    "max"
+                  ]
+                }
+              ]
+            }
           }
         }
       ]
@@ -519,7 +681,8 @@
               "resolved"
             ]
           },
-          "maxItems": 2
+          "maxItems": 2,
+          "uniqueItems": true
         },
         "severity": {
           "enum": [
@@ -537,7 +700,8 @@
         "command": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 64
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*$"
         },
         "params": {
           "type": "object"
@@ -675,8 +839,62 @@
               "device_type_id"
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "device"
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "device_ids"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "group"
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "group_id"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "device_type"
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "device_type_id"
+              ]
+            }
+          }
         }
       ]
+    },
+    "stream": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,62}(\\.[a-z0-9][a-z0-9_-]{0,62}){0,7}$"
     }
   }
 }

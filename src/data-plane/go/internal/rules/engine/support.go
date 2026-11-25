@@ -163,6 +163,13 @@ func (c *committer) commit(ctx context.Context, b *state.Batch) error {
 	case <-ctx.Done():
 		// The commit may still land; the event is redelivered and deduplicated.
 		return ctx.Err()
+	case <-c.done:
+		select {
+		case err := <-r.err: // committed just before the committer stopped
+			return err
+		default:
+			return context.Canceled
+		}
 	}
 }
 
