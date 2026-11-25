@@ -1,0 +1,11 @@
+[
+  {"reason": "absence nested in resolve", "rule": {"schema_version": 1, "name": "x", "scope": {"type": "organization"}, "condition": {"type": "comparison", "field": "a", "operator": "exists"}, "resolve": {"type": "not", "condition": {"type": "absence", "duration": "1m"}}}},
+  {"reason": "absence in a list inside resolve", "rule": {"schema_version": 1, "name": "x", "scope": {"type": "organization"}, "condition": {"type": "comparison", "field": "a", "operator": "exists"}, "resolve": {"type": "all", "conditions": [{"type": "comparison", "field": "a", "operator": "exists"}, {"type": "absence", "duration": "1m"}]}}},
+  {"reason": "group id on an organization scope", "rule": {"schema_version": 1, "name": "x", "scope": {"type": "organization", "group_id": "g"}, "condition": {"type": "comparison", "field": "a", "operator": "exists"}}},
+  {"reason": "empty device list on an organization scope", "rule": {"schema_version": 1, "name": "x", "scope": {"type": "organization", "device_ids": []}, "condition": {"type": "comparison", "field": "a", "operator": "exists"}}},
+  {"reason": "key with the wrong case", "rule": {"schema_version": 1, "Name": "x", "name": "x", "scope": {"type": "organization"}, "condition": {"type": "comparison", "field": "a", "operator": "exists"}}},
+  {"reason": "node key with the wrong case", "rule": {"schema_version": 1, "name": "x", "scope": {"type": "organization"}, "condition": {"type": "comparison", "Field": "a", "operator": "exists"}}},
+  {"reason": "enabled is null", "rule": {"schema_version": 1, "name": "x", "enabled": null, "scope": {"type": "organization"}, "condition": {"type": "comparison", "field": "a", "operator": "exists"}}},
+  {"reason": "duration without a unit", "rule": {"schema_version": 1, "name": "x", "cooldown": "0", "scope": {"type": "organization"}, "condition": {"type": "comparison", "field": "a", "operator": "exists"}}},
+  {"reason": "duration without a leading digit", "rule": {"schema_version": 1, "name": "x", "cooldown": ".5s", "scope": {"type": "organization"}, "condition": {"type": "comparison", "field": "a", "operator": "exists"}}}
+]

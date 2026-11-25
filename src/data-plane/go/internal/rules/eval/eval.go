@@ -14,8 +14,10 @@
 package eval
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"slices"
@@ -64,33 +66,43 @@ type Event struct {
 // nested path, the nested path wins.
 func FlattenJSON(data []byte) (map[string]Value, error) {
 	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber() // a number is converted only when it is kept: not those inside arrays
+	if err := dec.Decode(&obj); err != nil {
 		return nil, fmt.Errorf("payload is not a JSON object: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("payload is not a JSON object: trailing data")
 	}
 	if obj == nil {
 		return nil, fmt.Errorf("payload is not a JSON object: null")
 	}
 	out := make(map[string]Value, len(obj))
-	flatten("", obj, out, 0, false)
-	flatten("", obj, out, 0, true)
+	for _, literal := range []bool{false, true} {
+		if err := flatten("", obj, out, 0, literal); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 
 // flatten adds the fields out does not have yet, in key order. Keys that contain a dot
 // are read only in the literal pass.
-func flatten(prefix string, obj map[string]any, out map[string]Value, depth int, literal bool) {
+func flatten(prefix string, obj map[string]any, out map[string]Value, depth int, literal bool) error {
 	for _, k := range slices.Sorted(maps.Keys(obj)) {
 		if !literal && strings.Contains(k, ".") {
 			continue
 		}
 		v := obj[k]
 		key := k
-		if prefix != "" {
+		if depth > 0 {
 			key = prefix + "." + k
 		}
 		if t, ok := v.(map[string]any); ok {
 			if depth < 5 {
-				flatten(key, t, out, depth+1, literal)
+				if err := flatten(key, t, out, depth+1, literal); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -98,14 +110,19 @@ func flatten(prefix string, obj map[string]any, out map[string]Value, depth int,
 			continue
 		}
 		switch t := v.(type) {
-		case float64:
-			out[key] = Num(t)
+		case json.Number:
+			f, err := t.Float64()
+			if err != nil {
+				return fmt.Errorf("field %q: number out of range", key)
+			}
+			out[key] = Num(f)
 		case string:
 			out[key] = Str(t)
 		case bool:
 			out[key] = Bool(t)
 		}
 	}
+	return nil
 }
 
 // Bucket summarizes the samples that fell into one slice of a window.
@@ -167,6 +184,7 @@ type Output struct {
 type result struct {
 	v, raw   bool
 	unk      bool // the event alone says nothing; raw is false then
+	unset    bool // the frontier outcome is not known yet (never observed); v is false then
 	pending  bool
 	deadline time.Time
 }
@@ -390,18 +408,18 @@ func (c *comparison) eval(cx *ctx) result {
 	last := ns.Last != nil && *ns.Last
 	ev := cx.in.Event
 	if ev == nil {
-		return result{v: last, raw: last}
+		return result{v: last, raw: last, unset: ns.Last == nil}
 	}
 	v, ok := ev.Fields[c.field]
 	if !ok && c.op != dsl.OpExists && c.op != dsl.OpNotExists {
-		return result{v: last, unk: true}
+		return result{v: last, unk: true, unset: ns.Last == nil}
 	}
 	got := c.test(v, ok)
 	if ok && v.Kind == KindNumber {
 		cx.values[c.field] = v.Num
 	}
 	if cx.in.OutOfOrder {
-		return result{v: last, raw: got}
+		return result{v: last, raw: got, unset: ns.Last == nil}
 	}
 	if ns.Last == nil || *ns.Last != got {
 		b := got
@@ -420,6 +438,7 @@ type logical struct {
 func (l *logical) eval(cx *ctx) result {
 	out := result{v: l.all, raw: l.all}
 	decided := false // one child alone settles what the event says
+	settled := false // one child alone settles the frontier outcome
 	anyPending, allSatisfiable := false, true
 	for _, k := range l.kids { // every child runs, so every child's state stays current
 		r := k.eval(cx)
@@ -432,12 +451,16 @@ func (l *logical) eval(cx *ctx) result {
 		}
 		out.unk = out.unk || r.unk
 		decided = decided || (!r.unk && r.raw != l.all)
+		out.unset = out.unset || r.unset
+		settled = settled || (!r.unset && r.v != l.all)
 		anyPending = anyPending || r.pending
 		allSatisfiable = allSatisfiable && (r.v || r.pending)
 		out.deadline = minTime(out.deadline, r.deadline)
 	}
 	out.unk = out.unk && !decided
 	out.raw = out.raw && !out.unk
+	out.unset = out.unset && !settled
+	out.v = out.v && !out.unset
 	if !out.v {
 		if l.all {
 			out.pending = anyPending && allSatisfiable
@@ -452,7 +475,7 @@ type not struct{ kid node }
 
 func (n *not) eval(cx *ctx) result {
 	r := n.kid.eval(cx)
-	return result{v: !r.v, raw: !r.raw && !r.unk, unk: r.unk, deadline: r.deadline}
+	return result{v: !r.v && !r.unset, raw: !r.raw && !r.unk, unk: r.unk, unset: r.unset, deadline: r.deadline}
 }
 
 // frontier is the result of a node that only has an outcome at the frontier. A late
@@ -477,20 +500,19 @@ func (d *duration) eval(cx *ctx) result {
 	r := d.kid.eval(cx)
 	ns := cx.st.get(d.path)
 	ev := cx.in.Event
-	if ev == nil || !cx.in.OutOfOrder {
-		switch {
-		case r.v && ns.Since == nil:
-			t := cx.in.Now
-			if ev != nil {
-				t = ev.Time
-			}
-			ns.Since = &t
-		case !r.v && ns.Since != nil:
-			ns.Since = nil
+	switch {
+	case !r.v:
+		// Also for a late event: it may change a window, and r.v is the frontier outcome.
+		ns.Since = nil
+	case ns.Since == nil && (ev == nil || !cx.in.OutOfOrder):
+		t := cx.in.Now
+		if ev != nil {
+			t = ev.Time
 		}
+		ns.Since = &t
 	}
 	if ns.Since == nil {
-		return frontier(cx, result{deadline: r.deadline})
+		return frontier(cx, result{unset: r.unset, deadline: r.deadline})
 	}
 	due := ns.Since.Add(d.d)
 	if !cx.in.Now.Before(due) {
@@ -706,7 +728,12 @@ func (a *aggregate) eval(cx *ctx) result {
 	if !ok {
 		return frontier(cx, result{deadline: leaves})
 	}
-	cx.values[a.fn+"("+a.field+")"] = x
+	name := a.fn + "(" + a.field + ")"
+	if old, taken := cx.values[name]; taken && old != x {
+		// The same aggregate over another window (often in the resolve condition).
+		name += " " + a.w.String()
+	}
+	cx.values[name] = x
 	v := a.test.test(x)
 	return frontier(cx, result{v: v, deadline: leaves})
 }
@@ -756,7 +783,11 @@ func (a *aggregate) compute(bs []Bucket) (float64, bool) {
 		if lt <= ft {
 			return 0, false
 		}
-		return finite(finite(last-first) / time.Duration(lt-ft).Seconds()), true
+		secs := time.Duration(lt - ft).Seconds()
+		if d := last - first; !math.IsInf(d, 0) {
+			return finite(d / secs), true
+		}
+		return finite(last/secs - first/secs), true
 	}
 	return 0, false
 }

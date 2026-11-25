@@ -39,9 +39,8 @@ func (e memErr) Error() string { return string(e) }
 const ErrInjected = memErr("injected commit failure")
 
 func copyCursor(c *Cursor) *Cursor {
-	b, _ := json.Marshal(c)
-	var out Cursor
-	_ = json.Unmarshal(b, &out)
+	out := *c
+	out.Recent = slices.Clone(c.Recent)
 	return &out
 }
 
@@ -88,6 +87,9 @@ func (m *Memory) commit(b *Batch) error {
 		cur, ok := m.cursors[b.Cursor.DeviceID]
 		if (ok && cur.Version != b.Cursor.Version) || (!ok && b.Cursor.Version != 0) {
 			return ErrConflict
+		}
+		if _, err := json.Marshal(b.Cursor); err != nil {
+			return fmt.Errorf("encode cursor: %w", err)
 		}
 	}
 	check := func(s *RuleState) error {
@@ -178,12 +180,15 @@ func (m *Memory) StatesForRule(_ context.Context, ruleID, after string, limit in
 	var out []*RuleState
 	for k, s := range m.states {
 		if k.RuleID == ruleID && k.DeviceID > after {
-			out = append(out, s.Clone())
+			out = append(out, s)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].DeviceID < out[j].DeviceID })
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	for i, s := range out {
+		out[i] = s.Clone()
 	}
 	return out, nil
 }

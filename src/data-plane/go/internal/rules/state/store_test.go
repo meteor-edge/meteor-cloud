@@ -32,7 +32,7 @@ func stores(t *testing.T) map[string]Store {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := p.pool.Exec(ctx, `TRUNCATE rules.rule_state, rules.device_cursor, rules.rule_timers, rules.action_outbox`); err != nil {
+		if _, err := p.pool.Exec(ctx, `TRUNCATE rules.rule_state, rules.device_cursor, rules.rule_timers, rules.action_outbox, rules.action_dead_letters`); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(p.Close)
@@ -73,12 +73,12 @@ func TestStoreContract(t *testing.T) {
 			if err != nil || len(got) != 1 || got["r1"].Nodes["c"].Last == nil || !*got["r1"].Nodes["c"].Last || got["r1"].Version != 1 {
 				t.Fatalf("load: %v %+v", err, got)
 			}
-			c, _ := s.LoadCursor(ctx, "d1")
-			if c == nil || !c.Seen("e1") || !c.Watermark.Equal(t0) {
+			c, err := s.LoadCursor(ctx, "d1")
+			if err != nil || c == nil || !c.Seen("e1") || !c.Watermark.Equal(t0) {
 				t.Fatalf("cursor %+v", c)
 			}
-			if c, _ := s.LoadCursor(ctx, "nobody"); c != nil {
-				t.Fatal("unknown cursor is nil")
+			if c, err := s.LoadCursor(ctx, "nobody"); err != nil || c != nil {
+				t.Fatalf("unknown cursor: %v %+v", err, c)
 			}
 
 			// A stale writer loses.
@@ -106,7 +106,7 @@ func TestStoreContract(t *testing.T) {
 			if errs[0] != nil || !errors.Is(errs[1], ErrConflict) || errs[2] != nil {
 				t.Fatalf("group commit: %v", errs)
 			}
-			if all, _ := s.LoadStates(ctx, "d1", []string{"r1", "r2", "r3"}); len(all) != 3 || all["r1"].Phase != PhaseFiring {
+			if all, err := s.LoadStates(ctx, "d1", []string{"r1", "r2", "r3"}); err != nil || len(all) != 3 || all["r1"].Phase != PhaseFiring {
 				t.Fatalf("after group commit: %+v", all)
 			}
 
@@ -115,34 +115,34 @@ func TestStoreContract(t *testing.T) {
 			if err := commit(t, s, &Batch{Outbox: []OutboxItem{dup}}); err != nil {
 				t.Fatal(err)
 			}
-			if _, outbox, _ := s.Counts(ctx); outbox != 1 {
+			if _, outbox, err := s.Counts(ctx); err != nil || outbox != 1 {
 				t.Fatalf("outbox %d", outbox)
 			}
 
 			// Timers: claimed with a lease, invisible until it ends.
-			if ts, _ := s.ClaimTimers(ctx, t0, time.Minute, 10); len(ts) != 0 {
+			if ts, err := s.ClaimTimers(ctx, t0, time.Minute, 10); err != nil || len(ts) != 0 {
 				t.Fatal("not due yet")
 			}
 			ts, err := s.ClaimTimers(ctx, t0.Add(time.Minute), 30*time.Second, 10)
 			if err != nil || len(ts) != 1 || !ts[0].Due.Equal(t0.Add(time.Minute)) {
 				t.Fatalf("claim: %v %+v", err, ts)
 			}
-			if ts, _ := s.ClaimTimers(ctx, t0.Add(80*time.Second), 30*time.Second, 10); len(ts) != 0 {
+			if ts, err := s.ClaimTimers(ctx, t0.Add(80*time.Second), 30*time.Second, 10); err != nil || len(ts) != 0 {
 				t.Fatal("leased")
 			}
-			if ts, _ := s.ClaimTimers(ctx, t0.Add(91*time.Second), 30*time.Second, 10); len(ts) != 1 {
+			if ts, err := s.ClaimTimers(ctx, t0.Add(91*time.Second), 30*time.Second, 10); err != nil || len(ts) != 1 {
 				t.Fatal("lease expired: claimable again")
 			}
 
 			// Paging and deletion.
-			page, _ := s.StatesForRule(ctx, "r1", "", 10)
-			if len(page) != 1 {
+			page, err := s.StatesForRule(ctx, "r1", "", 10)
+			if err != nil || len(page) != 1 {
 				t.Fatalf("page %d", len(page))
 			}
 			if err := commit(t, s, &Batch{Deleted: []*RuleState{page[0]}}); err != nil {
 				t.Fatal(err)
 			}
-			if timers, _, _ := s.Counts(ctx); timers != 0 {
+			if timers, _, err := s.Counts(ctx); err != nil || timers != 0 {
 				t.Fatalf("timer removed with its state, %d left", timers)
 			}
 			if err := s.Ping(ctx); err != nil {

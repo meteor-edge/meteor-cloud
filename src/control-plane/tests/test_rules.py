@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,13 +18,14 @@ from app.audit.models import AuditEvent
 from app.core.config import get_settings
 from app.core.secretbox import unseal
 from app.devices.models import Device, DeviceGroup
-from app.rules.definition import RuleDefinitionError, condition_hash, validate_definition
-from app.rules.models import NotificationIntegration
+from app.rules.definition import RuleDefinitionError, condition_hash, parse_duration, validate_definition
+from app.rules.models import AlertSilence, NotificationIntegration
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
 
 INTERNAL = {"X-Data-Plane-Internal-Token": get_settings().data_plane_internal_token}
-EXAMPLES = Path(__file__).resolve().parents[3] / "contracts" / "rules-v1.examples.json"
+CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
+EXAMPLES = CONTRACTS / "rules-v1.examples.json"
 
 
 def _definition(**overrides) -> dict:
@@ -307,8 +309,9 @@ def test_command_actions_need_the_command_permission(client: TestClient, db_sess
     base = f"/api/v1/organizations/{org.id}/rules"
     reboot = _definition(actions=[{"type": "alert"}, {"type": "command", "command": "reboot"}])
     assert client.post(base, headers=headers, json={"definition": reboot}).status_code == 403
-    restart_app = _definition(actions=[{"type": "command", "command": "restart"}])
-    assert client.post(base, headers=headers, json={"definition": restart_app}).status_code == 201
+    unsupported = _definition(actions=[{"type": "command", "command": "restart"}])
+    response = client.post(f"{base}/validate", headers=headers, json={"definition": unsupported}).json()
+    assert response["problems"] == [{"path": "actions[0].command", "message": "must be one of: reboot, shutdown"}]
 
 
 # ---- engine-facing -------------------------------------------------------
@@ -450,3 +453,139 @@ def test_integrations_seal_secrets_and_block_delete_in_use(client: TestClient, d
     viewer_headers = auth_header(client, "viewer@example.com")
     assert client.get(base, headers=viewer_headers).status_code == 200
     assert client.post(base, headers=viewer_headers, json={"name": "x", "url": "https://x.example"}).status_code == 403
+
+
+# ---- review of #43 -------------------------------------------------------
+
+
+def test_schema_agrees_with_the_shared_examples() -> None:
+    schema = Draft202012Validator(json.loads((CONTRACTS / "rules-v1.schema.json").read_text()))
+    for example in json.loads(EXAMPLES.read_text()):
+        assert schema.is_valid(example), example
+    for case in json.loads((CONTRACTS / "rules-v1.invalid.json").read_text()):
+        assert not schema.is_valid(case["rule"]), case["reason"]
+        with pytest.raises(RuleDefinitionError):
+            validate_definition(case["rule"])
+
+
+def _comparison(**fields) -> dict:
+    return {"condition": {"type": "comparison", "field": "a", **fields}}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        _comparison(operator="gt", value=10**310),
+        _comparison(operator="in", values=[1, 10**310]),
+        _comparison(operator="between", min=0, max=10**310),
+        _comparison(operator="eq", value=float("inf")),
+        _comparison(operator="exists") | {"cooldown": "1s\n"},
+        _comparison(operator="exists") | {"cooldown": "1s "},
+        _comparison(operator="exists") | {"cooldown": "٣s"},
+        _comparison(operator="exists") | {"source": {"streams": ["app.x\n"]}},
+        {"condition": {"type": "comparison", "field": "cpu\n", "operator": "exists"}},
+        {"scope": {"type": "group", "group_id": "g\n"}},
+        {"schema_version": 1.0},
+        {"actions": [{"type": "platform_event", "params": {"x": float("nan")}}]},
+        {"actions": [{"type": "platform_event", "params": {"x": "a" * 4089}}]},
+    ],
+)
+def test_what_the_engine_cannot_load_is_refused(overrides: dict) -> None:
+    with pytest.raises(RuleDefinitionError):
+        validate_definition(_definition(**overrides))
+
+
+def test_boundaries_stay_valid() -> None:
+    assert parse_duration("1h1.5s") == 3601.5 and parse_duration("0s") == 0 and parse_duration("0") is None
+    validate_definition(_definition(**_comparison(operator="eq", value=True), cooldown="0s"))
+    validate_definition(_definition(actions=[{"type": "platform_event", "params": {"x": "a" * 4088}}]))
+    validate_definition(_definition(name="é" * 200))
+
+
+def test_a_deep_resolve_tree_is_a_problem_not_a_crash() -> None:
+    node: dict = {"type": "absence", "duration": "1m"}
+    for _ in range(5000):
+        node = {"type": "not", "condition": node}
+    with pytest.raises(RuleDefinitionError, match="nested deeper"):
+        validate_definition(_definition(resolve=node))
+
+
+def test_condition_hash_uses_effective_sources() -> None:
+    base = condition_hash(_definition())
+    assert condition_hash(_definition(source={"streams": ["meteor.device.metrics"]})) == base
+    assert condition_hash(_definition(source={"streams": ["app.x"]})) != base
+
+
+def test_scope_ids_are_stored_in_canonical_form(client: TestClient, db_session: Session) -> None:
+    org, headers = _org(client, db_session)
+    group = DeviceGroup(organization_id=org.id, name="g", slug="g")
+    db_session.add(group)
+    db_session.commit()
+    device = _device(db_session, org, device_group_id=group.id)
+    scope = {"type": "group", "group_id": str(group.id).upper()}
+    rule = _rule(client, org, headers, _definition(scope=scope))
+    assert rule["definition"]["scope"]["group_id"] == str(group.id)
+    base = f"/api/v1/organizations/{org.id}/rules"
+    preview = client.post(f"{base}/preview-devices", headers=headers, json={"definition": {"scope": scope}})
+    assert preview.json()["total"] == 1
+    rule = _rule(client, org, headers, _definition(scope={"type": "device", "device_ids": [str(device.id).upper()]}))
+    assert rule["definition"]["scope"]["device_ids"] == [str(device.id)]
+    for bad in ({"type": "organization", "labels": ["env"]}, {"type": "device", "device_ids": 5}, None):
+        response = client.post(f"{base}/preview-devices", headers=headers, json={"definition": {"scope": bad}})
+        assert response.status_code == 422, response.text
+
+
+def test_resolve_closes_every_alert_of_the_episode(client: TestClient, db_session: Session) -> None:
+    org, headers = _org(client, db_session)
+    device = _device(db_session, org)
+    rule = _rule(client, org, headers)
+    further = _transition(rule, device, "firing", 1, fingerprint="e2") | {"idempotency_key": "further"}
+    _send(client, _transition(rule, device, "firing", 1), further)
+    resolved = _transition(rule, device, "resolved", 1)
+    assert _send(client, resolved)[0]["status"] == "applied"
+    alerts = client.get(f"/api/v1/organizations/{org.id}/alerts", headers=headers).json()
+    assert [a["status"] for a in alerts] == ["resolved", "resolved"]
+    assert _send(client, resolved)[0]["status"] == "duplicate"
+
+
+def test_silenced_flag_follows_the_clock(client: TestClient, db_session: Session) -> None:
+    org, headers = _org(client, db_session)
+    device = _device(db_session, org)
+    rule = _rule(client, org, headers)
+    _send(client, _transition(rule, device, "firing", 1))
+    base = f"/api/v1/organizations/{org.id}"
+    end = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    created = client.post(f"{base}/alert-silences", headers=headers, json={"ends_at": end}).json()
+    assert client.get(f"{base}/alerts", headers=headers).json()[0]["silenced"] is True
+    silence = db_session.get(AlertSilence, uuid.UUID(created["id"]))
+    silence.starts_at = datetime.now(UTC) - timedelta(hours=2)
+    silence.ends_at = datetime.now(UTC) - timedelta(hours=1)  # ended without any write to the alert
+    db_session.commit()
+    alert = client.get(f"{base}/alerts", headers=headers).json()[0]
+    assert alert["silenced"] is False
+    assert client.get(f"{base}/alerts/{alert['id']}", headers=headers).json()["silenced"] is False
+
+
+def test_silence_times_need_a_timezone(client: TestClient, db_session: Session) -> None:
+    org, headers = _org(client, db_session)
+    response = client.post(
+        f"/api/v1/organizations/{org.id}/alert-silences",
+        headers=headers,
+        json={"starts_at": "2036-12-01T10:00:00", "ends_at": "2036-12-01T11:00:00Z"},
+    )
+    assert response.status_code == 422
+
+
+def test_integration_urls_are_bounded_and_hidden_from_readers(client: TestClient, db_session: Session) -> None:
+    org, headers = _org(client, db_session)
+    base = f"/api/v1/organizations/{org.id}/notification-integrations"
+    url = "https://hooks.slack.com/services/T0/B0/not-a-real-token"
+    row = client.post(base, headers=headers, json={"kind": "slack", "name": "Slack", "url": url}).json()
+    viewer = create_user(db_session, email="reader@example.com")
+    add_member(db_session, org, viewer, OrganizationRole.VIEWER)
+    seen = client.get(base, headers=auth_header(client, "reader@example.com"))
+    assert seen.json()[0]["url"] == "https://hooks.slack.com/…" and "services" not in seen.text
+    assert client.get(base, headers=headers).json()[0]["url"] == url
+    long = "https://a.example/" + "x" * 2031
+    assert client.post(base, headers=headers, json={"name": "long", "url": long}).status_code == 422
+    assert client.patch(f"{base}/{row['id']}", headers=headers, json={"url": long}).status_code == 422

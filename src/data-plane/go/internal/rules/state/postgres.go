@@ -77,6 +77,9 @@ var migrations = []string{
 		last_error       text        NOT NULL,
 		failed_at        timestamptz NOT NULL DEFAULT now()
 	);`,
+	// 2: per-key ordering for the dispatcher (an older pending action of the same
+	// rule, device and type is always delivered first).
+	`CREATE INDEX action_outbox_order ON rules.action_outbox (rule_id, device_id, action_type, id) WHERE status = 'pending';`,
 }
 
 // Postgres is the durable Store.
@@ -114,7 +117,14 @@ func (p *Postgres) migrate(ctx context.Context) error {
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(778899002)`); err != nil {
 		return err
 	}
-	defer conn.Exec(context.Background(), `SELECT pg_advisory_unlock(778899002)`)
+	defer func() {
+		// Its own short deadline: ctx may be over, and a dead server must not block startup.
+		uctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(uctx, `SELECT pg_advisory_unlock(778899002)`); err != nil {
+			_ = conn.Conn().Close(uctx) // ends the session, and with it the lock
+		}
+	}()
 	if _, err := conn.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS rules;
 		CREATE TABLE IF NOT EXISTS rules.schema_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return fmt.Errorf("prepare rules migrations: %w", err)

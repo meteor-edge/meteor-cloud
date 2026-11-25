@@ -29,7 +29,8 @@ type SimRequest struct {
 	Until      *time.Time      `json:"until,omitempty"`
 }
 
-// SimStep is the rule's state after one event or timer.
+// SimStep is the rule's state after one event or timer. Transitions are those at least
+// one action of the rule runs on.
 type SimStep struct {
 	At          time.Time          `json:"at"`
 	EventID     string             `json:"event_id,omitempty"`
@@ -107,12 +108,19 @@ func Simulate(ctx context.Context, req SimRequest, lim dsl.Limits, allowPlatform
 			step.Phase = st.Phase
 			step.Values = st.LastValues
 		}
+		type tkey struct {
+			kind, reason, fingerprint string
+			episode                   int64
+		}
+		had := map[tkey]bool{} // one transition queues one item per action
 		for _, o := range store.Outbox()[seen:] {
-			if o.ActionType != dsl.ActionAlert {
-				continue
-			}
 			var p ActionPayload
 			_ = json.Unmarshal(o.Payload, &p)
+			k := tkey{p.Transition.Kind, p.Transition.Reason, p.Transition.Fingerprint, p.Transition.Episode}
+			if had[k] {
+				continue
+			}
+			had[k] = true
 			step.Transitions = append(step.Transitions, p.Transition)
 		}
 		seen = len(store.Outbox())

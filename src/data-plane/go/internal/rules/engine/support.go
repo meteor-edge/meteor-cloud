@@ -131,6 +131,7 @@ type committer struct {
 	reqs     chan *commitReq
 	stop     chan struct{}
 	done     chan struct{}
+	once     sync.Once
 }
 
 type commitReq struct {
@@ -211,8 +212,36 @@ func (c *committer) run() {
 }
 
 func (c *committer) close() {
-	close(c.stop)
+	c.once.Do(func() { close(c.stop) })
 	<-c.done
+}
+
+// firingSet is the rule and device pairs this worker has seen start firing. A resolve of
+// an episode that started elsewhere (or before a restart) removes nothing.
+type firingSet struct {
+	mu sync.Mutex
+	m  map[state.Key]bool
+}
+
+func (f *firingSet) add(k state.Key) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.m == nil {
+		f.m = map[state.Key]bool{}
+	}
+	f.m[k] = true
+}
+
+func (f *firingSet) remove(k state.Key) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.m, k)
+}
+
+func (f *firingSet) len() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.m)
 }
 
 // stripes serialize work on one device without a global lock.

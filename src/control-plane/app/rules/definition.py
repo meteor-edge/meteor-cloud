@@ -2,7 +2,8 @@
 
 This mirrors the data plane's Go validator (``internal/rules/dsl``), which stays the
 authority: the engine re-validates every rule it loads and refuses one it cannot
-compile. Both are tested against ``contracts/rules-v1.examples.json``. Validation here
+compile. Both, and the JSON schema, are tested against ``contracts/rules-v1.examples.json``
+and ``contracts/rules-v1.invalid.json``. Validation here
 gives the API immediate, path-addressed errors without a round trip to the data plane.
 """
 
@@ -10,7 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +33,7 @@ MAX_WINDOW = 24 * 3600.0
 MAX_ACTIONS = 10
 MAX_LIST_ITEMS = 100
 MAX_DEVICES = 1000
+MAX_PARAMS = 4096
 
 TOP_KEYS = {
     "schema_version",
@@ -85,11 +89,12 @@ OPERANDS = {
 SCOPE_KEYS = {"type", "device_ids", "group_id", "device_type_id", "labels"}
 ACTION_KEYS = {"type", "on", "severity", "integration_id", "command", "params", "timeout"}
 
-_REF = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-_FIELD_SEG = re.compile(r"^[A-Za-z0-9_-]+$")
-_STREAM_SEG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
-_DURATION = re.compile(r"^(?:(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h))+$")
-_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
+# Matched with fullmatch: "$" would also match before a trailing newline.
+_REF = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_FIELD_SEG = re.compile(r"[A-Za-z0-9_-]+")
+_STREAM_SEG = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+_DURATION = re.compile(r"(?:[0-9]+(?:\.[0-9]+)?(?:ns|us|µs|ms|s|m|h))+")
+_DURATION_PART = re.compile(r"([0-9]+(?:\.[0-9]+)?)(ns|us|µs|ms|s|m|h)")
 _UNIT = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
 
 
@@ -107,13 +112,19 @@ class RuleDefinitionError(ValueError):
 
 def parse_duration(value: Any) -> float | None:
     """Seconds for a Go-style duration string ("90s", "1h30m"), else None."""
-    if not isinstance(value, str) or not _DURATION.match(value):
+    if not isinstance(value, str) or not _DURATION.fullmatch(value):
         return None
     return sum(float(n) * _UNIT[u] for n, u in _DURATION_PART.findall(value))
 
 
 def _is_number(v: Any) -> bool:
-    return isinstance(v, int | float) and not isinstance(v, bool)
+    """A number the engine can hold: a finite 64-bit float."""
+    if not isinstance(v, int | float) or isinstance(v, bool):
+        return False
+    try:
+        return math.isfinite(float(v))
+    except OverflowError:
+        return False
 
 
 def _is_scalar(v: Any) -> bool:
@@ -121,18 +132,27 @@ def _is_scalar(v: Any) -> bool:
 
 
 def _valid_field(f: Any) -> bool:
-    return isinstance(f, str) and 0 < len(f) <= 128 and all(_FIELD_SEG.match(s) for s in f.split("."))
+    return isinstance(f, str) and 0 < len(f) <= 128 and all(_FIELD_SEG.fullmatch(s) for s in f.split("."))
 
 
 def _valid_stream(s: Any) -> bool:
     if not isinstance(s, str) or not 0 < len(s) <= 128:
         return False
     parts = s.split(".")
-    return len(parts) <= 8 and all(_STREAM_SEG.match(p) for p in parts)
+    return len(parts) <= 8 and all(_STREAM_SEG.fullmatch(p) for p in parts)
 
 
 def _valid_ref(v: Any) -> bool:
-    return isinstance(v, str) and bool(_REF.match(v))
+    return isinstance(v, str) and bool(_REF.fullmatch(v))
+
+
+def _params_size(params: dict[str, Any]) -> int:
+    """Compact UTF-8 size, as the engine measures it; over the limit when it cannot be encoded."""
+    try:
+        text = json.dumps(params, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        return len(text.encode())
+    except (ValueError, RecursionError):
+        return MAX_PARAMS + 1
 
 
 class _Validator:
@@ -140,6 +160,7 @@ class _Validator:
         self.allow_platform = allow_platform
         self.problems: list[Problem] = []
         self.nodes = 0
+        self.absence_seen = False
 
     def add(self, path: str, message: str) -> None:
         self.problems.append(Problem(path, message))
@@ -158,7 +179,7 @@ class _Validator:
             self.add("", "a rule must be a JSON object")
             return
         self.unknown("", d, TOP_KEYS)
-        if d.get("schema_version") != SCHEMA_VERSION or isinstance(d.get("schema_version"), bool):
+        if type(d.get("schema_version")) is not int or d["schema_version"] != SCHEMA_VERSION:
             self.add("schema_version", f"must be {SCHEMA_VERSION}")
         name = d.get("name")
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 200:
@@ -182,8 +203,9 @@ class _Validator:
         else:
             self.node("condition", d["condition"], 1)
         if d.get("resolve") is not None:
+            self.absence_seen = False
             self.node("resolve", d["resolve"], 1)
-            if _contains(d["resolve"], "absence"):
+            if self.absence_seen:
                 self.add("resolve", "absence cannot be used in a resolve condition")
         for key in ("cooldown", "late_tolerance"):
             if key in d:
@@ -221,11 +243,11 @@ class _Validator:
                 self.add("scope.type", "platform rules are for platform administrators only")
         else:
             self.add("scope.type", "must be device, group, device_type, organization or platform")
-        if t != "device" and s.get("device_ids"):
+        if t != "device" and "device_ids" in s:
             self.add("scope.device_ids", "applies only to a device scope")
-        if t != "group" and s.get("group_id"):
+        if t != "group" and "group_id" in s:
             self.add("scope.group_id", "applies only to a group scope")
-        if t != "device_type" and s.get("device_type_id"):
+        if t != "device_type" and "device_type_id" in s:
             self.add("scope.device_type_id", "applies only to a device_type scope")
         labels = s.get("labels")
         if labels is not None:
@@ -313,6 +335,7 @@ class _Validator:
                 self.add(f"{path}.operator", "must be eq, ne, gt, gte, lt, lte or between for an aggregate")
             self.operands(path, n)
         elif t == "absence":
+            self.absence_seen = True
             self.window(f"{path}.duration", n.get("duration"))
             if "streams" in n:
                 self.streams(f"{path}.streams", n["streams"])
@@ -410,7 +433,7 @@ class _Validator:
             for on in a.get("on", []) if isinstance(a.get("on", []), list) else ["?"]:
                 if on not in ("firing", "resolved"):
                     self.add(f"{p}.on", "entries must be firing or resolved")
-            if "params" in a and (not isinstance(a["params"], dict) or len(json.dumps(a["params"])) > 4096):
+            if "params" in a and (not isinstance(a["params"], dict) or _params_size(a["params"]) > MAX_PARAMS):
                 self.add(f"{p}.params", "must be a JSON object of at most 4 KiB")
             if "timeout" in a:
                 seconds = parse_duration(a["timeout"])
@@ -420,13 +443,39 @@ class _Validator:
             self.add("actions", "at most one alert action")
 
 
-def _contains(n: Any, node_type: str) -> bool:
-    if not isinstance(n, dict):
-        return False
-    if n.get("type") == node_type:
-        return True
-    kids = n.get("conditions") if isinstance(n.get("conditions"), list) else []
-    return any(_contains(c, node_type) for c in kids) or _contains(n.get("condition"), node_type)
+def _canonical(value: Any) -> Any:
+    try:
+        return str(uuid.UUID(value)) if isinstance(value, str) else value
+    except ValueError:
+        return value
+
+
+def normalize_definition(definition: dict[str, Any]) -> dict[str, Any]:
+    """The definition with every id in canonical (lowercase) form, because the engine compares
+    ids as text. Whatever is not an id stays as it is, for validation to report."""
+    out = dict(definition)
+    if isinstance(out.get("scope"), dict):
+        scope = out["scope"] = dict(out["scope"])
+        for key in ("group_id", "device_type_id"):
+            if key in scope:
+                scope[key] = _canonical(scope[key])
+        if isinstance(scope.get("device_ids"), list):
+            scope["device_ids"] = [_canonical(v) for v in scope["device_ids"]]
+    if isinstance(out.get("actions"), list):
+        out["actions"] = [
+            {**a, "integration_id": _canonical(a["integration_id"])}
+            if isinstance(a, dict) and "integration_id" in a
+            else a
+            for a in out["actions"]
+        ]
+    return out
+
+
+def scope_problems(scope: Any) -> list[Problem]:
+    """Problems of an organization rule's scope alone (a rule still being written)."""
+    v = _Validator(allow_platform=False)
+    v.scope(scope)
+    return v.problems
 
 
 def validate_definition(definition: Any, *, allow_platform: bool = False) -> dict[str, Any]:
@@ -444,7 +493,11 @@ def severity_of(definition: dict[str, Any]) -> str:
 
 def condition_hash(definition: dict[str, Any]) -> str:
     """Fingerprint of what shapes evaluation state, for display (the engine computes its own)."""
-    shape = {k: definition.get(k) for k in ("condition", "resolve", "scope", "source")}
+    shape = {k: definition.get(k) for k in ("condition", "resolve", "scope")}
+    scope = definition.get("scope") or {}
+    if isinstance(scope.get("device_ids"), list):  # a set: its order changes nothing
+        shape["scope"] = {**scope, "device_ids": sorted(set(scope["device_ids"]))}
+    shape["streams"] = sorted(set((definition.get("source") or {}).get("streams") or [DEFAULT_STREAM]))
     # The effective settings, so spelling out a default changes nothing.
     alerting = definition.get("alerting") or {}
     if alerting.get("mode") == "per_event":

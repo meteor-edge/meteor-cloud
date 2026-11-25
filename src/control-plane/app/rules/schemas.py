@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, HttpUrl, UrlConstraints, model_validator
 
 
 class RuleWrite(BaseModel):
@@ -107,8 +107,8 @@ class SilenceCreate(BaseModel):
     rule_id: uuid.UUID | None = None
     device_id: uuid.UUID | None = None
     comment: str | None = Field(default=None, max_length=2000)
-    starts_at: datetime | None = None
-    ends_at: datetime
+    starts_at: AwareDatetime | None = None
+    ends_at: AwareDatetime
 
     @model_validator(mode="after")
     def _window(self) -> SilenceCreate:
@@ -131,17 +131,21 @@ class SilenceResponse(BaseModel):
     created_at: datetime
 
 
+# As long as the column.
+IntegrationUrl = Annotated[HttpUrl, UrlConstraints(max_length=2048)]
+
+
 class IntegrationCreate(BaseModel):
     kind: Literal["webhook", "slack"] = "webhook"
     name: str = Field(min_length=1, max_length=120)
-    url: HttpUrl
+    url: IntegrationUrl
     enabled: bool = True
     secret: str | None = Field(default=None, min_length=16, max_length=512)
 
 
 class IntegrationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    url: HttpUrl | None = None
+    url: IntegrationUrl | None = None
     enabled: bool | None = None
     # "" removes the secret; omitted keeps it.
     secret: str | None = Field(default=None, max_length=512)
@@ -220,3 +224,53 @@ class AlertTransitionResult(BaseModel):
 
 class AlertTransitionResponse(BaseModel):
     results: list[AlertTransitionResult]
+
+
+class EngineAction(BaseModel):
+    """Any outbox action as the dispatcher sends it: the outbox payload plus its key."""
+
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    rule_id: uuid.UUID
+    rule_version: int
+    rule_name: str = Field(max_length=200)
+    organization_id: uuid.UUID
+    device_id: uuid.UUID
+    severity: Literal["info", "warning", "critical"]
+    event: TransitionEvent
+    action: dict[str, Any] = Field(default_factory=dict)
+
+
+class CommandResult(BaseModel):
+    status: Literal["sent", "skipped"]
+    detail: str | None = None
+
+
+class DeliveryRequest(BaseModel):
+    integration_id: uuid.UUID
+    organization_id: uuid.UUID
+    rule_id: uuid.UUID
+    device_id: uuid.UUID
+    at: datetime
+
+
+class DeliveryResponse(BaseModel):
+    url: str
+    kind: str
+    secret: str
+    enabled: bool
+    silenced: bool
+
+
+class RuleTestEvent(BaseModel):
+    id: str | None = Field(default=None, max_length=64)
+    time: datetime
+    stream: str | None = Field(default=None, max_length=128)
+    data: dict[str, Any]
+
+
+class RuleTestRequest(BaseModel):
+    """Run a definition over sample events with a virtual clock. Nothing is stored, no action runs."""
+
+    definition: dict[str, Any]
+    events: list[RuleTestEvent] = Field(max_length=1000)
+    until: datetime | None = None

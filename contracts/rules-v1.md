@@ -8,7 +8,9 @@ network or read another tenant's data.
 - Machine-readable schema: [`rules-v1.schema.json`](rules-v1.schema.json). The Go
   validator (`internal/rules/dsl`) is the authority; the schema mirrors it for the
   control plane and the console.
-- Examples that both are tested against: [`rules-v1.examples.json`](rules-v1.examples.json).
+- Rules that the schema, the engine and the API must accept
+  ([`rules-v1.examples.json`](rules-v1.examples.json)) and refuse
+  ([`rules-v1.invalid.json`](rules-v1.invalid.json)); tests run all three against both.
 
 ## Top level
 
@@ -84,7 +86,9 @@ gives `net.eth0.rx`. Arrays and nulls are not fields. If a literal key `"net.eth
 spells the same field, the nested path wins. A comparison on a field the
 event does not carry keeps its previous outcome, because devices may report
 metrics in separate messages. Such an event is no evidence either way for
-`count_within`, also under `not`; it ends a `consecutive` streak.
+`count_within`, also under `not`; it ends a `consecutive` streak. Until the field is
+reported for the first time the comparison is neither true nor false, so `not` around it
+does not fire either.
 
 ### Time and order
 
@@ -132,6 +136,23 @@ still true), `rule_removed` (deleted or disabled), `device_out_of_scope`.
 | `notification` | `integration_id`, `params` | firing |
 | `command` | `command`, `params`, `timeout` | firing |
 | `platform_event` | `params` | firing |
+
+How each is delivered (`internal/rules/dispatch`):
+
+- `alert` creates or resolves the alert record in the control plane
+  (`POST /internal/rules/alert-transitions`, idempotent by key).
+- `webhook` and `notification` post to a notification integration of the rule's
+  organization. Kind `webhook` gets the JSON below plus `params`; kind `slack` gets a
+  Slack-compatible `{"text": "..."}`. Headers: `X-MeteorCloud-Event: rule.<transition>`,
+  `X-MeteorCloud-Delivery: <idempotency key>` and, when the integration has a secret,
+  `X-MeteorCloud-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`. Private,
+  loopback and link-local addresses are refused, redirects are not followed, and an
+  active silence skips the delivery.
+- `command` sends `reboot` or `shutdown` (the only commands rules accept in v1) as a
+  device action, as the rule's author and with their current permission
+  (`device.reboot`) and device-group scope. An author who lost it gets the action
+  dead-lettered, never sent.
+- `platform_event` is written to the organization's audit log as `rule.event`.
 
 `on: ["firing", "resolved"]` overrides the default of every action except `alert`, which
 always runs on both. Actions never run inside

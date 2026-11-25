@@ -12,19 +12,31 @@ import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.audit.models import AuditEvent
 from app.audit.service import AuditRecorder
 from app.authorization.service import AuthzService
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
-from app.core.secretbox import seal
+from app.core.secretbox import SecretBoxError, seal, unseal
+from app.device_actions.service import DeviceActionService
 from app.devices.models import Device, DeviceGroup, DeviceType
 from app.identity.models import User
-from app.rules.definition import Problem, RuleDefinitionError, condition_hash, severity_of, validate_definition
+from app.rules.definition import (
+    Problem,
+    RuleDefinitionError,
+    condition_hash,
+    normalize_definition,
+    scope_problems,
+    severity_of,
+    validate_definition,
+)
+from app.rules.engine_client import RulesEngineClient
 from app.rules.models import (
     ACTIVE_ALERT_STATUSES,
     ALERT_ACKNOWLEDGED,
@@ -40,23 +52,27 @@ from app.rules.models import (
 from app.rules.schemas import (
     AlertTransition,
     AlertTransitionResult,
+    CommandResult,
+    DeliveryRequest,
+    DeliveryResponse,
     DevicePreview,
+    EngineAction,
     IntegrationCreate,
     IntegrationResponse,
     IntegrationUpdate,
     MatchingDevice,
     ProblemResponse,
     RulesSnapshot,
+    RuleTestRequest,
     SilenceCreate,
     SnapshotDevice,
     SnapshotRule,
     ValidationResult,
 )
 
-# The permission a rule's author must hold to attach a device command, by command name.
-# The dispatcher re-checks the author's current access before it sends anything.
+# Device commands a rule may send, and the permission its author must hold. The
+# control plane re-checks the author's current access when the command is delivered.
 COMMAND_PERMISSIONS = {"reboot": "device.reboot", "shutdown": "device.reboot"}
-DEFAULT_COMMAND_PERMISSION = "application.command"
 PREVIEW_LIMIT = 200
 
 
@@ -82,13 +98,19 @@ def scope_matches(scope: dict[str, Any], organization_id: uuid.UUID | None, devi
     return all(str(labels.get(k)) == str(v) and k in labels for k, v in (scope.get("labels") or {}).items())
 
 
-def _integration_view(row: NotificationIntegration) -> IntegrationResponse:
+def _redacted_url(url: str) -> str:
+    """The URL's scheme and host: its user, path and query may be the posting credential (Slack)."""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}/…"
+
+
+def _integration_view(row: NotificationIntegration, *, full_url: bool = True) -> IntegrationResponse:
     return IntegrationResponse(
         id=row.id,
         organization_id=row.organization_id,
         kind=row.kind,
         name=row.name,
-        url=row.url,
+        url=row.url if full_url else _redacted_url(row.url),
         enabled=row.enabled,
         has_secret=row.secret_sealed is not None,
         created_at=row.created_at,
@@ -97,9 +119,12 @@ def _integration_view(row: NotificationIntegration) -> IntegrationResponse:
 
 
 class RuleService:
-    def __init__(self, session: Session, *, settings: Settings | None = None) -> None:
+    def __init__(
+        self, session: Session, *, settings: Settings | None = None, engine: RulesEngineClient | None = None
+    ) -> None:
         self.session = session
         self.settings = settings or get_settings()
+        self.engine = engine or RulesEngineClient(self.settings)
         self.authz = AuthzService(session)
         self.audit = AuditRecorder(session)
 
@@ -147,6 +172,10 @@ class RuleService:
             if device_type is None or device_type.organization_id != organization_id:
                 problems.append(Problem("scope.device_type_id", "device type is not in this organization"))
         for index, action in enumerate(definition.get("actions") or []):
+            if action.get("type") == "command" and action.get("command") not in COMMAND_PERMISSIONS:
+                problems.append(
+                    Problem(f"actions[{index}].command", f"must be one of: {', '.join(sorted(COMMAND_PERMISSIONS))}")
+                )
             integration_id = action.get("integration_id")
             if integration_id:
                 ref = _as_uuid(integration_id)
@@ -166,7 +195,7 @@ class RuleService:
         for action in definition.get("actions") or []:
             if action.get("type") != "command":
                 continue
-            permission = COMMAND_PERMISSIONS.get(action.get("command"), DEFAULT_COMMAND_PERMISSION)
+            permission = COMMAND_PERMISSIONS[action["command"]]
             if not self.authz.has_permission(membership, permission):
                 raise ForbiddenError(
                     "insufficient_permission",
@@ -179,6 +208,7 @@ class RuleService:
         self._authorize(actor, organization_id, "rule.read")
         if not isinstance(definition, dict):
             return ValidationResult(valid=False, problems=[ProblemResponse(path="", message="must be an object")])
+        definition = normalize_definition(definition)
         problems = self._validate(organization_id, definition)
         return ValidationResult(
             valid=not problems,
@@ -188,9 +218,10 @@ class RuleService:
 
     def preview_devices(self, *, actor: User, organization_id: uuid.UUID, definition: Any) -> DevicePreview:
         self._authorize(actor, organization_id, "rule.read")
-        scope = definition.get("scope") if isinstance(definition, dict) else None
-        if not isinstance(scope, dict) or scope.get("type") == "platform":
-            raise ValidationAppError("invalid_scope", "definition.scope must be an organization scope object.")
+        scope = normalize_definition(definition).get("scope") if isinstance(definition, dict) else None
+        problems = scope_problems(scope)
+        if problems:
+            raise ValidationAppError("invalid_scope", str(RuleDefinitionError(problems)))
         devices = self.session.scalars(
             select(Device)
             .where(Device.organization_id == organization_id, Device.is_enabled.is_(True))
@@ -243,6 +274,7 @@ class RuleService:
 
     def create_rule(self, *, actor: User, organization_id: uuid.UUID, definition: dict[str, Any]) -> Rule:
         membership = self._authorize(actor, organization_id, "rule.create")
+        definition = normalize_definition(definition)
         self._require_valid(organization_id, definition)
         self._require_action_rights(membership, definition)
         rule = Rule(
@@ -273,6 +305,7 @@ class RuleService:
     ) -> Rule:
         membership = self._authorize(actor, organization_id, "rule.update")
         rule = self._rule(organization_id, rule_id)
+        definition = normalize_definition(definition)
         self._require_valid(organization_id, definition)
         self._require_action_rights(membership, definition)
         previous = self.definition_of(rule)
@@ -372,10 +405,11 @@ class RuleService:
                 )
             else:
                 statement = statement.where(Alert.fired_at < before)
-        return list(self.session.scalars(statement.order_by(Alert.fired_at.desc(), Alert.id.desc()).limit(limit)))
+        rows = self.session.scalars(statement.order_by(Alert.fired_at.desc(), Alert.id.desc()).limit(limit))
+        return self._with_current_silence(organization_id, list(rows))
 
-    def _alert(self, organization_id: uuid.UUID, alert_id: uuid.UUID) -> Alert:
-        row = self.session.get(Alert, alert_id)
+    def _alert(self, organization_id: uuid.UUID, alert_id: uuid.UUID, *, lock: bool = False) -> Alert:
+        row = self.session.get(Alert, alert_id, with_for_update=lock, populate_existing=lock)
         if row is None or row.organization_id != organization_id:
             raise NotFoundError("alert_not_found", "Alert was not found.")
         return row
@@ -385,6 +419,7 @@ class RuleService:
     ) -> tuple[Alert, list[AlertEvent]]:
         self._authorize(actor, organization_id, "alert.read")
         alert = self._alert(organization_id, alert_id)
+        self._with_current_silence(organization_id, [alert])
         events = list(
             self.session.scalars(
                 select(AlertEvent).where(AlertEvent.alert_id == alert.id).order_by(AlertEvent.at, AlertEvent.id)
@@ -394,7 +429,9 @@ class RuleService:
 
     def acknowledge(self, *, actor: User, organization_id: uuid.UUID, alert_id: uuid.UUID) -> Alert:
         self._authorize(actor, organization_id, "alert.acknowledge")
-        alert = self._alert(organization_id, alert_id)
+        # Locked, so a resolve that arrives meanwhile is not overwritten.
+        alert = self._alert(organization_id, alert_id, lock=True)
+        self._with_current_silence(organization_id, [alert])
         if alert.status == ALERT_ACKNOWLEDGED:
             return alert
         if alert.status == ALERT_RESOLVED:
@@ -436,6 +473,16 @@ class RuleService:
             (s.rule_id is None or s.rule_id == rule_id) and (s.device_id is None or s.device_id == device_id)
             for s in silences
         )
+
+    def _with_current_silence(self, organization_id: uuid.UUID, alerts: list[Alert]) -> list[Alert]:
+        """Set the silenced flag of active alerts from the silences in force now, because a
+        silence starts and ends without any write. A resolved alert keeps what it had."""
+        active = [a for a in alerts if a.status in ACTIVE_ALERT_STATUSES]
+        if active:
+            silences = self._active_silences(organization_id, datetime.now(UTC))
+            for alert in active:
+                alert.silenced = self._silenced(silences, alert.rule_id, alert.device_id)
+        return alerts
 
     def _refresh_silenced(self, organization_id: uuid.UUID) -> None:
         silences = self._active_silences(organization_id, datetime.now(UTC))
@@ -512,13 +559,14 @@ class RuleService:
     # ---- notification integrations -------------------------------------
 
     def list_integrations(self, *, actor: User, organization_id: uuid.UUID) -> list[IntegrationResponse]:
-        self._authorize(actor, organization_id, "rule.read")
+        membership = self._authorize(actor, organization_id, "rule.read")
+        manager = self.authz.has_permission(membership, "integration.manage")
         rows = self.session.scalars(
             select(NotificationIntegration)
             .where(NotificationIntegration.organization_id == organization_id)
             .order_by(NotificationIntegration.name)
         )
-        return [_integration_view(row) for row in rows]
+        return [_integration_view(row, full_url=manager) for row in rows]
 
     def _seal(self, row: NotificationIntegration, secret: str | None) -> None:
         row.secret_sealed = seal(self.settings, secret, context=f"integration:{row.id}") if secret else None
@@ -672,6 +720,8 @@ class RuleService:
         seen = self.session.scalar(select(AlertEvent).where(AlertEvent.idempotency_key == key))
         if seen is not None:
             alert = self.session.get(Alert, seen.alert_id)
+            if alert is not None:
+                self._with_current_silence(alert.organization_id, [alert])
             return AlertTransitionResult(
                 idempotency_key=key, alert_id=seen.alert_id, status="duplicate", silenced=bool(alert and alert.silenced)
             )
@@ -693,6 +743,19 @@ class RuleService:
         )
         if ev.transition == "firing":
             return self._fire(item, base)
+        if not ev.fingerprint:
+            # The episode is over: in per_event mode it may have opened further alerts.
+            further = select(Alert).where(
+                Alert.rule_id == item.rule_id,
+                Alert.device_id == item.device_id,
+                Alert.episode == ev.episode,
+                Alert.fingerprint != "",
+                Alert.status.in_(ACTIVE_ALERT_STATUSES),
+            )
+            for other in self.session.scalars(further).all():
+                self._resolve(
+                    other, ev.at, ev.reason or "condition_cleared", key=None, values=ev.values, event_id=ev.event_id
+                )
         alert = self.session.scalar(base.where(Alert.episode == ev.episode).order_by(Alert.fired_at.desc()))
         if alert is None:
             return AlertTransitionResult(idempotency_key=key, alert_id=None, status="ignored", detail="no such alert")
@@ -708,6 +771,7 @@ class RuleService:
         active = self.session.scalar(base.where(Alert.status.in_(ACTIVE_ALERT_STATUSES)))
         if active is not None:
             if active.episode == ev.episode:
+                self._with_current_silence(item.organization_id, [active])
                 return AlertTransitionResult(
                     idempotency_key=item.idempotency_key,
                     alert_id=active.id,
@@ -777,3 +841,139 @@ class RuleService:
             )
         )
         self.session.flush()
+
+    # ---- rule tests and evaluation status (proxied to the rule processor) ----
+
+    def test_rule(self, *, actor: User, organization_id: uuid.UUID, payload: RuleTestRequest) -> dict[str, Any]:
+        self._authorize(actor, organization_id, "rule.read")
+        payload = payload.model_copy(update={"definition": normalize_definition(payload.definition)})
+        self._require_valid(organization_id, payload.definition)
+        return self.engine.simulate(payload.model_dump(mode="json", exclude_none=True))
+
+    def evaluation_status(
+        self, *, actor: User, organization_id: uuid.UUID, rule_id: uuid.UUID, after: str = "", limit: int = 100
+    ) -> dict[str, Any]:
+        self._authorize(actor, organization_id, "rule.read")
+        rule = self._rule(organization_id, rule_id)
+        result = self.engine.status(str(rule.id), after=after, limit=limit)
+        return {"rule_id": str(rule.id), "current_version": rule.current_version, "enabled": rule.enabled, **result}
+
+    # ---- dispatcher-facing --------------------------------------------------
+
+    def _engine_rule_and_device(self, item: EngineAction) -> tuple[Rule, Device]:
+        rule = self.session.get(Rule, item.rule_id)
+        device = self.session.get(Device, item.device_id)
+        if (
+            rule is None
+            or device is None
+            or device.organization_id != item.organization_id
+            or (rule.organization_id is not None and rule.organization_id != item.organization_id)
+        ):
+            raise NotFoundError("rule_or_device_not_found", "Rule or device is not in this organization.")
+        return rule, device
+
+    def delivery(self, payload: DeliveryRequest) -> DeliveryResponse:
+        """Where a webhook goes, only if the integration belongs to the action's organization."""
+        row = self.session.get(NotificationIntegration, payload.integration_id)
+        if row is None or row.organization_id != payload.organization_id:
+            raise NotFoundError("integration_not_found", "Integration was not found.")
+        secret = ""
+        if row.secret_sealed is not None:
+            try:
+                secret = unseal(self.settings, row.secret_sealed, context=f"integration:{row.id}")
+            except SecretBoxError as exc:
+                raise ConflictError("integration_secret_unreadable", "The integration secret cannot be read.") from exc
+        silences = self._active_silences(payload.organization_id, payload.at)
+        return DeliveryResponse(
+            url=row.url,
+            kind=row.kind,
+            secret=secret,
+            enabled=row.enabled,
+            silenced=self._silenced(silences, payload.rule_id, payload.device_id),
+        )
+
+    def run_command(self, item: EngineAction) -> CommandResult:
+        """Send a rule's device command as its author, with the console's permission and scope checks."""
+        rule, device = self._engine_rule_and_device(item)
+        command = item.action.get("command")
+        if command not in COMMAND_PERMISSIONS:
+            raise ValidationAppError("unsupported_command", f"Rules cannot send the {command!r} command.")
+        author = self.session.get(User, rule.created_by_user_id) if rule.created_by_user_id else None
+        if author is None or not author.is_active:
+            raise ForbiddenError("rule_author_inactive", "The rule's author can no longer send commands.")
+        metadata = {
+            "rule_id": str(rule.id),
+            "rule_version": item.rule_version,
+            "device_id": str(device.id),
+            "command": command,
+            "episode": item.event.episode,
+            "idempotency_key": item.idempotency_key,
+        }
+        actions = DeviceActionService(self.session, self.settings)
+        try:
+            if command == "reboot":
+                actions.reboot(actor=author, organization_id=device.organization_id, device_id=device.id)
+            else:
+                actions.shutdown(actor=author, organization_id=device.organization_id, device_id=device.id)
+        except ConflictError as exc:
+            # A restart or shut-down already waits (a redelivery of this very command, or another one).
+            self.session.rollback()
+            return CommandResult(status="skipped", detail=exc.code)
+        except ForbiddenError:
+            self.session.rollback()
+            self.audit.record(
+                action="rule.command",
+                resource_type="rule",
+                actor_type="rule",
+                actor_id=rule.id,
+                organization_id=device.organization_id,
+                resource_id=rule.id,
+                outcome="denied",
+                metadata=metadata,
+            )
+            self.session.commit()
+            raise
+        self.audit.record(
+            action="rule.command",
+            resource_type="rule",
+            actor_type="rule",
+            actor_id=rule.id,
+            organization_id=device.organization_id,
+            resource_id=rule.id,
+            metadata=metadata,
+        )
+        self.session.commit()
+        return CommandResult(status="sent")
+
+    def platform_event(self, item: EngineAction) -> None:
+        """Record a rule's platform event in the audit log; replays of one key are recorded once."""
+        rule, device = self._engine_rule_and_device(item)
+        exists = self.session.scalar(
+            select(AuditEvent.id).where(
+                AuditEvent.action == "rule.event",
+                AuditEvent.resource_id == str(rule.id),
+                AuditEvent.metadata_["idempotency_key"].astext == item.idempotency_key,
+            )
+        )
+        if exists is not None:
+            return
+        self.audit.record(
+            action="rule.event",
+            resource_type="rule",
+            actor_type="rule",
+            actor_id=rule.id,
+            organization_id=device.organization_id,
+            resource_id=rule.id,
+            metadata={
+                "idempotency_key": item.idempotency_key,
+                "rule_version": item.rule_version,
+                "rule_name": item.rule_name,
+                "device_id": str(device.id),
+                "severity": item.severity,
+                "transition": item.event.transition,
+                "episode": item.event.episode,
+                "values": item.event.values,
+                "params": item.action.get("params") or {},
+            },
+        )
+        self.session.commit()

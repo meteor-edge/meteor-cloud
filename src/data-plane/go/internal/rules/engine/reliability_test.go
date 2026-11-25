@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -84,15 +85,15 @@ func TestReconcileRetriesConflicts(t *testing.T) {
 func TestFailedCommitIsNotCountedAsFiring(t *testing.T) {
 	h := newHarness(t, rule("r", "org-1", hotDef))
 	h.store.FailCommits = 1
-	if h.handle("e1", "dev-a", 0, `{"t":90}`) == nil || h.e.firing.Load() != 0 {
-		t.Fatalf("firing %d after a failed commit", h.e.firing.Load())
+	if h.handle("e1", "dev-a", 0, `{"t":90}`) == nil || h.e.counted.len() != 0 {
+		t.Fatalf("firing %d after a failed commit", h.e.counted.len())
 	}
 	h.sendID("e1", "dev-a", 0, `{"t":90}`)
-	if n := h.e.firing.Load(); n != 1 {
+	if n := h.e.counted.len(); n != 1 {
 		t.Fatalf("firing %d", n)
 	}
 	h.update()
-	if n := h.e.firing.Load(); n != 0 {
+	if n := h.e.counted.len(); n != 0 {
 		t.Fatalf("firing %d after the rule was removed", n)
 	}
 }
@@ -119,11 +120,23 @@ func TestStoppedCommitterReleasesItsCallers(t *testing.T) {
 				errs <- c.commit(context.Background(), &state.Batch{TimersClear: []state.Key{{RuleID: fmt.Sprint(i)}}})
 			}()
 		}
-		<-s.entered
-		for len(c.reqs) < 4 {
-			time.Sleep(time.Millisecond)
+		var once sync.Once
+		release := func() { once.Do(func() { close(s.release) }) }
+		t.Cleanup(release)
+		setup := time.After(5 * time.Second)
+		select {
+		case <-s.entered:
+		case <-setup:
+			t.Fatal("no commit started")
 		}
-		time.AfterFunc(time.Millisecond, func() { close(s.release) })
+		for len(c.reqs) < 4 {
+			select {
+			case <-setup:
+				t.Fatalf("only %d callers queued", len(c.reqs))
+			case <-time.After(time.Millisecond):
+			}
+		}
+		time.AfterFunc(time.Millisecond, release)
 		c.close()
 		for range 5 {
 			select {
