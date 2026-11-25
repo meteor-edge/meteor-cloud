@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import hmac
 import uuid
 from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
 from app.adapters import rate_limiter as build_rate_limiter
@@ -44,7 +44,6 @@ token_router = APIRouter(prefix="/api/v1/registry", tags=["registry"])
 router = APIRouter(prefix="/api/v1/organizations/{organization_id}/registry", tags=["registry"])
 internal_router = APIRouter(prefix="/internal/registry", tags=["internal-registry"], include_in_schema=False)
 agent_router = APIRouter(prefix="/api/v1/agent/registry", tags=["agent"])
-basic_scheme = HTTPBasic(auto_error=False)
 
 
 def get_registry_service(
@@ -82,6 +81,18 @@ def enforce_registry_rate_limit(
         )
 
 
+def basic_token(authorization: Annotated[str | None, Header()] = None) -> str | None:
+    """The token in an HTTP Basic header. Docker sends it as the password; the user name is not checked."""
+    scheme, _, encoded = (authorization or "").partition(" ")
+    if scheme.lower() != "basic":
+        return None
+    try:
+        decoded = base64.b64decode(encoded.strip(), validate=True).decode()
+    except ValueError:  # also not UTF-8
+        return None
+    return decoded.partition(":")[2] or None
+
+
 RegistrySvc = Annotated[RegistryService, Depends(get_registry_service)]
 
 
@@ -90,16 +101,14 @@ RegistrySvc = Annotated[RegistryService, Depends(get_registry_service)]
 )
 def issue_registry_token(
     response: Response,
-    credentials: Annotated[HTTPBasicCredentials | None, Depends(basic_scheme)],
+    presented: Annotated[str | None, Depends(basic_token)],
     registry: RegistrySvc,
     service: str = "",
     scope: Annotated[list[str] | None, Query()] = None,
 ) -> RegistryAccessTokenResponse:
     """Docker token auth. The password is a registry token; the user name is not checked."""
     response.headers["Cache-Control"] = "no-store"
-    return registry.issue_access_token(
-        password=credentials.password if credentials else None, service=service, scopes=scope or []
-    )
+    return registry.issue_access_token(presented=presented, service=service, scopes=scope or [])
 
 
 @token_router.get(
@@ -107,12 +116,12 @@ def issue_registry_token(
 )
 def registry_account(
     response: Response,
-    credentials: Annotated[HTTPBasicCredentials | None, Depends(basic_scheme)],
+    presented: Annotated[str | None, Depends(basic_token)],
     registry: RegistrySvc,
 ) -> RegistryAccountResponse:
     """Who the registry token is and where it pushes to."""
     response.headers["Cache-Control"] = "no-store"
-    return registry.account(password=credentials.password if credentials else None)
+    return registry.account(presented=presented)
 
 
 @router.get("", response_model=RegistryInfoResponse)

@@ -101,3 +101,6 @@ tests/e2e/.env
 tests/e2e/.state/
 tests/e2e/terraform/*/.terraform-validate/
 deploy/compose/backups/
+
+# Runtime pid files (e.g. a local meteorcli run)
+*.pid
