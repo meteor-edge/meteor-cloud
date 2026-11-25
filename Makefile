@@ -379,6 +379,13 @@ helm-lint: ## Lint the Helm chart and render it with every values file
 	@# Bundled PostgreSQL backup CronJob.
 	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set postgresql.bundled.backup.enabled=true \
 		| grep -q 'kind: CronJob'
+	@# Container registry: filesystem, S3, and fail-closed without a host.
+	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml \
+		--set registry.enabled=true,registry.host=registry.example.com,config.publicUrl=https://example.com,ingress.enabled=true \
+		| grep -q 'name: meteorcloud-registry'
+	helm template meteorcloud $(CHART) -f $(CHART)/values-production.yaml \
+		--set registry.enabled=true,registry.host=registry.example.com,registry.replicaCount=2 > /dev/null
+	! helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set registry.enabled=true > /dev/null 2>&1
 	@# Application data API: off (defaults), MQTT bus with EMQX direct MQTT, and fail-closed cases.
 	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set dataApi.enabled=false > /dev/null
 	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml \

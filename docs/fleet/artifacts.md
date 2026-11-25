@@ -155,8 +155,8 @@ database enforces it.
   before streaming them to storage. Very large images may later move to
   presigned direct-to-storage uploads.
 - Deleting an organization removes artifact rows, but not their stored objects.
-- Deployments and the container registry are not implemented yet. They will
-  reference artifacts by ID.
+- Container images can also be pushed to the [container registry](../registry.md). It uses the
+  same storage choice but keeps its own objects; they are not artifacts.
 
 ## UI
 

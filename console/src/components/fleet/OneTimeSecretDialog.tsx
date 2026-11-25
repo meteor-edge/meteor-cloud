@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 
@@ -8,6 +8,8 @@ type OneTimeSecretDialogProps = {
   secret: string;
   /** Optional shell command to copy (e.g. the agent register command). */
   command?: string;
+  commandLabel?: string;
+  commandHint?: ReactNode;
   onClose: () => void;
 };
 
@@ -25,6 +27,12 @@ export function OneTimeSecretDialog({
   description,
   secret,
   command,
+  commandLabel = "Register command",
+  commandHint = (
+    <>
+      Tip: prefer <code>--token-file</code> so the secret is not stored in shell history.
+    </>
+  ),
   onClose,
 }: OneTimeSecretDialogProps) {
   const [copied, setCopied] = useState<string | null>(null);
@@ -71,7 +79,7 @@ export function OneTimeSecretDialog({
         {command && (
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Register command
+              {commandLabel}
             </p>
             <div className="flex items-center gap-2">
               <code className="flex-1 overflow-x-auto whitespace-pre rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground">
@@ -87,7 +95,7 @@ export function OneTimeSecretDialog({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Tip: prefer <code>--token-file</code> so the secret is not stored in shell history.
+              {commandHint}
             </p>
           </div>
         )}

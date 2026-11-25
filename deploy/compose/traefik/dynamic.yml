@@ -3,7 +3,9 @@
 # PLATFORM_DOMAIN empty: plain HTTP on port 80.
 # Only /api and /health reach the API; /internal and /metrics stay private.
 # /v1 reaches the application data API (profile data-api): its public listener only.
+# REGISTRY_PUBLIC_HOST set: that host goes to the container registry (profile registry).
 {{ $domain := env "PLATFORM_DOMAIN" }}
+{{ $registry := env "REGISTRY_PUBLIC_HOST" }}
 http:
   routers:
     backend:
@@ -31,6 +33,21 @@ http:
           - main: "{{ $domain }}"
 {{- else }}
       entryPoints: [web]
+{{- end }}
+{{- if $registry }}
+    registry:
+      rule: "Host(`{{ $registry }}`) && PathPrefix(`/v2`)"
+      service: registry
+      priority: 50
+{{- if $domain }}
+      entryPoints: [websecure]
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "{{ $registry }}"
+{{- else }}
+      entryPoints: [web]
+{{- end }}
 {{- end }}
     console:
       rule: "PathPrefix(`/`)"
@@ -67,6 +84,12 @@ http:
       loadBalancer:
         servers:
           - url: http://data-api:8082
+{{- if $registry }}
+    registry:
+      loadBalancer:
+        servers:
+          - url: http://registry:5000
+{{- end }}
     console:
       loadBalancer:
         servers:

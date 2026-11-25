@@ -8,6 +8,7 @@ services:
       - ${SHELL_SSH_DIR:-./shell}:/run/meteorcloud/shell:ro
     command: >
       sh -c "alembic upgrade head &&
+             python -m app.cli registry-config /data/registry-config &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   console:

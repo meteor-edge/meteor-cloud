@@ -119,6 +119,14 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (include "meteorcloud.filesystemRWO" .) (gt (int $v.backend.replicaCount) 1) }}
 {{- fail "backend.replicaCount > 1 needs objectStorage.provider=s3 or a ReadWriteMany filesystem volume" }}
 {{- end }}
+{{- if $v.registry.enabled }}
+{{- if or (not $v.registry.host) (not $v.config.publicUrl) (not $v.ingress.enabled) }}
+{{- fail "registry.enabled needs registry.host, config.publicUrl and ingress.enabled" }}
+{{- end }}
+{{- if and (gt (int $v.registry.replicaCount) 1) (eq $v.objectStorage.provider "filesystem") }}
+{{- fail "registry.replicaCount > 1 needs objectStorage.provider=s3" }}
+{{- end }}
+{{- end }}
 {{- if $v.mqtt.enabled }}
 {{- if not (has $v.mqtt.broker (list "bundled" "external")) }}
 {{- fail "mqtt.broker must be bundled or external" }}

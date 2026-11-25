@@ -226,6 +226,39 @@ def sign_ssh_cert(target: str, identity: str, public_key: str) -> int:
         session.close()
 
 
+def registry_config(directory: str, *, rotate: bool = False) -> int:
+    """Write the registry's configuration and public keys. Does nothing while the registry is off."""
+    from pathlib import Path
+
+    from app.adapters import container_registry
+    from app.registry.keys import RegistryKeys
+
+    settings = get_settings()
+    registry = container_registry(settings)
+    if registry is None:
+        logger.info("REGISTRY_PROVIDER=none; no registry configuration written.")
+        return 0
+    session = SessionLocal()
+    try:
+        keys = RegistryKeys(session, settings)
+        if rotate:
+            keys.rotate()
+        files = registry.config_files(keys.jwks())
+        session.commit()
+    finally:
+        session.close()
+    target = Path(directory)
+    target.mkdir(parents=True, exist_ok=True)
+    for name, content in files.items():
+        # Replaced in one step: the registry never reads half a file.
+        partial = target / f".{name}.tmp"
+        partial.touch(mode=0o600)
+        partial.write_text(content, encoding="utf-8")
+        partial.replace(target / name)
+    logger.info("Wrote registry configuration to %s", target)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -242,6 +275,12 @@ def main(argv: list[str] | None = None) -> int:
     sign_parser.add_argument("target", help="Device ID or WireGuard address")
     sign_parser.add_argument("--identity", required=True, help="Who asked, for the audit log (user@host)")
 
+    registry_parser = subparsers.add_parser("registry-config", help="Write the container registry's configuration.")
+    registry_parser.add_argument("directory")
+    registry_parser.add_argument(
+        "--rotate-key", action="store_true", help="Create a new token signing key first; restart the registry after."
+    )
+
     args = parser.parse_args(argv)
     if args.command == "create-admin":
         return create_admin()
@@ -251,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         return shell_target(args.target)
     if args.command == "sign-ssh-cert":
         return sign_ssh_cert(args.target, args.identity, sys.stdin.read(4096))
+    if args.command == "registry-config":
+        return registry_config(args.directory, rotate=args.rotate_key)
     parser.error(f"Unknown command: {args.command}")
     return 1
 

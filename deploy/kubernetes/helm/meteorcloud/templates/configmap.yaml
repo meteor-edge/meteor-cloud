@@ -61,6 +61,13 @@ data:
   OBJECT_STORAGE_BUCKET: {{ .bucket | quote }}
   OBJECT_STORAGE_AUTO_CREATE_BUCKET: {{ .autoCreateBucket | toString | quote }}
   {{- end }}
+  {{- if .Values.registry.enabled }}
+  REGISTRY_PROVIDER: distribution
+  REGISTRY_PUBLIC_HOST: {{ .Values.registry.host | quote }}
+  REGISTRY_TOKEN_REALM: {{ printf "%s/api/v1/registry/token" (trimSuffix "/" .Values.config.publicUrl) | quote }}
+  REGISTRY_STORAGE_BUCKET: {{ .Values.registry.s3.bucket | quote }}
+  REGISTRY_STORAGE_PREFIX: {{ .Values.registry.s3.prefix | quote }}
+  {{- end }}
   MQTT_ENABLED: {{ .Values.mqtt.enabled | toString | quote }}
   MQTT_PROVIDER: {{ .Values.mqtt.provider | quote }}
   MQTT_BROKER_HOST: {{ include "meteorcloud.mqttBrokerHost" . | quote }}

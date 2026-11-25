@@ -32,6 +32,7 @@ How to use the product day to day.
 | Device HTTP auth & heartbeat | [Device authentication](fleet/device-authentication.md) · [Heartbeat](fleet/heartbeat.md) |
 | MQTT connectivity | [MQTT](fleet/mqtt.md) |
 | Artifacts (images, firmware, …) | [Artifacts](fleet/artifacts.md) |
+| Container registry (push images) | [Registry](registry.md) |
 | Releases (software versions) | [Releases](fleet/releases.md) |
 | Deployments (send a release) | [Deployments](fleet/deployments.md) · [Rollout strategies](fleet/deployments.md#rollout-strategies) |
 | Signed updates (device-side verification, key rotation) | [Signed updates](fleet/signed-updates.md) |

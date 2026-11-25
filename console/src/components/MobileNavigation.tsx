@@ -154,7 +154,7 @@ export function MobileNavigation() {
                           </MobileSubnav>
                         </>
                       )}
-                      <NavLink to={`${organizationPath}/settings`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("settings") || isPage("api-keys"))}>
+                      <NavLink to={`${organizationPath}/settings`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("settings") || isPage("api-keys") || isPage("registry"))}>
                         Settings
                       </NavLink>
                     </div>

@@ -4,9 +4,8 @@ Adapters: ``S3ObjectStorage`` (AWS S3 or any S3-compatible API such as MinIO, Ce
 or GCS interoperability) and ``FilesystemObjectStorage`` (a local or mounted
 directory). PostgreSQL stores only the object key.
 
-A future container registry is expected to run its own OCI distribution service
-on the same storage backend (e.g. a separate bucket); it does not go through
-this port.
+The container registry (``app/ports/registry.py``) is its own OCI distribution service on
+the same storage backend; it does not go through this port.
 """
 
 from __future__ import annotations

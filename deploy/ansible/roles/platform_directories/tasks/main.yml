@@ -17,6 +17,7 @@
     - { path: "{{ platform_root }}/data/postgres", mode: "0700", owner: "70", group: "70" }
     - { path: "{{ platform_root }}/data/redis", mode: "0750" }
     - { path: "{{ platform_root }}/data/artifacts", mode: "0750" }
+    - { path: "{{ platform_root }}/data/registry", mode: "0750" }
     # bitnami MinIO runs as UID 1001
     - { path: "{{ platform_root }}/data/minio", mode: "0750", owner: "1001", group: "root" }
     # prom/prometheus runs as nobody (65534)

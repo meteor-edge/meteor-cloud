@@ -43,6 +43,7 @@ setups do this).
 | Software on a device | `software.restart`, `software.stop`, `software.start` (denied attempts: `access.denied`) |
 | Remote access | `connectivity.enroll` (first or new WireGuard key), `connectivity.revoke`, `connectivity.reenroll`, `connectivity.key_change_rejected`, `connectivity.host_key_mismatch`, `device.shell.start/end/denied`, `device.shell.certificate` (`meteorcloud-ssh`), `device.logs.start/end/list/denied` |
 | Software | `artifact.upload/update/delete`, `artifact.download_link.create`, `release.create/update/delete`, `deployment.create/cancel/pause/resume/retry_failed/rollback` |
+| Container registry | `registry_token.create/revoke`, `registry_token.use` (`outcome=failure` with `reason`: `revoked`, `expired`, `inactive`, `not_a_member`), `image.access` (`outcome=denied`: a push or delete that was not allowed) |
 | Public apps | `endpoint.create/update/delete` |
 | Applications (data plane) | `application.create/update/delete` (permission changes included), `application.credential.create/rotate/revoke`, `application.credential.mint` (a device agent obtained a token for a deployed workload), `application.command.send` (operator command; recorded before the command is forwarded, with its name, idempotency key and target device). Tokens are never in the metadata |
 
