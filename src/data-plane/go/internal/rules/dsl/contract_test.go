@@ -12,7 +12,7 @@ import (
 func TestContractExamplesAreValid(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "..", "..", "contracts", "rules-v1.examples.json"))
 	if err != nil {
-		t.Skipf("contracts directory not available: %v", err)
+		t.Fatalf("read the contract examples: %v", err)
 	}
 	var examples []json.RawMessage
 	if err := json.Unmarshal(raw, &examples); err != nil {

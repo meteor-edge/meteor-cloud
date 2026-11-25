@@ -85,11 +85,11 @@ func Validate(r *Rule, lim Limits, allowPlatform bool) error {
 	if r.Alerting != nil {
 		switch r.Alerting.Mode {
 		case "", ModeSingle:
-			if r.Alerting.MaxActive > 1 {
+			if r.Alerting.MaxActive != nil {
 				v.add("alerting.max_active", "applies only to per_event mode")
 			}
 		case ModePerEvent:
-			if r.Alerting.MaxActive < 0 || r.Alerting.MaxActive > 100 {
+			if n := r.Alerting.MaxActive; n != nil && (*n < 1 || *n > 100) {
 				v.add("alerting.max_active", "must be between 1 and 100")
 			}
 		default:
@@ -231,7 +231,7 @@ func (v *validator) node(path string, n *Node, depth int) {
 		}
 	}
 	child := func() {
-		if len(n.Conditions) > 0 {
+		if nodeHas(n, "conditions") {
 			v.add(path+".conditions", "use condition (one child) for a %s node", n.Type)
 		}
 		v.node(path+".condition", n.Condition, depth+1)
@@ -288,7 +288,8 @@ func (v *validator) node(path string, n *Node, depth int) {
 		default:
 			v.add(path+".operator", "must be eq, ne, gt, gte, lt, lte or between for an aggregate")
 		}
-		unexpected("conditions", "condition", "duration", "min_count", "count", "streams", "values")
+		unexpected("conditions", "condition", "duration", "min_count", "count", "streams")
+		v.operands(path, n)
 	case NodeAbsence:
 		v.window(path+".duration", n.Duration)
 		v.streamList(path+".streams", n.Streams)
@@ -325,19 +326,32 @@ func (v *validator) comparison(path string, n *Node) {
 			}
 		}
 	case OpExists, OpNotExists:
-		if len(n.Value) > 0 {
-			v.add(path+".value", "does not apply to %s", n.Operator)
-		}
 	case "":
 		v.add(path+".operator", "is required")
 	default:
 		v.add(path+".operator", "unknown operator %q", n.Operator)
 	}
-	if n.Operator != OpIn && n.Operator != OpNotIn && len(n.Values) > 0 {
-		v.add(path+".values", "applies only to in and not_in")
+	v.operands(path, n)
+}
+
+// operands refuses values the operator would ignore.
+func (v *validator) operands(path string, n *Node) {
+	allowed := map[string]bool{}
+	switch n.Operator {
+	case OpEq, OpNe, OpGt, OpGte, OpLt, OpLte:
+		allowed["value"] = true
+	case OpIn, OpNotIn:
+		allowed["values"] = true
+	case OpBetween:
+		allowed["min"], allowed["max"] = true, true
+	case OpExists, OpNotExists:
+	default:
+		return // the operator itself is already reported
 	}
-	if n.Operator != OpBetween && (n.Min != nil || n.Max != nil) {
-		v.add(path+".min", "min and max apply only to between")
+	for _, name := range []string{"value", "values", "min", "max"} {
+		if !allowed[name] && nodeHas(n, name) {
+			v.add(path+"."+name, "does not apply to %s", n.Operator)
+		}
 	}
 }
 
@@ -346,9 +360,6 @@ func (v *validator) between(path string, n *Node) {
 		v.add(path, "between needs min and max")
 	} else if *n.Min > *n.Max {
 		v.add(path+".min", "must not be greater than max")
-	}
-	if len(n.Value) > 0 {
-		v.add(path+".value", "between uses min and max, not value")
 	}
 }
 
@@ -379,6 +390,9 @@ func (v *validator) actions(acts []Action) {
 		default:
 			v.add(p+".type", "must be alert, webhook, command, notification or platform_event")
 		}
+		if len(a.On) > 2 || (len(a.On) == 2 && a.On[0] == a.On[1]) {
+			v.add(p+".on", "must not repeat a transition")
+		}
 		for _, on := range a.On {
 			if on != OnFiring && on != OnResolved {
 				v.add(p+".on", "entries must be firing or resolved")
@@ -386,7 +400,7 @@ func (v *validator) actions(acts []Action) {
 		}
 		if len(a.Params) > 0 {
 			t := bytes.TrimSpace(a.Params)
-			if len(t) > 4096 || t[0] != '{' || !json.Valid(t) {
+			if len(t) == 0 || len(t) > 4096 || t[0] != '{' || !json.Valid(t) {
 				v.add(p+".params", "must be a JSON object of at most 4 KiB")
 			}
 		}
@@ -404,11 +418,11 @@ func number(raw json.RawMessage) (float64, bool) {
 	if len(raw) == 0 {
 		return 0, false
 	}
-	var f float64
-	if err := json.Unmarshal(raw, &f); err != nil {
+	var f *float64 // null leaves the pointer nil
+	if err := json.Unmarshal(raw, &f); err != nil || f == nil {
 		return 0, false
 	}
-	return f, true
+	return *f, true
 }
 
 // scalar decodes a JSON number, string or boolean.
@@ -435,7 +449,11 @@ func Scalar(raw json.RawMessage) (any, bool) { return scalar(raw) }
 // Number exposes number decoding to the compiler.
 func Number(raw json.RawMessage) (float64, bool) { return number(raw) }
 
+// nodeHas reports whether a node carries a key, whatever its value.
 func nodeHas(n *Node, name string) bool {
+	if n.keys != nil {
+		return n.keys[name]
+	}
 	switch name {
 	case "field":
 		return n.Field != ""

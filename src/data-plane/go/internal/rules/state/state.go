@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"time"
 
 	"meteorcloud/dataplane/internal/rules/eval"
@@ -57,15 +59,36 @@ type RuleState struct {
 	Version int64 `json:"version"`
 }
 
+// Retired reports whether the record is a tombstone: the rule or device is out of the
+// picture and only the episode counter still matters.
+func (s *RuleState) Retired() bool { return s.ConditionHash == "" }
+
+// Retire turns the record into a tombstone, keeping the episode counter.
+func (s *RuleState) Retire(now time.Time) {
+	s.ConditionHash, s.Nodes = "", eval.State{}
+	s.Phase, s.PhaseSince, s.ActiveAlerts = PhaseNormal, now, 0
+	s.CooldownUntil, s.TimerDue, s.LastValues = time.Time{}, time.Time{}, nil
+}
+
 func (s *RuleState) Key() Key { return Key{s.RuleID, s.DeviceID} }
 
-// Clone deep-copies a state (JSON round trip keeps it honest with what is stored).
+// Clone deep-copies a state.
 func (s *RuleState) Clone() *RuleState {
-	b, _ := json.Marshal(s)
-	var c RuleState
-	_ = json.Unmarshal(b, &c)
-	if c.Nodes == nil {
-		c.Nodes = eval.State{}
+	c := *s
+	c.LastValues = maps.Clone(s.LastValues)
+	c.Nodes = make(eval.State, len(s.Nodes))
+	for path, ns := range s.Nodes {
+		n := *ns
+		if ns.Last != nil {
+			last := *ns.Last
+			n.Last = &last
+		}
+		if ns.Since != nil {
+			since := *ns.Since
+			n.Since = &since
+		}
+		n.Buckets = slices.Clone(ns.Buckets)
+		c.Nodes[path] = &n
 	}
 	return &c
 }
@@ -170,6 +193,8 @@ type Store interface {
 	// StatesForRule pages through the states of one rule (status API, reconciling a
 	// changed or removed rule). Pass the last device id seen as after.
 	StatesForRule(ctx context.Context, ruleID, after string, limit int) ([]*RuleState, error)
+	// RuleIDs lists every rule that has stored state, tombstones excluded.
+	RuleIDs(ctx context.Context) ([]string, error)
 	// Counts returns the number of stored timers and pending outbox items.
 	Counts(ctx context.Context) (timers, outbox int, err error)
 	Ping(ctx context.Context) error

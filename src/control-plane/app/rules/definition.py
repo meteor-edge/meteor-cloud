@@ -75,12 +75,19 @@ ALLOWED = {
     "aggregate": {"function", "field", "window", "operator", "value", "min", "max"},
     "absence": {"duration", "streams"},
 }
+# The operand keys each operator uses.
+OPERANDS = {
+    **dict.fromkeys(("eq", "ne", "gt", "gte", "lt", "lte"), {"value"}),
+    **dict.fromkeys(("in", "not_in"), {"values"}),
+    "between": {"min", "max"},
+    **dict.fromkeys(("exists", "not_exists"), set()),
+}
 SCOPE_KEYS = {"type", "device_ids", "group_id", "device_type_id", "labels"}
 ACTION_KEYS = {"type", "on", "severity", "integration_id", "command", "params", "timeout"}
 
 _REF = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _FIELD_SEG = re.compile(r"^[A-Za-z0-9_-]+$")
-_STREAM_SEG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_STREAM_SEG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _DURATION = re.compile(r"^(?:(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h))+$")
 _DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
 _UNIT = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
@@ -304,6 +311,7 @@ class _Validator:
                 self.between(path, n)
             else:
                 self.add(f"{path}.operator", "must be eq, ne, gt, gte, lt, lte or between for an aggregate")
+            self.operands(path, n)
         elif t == "absence":
             self.window(f"{path}.duration", n.get("duration"))
             if "streams" in n:
@@ -330,16 +338,21 @@ class _Validator:
                     if not _is_scalar(v):
                         self.add(f"{path}.values[{i}]", "must be a number, string or boolean")
         elif op in ("exists", "not_exists"):
-            if "value" in n:
-                self.add(f"{path}.value", f"does not apply to {op}")
+            pass
         elif op is None:
             self.add(f"{path}.operator", "is required")
         else:
             self.add(f"{path}.operator", f'unknown operator "{op}"')
-        if op not in ("in", "not_in") and n.get("values"):
-            self.add(f"{path}.values", "applies only to in and not_in")
-        if op != "between" and ("min" in n or "max" in n):
-            self.add(f"{path}.min", "min and max apply only to between")
+        self.operands(path, n)
+
+    def operands(self, path: str, n: dict[str, Any]) -> None:
+        """Refuse values the operator would ignore."""
+        op = n.get("operator")
+        if not isinstance(op, str) or op not in OPERANDS:
+            return  # the operator itself is already reported
+        for key in ("value", "values", "min", "max"):
+            if key in n and key not in OPERANDS[op]:
+                self.add(f"{path}.{key}", f"does not apply to {op}")
 
     def between(self, path: str, n: dict[str, Any]) -> None:
         lo, hi = n.get("min"), n.get("max")
@@ -347,20 +360,18 @@ class _Validator:
             self.add(path, "between needs min and max")
         elif lo > hi:
             self.add(f"{path}.min", "must not be greater than max")
-        if "value" in n:
-            self.add(f"{path}.value", "between uses min and max, not value")
 
     def alerting(self, a: Any) -> None:
         if not isinstance(a, dict):
             self.add("alerting", "must be an object")
             return
         self.unknown("alerting", a, {"mode", "max_active"})
-        mode, mx = a.get("mode", "single"), a.get("max_active", 0)
+        mode, mx = a.get("mode", "single"), a.get("max_active", 10)
         if mode == "single":
-            if isinstance(mx, int) and mx > 1:
+            if "max_active" in a:
                 self.add("alerting.max_active", "applies only to per_event mode")
         elif mode == "per_event":
-            if not isinstance(mx, int) or isinstance(mx, bool) or not 0 <= mx <= 100:
+            if not isinstance(mx, int) or isinstance(mx, bool) or not 1 <= mx <= 100:
                 self.add("alerting.max_active", "must be between 1 and 100")
         else:
             self.add("alerting.mode", "must be single or per_event")
@@ -394,6 +405,8 @@ class _Validator:
                 pass
             else:
                 self.add(f"{p}.type", "must be alert, webhook, command, notification or platform_event")
+            if isinstance(a.get("on"), list) and len(a["on"]) != len({str(on) for on in a["on"]}):
+                self.add(f"{p}.on", "must not repeat a transition")
             for on in a.get("on", []) if isinstance(a.get("on", []), list) else ["?"]:
                 if on not in ("firing", "resolved"):
                     self.add(f"{p}.on", "entries must be firing or resolved")
@@ -431,5 +444,9 @@ def severity_of(definition: dict[str, Any]) -> str:
 
 def condition_hash(definition: dict[str, Any]) -> str:
     """Fingerprint of what shapes evaluation state, for display (the engine computes its own)."""
-    shape = {k: definition.get(k) for k in ("condition", "resolve", "scope", "source", "alerting")}
+    shape = {k: definition.get(k) for k in ("condition", "resolve", "scope", "source")}
+    # The effective settings, so spelling out a default changes nothing.
+    alerting = definition.get("alerting") or {}
+    if alerting.get("mode") == "per_event":
+        shape["alerting"] = {"mode": "per_event", "max_active": alerting.get("max_active", 10)}
     return hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()[:24]

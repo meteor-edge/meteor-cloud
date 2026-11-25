@@ -2,6 +2,8 @@ package eval
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -167,9 +169,11 @@ func TestConsecutive(t *testing.T) {
 	st := State{}
 	run(p, st, ev(0, `{"v":2}`))
 	run(p, st, ev(1*time.Second, `{"v":2}`))
-	run(p, st, ev(2*time.Second, `{"v":0}`))
-	run(p, st, ev(3*time.Second, `{"v":2}`))
-	run(p, st, ev(4*time.Second, `{"v":2}`))
+	for i, data := range []string{`{"v":0}`, `{"v":2}`, `{"v":2}`} {
+		if run(p, st, ev(time.Duration(2+i)*time.Second, data)).Fire {
+			t.Fatalf("fired at event %d: the streak did not reset", 2+i)
+		}
+	}
 	if !run(p, st, ev(5*time.Second, `{"v":2}`)).Fire {
 		t.Fatal("three in a row after the reset")
 	}
@@ -285,6 +289,12 @@ func TestResolveConditionIsEvaluated(t *testing.T) {
 	if o.Fire || o.Resolve == nil || *o.Resolve {
 		t.Fatalf("75 neither fires nor resolves: %+v", o)
 	}
+	if o = run(p, State{}, ev(0, `{"t":65}`)); o.Fire || !*o.Resolve {
+		t.Fatalf("65 resolves: %+v", o)
+	}
+	if o = run(p, State{}, ev(0, `{"t":85}`)); !o.Fire || *o.Resolve {
+		t.Fatalf("85 fires: %+v", o)
+	}
 }
 
 func TestWindowStateIsBounded(t *testing.T) {
@@ -295,5 +305,106 @@ func TestWindowStateIsBounded(t *testing.T) {
 	}
 	if n := len(st["c"].Buckets); n > BucketsPerWindow*3 {
 		t.Fatalf("%d buckets kept", n)
+	}
+}
+
+func TestFlattenIsDeterministic(t *testing.T) {
+	var b strings.Builder
+	for i := range 400 {
+		fmt.Fprintf(&b, `"k%d":%d,`, i, i)
+	}
+	f, err := FlattenJSON([]byte(`{` + b.String() + `"net":{"rx":5},"net.rx":100,"disk.used":7}`))
+	if err != nil || len(f) != 402 || f["net.rx"].Num != 5 || f["disk.used"].Num != 7 {
+		t.Fatalf("%v: %d fields, net.rx %v", err, len(f), f["net.rx"])
+	}
+	for range 20 { // two spellings of one field: always the same one
+		f, _ := FlattenJSON([]byte(`{"a.b":{"c":1},"a":{"b.c":2}}`))
+		if f["a.b.c"].Num != 2 {
+			t.Fatalf("a.b.c %v", f["a.b.c"])
+		}
+	}
+	if _, err := FlattenJSON([]byte(`null`)); err == nil {
+		t.Fatal("null is not an object")
+	}
+	if _, err := FlattenJSON([]byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMissingFieldIsNotEvidence(t *testing.T) {
+	p := program(t, `{"type":"count_within","window":"10m","min_count":2,"condition":{"type":"not","condition":{"type":"comparison","field":"charging","operator":"eq","value":true}}}`)
+	st := State{}
+	for i := range 5 {
+		if run(p, st, ev(time.Duration(i)*time.Second, `{"cpu":1}`)).Fire {
+			t.Fatal("an event without the field says nothing")
+		}
+	}
+	run(p, st, ev(6*time.Second, `{"charging":false}`))
+	if !run(p, st, ev(7*time.Second, `{"charging":false}`)).Fire {
+		t.Fatal("two events said not charging")
+	}
+	// One child can settle the answer without the other's field.
+	p = program(t, `{"type":"count_within","window":"10m","min_count":1,"condition":{"type":"any","conditions":[
+		{"type":"comparison","field":"a","operator":"gt","value":1},{"type":"comparison","field":"b","operator":"gt","value":1}]}}`)
+	if run(p, State{}, ev(0, `{"a":1}`)).Fire || !run(p, State{}, ev(0, `{"a":2}`)).Fire {
+		t.Fatal("any")
+	}
+}
+
+func TestLateEventIsNotCountedWithANewerStreak(t *testing.T) {
+	p := program(t, `{"type":"count_within","window":"10m","min_count":2,"condition":{"type":"consecutive","count":2,"condition":{"type":"comparison","field":"x","operator":"gt","value":0}}}`)
+	st := State{}
+	run(p, st, ev(time.Minute, `{"x":1}`))
+	run(p, st, ev(2*time.Minute, `{"x":1}`)) // streak of 2: counted once
+	o := p.Evaluate(Input{Event: ev(30*time.Second, `{"x":-1}`), Now: t0.Add(2 * time.Minute), OutOfOrder: true, LateTolerance: 5 * time.Minute}, st)
+	if o.Fire {
+		t.Fatal("the late event is not part of the streak")
+	}
+	if !run(p, st, ev(3*time.Minute, `{"x":1}`)).Fire {
+		t.Fatal("the late event must not break the streak")
+	}
+}
+
+func TestOverflowStaysFinite(t *testing.T) {
+	for _, fn := range []string{"sum", "avg", "delta", "rate"} {
+		p := program(t, `{"type":"aggregate","function":"`+fn+`","field":"v","window":"1m","operator":"ne","value":0}`)
+		st := State{}
+		run(p, st, ev(0, `{"v":-1.7e308}`))
+		run(p, st, ev(time.Millisecond, `{"v":1.7e308}`))
+		run(p, st, ev(2*time.Millisecond, `{"v":1.7e308}`))
+		o := run(p, st, ev(30*time.Second, `{"v":1.7e308}`))
+		if _, err := json.Marshal(st); err != nil {
+			t.Fatal(fn, err)
+		}
+		if _, err := json.Marshal(o.Values); err != nil {
+			t.Fatal(fn, err)
+		}
+	}
+}
+
+func TestRateBelowAMillisecond(t *testing.T) {
+	p := program(t, `{"type":"aggregate","function":"rate","field":"v","window":"1s","operator":"gt","value":0}`)
+	st := State{}
+	run(p, st, ev(100*time.Microsecond, `{"v":1}`))
+	o := run(p, st, ev(900*time.Microsecond, `{"v":2}`))
+	if r := o.Values["rate(v)"]; r < 1249 || r > 1251 {
+		t.Fatalf("rate %v", r)
+	}
+	st = State{}
+	run(p, st, ev(0, `{"v":1}`))
+	if run(p, st, ev(0, `{"v":2}`)).Fire {
+		t.Fatal("no rate within one instant")
+	}
+}
+
+func TestLateToleranceDoesNotGrowTheWindow(t *testing.T) {
+	p := program(t, `{"type":"aggregate","function":"count","field":"v","window":"1s","operator":"gt","value":0}`)
+	st := State{}
+	for i := range 5000 {
+		e := ev(time.Duration(i)*100*time.Millisecond, `{"v":1}`)
+		p.Evaluate(Input{Event: e, Now: e.Time, LateTolerance: 24 * time.Hour}, st)
+	}
+	if n := len(st["c"].Buckets); n > 2*BucketsPerWindow+3 {
+		t.Fatalf("%d slices kept", n)
 	}
 }

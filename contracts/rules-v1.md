@@ -25,7 +25,7 @@ network or read another tenant's data.
 | `resolve` | node | | separate resolve condition (hysteresis); without it the alert resolves when `condition` is false |
 | `cooldown` | duration | `0s` | after a resolve, no new alert for this long |
 | `alerting.mode` | `single` \| `per_event` | `single` | `single`: at most one active alert per rule and device |
-| `alerting.max_active` | integer 1-100 | 10 | cap of alert instances per device in `per_event` mode |
+| `alerting.max_active` | integer 1-100 | 10 | cap of alert instances per device; only with `per_event` mode |
 | `actions` | action[] (max 10) | one `alert` action | what to do on transitions |
 | `late_tolerance` | duration | `60s` | how late an event may arrive and still update windows |
 
@@ -61,7 +61,10 @@ re-checks the organization of every event against the device index.
 | `count_within` | `window`, `min_count`, `condition` | the child was true on at least `min_count` events within the last `window` |
 | `consecutive` | `count`, `condition` | the child was true on `count` events in a row |
 | `aggregate` | `function`, `field`, `window`, `operator`, `value` \| `min`+`max` | the function over the window compares true |
-| `absence` | `duration`, optional `streams` | no matching event for `duration` |
+| `absence` | `duration`, optional `streams` | no matching event for `duration` (default: on the rule's sources) |
+
+The rule also reads the `streams` an `absence` node names. Events on a stream that is not
+one of the rule's sources only count for the absence nodes.
 
 Operators: `eq`, `ne` (number, string or boolean), `gt`, `gte`, `lt`, `lte`
 (number), `between` (`min` and `max`, inclusive), `in`, `not_in` (`values`, up to
@@ -77,16 +80,18 @@ operators `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between`.
 ### Fields
 
 `field` is a dotted path into the event payload: `{"net": {"eth0": {"rx": 5}}}`
-gives `net.eth0.rx`. Arrays and nulls are not fields. A comparison on a field the
+gives `net.eth0.rx`. Arrays and nulls are not fields. If a literal key `"net.eth0.rx"`
+spells the same field, the nested path wins. A comparison on a field the
 event does not carry keeps its previous outcome, because devices may report
-metrics in separate messages.
+metrics in separate messages. Such an event is no evidence either way for
+`count_within`, also under `not`; it ends a `consecutive` streak.
 
 ### Time and order
 
 Events carry event time. Windows and durations use event time; timers (pending
 deadlines, absence, cooldown) run on the engine's clock. An event older than the
 newest one seen for its device is *out of order*: it still lands in window
-aggregates if it is within `late_tolerance`, but it cannot flip a comparison,
+aggregates if it is within both the window and `late_tolerance`, but it cannot flip a comparison,
 `duration` or `consecutive` condition backwards. Older than `late_tolerance`, it
 is dropped and counted.
 
@@ -107,7 +112,7 @@ firing --resolve condition--> normal | cooldown --cooldown over--> normal
 `acknowledged` and `silenced` are control-plane states of an alert record (user
 actions); they never change what the engine evaluates.
 
-Each firing starts a new *episode*. Every transition produces one outbox item per
+Each firing starts a new *episode*. The counter survives disabling or editing a rule. Every transition produces one outbox item per
 matching action, keyed
 `<rule_id>:<device_id>:<episode>:<transition>[:<fingerprint>][:<reason>]:a<index>`.
 The key is stored uniquely, so a replayed evaluation can never enqueue an action
@@ -145,7 +150,8 @@ How each is delivered (`internal/rules/dispatch`):
   dead-lettered, never sent.
 - `platform_event` is written to the organization's audit log as `rule.event`.
 
-`on: ["firing", "resolved"]` overrides the default. Actions never run inside
+`on: ["firing", "resolved"]` overrides the default of every action except `alert`, which
+always runs on both. Actions never run inside
 evaluation: the engine writes them to the outbox in the same transaction as the
 state change, and a separate dispatcher delivers them with retries, timeouts and a
 dead letter table.
@@ -171,7 +177,9 @@ skipped and reported, the rest load.
 ```json
 {
   "version": "<etag>",
-  "rules": [{"id": "…", "organization_id": "…", "version": 3, "definition": {…}}],
+  "rules": [{"id": "…", "organization_id": "…", "version": 3,
+             "definition": {"schema_version": 1, "name": "High CPU", "scope": {"type": "organization"},
+                            "condition": {"type": "comparison", "field": "cpu_percent", "operator": "gt", "value": 90}}}],
   "devices": [{"id": "…", "organization_id": "…", "group_id": "…", "device_type_id": "…",
                "labels": {"env": "production"}}]
 }
