@@ -127,3 +127,62 @@ func TestEffectiveDefaults(t *testing.T) {
 		t.Fatal("single mode by default")
 	}
 }
+
+func TestStrictOperandsAndKeys(t *testing.T) {
+	const head = `{"schema_version":1,"name":"x","scope":{"type":"organization"},"condition":`
+	const ok = `{"type":"comparison","field":"a","operator":"gt","value":0}`
+	agg := func(rest string) string {
+		return head + `{"type":"aggregate","function":"avg","field":"a","window":"1m",` + rest + `}}`
+	}
+	cmp := func(rest string) string { return head + `{"type":"comparison","field":"a",` + rest + `}}` }
+	with := func(rest string) string { return head + ok + `,` + rest + `}` }
+	valid := []string{
+		head + ok + "} \n", agg(`"operator":"between","min":1,"max":2`), cmp(`"operator":"in","values":[1]`), cmp(`"operator":"eq","value":"s"`),
+		with(`"alerting":{"mode":"per_event"}`), with(`"alerting":{"mode":"per_event","max_active":2}`),
+		with(`"actions":[{"type":"webhook","integration_id":"h","on":["firing","resolved"],"params": {} }]`),
+		with(`"resolve":` + ok),
+	}
+	for _, raw := range valid {
+		if err := mustValidate(t, raw, false); err != nil {
+			t.Errorf("%s: %v", raw, err)
+		}
+	}
+	invalid := []string{
+		head + ok + "}]", head + ok + "} {}",
+		cmp(`"operator":"gt","value":null`), agg(`"operator":"gt","value":null`), agg(`"operator":"gt","value":10,"min":50`),
+		agg(`"operator":"gt","value":1,"values":[]`), cmp(`"operator":"in","values":[1],"value":2`),
+		cmp(`"operator":"exists","value":null`), cmp(`"operator":"between","min":1,"max":2,"value":1`),
+		cmp(`"operator":"gt","value":1,"window":"0s"`), cmp(`"operator":"gt","value":1,"conditions":[]`),
+		head + `{"type":"not","condition":{"type":"all","conditions":[{"type":"comparison","field":"a","operator":"gt","value":1,"count":0}]}}}`,
+		with(`"resolve":{"type":"comparison","field":"a","operator":"lt","value":1,"min_count":0}`),
+		with(`"alerting":{"mode":"per_event","max_active":0}`), with(`"alerting":{"mode":"single","max_active":2}`), with(`"alerting":{"max_active":1}`),
+		with(`"actions":[{"type":"webhook","integration_id":"h","on":["firing","resolved","firing"]}]`),
+		with(`"actions":[{"type":"webhook","integration_id":"h","on":["firing","firing"]}]`),
+	}
+	for _, raw := range invalid {
+		if mustValidate(t, raw, false) == nil {
+			t.Errorf("accepted: %s", raw)
+		}
+	}
+	r, _ := Parse([]byte(with(`"actions":[{"type":"platform_event"}]`)))
+	r.Actions[0].Params = []byte("  ")
+	if Validate(r, DefaultLimits(), false) == nil {
+		t.Error("blank params")
+	}
+}
+
+func TestHashUsesEffectiveAlerting(t *testing.T) {
+	hash := func(alerting string) string {
+		r, err := Parse([]byte(`{"schema_version":1,"name":"x","scope":{"type":"organization"},"condition":{"type":"absence","duration":"5m"}` + alerting + `}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ConditionHash(r)
+	}
+	if hash("") != hash(`,"alerting":{"mode":"single"}`) || hash(`,"alerting":{"mode":"per_event"}`) != hash(`,"alerting":{"mode":"per_event","max_active":10}`) {
+		t.Error("spelling out a default changed the hash")
+	}
+	if hash("") == hash(`,"alerting":{"mode":"per_event"}`) || hash(`,"alerting":{"mode":"per_event"}`) == hash(`,"alerting":{"mode":"per_event","max_active":3}`) {
+		t.Error("a different setting kept the hash")
+	}
+}

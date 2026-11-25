@@ -264,9 +264,11 @@ func applyBatch(ctx context.Context, tx pgx.Tx, b *Batch) error {
 		}
 	}
 	for _, s := range b.States {
-		doc, _ := json.Marshal(s)
+		doc, err := json.Marshal(s)
+		if err != nil {
+			return fmt.Errorf("encode rule state: %w", err)
+		}
 		var tag interface{ RowsAffected() int64 }
-		var err error
 		if s.Version == 0 {
 			tag, err = tx.Exec(ctx, `INSERT INTO rules.rule_state
 				(rule_id, device_id, organization_id, rule_version, condition_hash, phase, version, doc)
@@ -376,6 +378,14 @@ func (p *Postgres) StatesForRule(ctx context.Context, ruleID, after string, limi
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+func (p *Postgres) RuleIDs(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT DISTINCT rule_id FROM rules.rule_state WHERE condition_hash <> '' ORDER BY rule_id`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 func (p *Postgres) Counts(ctx context.Context) (int, int, error) {

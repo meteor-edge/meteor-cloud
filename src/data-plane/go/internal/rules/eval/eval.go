@@ -9,13 +9,16 @@
 //   - v: the outcome at the event-time frontier of the device, which drives alerts;
 //   - raw: what this event alone says, which window nodes count. They differ only
 //     for an out-of-order event, which may still land in a window but must not flip
-//     an order-sensitive condition backwards.
+//     //     order-sensitive condition backwards. An event may also say nothing about a
+//     node (the field is missing, or the node only knows the frontier): unk.
 package eval
 
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -56,25 +59,43 @@ type Event struct {
 }
 
 // FlattenJSON turns a JSON object into dotted scalar fields ({"net":{"rx":1}} ->
-// "net.rx"). Arrays and nulls are skipped; nesting stops at 6 levels and 256 fields.
+// "net.rx"). Arrays and nulls are skipped and nesting stops at 6 levels; the transport
+// bounds the payload size. Where a literal key {"net.rx":2} spells the same field as a
+// nested path, the nested path wins.
 func FlattenJSON(data []byte) (map[string]Value, error) {
 	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return nil, fmt.Errorf("payload is not a JSON object: %w", err)
 	}
+	if obj == nil {
+		return nil, fmt.Errorf("payload is not a JSON object: null")
+	}
 	out := make(map[string]Value, len(obj))
-	flatten("", obj, out, 0)
+	flatten("", obj, out, 0, false)
+	flatten("", obj, out, 0, true)
 	return out, nil
 }
 
-func flatten(prefix string, obj map[string]any, out map[string]Value, depth int) {
-	for k, v := range obj {
-		if len(out) >= 256 {
-			return
+// flatten adds the fields out does not have yet, in key order. Keys that contain a dot
+// are read only in the literal pass.
+func flatten(prefix string, obj map[string]any, out map[string]Value, depth int, literal bool) {
+	for _, k := range slices.Sorted(maps.Keys(obj)) {
+		if !literal && strings.Contains(k, ".") {
+			continue
 		}
+		v := obj[k]
 		key := k
 		if prefix != "" {
 			key = prefix + "." + k
+		}
+		if t, ok := v.(map[string]any); ok {
+			if depth < 5 {
+				flatten(key, t, out, depth+1, literal)
+			}
+			continue
+		}
+		if _, taken := out[key]; taken {
+			continue
 		}
 		switch t := v.(type) {
 		case float64:
@@ -83,10 +104,6 @@ func flatten(prefix string, obj map[string]any, out map[string]Value, depth int)
 			out[key] = Str(t)
 		case bool:
 			out[key] = Bool(t)
-		case map[string]any:
-			if depth < 5 {
-				flatten(key, t, out, depth+1)
-			}
 		}
 	}
 }
@@ -99,9 +116,9 @@ type Bucket struct {
 	Min float64 `json:"min,omitempty"`
 	Max float64 `json:"max,omitempty"`
 	F   float64 `json:"f,omitempty"`  // earliest sample value
-	FT  int64   `json:"ft,omitempty"` // earliest sample time, unix ms
+	FT  int64   `json:"fn,omitempty"` // earliest sample time, unix ns
 	L   float64 `json:"l,omitempty"`  // latest sample value
-	LT  int64   `json:"lt,omitempty"` // latest sample time, unix ms
+	LT  int64   `json:"ln,omitempty"` // latest sample time, unix ns
 }
 
 // NodeState is the persisted state of one stateful node. Fields are short and
@@ -149,12 +166,14 @@ type Output struct {
 
 type result struct {
 	v, raw   bool
+	unk      bool // the event alone says nothing; raw is false then
 	pending  bool
 	deadline time.Time
 }
 
 type ctx struct {
-	in     Input
+	in     Input  // Event is nil for an event on a stream only absence nodes read
+	heard  *Event // the event, whatever its stream
 	st     State
 	values map[string]float64
 }
@@ -166,13 +185,17 @@ type node interface {
 // Program is a compiled rule condition.
 type Program struct {
 	root, resolve node
-	streams       map[string]bool
+	streams       map[string]bool // every stream the rule reads
+	sources       map[string]bool // those that feed conditions other than absence
 	absence       bool
 }
 
 // Compile builds the evaluation tree of a validated rule.
 func Compile(r *dsl.Rule) (*Program, error) {
-	p := &Program{streams: map[string]bool{}}
+	p := &Program{streams: map[string]bool{}, sources: map[string]bool{}}
+	for _, s := range r.SourceStreams() {
+		p.sources[s] = true
+	}
 	for _, s := range r.Streams() {
 		p.streams[s] = true
 	}
@@ -197,7 +220,10 @@ func (p *Program) HasAbsence() bool { return p.absence }
 
 // Evaluate runs the condition (and the resolve condition) and mutates st.
 func (p *Program) Evaluate(in Input, st State) Output {
-	c := &ctx{in: in, st: st, values: map[string]float64{}}
+	c := &ctx{in: in, heard: in.Event, st: st, values: map[string]float64{}}
+	if in.Event != nil && !p.sources[in.Event.Stream] {
+		c.in.Event = nil
+	}
 	r := p.root.eval(c)
 	out := Output{Fire: r.v, Pending: r.pending && !r.v, Deadline: r.deadline, Values: c.values}
 	if p.resolve != nil {
@@ -368,7 +394,7 @@ func (c *comparison) eval(cx *ctx) result {
 	}
 	v, ok := ev.Fields[c.field]
 	if !ok && c.op != dsl.OpExists && c.op != dsl.OpNotExists {
-		return result{v: last, raw: false}
+		return result{v: last, unk: true}
 	}
 	got := c.test(v, ok)
 	if ok && v.Kind == KindNumber {
@@ -393,6 +419,7 @@ type logical struct {
 
 func (l *logical) eval(cx *ctx) result {
 	out := result{v: l.all, raw: l.all}
+	decided := false // one child alone settles what the event says
 	anyPending, allSatisfiable := false, true
 	for _, k := range l.kids { // every child runs, so every child's state stays current
 		r := k.eval(cx)
@@ -403,10 +430,14 @@ func (l *logical) eval(cx *ctx) result {
 			out.v = out.v || r.v
 			out.raw = out.raw || r.raw
 		}
+		out.unk = out.unk || r.unk
+		decided = decided || (!r.unk && r.raw != l.all)
 		anyPending = anyPending || r.pending
 		allSatisfiable = allSatisfiable && (r.v || r.pending)
 		out.deadline = minTime(out.deadline, r.deadline)
 	}
+	out.unk = out.unk && !decided
+	out.raw = out.raw && !out.unk
 	if !out.v {
 		if l.all {
 			out.pending = anyPending && allSatisfiable
@@ -421,7 +452,17 @@ type not struct{ kid node }
 
 func (n *not) eval(cx *ctx) result {
 	r := n.kid.eval(cx)
-	return result{v: !r.v, raw: !r.raw, deadline: r.deadline}
+	return result{v: !r.v, raw: !r.raw && !r.unk, unk: r.unk, deadline: r.deadline}
+}
+
+// frontier is the result of a node that only has an outcome at the frontier. A late
+// event says nothing about it: the outcome belongs to newer events.
+func frontier(cx *ctx, r result) result {
+	r.raw, r.unk = r.v, false
+	if cx.in.OutOfOrder {
+		r.raw, r.unk = false, true
+	}
+	return r
 }
 
 // ---- duration: the child holds continuously for d
@@ -449,13 +490,13 @@ func (d *duration) eval(cx *ctx) result {
 		}
 	}
 	if ns.Since == nil {
-		return result{deadline: r.deadline}
+		return frontier(cx, result{deadline: r.deadline})
 	}
 	due := ns.Since.Add(d.d)
 	if !cx.in.Now.Before(due) {
-		return result{v: true, raw: true, deadline: r.deadline}
+		return frontier(cx, result{v: true, deadline: r.deadline})
 	}
-	return result{pending: true, deadline: minTime(due, r.deadline)}
+	return frontier(cx, result{pending: true, deadline: minTime(due, r.deadline)})
 }
 
 // ---- consecutive: the child holds on n events in a row
@@ -479,7 +520,7 @@ func (c *consecutive) eval(cx *ctx) result {
 		}
 	}
 	v := ns.Count >= c.n
-	return result{v: v, raw: v, pending: !v && ns.Count > 0, deadline: r.deadline}
+	return frontier(cx, result{v: v, pending: !v && ns.Count > 0, deadline: r.deadline})
 }
 
 // ---- windows
@@ -495,7 +536,7 @@ func width(w time.Duration) int64 {
 // addSample puts one sample into its slice, keeping buckets sorted by start.
 func addSample(ns *NodeState, w time.Duration, t time.Time, val float64, hasVal bool) {
 	wd := width(w)
-	ms := t.UnixMilli()
+	ms, at := t.UnixMilli(), t.UnixNano()
 	start := ms - mod(ms, wd)
 	i := 0
 	for i < len(ns.Buckets) && ns.Buckets[i].S < start {
@@ -512,19 +553,24 @@ func addSample(ns *NodeState, w time.Duration, t time.Time, val float64, hasVal 
 		return
 	}
 	if b.N == 0 {
-		b.Min, b.Max, b.F, b.FT, b.L, b.LT = val, val, val, ms, val, ms
+		b.Min, b.Max, b.F, b.FT, b.L, b.LT = val, val, val, at, val, at
 	} else {
 		b.Min = math.Min(b.Min, val)
 		b.Max = math.Max(b.Max, val)
-		if ms < b.FT {
-			b.F, b.FT = val, ms
+		if at < b.FT {
+			b.F, b.FT = val, at
 		}
-		if ms >= b.LT {
-			b.L, b.LT = val, ms
+		if at >= b.LT {
+			b.L, b.LT = val, at
 		}
 	}
 	b.N++
-	b.Sum += val
+	b.Sum = finite(b.Sum + val)
+}
+
+// finite clamps an overflow, because JSON (the persisted state) has no infinity.
+func finite(f float64) float64 {
+	return math.Max(-math.MaxFloat64, math.Min(math.MaxFloat64, f))
 }
 
 func mod(a, b int64) int64 {
@@ -535,9 +581,15 @@ func mod(a, b int64) int64 {
 	return m
 }
 
-// prune drops slices that can no longer enter the window, even for a late event.
-func prune(ns *NodeState, w time.Duration, now time.Time, late time.Duration) {
-	cut := now.Add(-w - late).UnixMilli()
+// prune drops slices that can no longer enter the window. Only events prune: their
+// frontier never moves back, while a tick's wall clock may run ahead of the device.
+// Beyond the window itself, slack for a wall clock that runs behind is at most one more
+// window, so the state stays bounded whatever the late tolerance.
+func prune(ns *NodeState, w time.Duration, in Input) {
+	if in.Event == nil {
+		return
+	}
+	cut := in.Now.Add(-w - min(w, in.LateTolerance)).UnixMilli()
 	wd := width(w)
 	i := 0
 	for i < len(ns.Buckets) && ns.Buckets[i].S+wd <= cut {
@@ -583,14 +635,14 @@ func (c *countWithin) eval(cx *ctx) result {
 	if ev := cx.in.Event; ev != nil && r.raw {
 		addSample(ns, c.w, ev.Time, 0, false)
 	}
-	prune(ns, c.w, cx.in.Now, cx.in.LateTolerance)
+	prune(ns, c.w, cx.in)
 	bs, leaves := inWindow(ns, c.w, cx.in.Now)
 	n := 0
 	for _, b := range bs {
 		n += b.N
 	}
 	v := n >= c.min
-	return result{v: v, raw: v, pending: !v && n > 0, deadline: minTime(leaves, r.deadline)}
+	return frontier(cx, result{v: v, pending: !v && n > 0, deadline: minTime(leaves, r.deadline)})
 }
 
 type numericTest struct {
@@ -648,15 +700,15 @@ func (a *aggregate) eval(cx *ctx) result {
 			addSample(ns, a.w, ev.Time, v.Num, true)
 		}
 	}
-	prune(ns, a.w, cx.in.Now, cx.in.LateTolerance)
+	prune(ns, a.w, cx.in)
 	bs, leaves := inWindow(ns, a.w, cx.in.Now)
 	x, ok := a.compute(bs)
 	if !ok {
-		return result{deadline: leaves}
+		return frontier(cx, result{deadline: leaves})
 	}
 	cx.values[a.fn+"("+a.field+")"] = x
 	v := a.test.test(x)
-	return result{v: v, raw: v, deadline: leaves}
+	return frontier(cx, result{v: v, deadline: leaves})
 }
 
 func (a *aggregate) compute(bs []Bucket) (float64, bool) {
@@ -676,7 +728,7 @@ func (a *aggregate) compute(bs []Bucket) (float64, bool) {
 			last, lt = b.L, b.LT
 		}
 		n += b.N
-		sum += b.Sum
+		sum = finite(sum + b.Sum)
 		lo = math.Min(lo, b.Min)
 		hi = math.Max(hi, b.Max)
 	}
@@ -699,12 +751,12 @@ func (a *aggregate) compute(bs []Bucket) (float64, bool) {
 		if n < 2 {
 			return 0, false
 		}
-		return last - first, true
+		return finite(last - first), true
 	case dsl.FnRate:
 		if lt <= ft {
 			return 0, false
 		}
-		return (last - first) / (float64(lt-ft) / 1000), true
+		return finite(finite(last-first) / time.Duration(lt-ft).Seconds()), true
 	}
 	return 0, false
 }
@@ -719,7 +771,7 @@ type absence struct {
 
 func (a *absence) eval(cx *ctx) result {
 	ns := cx.st.get(a.path)
-	if ev := cx.in.Event; ev != nil && (len(a.streams) == 0 || a.streams[ev.Stream]) {
+	if ev := cx.heard; ev != nil && (a.streams[ev.Stream] || (len(a.streams) == 0 && cx.in.Event != nil)) {
 		if ns.Since == nil || ev.Time.After(*ns.Since) {
 			t := ev.Time
 			ns.Since = &t
@@ -731,9 +783,9 @@ func (a *absence) eval(cx *ctx) result {
 	}
 	due := seen.Add(a.d)
 	if !cx.in.Now.Before(due) {
-		return result{v: true, raw: true}
+		return frontier(cx, result{v: true})
 	}
-	return result{deadline: due}
+	return frontier(cx, result{deadline: due})
 }
 
 // Describe renders a short human summary of a node, for logs and test output.

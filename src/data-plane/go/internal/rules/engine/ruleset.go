@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 
 	"meteorcloud/dataplane/internal/rules/dsl"
@@ -72,7 +73,7 @@ func (r *Rule) Matches(d *Device) bool {
 		return false
 	}
 	for k, v := range s.Labels {
-		if d.Labels[k] != v {
+		if got, ok := d.Labels[k]; !ok || got != v {
 			return false
 		}
 	}
@@ -103,6 +104,7 @@ func CompileSnapshot(s *Snapshot, lim dsl.Limits) *RuleSet {
 		devices: make(map[string]*Device, len(s.Devices))}
 	for i := range s.Devices {
 		d := s.Devices[i]
+		d.Labels = maps.Clone(d.Labels)
 		rs.devices[d.ID] = &d
 	}
 	for _, rec := range s.Rules {

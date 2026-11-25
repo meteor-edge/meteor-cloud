@@ -156,13 +156,10 @@
           "value": 15
         },
         {
-          "type": "not",
-          "condition": {
-            "type": "comparison",
-            "field": "charging",
-            "operator": "eq",
-            "value": true
-          }
+          "type": "comparison",
+          "field": "charging",
+          "operator": "eq",
+          "value": false
         }
       ]
     },
