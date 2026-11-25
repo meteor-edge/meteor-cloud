@@ -103,11 +103,11 @@
       - not (data_api_enabled | bool and dataplane_storage == 'clickhouse') or (clickhouse_password | length > 0)
       - not (nats_enabled | bool) or (mqtt_enabled | bool)
       - not (nats_enabled | bool) or (dataplane_storage == 'clickhouse' and clickhouse_password | length > 0)
-      # Docker refuses plain HTTP: either Traefik gets certificates, or something in front ends TLS.
+      # Docker refuses plain HTTP, and sends tokens to platform_public_url: both need HTTPS.
       - >-
         not (registry_enabled | bool)
         or (registry_public_host | length > 0
-            and (platform_domain | length > 0 or platform_public_url is match('https://')))
+            and platform_public_url is match('https://'))
       - image_source in ['git', 'archive', 'registry']
       - image_source != 'archive' or platform_source_archive | length > 0
       # Devices and the data plane share MQTT_BROKER_PORT; the bundled broker listens on 8883.
@@ -127,7 +127,7 @@
     fail_msg: >-
       Unsupported provider setting. Allowed: postgres_provider bundled|external, cache_provider redis|memory,
       redis_provider bundled|external, object_storage_provider filesystem|s3, mqtt_broker bundled|external, mqtt_provider mosquitto|emqx|vernemq,
-      registry_enabled needs platform_domain (or registry_public_host with an https platform_public_url behind your own TLS proxy),
+      registry_enabled needs an https platform_public_url, and platform_domain (or registry_public_host behind your own TLS proxy),
       image_source git|archive|registry (archive needs platform_source_archive), observability_components
       (at least one) from metrics,logs,alerting,dashboards, alerting needs metrics; the bundled MQTT broker always uses port 8883.
     quiet: true
