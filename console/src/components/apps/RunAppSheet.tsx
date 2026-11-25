@@ -2,7 +2,16 @@ import { FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { getDeployment, listDevices, listEndpoints, runApp, type AppRun } from "@/api/fleet";
+import {
+  getDeployment,
+  listDevices,
+  listEndpoints,
+  redeployApp,
+  runApp,
+  type AppRun,
+  type AppSpec,
+  type DeployedApp,
+} from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { getRegistry, listImages, listImageTags } from "@/api/registry";
 import { AppAddressPicker } from "@/components/fleet/AppAddressPicker";
@@ -14,7 +23,8 @@ const POLL_MS = 2000;
 const selectClass = "h-10 w-full rounded-md border border-border bg-background px-3 text-sm";
 
 type Port = { host: string; container: string };
-type EnvRow = { key: string; value: string; secret: boolean };
+/** stored: a secret that already has a value, kept while the value is empty. */
+type EnvRow = { key: string; value: string; secret: boolean; stored?: boolean };
 
 type RunAppSheetProps = {
   token: string;
@@ -23,6 +33,8 @@ type RunAppSheetProps = {
   deviceId?: string;
   /** Fixed image of the organization's registry, such as web:1.0; otherwise the user chooses one. */
   image?: string;
+  /** An app of the device to change; its name and public address stay. */
+  app?: DeployedApp;
   canPublish: boolean;
   onClose: () => void;
 };
@@ -32,6 +44,26 @@ function defaultName(image: string): string {
     .split(":")[0]
     .toLowerCase()
     .replace(/[^a-z0-9_.-]+/g, "-");
+}
+
+function initialPorts(spec: AppSpec | undefined): Port[] {
+  return spec
+    ? (spec.ports ?? []).map((port) => {
+        const at = port.lastIndexOf(":");
+        return { host: port.slice(0, Math.max(at, 0)), container: port.slice(at + 1) };
+      })
+    : [{ host: "8080", container: "8080" }];
+}
+
+function initialEnv(spec: AppSpec | undefined): EnvRow[] {
+  return [
+    ...Object.entries(spec?.env ?? {}).map(([key, value]) => ({ key, value, secret: false })),
+    ...(spec?.secret_env ?? []).map((key) => ({ key, value: "", secret: true, stored: true })),
+  ];
+}
+
+function portText(port: Port): string {
+  return port.host ? `${port.host}:${port.container}` : port.container;
 }
 
 function isPort(value: string): boolean {
@@ -215,17 +247,24 @@ export function RunAppSheet({
   token,
   organizationId,
   deviceId: fixedDevice,
-  image: fixedImage,
+  image: chosenImage,
+  app,
   canPublish,
   onClose,
 }: RunAppSheetProps) {
+  const fixedImage = chosenImage ?? app?.spec.image;
   const queryClient = useQueryClient();
   const [deviceId, setDeviceId] = useState(fixedDevice ?? "");
   const [source, setSource] = useState<"meteorcloud" | "public">("meteorcloud");
   const [image, setImage] = useState(fixedImage ?? "");
   const [editedName, setEditedName] = useState<string | null>(null);
-  const [ports, setPorts] = useState<Port[]>([{ host: "8080", container: "8080" }]);
-  const [env, setEnv] = useState<EnvRow[]>([]);
+  const [ports, setPorts] = useState<Port[]>(() => initialPorts(app?.spec));
+  const [env, setEnv] = useState<EnvRow[]>(() => initialEnv(app?.spec));
+  const [volumes, setVolumes] = useState((app?.spec.volumes ?? []).join("\n"));
+  const [memory, setMemory] = useState(String(app?.spec.resources?.memory_mb ?? ""));
+  const [cpus, setCpus] = useState(
+    app?.spec.resources?.cpu_millis ? String(app.spec.resources.cpu_millis / 1000) : "",
+  );
   const [publish, setPublish] = useState(false);
   const [hostname, setHostname] = useState<string | null>(null);
   const [run, setRun] = useState<AppRun | null>(null);
@@ -240,30 +279,73 @@ export function RunAppSheet({
     enabled: !fixedDevice,
   });
   const ownRegistry = Boolean(registry.data?.enabled);
-  const fromRegistry = Boolean(fixedImage) || (ownRegistry && source === "meteorcloud");
-  const name = editedName ?? defaultName(image);
-  const badPort = ports.some((port) => !isPort(port.host) || !isPort(port.container));
+  const fromRegistry = app ? app.spec.registry === "meteorcloud" : Boolean(fixedImage) || (ownRegistry && source === "meteorcloud");
+  const name = app?.workload_key ?? editedName ?? defaultName(image);
+  // An app made from a release may use other forms (127.0.0.1:80, 53/udp); they are sent as they are.
+  const known = new Set(app?.spec.ports ?? []);
+  const badPort = ports.some(
+    (port) =>
+      !known.has(portText(port)) && !(isPort(port.host) && isPort(port.container)),
+  );
+  const volumeList = volumes.split("\n").map((line) => line.trim()).filter(Boolean);
+  const badVolume = volumeList.some(
+    (line) => !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}:\/[^:\s]+(:ro)?$/.test(line),
+  );
+  const badLimit =
+    (memory !== "" && !/^\d+$/.test(memory)) || (cpus !== "" && !(Number(cpus) >= 0.05));
   const badEnv = env.some((row) => row.key && !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(row.key));
   const ready =
     Boolean(deviceId && image.trim() && name) &&
     registry.isSuccess &&
     !badPort &&
     !badEnv &&
+    !badVolume &&
+    !badLimit &&
     (!publish || (Boolean(hostname) && ports.length > 0));
 
   const mutation = useMutation({
-    mutationFn: () =>
-      runApp(token, organizationId, deviceId, {
+    mutationFn: () => {
+      const rows = env.filter((row) => row.key);
+      const settings = {
         image: image.trim(),
+        ports: ports.map(portText),
+        env: Object.fromEntries(
+          rows.filter((row) => !row.secret).map((row) => [row.key, row.value]),
+        ),
+        volumes: volumeList,
+        resources:
+          memory || cpus
+            ? {
+                memory_mb: memory ? Number(memory) : null,
+                cpu_millis: cpus ? Math.round(Number(cpus) * 1000) : null,
+              }
+            : null,
+      };
+      const secrets: Record<string, string> = Object.fromEntries(
+        rows
+          .filter((row) => row.secret && !(row.stored && row.value === ""))
+          .map((row) => [row.key, row.value]),
+      );
+      if (app) {
+        const kept = new Set(rows.filter((row) => row.secret).map((row) => row.key));
+        const removed = (app.spec.secret_env ?? []).filter((key) => !kept.has(key));
+        return redeployApp(token, organizationId, deviceId, app.workload_key, {
+          ...settings,
+          secret_env: { ...secrets, ...Object.fromEntries(removed.map((key) => [key, null])) },
+        });
+      }
+      return runApp(token, organizationId, deviceId, {
+        ...settings,
         registry: fromRegistry ? "meteorcloud" : null,
         name,
-        ports: ports.map((port) => `${port.host}:${port.container}`),
-        env: Object.fromEntries(env.filter((row) => row.key).map((row) => [row.key, row.value])),
+        secret_env: secrets,
         endpoint: publish ? { hostname, port: Number(ports[0].host) } : null,
-      }),
+      });
+    },
     onSuccess: async (result) => {
       setRun(result);
       await queryClient.invalidateQueries({ queryKey: ["device-software", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["deployed-apps", organizationId] });
     },
   });
 
@@ -290,7 +372,7 @@ export function RunAppSheet({
       >
         <div className="mb-4 flex items-start justify-between gap-3">
           <h2 id="run-app-title" className="text-xl font-semibold">
-            Run an app
+            {app ? `Edit ${app.workload_key}` : "Run an app"}
           </h2>
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
             ✕
@@ -308,7 +390,18 @@ export function RunAppSheet({
           />
         ) : (
           <form className="space-y-5" onSubmit={onSubmit}>
-            {fixedImage ? (
+            {app ? (
+              <div>
+                <Label htmlFor="run-image">Image</Label>
+                <Input
+                  id="run-image"
+                  className="font-mono"
+                  value={image}
+                  onChange={(event) => setImage(event.target.value)}
+                  required
+                />
+              </div>
+            ) : fixedImage ? (
               <p className="break-all font-mono text-sm">{fixedImage}</p>
             ) : (
               <>
@@ -380,6 +473,7 @@ export function RunAppSheet({
                 id="run-name"
                 value={name}
                 maxLength={63}
+                disabled={Boolean(app)}
                 onChange={(event) => setEditedName(event.target.value)}
                 required
               />
@@ -437,18 +531,26 @@ export function RunAppSheet({
                   <Input
                     aria-label={`Variable ${index + 1} value`}
                     type={row.secret ? "password" : "text"}
+                    placeholder={row.stored ? "unchanged" : undefined}
                     autoComplete="off"
                     value={row.value}
                     onChange={(event) => setEnvRow(index, { value: event.target.value })}
                   />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setEnvRow(index, { secret: !row.secret })}
-                  >
-                    {row.secret ? "Show" : "Hide"}
-                  </Button>
+                  <label className="flex items-center gap-1 text-xs">
+                    <input
+                      type="checkbox"
+                      aria-label={`Variable ${index + 1} is secret`}
+                      checked={row.secret}
+                      onChange={(event) =>
+                        setEnvRow(index, {
+                          secret: event.target.checked,
+                          // A stored value never comes back to the browser.
+                          ...(row.stored ? { stored: false } : {}),
+                        })
+                      }
+                    />
+                    Secret
+                  </label>
                   <Button
                     type="button"
                     variant="ghost"
@@ -475,12 +577,55 @@ export function RunAppSheet({
               </Button>
               {env.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Values are hidden here only: members who can see releases can read them.
+                  Secret values are stored encrypted and never shown again. Other values can be read
+                  by everyone who can see releases.
                 </p>
               )}
             </fieldset>
 
-            {canPublish && (
+            <div>
+              <Label htmlFor="run-volumes">Volumes</Label>
+              <textarea
+                id="run-volumes"
+                className="min-h-16 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+                placeholder="data:/var/lib/app"
+                value={volumes}
+                onChange={(event) => setVolumes(event.target.value)}
+              />
+              <p
+                className={
+                  badVolume ? "text-xs text-destructive" : "text-xs text-muted-foreground"
+                }
+              >
+                One per line: name:/path in the container, :ro for read-only. Volumes keep their data
+                when the app is updated or removed.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="run-memory">Memory limit (MB)</Label>
+                <Input
+                  id="run-memory"
+                  inputMode="numeric"
+                  placeholder="No limit"
+                  value={memory}
+                  onChange={(event) => setMemory(event.target.value.trim())}
+                />
+              </div>
+              <div>
+                <Label htmlFor="run-cpus">CPU limit</Label>
+                <Input
+                  id="run-cpus"
+                  inputMode="decimal"
+                  placeholder="No limit"
+                  value={cpus}
+                  onChange={(event) => setCpus(event.target.value.trim())}
+                />
+              </div>
+            </div>
+
+            {canPublish && !app && (
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <input
@@ -511,7 +656,7 @@ export function RunAppSheet({
               </p>
             )}
             <Button type="submit" disabled={!ready || mutation.isPending}>
-              {mutation.isPending ? "Starting…" : "Run"}
+              {mutation.isPending ? "Starting…" : app ? "Redeploy" : "Run"}
             </Button>
           </form>
         )}

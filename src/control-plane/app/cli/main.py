@@ -298,8 +298,10 @@ def main(argv: list[str] | None = None) -> int:
         from app.registry.catalog import CatalogService
 
         with SessionLocal() as session:
-            logger.info("Compared %d repositories", CatalogService(session).reconcile())
-        return 0
+            catalog = CatalogService(session)
+            logger.info("Compared %d repositories", catalog.reconcile())
+        # scripts/registry-gc.sh must not delete what could not be compared.
+        return 1 if catalog.failed else 0
     parser.error(f"Unknown command: {args.command}")
     return 1
 

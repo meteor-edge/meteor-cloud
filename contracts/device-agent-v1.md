@@ -107,6 +107,7 @@ All under `/api/v1/agent`. Request and answer schemas: `schemas/agent/http/<name
 | `POST /actions/report` | device | `actions-report.request` | `200` `actions-report.response` |
 | `POST /applications/credentials` | device | `applications-credentials.request` | `201` `applications-credentials.response` |
 | `POST /registry/pull-token` | device | `registry-pull-token.request` | `200` `registry-pull-token.response` |
+| `POST /software/secrets` | device | `software-secrets.request` | `200` `software-secrets.response` |
 
 `GET /api/v1/health` (no auth) is used to check that the server is reachable, for
 example after joining a new Wi-Fi network.
@@ -140,6 +141,13 @@ password stops working) and reconnects. `enabled: false` stops the MQTT session.
    only for that repository, only to pull, for 30 minutes, and only while the item is desired; `404
    registry_image_not_desired` otherwise. The agent sends it only to the registry named in the answer,
    and only when that is the image's own host.
+
+6. A `docker` item with `spec.secret_env` (a list of names; new in v1, additive) gets the values from
+   `POST /software/secrets` with `workload_key` and `release_id`, for the desired release or one that ran
+   on the device before (a rollback). The agent refuses an answer whose names are not exactly that list,
+   and keeps no copy. `spec.volumes` (`name:/path[:ro]`, named volumes prefixed with the container's
+   name) and `spec.resources` (`memory_mb`, `cpu_millis`) are also additive; an older agent ignores all
+   three.
 
 Deploy kinds today: `systemd`, `docker`, `docker_compose`.
 

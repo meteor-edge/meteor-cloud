@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -65,6 +66,17 @@ class MeteorCloudBinding(BaseModel):
     environment: str = Field(default="production", pattern=r"^[a-z][a-z0-9-]{0,31}$")
 
 
+_VOLUME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}:(/[^:\s]+)(:ro)?")
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}")
+
+
+class DockerResources(BaseModel):
+    # Whole numbers: the spec is signed, and floats are not written the same everywhere.
+    memory_mb: int | None = Field(default=None, ge=16, le=4_194_304)
+    # 1000 = one CPU.
+    cpu_millis: int | None = Field(default=None, ge=50, le=256_000)
+
+
 class DockerSpec(BaseModel):
     container_name: str = Field(min_length=1, max_length=255)
     image: str | None = Field(default=None, max_length=512)
@@ -78,6 +90,34 @@ class DockerSpec(BaseModel):
     command: str | None = Field(default=None, max_length=1024)
     meteorcloud: MeteorCloudBinding | None = None
     health_check: HealthCheck | None = None
+    # "data:/var/lib/app" or "data:/etc/app:ro": named volumes of this app. Never a path on the device.
+    volumes: list[str] = Field(default_factory=list, max_length=20)
+    resources: DockerResources | None = None
+    # Names of environment variables whose values are stored encrypted (ReleaseSecret).
+    secret_env: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("volumes")
+    @classmethod
+    def _check_volumes(cls, value: list[str]) -> list[str]:
+        targets = set()
+        for entry in value:
+            match = _VOLUME_RE.fullmatch(entry)
+            if match is None or any(part in ("", ".", "..") for part in match[1].rstrip("/").split("/")[1:]):
+                raise ValueError(f"{entry!r} is not name:/path or name:/path:ro")
+            target = match[1].rstrip("/")
+            if not target or target == "/run" or target.startswith("/run/secrets"):
+                raise ValueError(f"a volume cannot be mounted at {match[1]}")
+            if target in targets:
+                raise ValueError(f"two volumes are mounted at {target}")
+            targets.add(target)
+        return value
+
+    @field_validator("secret_env")
+    @classmethod
+    def _check_secret_env(cls, value: list[str]) -> list[str]:
+        if any(not _ENV_NAME_RE.fullmatch(name) for name in value) or len(set(value)) != len(value):
+            raise ValueError("secret_env lists environment variable names once each")
+        return sorted(value)
 
     @field_validator("container_name")
     @classmethod
@@ -140,6 +180,9 @@ def validate_release_spec(kind: ReleaseKind, spec: dict[str, Any]) -> dict[str, 
     # Unbound workloads keep the spec shape they had before application bindings existed.
     if validated.get("meteorcloud") is None:
         validated.pop("meteorcloud", None)
+    for optional in ("volumes", "resources", "secret_env"):
+        if not validated.get(optional):
+            validated.pop(optional, None)
     if validated.get("registry") is None:
         validated.pop("registry", None)
     if "image_digest" in validated and validated["image_digest"] is None:

@@ -19,7 +19,7 @@ from app.core.exceptions import AppError, ConflictError, ForbiddenError, NotFoun
 from app.devices.tokens import generate_registry_token, hash_token
 from app.identity.models import User
 from app.registry.access import sign_access_token
-from app.registry.models import RegistryNamespace, RegistryToken
+from app.registry.models import ContainerImage, RegistryNamespace, RegistryToken
 from app.registry.schemas import (
     COMPONENT,
     RegistryAccessTokenResponse,
@@ -80,6 +80,17 @@ def namespace_for(session: Session, organization: Organization) -> str:
     session.add(RegistryNamespace(name=name, organization_id=organization.id))
     session.flush()
     return name
+
+
+def used_bytes(session: Session, organization_id: uuid.UUID) -> int:
+    """Size of the tagged images; layers that images share are counted for each."""
+    images = (
+        select(ContainerImage.digest, func.max(ContainerImage.size_bytes).label("size"))
+        .where(ContainerImage.organization_id == organization_id)
+        .group_by(ContainerImage.digest)
+        .subquery()
+    )
+    return int(session.scalar(select(func.coalesce(func.sum(images.c.size), 0))) or 0)
 
 
 class RegistryService:
@@ -186,6 +197,10 @@ class RegistryService:
         organization = self.session.get(Organization, token.organization_id)
         namespace = namespace_for(self.session, organization)
         allowed = self._allowed_actions(token)
+        quota = self.settings.registry_org_quota_bytes
+        if quota and "push" in allowed and any("push" in scope.actions for scope in scopes):
+            if used_bytes(self.session, token.organization_id) >= quota:
+                allowed = allowed - {"push"}
         access: list[dict[str, Any]] = []
         for scope in scopes:
             match = _REPOSITORY_RE.fullmatch(scope.repository)
@@ -236,7 +251,13 @@ class RegistryService:
             return RegistryInfoResponse(enabled=False)
         namespace = namespace_for(self.session, self.session.get(Organization, organization_id))
         self.session.commit()
-        return RegistryInfoResponse(enabled=True, host=self.settings.registry_public_host, namespace=namespace)
+        return RegistryInfoResponse(
+            enabled=True,
+            host=self.settings.registry_public_host,
+            namespace=namespace,
+            used_bytes=used_bytes(self.session, organization_id),
+            quota_bytes=self.settings.registry_org_quota_bytes or None,
+        )
 
     def list_tokens(self, *, actor: User, organization_id: uuid.UUID) -> list[RegistryTokenResponse]:
         """Your own tokens; people who manage the organization see all of them."""

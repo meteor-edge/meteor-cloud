@@ -69,6 +69,7 @@ data:
   REGISTRY_EVENTS_URL: {{ printf "http://%s-backend:8000/internal/registry/events" (include "meteorcloud.fullname" .) | quote }}
   REGISTRY_STORAGE_BUCKET: {{ .Values.registry.s3.bucket | quote }}
   REGISTRY_STORAGE_PREFIX: {{ .Values.registry.s3.prefix | quote }}
+  REGISTRY_ORG_QUOTA_BYTES: {{ int64 .Values.registry.orgQuotaBytes | quote }}
   {{- end }}
   MQTT_ENABLED: {{ .Values.mqtt.enabled | toString | quote }}
   MQTT_PROVIDER: {{ .Values.mqtt.provider | quote }}

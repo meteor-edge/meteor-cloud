@@ -4,6 +4,9 @@ export type RegistryInfo = {
   enabled: boolean;
   host: string | null;
   namespace: string | null;
+  used_bytes?: number;
+  /** null: unlimited. */
+  quota_bytes?: number | null;
 };
 
 export type RegistryToken = {

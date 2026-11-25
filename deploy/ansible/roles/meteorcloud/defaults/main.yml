@@ -120,6 +120,8 @@ registry_enabled: false
 registry_public_host: "{{ 'registry.' ~ platform_domain if platform_domain else '' }}"
 registry_storage_bucket: ""
 registry_storage_prefix: registry
+# Image bytes one organization may store; 0 = unlimited.
+registry_org_quota_bytes: 0
 
 # MQTT device connectivity (data plane). mqtt_broker: bundled or external.
 mqtt_enabled: false

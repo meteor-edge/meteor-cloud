@@ -15,7 +15,7 @@ from app.deployments.software_models import DeviceSoftware, SoftwareSyncStatus
 from app.devices.models import Device
 from app.ports.registry import ContainerRegistry, RegistryUnavailableError
 from app.registry.access import sign_pull_password, verify_pull_password
-from app.registry.catalog import registry_client
+from app.registry.catalog import pin_tag, registry_client
 from app.registry.models import ContainerImage, RegistryNamespace
 from app.registry.schemas import PULL_PASSWORD_SECONDS, REFERENCE_RE, AgentPullTokenResponse
 from app.registry.service import namespace_for
@@ -86,7 +86,15 @@ class RegistryImages:
             raise AppError("registry_unavailable", str(exc), status_code=503) from exc
         if resolved is None:
             raise ValidationAppError("image_not_found", f"{repository}:{tag} is not in this organization's registry.")
+        self._keep(f"{namespace}/{repository}", resolved)
         return {**pinned, "image_digest": resolved}
+
+    def _keep(self, repository: str, digest: str) -> None:
+        """A hidden tag, so garbage collection keeps the image when its own tag moves or is deleted."""
+        try:
+            self.registry.tag(repository, digest, pin_tag(digest))
+        except RegistryUnavailableError as exc:
+            raise AppError("registry_unavailable", str(exc), status_code=503) from exc
 
     def platform_mismatch(self, organization_id: uuid.UUID, spec: dict[str, Any], device: Device) -> str | None:
         """Why the image cannot run on the device, or None when it can (or nobody knows)."""

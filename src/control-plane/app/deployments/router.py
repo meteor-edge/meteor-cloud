@@ -5,13 +5,17 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, Response
+from pydantic import BaseModel, Field
 
-from app.deployments.apps import AppRunRequest, AppRunResponse, AppService
+from app.core.config import Settings, get_settings
+from app.deployments.apps import AppRedeployRequest, AppResponse, AppRunRequest, AppRunResponse, AppService
 from app.deployments.dependencies import DeploymentSvc
 from app.deployments.schemas import DeploymentCreate, DeploymentResponse, RollbackResponse
+from app.devices.dependencies import CurrentDevice
 from app.devices.schemas import Page
 from app.identity.dependencies import CurrentUser
+from app.releases.secrets import ReleaseSecrets
 from app.releases.service import ReleaseService
 
 router = APIRouter(
@@ -20,6 +24,18 @@ router = APIRouter(
 )
 
 apps_router = APIRouter(prefix="/api/v1/organizations/{organization_id}/devices/{device_id}/apps", tags=["apps"])
+
+agent_secrets_router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
+
+
+class AgentSecretsRequest(BaseModel):
+    workload_key: str = Field(min_length=1, max_length=255)
+    release_id: uuid.UUID
+
+
+class AgentSecretsResponse(BaseModel):
+    # Secret values.
+    env: dict[str, str]
 
 
 @apps_router.post("/run", response_model=AppRunResponse, status_code=201)
@@ -33,6 +49,51 @@ def run_app(
     """Create a release from an image and deploy it to this device, with a public URL if asked."""
     return AppService(service, ReleaseService(service.session)).run(
         actor=current_user, organization_id=organization_id, device_id=device_id, payload=payload
+    )
+
+
+@apps_router.get("/deployed", response_model=list[AppResponse])
+def list_apps(
+    organization_id: uuid.UUID, device_id: uuid.UUID, current_user: CurrentUser, service: DeploymentSvc
+) -> list[AppResponse]:
+    """Single-container apps of the device, and whether a newer image is in the registry."""
+    return AppService(service, ReleaseService(service.session)).list_apps(
+        actor=current_user, organization_id=organization_id, device_id=device_id
+    )
+
+
+@apps_router.post("/{workload_key}/redeploy", response_model=AppRunResponse, status_code=201)
+def redeploy_app(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    workload_key: str,
+    current_user: CurrentUser,
+    service: DeploymentSvc,
+    payload: AppRedeployRequest,
+) -> AppRunResponse:
+    return AppService(service, ReleaseService(service.session)).redeploy(
+        actor=current_user,
+        organization_id=organization_id,
+        device_id=device_id,
+        workload_key=workload_key,
+        payload=payload,
+    )
+
+
+@agent_secrets_router.post("/software/secrets", response_model=AgentSecretsResponse)
+def agent_release_secrets(
+    payload: AgentSecretsRequest,
+    device: CurrentDevice,
+    response: Response,
+    service: DeploymentSvc,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AgentSecretsResponse:
+    """Values of a release's secret_env, for the agent that is about to start it."""
+    response.headers["Cache-Control"] = "no-store"
+    return AgentSecretsResponse(
+        env=ReleaseSecrets(service.session, settings).for_device(
+            device=device, workload_key=payload.workload_key, release_id=payload.release_id
+        )
     )
 
 

@@ -27,6 +27,9 @@ class RegistryInfoResponse(BaseModel):
     # Host and namespace are null while the registry is off.
     host: str | None = None
     namespace: str | None = None
+    used_bytes: int = 0
+    # null: unlimited
+    quota_bytes: int | None = None
 
 
 class RegistryTokenCreateRequest(BaseModel):

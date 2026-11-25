@@ -24,6 +24,7 @@ import { DeviceMqttStatus } from "@/components/fleet/DeviceMqttStatus";
 import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceUplinkPanel } from "@/components/fleet/DeviceUplinkPanel";
 import { DeviceResourceMeters } from "@/components/fleet/DeviceResourceMeters";
+import { DeployedApps } from "@/components/apps/DeployedApps";
 import { RunAppSheet } from "@/components/apps/RunAppSheet";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 import { DeviceTelemetryCharts } from "@/components/fleet/DeviceTelemetryCharts";
@@ -345,6 +346,10 @@ export function DeviceDetailPage() {
             />
           )}
         </div>
+      )}
+
+      {activeTab === "software" && canDeploy && token && (
+        <DeployedApps token={token} organizationId={organizationId} deviceId={deviceId} />
       )}
 
       {runOpen && token && (

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Enum, ForeignKey, Index, String, Text, func
+from sqlalchemy import Enum, ForeignKey, Index, LargeBinary, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -71,3 +71,15 @@ class Release(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Index("ix_releases_org_kind", "organization_id", "kind"),
         Index("ix_releases_artifact_id", "artifact_id"),
     )
+
+
+class ReleaseSecret(Base, TimestampMixin):
+    """One encrypted environment value of a release (``spec.secret_env`` lists the names)."""
+
+    __tablename__ = "release_secrets"
+
+    release_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("releases.id", ondelete="CASCADE"), primary_key=True
+    )
+    name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    sealed_value: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

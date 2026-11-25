@@ -3,13 +3,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getDeployment, listDevices, listEndpoints, runApp, suggestHostname } from "@/api/fleet";
+import { getDeployment, listDevices, listEndpoints, redeployApp, runApp, suggestHostname } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { getRegistry, listImages, listImageTags } from "@/api/registry";
 import { RunAppSheet, runState } from "@/components/apps/RunAppSheet";
 
 vi.mock("@/api/fleet", () => ({
   runApp: vi.fn(),
+  redeployApp: vi.fn(),
   getDeployment: vi.fn(),
   listDevices: vi.fn(),
   listEndpoints: vi.fn(),
@@ -98,6 +99,9 @@ describe("RunAppSheet", () => {
       name: "web",
       ports: ["8080:8080"],
       env: {},
+      secret_env: {},
+      volumes: [],
+      resources: null,
       endpoint: { hostname: "web.pi.example.com", port: 8080 },
     });
   });
@@ -115,7 +119,8 @@ describe("RunAppSheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     expect(await screen.findByText("Already runs web.")).toBeInTheDocument();
     expect(vi.mocked(runApp).mock.calls[0][2]).toBe("dev-2");
-    expect(vi.mocked(runApp).mock.calls[0][3].env).toEqual({ KEY: "v" });
+    expect(vi.mocked(runApp).mock.calls[0][3].env).toEqual({});
+    expect(vi.mocked(runApp).mock.calls[0][3].secret_env).toEqual({ KEY: "v" });
   });
 
   it("refuses bad ports and takes public images when the registry is off", async () => {
@@ -125,6 +130,46 @@ describe("RunAppSheet", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).toBeEnabled());
     fireEvent.change(screen.getByLabelText("Device port 1"), { target: { value: "99999" } });
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("edits an app: keeps stored secrets, removes deleted ones, sets limits", async () => {
+    vi.mocked(redeployApp).mockResolvedValue({
+      workload_key: "web",
+      release_id: "rel-2",
+      deployment: deployment("pending"),
+    });
+    vi.mocked(getDeployment).mockResolvedValue(deployment("failed", null, "pull failed"));
+    renderSheet({
+      app: {
+        workload_key: "web",
+        spec: {
+          image: "r/acme/web:1.0",
+          registry: "meteorcloud",
+          ports: ["127.0.0.1:80:80"],
+          env: { A: "1" },
+          secret_env: ["GONE", "KEEP"],
+          volumes: ["data:/data"],
+        },
+      } as never,
+    });
+    expect(screen.getByLabelText("Name")).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("Remove variable 2"));
+    fireEvent.change(screen.getByLabelText("Memory limit (MB)"), { target: { value: "256" } });
+    fireEvent.change(screen.getByLabelText("CPU limit"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByLabelText("Volumes"), { target: { value: "/etc:/host" } });
+    expect(screen.getByRole("button", { name: "Redeploy" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Volumes"), { target: { value: "data:/data" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Redeploy" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Redeploy" }));
+    expect(await screen.findByText("pull failed")).toBeInTheDocument();
+    expect(redeployApp).toHaveBeenCalledWith("t", "org-1", "dev-1", "web", {
+      image: "r/acme/web:1.0",
+      ports: ["127.0.0.1:80:80"],
+      env: { A: "1" },
+      secret_env: { GONE: null },
+      volumes: ["data:/data"],
+      resources: { memory_mb: 256, cpu_millis: 500 },
+    });
   });
 
   it("names every state", () => {

@@ -27,6 +27,7 @@ from app.releases.kinds import (
 from app.releases.models import Release
 from app.releases.repository import ReleaseRepository
 from app.releases.schemas import ReleaseCreate, ReleaseResponse, ReleaseUpdate
+from app.releases.secrets import ReleaseSecrets
 from app.tenancy.models import OrganizationMembership
 
 logger = logging.getLogger(__name__)
@@ -159,12 +160,20 @@ class ReleaseService:
         self.session.refresh(release)
         return ReleaseResponse.model_validate(release)
 
-    def add_release(self, *, actor: User, membership: OrganizationMembership, payload: ReleaseCreate) -> Release:
+    def add_release(
+        self,
+        *,
+        actor: User,
+        membership: OrganizationMembership,
+        payload: ReleaseCreate,
+        secrets: dict[str, str] | None = None,
+    ) -> Release:
         """Validate and add a release. The caller checks permissions and commits."""
         organization_id = membership.organization_id
-        normalized_spec = self._pin_image(
-            membership, payload.kind, validate_release_spec(payload.kind, payload.spec)
-        )
+        normalized_spec = self._pin_image(membership, payload.kind, validate_release_spec(payload.kind, payload.spec))
+
+        if set(normalized_spec.get("secret_env") or []) != set(secrets or {}):
+            raise ValidationAppError("invalid_release_spec", "secret_env is set by running or redeploying an app.")
 
         artifact = None
         artifact_type = None
@@ -204,6 +213,8 @@ class ReleaseService:
         )
         self.releases.create(release)
         self.session.flush()
+        if secrets:
+            ReleaseSecrets(self.session, self.settings).store(release.id, secrets)
         self.audit.record(
             actor=actor,
             organization_id=organization_id,
@@ -249,6 +260,8 @@ class ReleaseService:
                 artifact_id=release.artifact_id,
                 spec=normalized,
             )
+            if set(normalized.get("secret_env") or []) != set((release.spec or {}).get("secret_env") or []):
+                raise ValidationAppError("invalid_release_spec", "secret_env is set by running or redeploying an app.")
             release.spec = normalized
 
         self.audit.record(

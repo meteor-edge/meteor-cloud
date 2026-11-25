@@ -232,6 +232,7 @@ registry:
     tag: "3.1.2"
     pullPolicy: IfNotPresent
   replicaCount: 1            # more than one needs objectStorage.provider=s3
+  orgQuotaBytes: 0           # image bytes one organization may store; 0 = unlimited
   s3:
     bucket: ""
     prefix: registry

@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { canManageRegistryRobots, canPushImages } from "@/lib/permissions";
-import { formatDateTime } from "@/lib/utils";
+import { formatBytes, formatDateTime } from "@/lib/utils";
 
 const selectClass = "h-10 w-full rounded-md border border-border bg-background px-3 text-sm";
 
@@ -151,6 +151,10 @@ function RegistrySettings({ organizationId }: { organizationId: string }) {
             </pre>
             <p className="mt-2 text-xs text-muted-foreground">
               Use a token below as the password. The user name can be anything.
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Storage used: {formatBytes(registry.used_bytes ?? 0)}
+              {registry.quota_bytes ? ` of ${formatBytes(registry.quota_bytes)}` : ""}
             </p>
           </div>
 

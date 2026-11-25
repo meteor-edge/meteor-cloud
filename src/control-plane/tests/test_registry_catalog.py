@@ -52,6 +52,10 @@ class FakeRegistry:
         media_type = "application/vnd.oci.image.manifest.v1+json"
         return ImageManifest(digest, media_type, (Platform("linux", "arm64", None, 7),))
 
+    def tag(self, repository: str, digest: str, tag: str) -> None:
+        self._check()
+        self.images[repository][tag] = digest
+
     def delete_tag(self, repository: str, tag: str) -> None:
         self._check()
         self.images[repository].pop(tag, None)
