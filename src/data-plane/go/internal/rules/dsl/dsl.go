@@ -12,6 +12,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"slices"
 	"strings"
 	"time"
 )
@@ -169,7 +171,7 @@ type Source struct {
 // Alerting controls how many alerts a rule may open per device.
 type Alerting struct {
 	Mode      string `json:"mode,omitempty"`
-	MaxActive int    `json:"max_active,omitempty"`
+	MaxActive *int   `json:"max_active,omitempty"`
 }
 
 // Node is one condition node. Which fields apply depends on Type.
@@ -195,6 +197,10 @@ type Node struct {
 	Count    int      `json:"count,omitempty"`
 	Function string   `json:"function,omitempty"`
 	Streams  []string `json:"streams,omitempty"`
+
+	// keys are the JSON keys the node was written with (nil when built in code), so
+	// validation sees a misplaced key even when its value is zero.
+	keys map[string]bool
 }
 
 // Action is something to do on a transition. Config is action specific and checked
@@ -212,12 +218,37 @@ type Action struct {
 // IsEnabled reports the enabled flag (default true).
 func (r *Rule) IsEnabled() bool { return r.Enabled == nil || *r.Enabled }
 
-// Streams returns the streams the rule reads.
-func (r *Rule) Streams() []string {
+// SourceStreams returns the streams that feed the rule's conditions.
+func (r *Rule) SourceStreams() []string {
 	if r.Source == nil || len(r.Source.Streams) == 0 {
 		return []string{DefaultStream}
 	}
 	return r.Source.Streams
+}
+
+// Streams returns every stream the rule reads: its sources first, then the streams
+// named only by absence nodes.
+func (r *Rule) Streams() []string {
+	out := slices.Clone(r.SourceStreams())
+	var walk func(n *Node)
+	walk = func(n *Node) {
+		if n == nil {
+			return
+		}
+		if n.Type == NodeAbsence {
+			for _, s := range n.Streams {
+				if !slices.Contains(out, s) {
+					out = append(out, s)
+				}
+			}
+		}
+		for _, c := range n.Conditions {
+			walk(c)
+		}
+		walk(n.Condition)
+	}
+	walk(r.Condition)
+	return out
 }
 
 // EffectiveSeverity returns the severity with its default.
@@ -241,11 +272,10 @@ func (r *Rule) Mode() (string, int) {
 	if r.Alerting == nil || r.Alerting.Mode == "" || r.Alerting.Mode == ModeSingle {
 		return ModeSingle, 1
 	}
-	n := r.Alerting.MaxActive
-	if n <= 0 {
-		n = 10
+	if r.Alerting.MaxActive == nil {
+		return ModePerEvent, 10
 	}
-	return ModePerEvent, n
+	return ModePerEvent, *r.Alerting.MaxActive
 }
 
 // EffectiveActions returns the actions with defaults applied: an alert action when
@@ -278,10 +308,43 @@ func Parse(raw []byte) (*Rule, error) {
 	if err := dec.Decode(&r); err != nil {
 		return nil, &ValidationError{Problems: []Problem{{Path: "", Message: cleanJSONError(err)}}}
 	}
-	if dec.More() {
+	if _, err := dec.Token(); err != io.EOF {
 		return nil, &ValidationError{Problems: []Problem{{Path: "", Message: "trailing data after the rule"}}}
 	}
+	var keys struct {
+		Condition any `json:"condition"`
+		Resolve   any `json:"resolve"`
+	}
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return nil, &ValidationError{Problems: []Problem{{Path: "", Message: cleanJSONError(err)}}}
+	}
+	noteKeys(r.Condition, keys.Condition)
+	noteKeys(r.Resolve, keys.Resolve)
 	return &r, nil
+}
+
+// noteKeys records which JSON keys each node was written with.
+func noteKeys(n *Node, raw any) {
+	obj, ok := raw.(map[string]any)
+	if n == nil || !ok {
+		return
+	}
+	n.keys = make(map[string]bool, len(obj))
+	for k, v := range obj {
+		k = strings.ToLower(k) // encoding/json matches keys without case
+		n.keys[k] = true
+		switch k {
+		case "condition":
+			noteKeys(n.Condition, v)
+		case "conditions":
+			list, _ := v.([]any)
+			for i, c := range list {
+				if i < len(n.Conditions) {
+					noteKeys(n.Conditions[i], c)
+				}
+			}
+		}
+	}
 }
 
 func cleanJSONError(err error) string {
@@ -300,7 +363,11 @@ func ConditionHash(r *Rule) string {
 		Scope     Scope     `json:"s"`
 		Streams   []string  `json:"st"`
 		Alerting  *Alerting `json:"a,omitempty"`
-	}{r.Condition, r.Resolve, r.Scope, r.Streams(), r.Alerting}
+	}{r.Condition, r.Resolve, r.Scope, r.Streams(), nil}
+	// The effective settings, so spelling out a default changes nothing.
+	if mode, n := r.Mode(); mode == ModePerEvent {
+		shape.Alerting = &Alerting{Mode: mode, MaxActive: &n}
+	}
 	b, _ := json.Marshal(shape)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:12])

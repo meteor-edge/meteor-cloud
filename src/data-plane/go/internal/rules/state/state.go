@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"time"
 
 	"meteorcloud/dataplane/internal/rules/eval"
@@ -70,13 +72,23 @@ func (s *RuleState) Retire(now time.Time) {
 
 func (s *RuleState) Key() Key { return Key{s.RuleID, s.DeviceID} }
 
-// Clone deep-copies a state (JSON round trip keeps it honest with what is stored).
+// Clone deep-copies a state.
 func (s *RuleState) Clone() *RuleState {
-	b, _ := json.Marshal(s)
-	var c RuleState
-	_ = json.Unmarshal(b, &c)
-	if c.Nodes == nil {
-		c.Nodes = eval.State{}
+	c := *s
+	c.LastValues = maps.Clone(s.LastValues)
+	c.Nodes = make(eval.State, len(s.Nodes))
+	for path, ns := range s.Nodes {
+		n := *ns
+		if ns.Last != nil {
+			last := *ns.Last
+			n.Last = &last
+		}
+		if ns.Since != nil {
+			since := *ns.Since
+			n.Since = &since
+		}
+		n.Buckets = slices.Clone(ns.Buckets)
+		c.Nodes[path] = &n
 	}
 	return &c
 }

@@ -173,23 +173,27 @@ func (e *Engine) tick(ctx context.Context, t state.Timer) error {
 // next alert would look like a replay of an old one and never be sent.
 func (e *Engine) retire(ctx context.Context, st *state.RuleState, r *Rule, reason string) error {
 	b := &state.Batch{TimersClear: []state.Key{st.Key()}}
+	var ps []pending
 	if st.Phase == state.PhaseFiring {
 		t := Transition{Kind: TransitionResolved, Reason: reason, Episode: st.Episode, At: e.clock.Now()}
-		e.firing.Add(-1)
-		e.metrics.Transitions.WithLabelValues(t.Kind).Inc()
 		if r == nil {
 			// The rule is gone from the snapshot: only the alert action can still run,
 			// so the open alert is closed in the control plane.
 			r = &Rule{ID: st.RuleID, Version: st.RuleVersion, Actions: defaultAlertOnly}
 			r.Def = retiredDef
 		}
-		e.enqueue(b, []pending{{r, st, t}})
+		ps = append(ps, pending{r, st, t})
+		e.enqueue(b, ps)
 	}
 	if !st.Retired() {
 		st.Retire(e.clock.Now())
 		b.States = []*state.RuleState{st}
 	}
-	return e.commits.commit(ctx, b)
+	if err := e.commits.commit(ctx, b); err != nil {
+		return err
+	}
+	e.afterCommit(ps)
+	return nil
 }
 
 // Reconcile compares the stored evaluation state with the current rules, so open
@@ -197,7 +201,7 @@ func (e *Engine) retire(ctx context.Context, st *state.RuleState, r *Rule, reaso
 // changed, or when a device left its scope. Working from the stored state (not from
 // the previous snapshot) also covers what changed while no worker was running. It
 // seeds absence timers for devices without state, so "device never sent anything"
-// fires too, including for devices added after the rule.
+// fires too, including for devices added after the rule. Call it again after an error.
 func (e *Engine) Reconcile(ctx context.Context, cur *RuleSet) error {
 	ids, err := e.store.RuleIDs(ctx)
 	if err != nil {
@@ -234,10 +238,28 @@ func (e *Engine) Reconcile(ctx context.Context, cur *RuleSet) error {
 	return nil
 }
 
+// retireLocked retires under the device lock, from a fresh copy whenever another worker
+// wrote the state first.
 func (e *Engine) retireLocked(ctx context.Context, st *state.RuleState, r *Rule, reason string) error {
 	unlock := e.locks.lock(st.DeviceID)
 	defer unlock()
-	return e.retire(ctx, st, r, reason)
+	for attempt := 0; ; attempt++ {
+		err := e.retire(ctx, st, r, reason)
+		if !errors.Is(err, state.ErrConflict) || attempt >= e.cfg.Retries {
+			return err
+		}
+		e.metrics.Conflicts.Inc()
+		states, err := e.store.LoadStates(ctx, st.DeviceID, []string{st.RuleID})
+		if err != nil {
+			e.metrics.StateErrors.WithLabelValues("load").Inc()
+			return err
+		}
+		fresh := states[st.RuleID]
+		if fresh == nil || fresh.Retired() {
+			return nil // another worker retired it
+		}
+		st = fresh
+	}
 }
 
 func (e *Engine) eachState(ctx context.Context, ruleID string, workers int, fn func(*state.RuleState) error) error {
@@ -247,12 +269,7 @@ func (e *Engine) eachState(ctx context.Context, ruleID string, workers int, fn f
 		if err != nil {
 			return err
 		}
-		if err := inParallel(workers, page, func(st *state.RuleState) error {
-			if err := fn(st); err != nil && !errors.Is(err, state.ErrConflict) {
-				return err
-			}
-			return nil
-		}); err != nil {
+		if err := inParallel(workers, page, fn); err != nil {
 			return err
 		}
 		if len(page) > 0 {

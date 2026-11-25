@@ -17,7 +17,7 @@ from app.audit.models import AuditEvent
 from app.core.config import get_settings
 from app.core.secretbox import unseal
 from app.devices.models import Device, DeviceGroup
-from app.rules.definition import RuleDefinitionError, validate_definition
+from app.rules.definition import RuleDefinitionError, condition_hash, validate_definition
 from app.rules.models import NotificationIntegration
 from app.tenancy.models import OrganizationRole
 from tests.conftest import add_member, auth_header, create_org_with_owner, create_user
@@ -182,6 +182,55 @@ def test_rule_crud_versions_and_audit(client: TestClient, db_session: Session) -
     assert {"rule.create", "rule.update", "rule.disable", "rule.enable", "rule.delete"} <= actions
     update = db_session.scalar(select(AuditEvent).where(AuditEvent.action == "rule.update"))
     assert update.metadata_["state_reset"] is False
+
+
+_AGGREGATE = {"type": "aggregate", "function": "avg", "field": "a", "window": "1m"}
+_COMPARISON = {"type": "comparison", "field": "a"}
+
+
+# The same cases as the Go validator's TestStrictOperandsAndKeys.
+@pytest.mark.parametrize(
+    ("valid", "overrides"),
+    [
+        (True, {"condition": {**_AGGREGATE, "operator": "between", "min": 1, "max": 2}}),
+        (True, {"condition": {**_COMPARISON, "operator": "in", "values": [1]}}),
+        (True, {"condition": {**_COMPARISON, "operator": "exists"}}),
+        (True, {"alerting": {"mode": "per_event"}}),
+        (True, {"alerting": {"mode": "per_event", "max_active": 2}}),
+        (True, {"actions": [{"type": "platform_event", "on": ["firing", "resolved"]}]}),
+        (False, {"condition": {**_AGGREGATE, "operator": "gt", "value": None}}),
+        (False, {"condition": {**_AGGREGATE, "operator": "gt", "value": 1, "min": 5}}),
+        (False, {"condition": {**_COMPARISON, "operator": "in", "values": [1], "value": 2}}),
+        (False, {"condition": {**_COMPARISON, "operator": "exists", "value": None}}),
+        (False, {"condition": {**_COMPARISON, "operator": "between", "min": 1, "max": 2, "value": 1}}),
+        (False, {"condition": {**_COMPARISON, "operator": "gt", "value": 1, "values": []}}),
+        (False, {"condition": {**_COMPARISON, "operator": "gt", "value": 1, "window": "0s"}}),
+        (False, {"condition": {**_COMPARISON, "operator": ["gt"], "value": 1}}),
+        (False, {"condition": {"type": "absence", "duration": "5m", "streams": ["a" * 64]}}),
+        (False, {"alerting": {"mode": "per_event", "max_active": 0}}),
+        (False, {"alerting": {"mode": "single", "max_active": 2}}),
+        (False, {"alerting": {"max_active": 1}}),
+        (False, {"actions": [{"type": "platform_event", "on": ["firing", "firing"]}]}),
+        (False, {"actions": [{"type": "platform_event", "on": ["firing", "resolved", "firing"]}]}),
+    ],
+)
+def test_strict_operands_and_keys(valid: bool, overrides: dict) -> None:
+    definition = {**_definition(), **overrides}
+    if valid:
+        validate_definition(definition)
+    else:
+        with pytest.raises(RuleDefinitionError):
+            validate_definition(definition)
+
+
+def test_condition_hash_uses_effective_alerting() -> None:
+    def digest(**overrides) -> str:
+        return condition_hash({**_definition(), **overrides})
+
+    per_event = digest(alerting={"mode": "per_event"})
+    assert digest() == digest(alerting={"mode": "single"})
+    assert per_event == digest(alerting={"mode": "per_event", "max_active": 10})
+    assert len({digest(), per_event, digest(alerting={"mode": "per_event", "max_active": 3})}) == 3
 
 
 def test_invalid_rule_is_rejected_with_problems(client: TestClient, db_session: Session) -> None:

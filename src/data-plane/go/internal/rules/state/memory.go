@@ -3,6 +3,8 @@ package state
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -89,6 +91,9 @@ func (m *Memory) commit(b *Batch) error {
 		}
 	}
 	check := func(s *RuleState) error {
+		if _, err := json.Marshal(s); err != nil { // a real store could not write it either
+			return fmt.Errorf("encode rule state: %w", err)
+		}
 		cur, ok := m.states[s.Key()]
 		if (ok && cur.Version != s.Version) || (!ok && s.Version != 0) {
 			return ErrConflict
@@ -135,6 +140,7 @@ func (m *Memory) commit(b *Batch) error {
 		if o.Status == "" {
 			o.Status = OutboxPending
 		}
+		o.Payload = slices.Clone(o.Payload)
 		m.outbox = append(m.outbox, o)
 	}
 	return nil
@@ -216,7 +222,11 @@ func (m *Memory) Close()                     {}
 func (m *Memory) Outbox() []OutboxItem {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]OutboxItem(nil), m.outbox...)
+	out := slices.Clone(m.outbox)
+	for i := range out {
+		out[i].Payload = slices.Clone(out[i].Payload)
+	}
+	return out
 }
 
 // Timers returns a copy of every stored timer (tests).

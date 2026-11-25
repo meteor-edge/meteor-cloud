@@ -140,6 +140,10 @@ func Simulate(ctx context.Context, req SimRequest, lim dsl.Limits, allowPlatform
 			}
 		}
 	}
+	used := map[string]bool{}
+	for _, se := range events {
+		used[se.ID] = true
+	}
 	for i, se := range events {
 		if err := runTimersUntil(se.Time); err != nil {
 			return nil, err
@@ -149,7 +153,10 @@ func Simulate(ctx context.Context, req SimRequest, lim dsl.Limits, allowPlatform
 		}
 		id := se.ID
 		if id == "" {
-			id = fmt.Sprintf("event-%d", i+1)
+			// Never an id the request uses itself: the engine would drop it as a duplicate.
+			for id = fmt.Sprintf("event-%d", i+1); used[id]; id += "-auto" {
+			}
+			used[id] = true
 		}
 		stream := se.Stream
 		if stream == "" {
