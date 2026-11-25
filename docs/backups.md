@@ -7,6 +7,7 @@ What holds state, and what each install method backs up:
 | PostgreSQL (organizations, devices, releases, audit log, …) | bundled `postgres` service or your database | `pg_dump -Fc` nightly | optional nightly `pg_dump` CronJob (bundled only) |
 | ClickHouse (telemetry, events, inference) | `clickhouse` service (profile `clickhouse`) | schema + Native dump per table, nightly | not yet: use ClickHouse `BACKUP` or your provider |
 | Artifacts | filesystem volume or bundled MinIO | `tar.gz` of the volume, nightly | your bucket or PVC: use its snapshots/versioning |
+| Container registry images ([registry](registry.md)) | filesystem volume or your bucket | **not yet**: copy the volume yourself | your bucket or PVC: use its snapshots/versioning |
 | NATS JetStream, Redis, broker state | in-flight queues and caches | not backed up (rebuilt on start) | not backed up |
 
 An external database or bucket is never touched: use your provider's backups for it.
@@ -45,6 +46,9 @@ ls /opt/edge-platform/backups
 ```
 
 ### Restore on a VM
+
+If the [container registry](registry.md#storage) is on, its images must be restored from the same
+time or emptied, so an old organization's images cannot end up under a new one.
 
 The restore replaces the current database, ClickHouse tables and artifacts. Application
 services are stopped while data is replaced and started again afterwards.

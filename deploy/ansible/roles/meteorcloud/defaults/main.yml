@@ -114,6 +114,13 @@ object_storage_access_key_id: "{{ EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID | d
 object_storage_secret_access_key: >-
   {{ EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY | default(lookup('env', 'EDGE_PLATFORM_OBJECT_STORAGE_SECRET_ACCESS_KEY'), true) }}
 
+# Container registry for the organizations' images (docs/registry.md). Uses the storage above:
+# {{ platform_root }}/data/registry, or S3 (a bucket of its own, or a prefix in the artifact bucket).
+registry_enabled: false
+registry_public_host: "{{ 'registry.' ~ platform_domain if platform_domain else '' }}"
+registry_storage_bucket: ""
+registry_storage_prefix: registry
+
 # MQTT device connectivity (data plane). mqtt_broker: bundled or external.
 mqtt_enabled: false
 mqtt_broker: bundled

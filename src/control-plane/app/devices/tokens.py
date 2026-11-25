@@ -20,6 +20,8 @@ API_KEY_PREFIX = "key_"
 # claim its credential exactly once.
 CLAIM_SECRET_PREFIX = "clm_"
 SHELL_TICKET_PREFIX = "sh_"
+# Password for `docker login` (personal or robot).
+REGISTRY_TOKEN_PREFIX = "rgt_"
 
 # Number of random bytes for the url-safe secret body.
 _SECRET_BYTES = 32
@@ -81,3 +83,8 @@ def generate_claim_secret() -> GeneratedToken:
 def generate_shell_ticket() -> GeneratedToken:
     """Generate a one-time browser SSH ticket (``sh_`` prefix)."""
     return _generate(SHELL_TICKET_PREFIX)
+
+
+def generate_registry_token() -> GeneratedToken:
+    """Generate a new container registry token (``rgt_`` prefix)."""
+    return _generate(REGISTRY_TOKEN_PREFIX)

@@ -42,6 +42,16 @@ export function canManageArtifacts(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "developer";
 }
 
+/** Push container images (image.push). */
+export function canPushImages(role: string | undefined): boolean {
+  return role === "owner" || role === "admin" || role === "developer";
+}
+
+/** Robot registry tokens belong to the organization (organization.update). */
+export function canManageRegistryRobots(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 /** Show OS images in Meteor Imager (artifact.publish): public downloads, so owners and admins only. */
 export function canPublishOsImages(role: string | undefined): boolean {
   return role === "owner" || role === "admin";

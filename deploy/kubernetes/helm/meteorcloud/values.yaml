@@ -220,6 +220,40 @@ objectStorage:
     accessKeyId: ""
     secretAccessKey: ""
 
+# --- Container registry (optional, docs/registry.md) ------------------------
+# CNCF Distribution. Images go to objectStorage above: a claim of their own
+# (filesystem), or S3 in registry.s3.bucket (empty: the artifact bucket, under prefix).
+registry:
+  enabled: false
+  # Host name people push to, e.g. registry.example.com. Needs ingress.enabled and config.publicUrl.
+  host: ""
+  image:
+    repository: registry
+    tag: "3.1.2"
+    pullPolicy: IfNotPresent
+  replicaCount: 1            # more than one needs objectStorage.provider=s3
+  s3:
+    bucket: ""
+    prefix: registry
+  persistence:
+    size: 20Gi
+    storageClass: ""
+    keep: true
+  ingress:
+    # Added to ingress.annotations. Layers are large: lift the controller's body limit.
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    tls: []
+    #  - secretName: meteorcloud-registry-tls
+    #    hosts: [registry.example.com]
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 512Mi }
+  nodeSelector: {}
+  tolerations: []
+
 # --- Device MQTT (optional) ------------------------------------------------
 mqtt:
   enabled: false

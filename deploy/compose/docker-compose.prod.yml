@@ -31,6 +31,11 @@ services:
       # other containers and the host loopback reach it.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
 
+  registry:
+    restart: unless-stopped
+    # Reached through Traefik at https://REGISTRY_PUBLIC_HOST.
+    ports: !reset []
+
   mosquitto:
     restart: unless-stopped
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
@@ -97,6 +102,9 @@ services:
       - --providers.http.headers.X-Routing-Internal-Token=${ROUTING_INTERNAL_TOKEN:-dev-connectivity-internal}
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      # Traefik stops reading a request after 60s by default; an image layer or an OS image takes longer.
+      - --entrypoints.web.transport.respondingTimeouts.readTimeout=3600s
+      - --entrypoints.websecure.transport.respondingTimeouts.readTimeout=3600s
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}
       - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
@@ -105,6 +113,7 @@ services:
       - --certificatesresolvers.letsencrypt-dns.acme.dnschallenge.provider=${ACME_DNS_PROVIDER:-route53}
     environment:
       PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-}
+      REGISTRY_PUBLIC_HOST: ${REGISTRY_PUBLIC_HOST:-}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-}

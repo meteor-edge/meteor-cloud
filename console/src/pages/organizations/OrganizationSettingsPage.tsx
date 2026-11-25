@@ -135,6 +135,9 @@ export function OrganizationSettingsPage() {
         <Button variant="secondary" asChild>
           <Link to={`/organizations/${organizationId}/api-keys`}>Enrollment API keys</Link>
         </Button>
+        <Button variant="secondary" asChild>
+          <Link to={`/organizations/${organizationId}/registry`}>Registry</Link>
+        </Button>
       </div>
 
       {canUpdate ? (

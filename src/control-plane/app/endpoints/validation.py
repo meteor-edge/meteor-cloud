@@ -14,7 +14,7 @@ _RESERVED_HOSTS = frozenset(
     {
         "admin", "api", "app", "apps", "auth", "backend", "console", "dashboard", "docs",
         "ftp", "grafana", "help", "localhost", "login", "mail", "metadata", "mqtt", "mx", "ns",
-        "ns1", "ns2", "postgres", "redis", "smtp", "sso", "status", "support", "traefik", "vpn",
+        "ns1", "ns2", "postgres", "redis", "registry", "smtp", "sso", "status", "support", "traefik", "vpn",
         "wg", "www",
     }
 )

@@ -16,6 +16,7 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | VerneMQ (official `vernemq/vernemq` image) | Optional MQTT broker (`MQTT_PROVIDER=vernemq`) | Source: Apache 2.0. Official builds: [VerneMQ EULA](https://vernemq.com/vernemq-licenses.html) | **Only with commercial license** | Off by default; starts only with `VERNEMQ_ACCEPT_EULA=yes`. Commercial use of the official image needs a VerneMQ subscription, or build your own image from source. [MQTT brokers](fleet/mqtt-brokers.md#vernemq) |
 | ClickHouse **25.8** (`clickhouse/clickhouse-server:25.8-alpine`) | Optional store for application data (profile `clickhouse`) | [Apache 2.0](https://github.com/ClickHouse/ClickHouse/blob/master/LICENSE) | **Yes** | Unmodified image, reached over its HTTP interface; no ClickHouse library is linked into MeteorCloud. ClickHouse Cloud and its enterprise features are separate products and are not used |
 | NATS Server **2.15.3** (`nats:2.15.3-alpine`) | Optional internal messaging for the device event path (profile `nats`) | [Apache 2.0](https://github.com/nats-io/nats-server/blob/main/LICENSE) | **Yes** | Unmodified image, internal only (devices never connect). Synadia's commercial add-ons are separate products and are not used. Re-check the license on every upgrade |
+| CNCF Distribution **3.1.2** (`registry:3.1.2`) | Optional container registry (profile `registry`) | [Apache 2.0](https://github.com/distribution/distribution/blob/main/LICENSE) | **Yes** | Unmodified image, off by default. No Distribution code is linked into MeteorCloud. Stores images on the artifact storage choice (not MinIO in production) |
 | Filesystem or customer S3 / R2 / GCS | Artifacts | N/A / cloud contract | **Yes** | **Preferred** production storage |
 | WireGuard / Docker | VPN / runtime | GPL family / Apache 2.0 | **Yes** | Normal host infra |
 | Prometheus / Alertmanager / node_exporter | Metrics / alerts | Apache 2.0 | **Yes** | Default ops stack on `make up` / installer; fine |
@@ -69,6 +70,7 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | Data API base images | `src/data-plane/go/Dockerfile` → `golang:1.27-alpine`, `alpine:3.24` | not in the chart |
 | Data API Go modules | `src/data-plane/go/go.mod` | same |
 | Go meteorcli systemd test (test only) | `src/device-plane/agent-go/test/systemd/Dockerfile` → `debian:12.8-slim` | not in the chart |
+| CNCF Distribution | `deploy/compose/control-plane.yml` → `registry:3.1.2` (`REGISTRY_IMAGE`) | `registry.image` |
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |
 | Observability | `deploy/compose/docker-compose.observability.yml` | not in the chart |
 

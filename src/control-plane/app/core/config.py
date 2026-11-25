@@ -301,6 +301,22 @@ class Settings(BaseSettings):
     # (e.g. MinIO at http://minio:9000 inside Compose but https://s3.example.com outside).
     object_storage_public_endpoint_url: str = Field(default="", alias="OBJECT_STORAGE_PUBLIC_ENDPOINT_URL")
 
+    # Container registry (docs/registry.md). "distribution" = CNCF Distribution v3 next to the
+    # API, storing images on the object storage configured above.
+    registry_provider: Literal["none", "distribution"] = Field(default="none", alias="REGISTRY_PROVIDER")
+    # Host (and port) people push to, e.g. registry.example.com. Also the token audience.
+    registry_public_host: str = Field(default="", alias="REGISTRY_PUBLIC_HOST")
+    # Public URL of GET /api/v1/registry/token, where clients get access tokens.
+    registry_token_realm: str = Field(default="", alias="REGISTRY_TOKEN_REALM")
+    registry_token_ttl_seconds: int = Field(default=300, ge=60, le=3600, alias="REGISTRY_TOKEN_TTL_SECONDS")
+    registry_token_rate_limit_requests: int = Field(default=600, alias="REGISTRY_TOKEN_RATE_LIMIT_REQUESTS")
+    registry_token_rate_limit_window_seconds: int = Field(
+        default=60, alias="REGISTRY_TOKEN_RATE_LIMIT_WINDOW_SECONDS"
+    )
+    # S3 storage only. Empty bucket: the artifact bucket, under the prefix.
+    registry_storage_bucket: str = Field(default="", alias="REGISTRY_STORAGE_BUCKET")
+    registry_storage_prefix: str = Field(default="registry", min_length=1, alias="REGISTRY_STORAGE_PREFIX")
+
     artifact_max_upload_bytes: int = Field(
         default=8 * 1024 * 1024 * 1024,
         alias="ARTIFACT_MAX_UPLOAD_BYTES",
@@ -401,6 +417,15 @@ class Settings(BaseSettings):
             )
         return self
 
+
+    @model_validator(mode="after")
+    def _require_registry_addresses(self) -> Settings:
+        if self.registry_provider != "none" and not (self.registry_public_host and self.registry_token_realm):
+            raise ValueError(
+                "REGISTRY_PROVIDER needs REGISTRY_PUBLIC_HOST (registry.example.com) and REGISTRY_TOKEN_REALM "
+                "(https://example.com/api/v1/registry/token)"
+            )
+        return self
 
     @model_validator(mode="after")
     def _require_real_secrets_in_production(self) -> Settings:

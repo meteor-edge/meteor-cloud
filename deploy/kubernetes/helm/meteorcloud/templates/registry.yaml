@@ -1,0 +1,191 @@
+{{- if .Values.registry.enabled }}
+{{- $fullname := include "meteorcloud.fullname" . }}
+{{- $secretName := include "meteorcloud.secretName" . }}
+{{- $filesystem := eq .Values.objectStorage.provider "filesystem" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-registry
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "registry") | nindent 4 }}
+spec:
+  replicas: {{ .Values.registry.replicaCount }}
+  strategy:
+    # A ReadWriteOnce volume cannot be attached to the old and new pod at once.
+    type: {{ ternary "Recreate" "RollingUpdate" $filesystem }}
+  selector:
+    matchLabels:
+      {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "registry") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "registry") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "meteorcloud.serviceAccountName" . }}
+      # Service variables such as REGISTRY_PORT would be read as registry settings.
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        # The configuration and public token keys; waits for the API's migrations.
+        - name: config
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" .Values.backend.image) }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              attempt=0
+              until python -m app.cli registry-config /etc/distribution; do
+                attempt=$((attempt + 1))
+                if [ "$attempt" -ge 60 ]; then echo "could not write the registry configuration" >&2; exit 1; fi
+                echo "waiting for the database (attempt $attempt)"
+                sleep 5
+              done
+          envFrom:
+            - configMapRef:
+                name: {{ $fullname }}
+            - secretRef:
+                name: {{ $secretName }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/distribution
+      containers:
+        - name: registry
+          image: {{ include "meteorcloud.image" (dict "ctx" . "image" .Values.registry.image) }}
+          imagePullPolicy: {{ .Values.registry.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5000
+          {{- if not $filesystem }}
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: OBJECT_STORAGE_ACCESS_KEY_ID, optional: true }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ $secretName }}, key: OBJECT_STORAGE_SECRET_ACCESS_KEY, optional: true }
+          {{- end }}
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.registry.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/distribution
+              readOnly: true
+            {{- if $filesystem }}
+            - name: data
+              mountPath: /var/lib/registry
+            {{- end }}
+      volumes:
+        - name: config
+          emptyDir: {}
+        {{- if $filesystem }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $fullname }}-registry
+        {{- end }}
+      {{- with .Values.registry.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.registry.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-registry
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "registry") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "meteorcloud.selectorLabels" (dict "ctx" . "component" "registry") | nindent 4 }}
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
+{{- if $filesystem }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-registry
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "registry") | nindent 4 }}
+  {{- if .Values.registry.persistence.keep }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.registry.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.registry.persistence.size }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-registry
+  labels:
+    {{- include "meteorcloud.componentLabels" (dict "ctx" . "component" "registry") | nindent 4 }}
+  {{- with merge (dict) .Values.registry.ingress.annotations .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.registry.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.registry.host | quote }}
+      http:
+        paths:
+          - path: /v2
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-registry
+                port: { name: http }
+{{- end }}

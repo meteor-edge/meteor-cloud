@@ -96,13 +96,15 @@
 # A checklist for whoever owns the DNS zone. Plain A records ("DNS only": no HTTP proxy).
 - name: Show the DNS records this installation needs
   ansible.builtin.debug:
-    msg: "{{ dns_web + (dns_wireguard if 'vpn' in enabled_services else []) }}"
+    msg: "{{ dns_web + (dns_registry if registry_enabled | bool else []) + (dns_wireguard if 'vpn' in enabled_services else []) }}"
   vars:
     dns_ip: "{{ public_ipv4 | default(ansible_host) | default(inventory_hostname) }} (this server's public IP)"
     dns_web:
       - "DNS records MeteorCloud needs (A records, DNS only, TTL 60-300s):"
       - "{{ platform_domain }}  ->  {{ dns_ip }}   console, API (/api), MQTT (TCP 8883)"
       - "*.{{ apps_base_domain }}  ->  {{ dns_ip }}   public app URLs"
+    dns_registry:
+      - "{{ registry_public_host }}  ->  {{ dns_ip }}   container registry (TCP 443)"
     dns_wg_host: "{{ vpn_gateway_endpoint | trim | regex_replace(':[0-9]+$', '') }}"
     dns_wg_ip: >-
       {{ hostvars[vpn_gateway_host].public_ipv4

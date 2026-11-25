@@ -69,6 +69,9 @@ jobs:
       - name: Typecheck (compileall)
         run: python -m compileall app tests scripts
       - name: Test (pytest)
+        env:
+          # Also checks token auth against a real registry:3 container.
+          REGISTRY_TEST: "1"
         run: python -m pytest -q
 
   data-api:

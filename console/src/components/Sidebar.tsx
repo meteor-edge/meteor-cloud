@@ -54,9 +54,11 @@ const subLinkClass = (isActive: boolean) =>
     isActive && "bg-accent text-accent-foreground",
   );
 
-// Enrollment API keys are reached from the Settings page.
+// Enrollment API keys and the registry are reached from the Settings page.
 function isSettingsSection(pathname: string, orgId: string): boolean {
-  return pathname.startsWith(`/organizations/${orgId}/api-keys`);
+  return ["api-keys", "registry"].some((page) =>
+    pathname.startsWith(`/organizations/${orgId}/${page}`),
+  );
 }
 
 /** A collapsible menu group. The heading names the area; the pages live underneath. */

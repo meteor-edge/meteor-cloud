@@ -6,7 +6,7 @@ server, and by Ansible (which copies this directory to `/opt/edge-platform/compo
 | File | Purpose |
 |------|---------|
 | `docker-compose.yml` | Includes the three module files below |
-| `control-plane.yml` | `backend`; bundled `postgres`, `redis`, `minio` behind profiles |
+| `control-plane.yml` | `backend`; bundled `postgres`, `redis`, `minio`, `registry` ([docs](../../docs/registry.md)) behind profiles |
 | `data-plane.yml` | `data-plane`, the Go MQTT forwarder (profile `mqtt`; [docs](../../docs/data-plane/mqtt-forwarder.md)), one bundled broker: `mosquitto` (default), `emqx`, or `vernemq` (profile of the same name), bundled `clickhouse` (profile `clickhouse`, no published port), application data API `data-api` (profile `data-api`, port 8082; [docs](../../docs/data-plane/operations.md)) |
 | `console.yml` | Vite dev server for the console |
 | `docker-compose.dev.yml` | Source mounts and hot reload |

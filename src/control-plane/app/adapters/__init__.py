@@ -18,6 +18,7 @@ from app.ports.deployment import DeploymentProvider
 from app.ports.identity import IdentityDirectory
 from app.ports.mqtt import MQTTGateway
 from app.ports.observability import Metrics
+from app.ports.registry import ContainerRegistry
 from app.ports.shell import DeviceShellProvider
 from app.ports.storage import ObjectStorage
 
@@ -40,6 +41,15 @@ def mqtt_gateway(settings: Settings) -> MQTTGateway:
     from app.adapters.data_plane_mqtt import DataPlaneMQTTGateway
 
     return DataPlaneMQTTGateway(settings)
+
+
+def container_registry(settings: Settings) -> ContainerRegistry | None:
+    """The bundled registry, or None when the registry is off."""
+    if settings.registry_provider == "none":
+        return None
+    from app.adapters.distribution_registry import DistributionRegistry
+
+    return DistributionRegistry(settings)
 
 
 def metrics_backend(settings: Settings) -> Metrics:

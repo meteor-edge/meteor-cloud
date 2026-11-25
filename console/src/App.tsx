@@ -28,6 +28,7 @@ import { MemberAccessPage } from "@/pages/organizations/MemberAccessPage";
 import { OrganizationMembersPage } from "@/pages/organizations/OrganizationMembersPage";
 import { OrganizationOverviewPage } from "@/pages/organizations/OrganizationOverviewPage";
 import { OrganizationSettingsPage } from "@/pages/organizations/OrganizationSettingsPage";
+import { RegistrySettingsPage } from "@/pages/organizations/RegistrySettingsPage";
 import { TeamDetailPage } from "@/pages/organizations/TeamDetailPage";
 import { TeamsPage } from "@/pages/organizations/TeamsPage";
 import { AlertsPage } from "@/pages/rules/AlertsPage";
@@ -268,6 +269,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <ApiKeysPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/registry"
+          element={
+            <ProtectedRoute>
+              <RegistrySettingsPage />
             </ProtectedRoute>
           }
         />

@@ -60,6 +60,8 @@ from app.identity.dependencies import get_login_email_rate_limiter, get_login_ip
 from app.identity.models import User
 from app.main import create_app
 from app.network import models as _network_models  # noqa: F401
+from app.registry import models as _registry_models  # noqa: F401
+from app.registry.router import get_registry_rate_limiter
 from app.releases import models as _release_models  # noqa: F401
 from app.rules import models as _rule_models  # noqa: F401
 from app.shell import models as _shell_models  # noqa: F401
@@ -152,6 +154,9 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
         limit=10_000, window_seconds=60
     )
     application.dependency_overrides[get_public_os_image_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
+    application.dependency_overrides[get_registry_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
     with TestClient(application) as test_client:
