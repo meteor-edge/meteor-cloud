@@ -110,6 +110,15 @@ func (s *Source) Token() (string, error) {
 	return s.token, nil
 }
 
+// WhileToken runs fn with the current device token ("" when there is none)
+// and keeps the token from changing in this process until fn returns: a
+// commit of a new identity waits. fn must be short and must not call Source.
+func (s *Source) WhileToken(fn func(token string) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fn(s.token)
+}
+
 // Enrolled reports whether the device has an identity (even a refused one).
 func (s *Source) Enrolled() bool {
 	s.mu.Lock()

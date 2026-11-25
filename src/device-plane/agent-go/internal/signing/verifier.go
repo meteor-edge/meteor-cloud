@@ -64,6 +64,11 @@ type Verifier struct {
 	// Stop picks the Fetch errors Check returns instead of turning them into a
 	// refusal (a refused device token: the caller must stop). nil: none.
 	Stop func(error) bool
+	// Hold runs save while the device token cannot change, and passes it
+	// CredentialFingerprint of the token current at that moment ("" when
+	// there is none). A key request that started under an earlier token then
+	// cannot overwrite the pins of a newer enrollment. nil: save as Fingerprint.
+	Hold func(save func(current string) error) error
 
 	serverSigns *bool
 }
@@ -161,7 +166,17 @@ func (v *Verifier) load() map[string]string {
 }
 
 func (v *Verifier) save(keys map[string]string) error {
-	return v.Store.Write(PinsFile, pinsVersion, pins{Keys: keys, DeviceID: v.DeviceID, CredentialFP: v.Fingerprint})
+	write := func(current string) error {
+		if current != v.Fingerprint {
+			v.Log.Info("device credential changed during the key request; its pins are not saved")
+			return nil
+		}
+		return v.Store.Write(PinsFile, pinsVersion, pins{Keys: keys, DeviceID: v.DeviceID, CredentialFP: v.Fingerprint})
+	}
+	if v.Hold == nil {
+		return write(v.Fingerprint)
+	}
+	return v.Hold(write)
 }
 
 // refresh pins every key on first use; afterwards only keys a pinned key endorsed.
