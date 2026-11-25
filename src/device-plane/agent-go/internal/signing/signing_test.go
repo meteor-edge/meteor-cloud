@@ -181,6 +181,33 @@ func TestPinsBelongToOneToken(t *testing.T) {
 	}
 }
 
+func TestLatePinSaveFromTheOldTokenIsDropped(t *testing.T) {
+	a, b := newOrg("k-a", 1), newOrg("k-b", 2)
+	store, _ := state.NewStore(t.TempDir())
+	current := CredentialFingerprint("tok")
+	hold := func(save func(string) error) error { return save(current) }
+	// The new enrollment pinned its organization's key.
+	fresh := newVerifier(t, store, func() ([]Key, error) { return []Key{b.key()}, nil })
+	fresh.Fingerprint, fresh.Hold = CredentialFingerprint("new-token"), hold
+	// The old cycle's key request is still running when the device re-enrolls.
+	old := newVerifier(t, store, func() ([]Key, error) {
+		current = CredentialFingerprint("new-token")
+		if got, _ := fresh.Check(context.Background(), b.sign(t, "d-1", item(t))); got != "" {
+			t.Fatalf("new enrollment: %q", got)
+		}
+		return []Key{a.key()}, nil
+	})
+	old.Hold = hold
+	_, _ = old.Check(context.Background(), a.sign(t, "d-1", item(t)))
+	var p pins
+	if _, err := store.Read(PinsFile, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.CredentialFP != CredentialFingerprint("new-token") || p.Keys["k-b"] == "" || p.Keys["k-a"] != "" {
+		t.Fatalf("the old cycle overwrote the new pins: %+v", p)
+	}
+}
+
 func TestPythonPinsFileIsRead(t *testing.T) {
 	a := newOrg("k-a", 1)
 	dir := t.TempDir()

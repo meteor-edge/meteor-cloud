@@ -65,8 +65,10 @@ done
 stop_writers() {
   if [ "${#writers[@]}" -gt 0 ]; then
     echo "==> Stopping ${writers[*]}"
-    compose stop "${writers[@]}"
+    # Set first: if `compose stop` stops some services and then fails, the exit trap
+    # must still start them again.
     writers_stopped=1
+    compose stop "${writers[@]}"
   fi
 }
 start_writers() {

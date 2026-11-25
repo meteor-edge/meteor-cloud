@@ -71,19 +71,26 @@ spec:
                 - sh
                 - -ec
                 - |
-                  # Drop abandoned partials, then expire old dumps before writing so a
-                  # full volume cannot block retention forever under `sh -e`.
+                  # Expire dumps older than RETENTION_DAYS, but never the newest one: if
+                  # the next pg_dump fails, a recovery point must still be there.
+                  expire() {
+                    [ "$RETENTION_DAYS" -gt 0 ] || return 0
+                    newest="$(ls -1 /backups/20*Z.dump 2>/dev/null | sort | tail -n 1)"
+                    find /backups -maxdepth 1 -name '20*Z.dump' -mtime +"$RETENTION_DAYS" |
+                      while read -r old; do
+                        [ "$old" = "$newest" ] || { rm -f "$old"; echo "expired $old"; }
+                      done
+                  }
+                  # Drop partials a killed run left behind, then expire before writing so
+                  # a full volume cannot block retention forever under `sh -e`.
                   rm -f /backups/.*.partial
-                  if [ "$RETENTION_DAYS" -gt 0 ]; then
-                    find /backups -maxdepth 1 -name '20*Z.dump' -mtime +"$RETENTION_DAYS" -print -delete
-                  fi
+                  expire
                   name="$(date -u +%Y%m%dT%H%M%SZ).dump"
+                  trap 'rm -f "/backups/.$name.partial"' EXIT
                   pg_dump -Fc -f "/backups/.$name.partial"
                   mv "/backups/.$name.partial" "/backups/$name"
                   echo "wrote /backups/$name"
-                  if [ "$RETENTION_DAYS" -gt 0 ]; then
-                    find /backups -maxdepth 1 -name '20*Z.dump' -mtime +"$RETENTION_DAYS" -print -delete
-                  fi
+                  expire
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

@@ -121,6 +121,14 @@ func (m *Module) reconcile(ctx context.Context) {
 		c.verifier = &signing.Verifier{
 			Store: d.State, DeviceID: id, Fingerprint: signing.CredentialFingerprint(token), Log: d.Log, Stop: api.IsAuth,
 			Fetch: func(ctx context.Context) ([]signing.Key, error) { return m.signingKeys(ctx, token) },
+			Hold: func(save func(string) error) error {
+				return d.Identity.WhileToken(func(current string) error {
+					if current == "" {
+						return save("")
+					}
+					return save(signing.CredentialFingerprint(current))
+				})
+			},
 		}
 	}
 	reports, attempts := c.run(ctx)
