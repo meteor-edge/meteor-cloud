@@ -22,6 +22,7 @@ DATA_DIR = "/var/lib/registry"
 _TIMEOUT_SECONDS = 10.0
 _MAX_BODY = 4 * 1024 * 1024  # the registry's own limit for a manifest
 _MAX_PLATFORMS = 20
+_MAX_SIZE = 2**50  # sizes are only declared; keeps the total of all platforms in a BIGINT
 _INDEX_TYPES = (
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.docker.distribution.manifest.list.v2+json",
@@ -33,6 +34,7 @@ _ACCEPT = ", ".join(
         "application/vnd.docker.distribution.manifest.v2+json",
     )
 )
+_NEXT_RE = re.compile(r'<([^>]*)>\s*;\s*rel="?next"?')
 _DIGEST_RE = re.compile(r"sha256:[a-f0-9]{64}")
 
 Access = list[dict[str, Any]]
@@ -85,6 +87,10 @@ class DistributionRegistry:
                 answer = response.read(_MAX_BODY + 1)
                 if len(answer) > _MAX_BODY:
                     raise RegistryUnavailableError("The registry sent an answer that is too large.")
+                # A bounded read does not report a connection that closed early.
+                length = response.headers.get("Content-Length")
+                if method == "GET" and length is not None and len(answer) != int(length):
+                    raise RegistryUnavailableError("The registry sent an incomplete answer.")
                 return response.status, {k.lower(): v for k, v in response.headers.items()}, answer
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
@@ -93,19 +99,31 @@ class DistributionRegistry:
         except OSError as exc:  # URLError and timeouts are OSErrors
             raise RegistryUnavailableError(f"The registry is unreachable: {exc}") from exc
 
-    def _json(self, path: str, access: Access) -> dict[str, Any]:
-        return _parse(self._request("GET", path, access)[2])
-
     def _pages(self, path: str, key: str, access: Access) -> list[str]:
+        """Every page, or an error: what is missing from a list is removed from the catalog."""
         items: list[str] = []
+        seen = {""}
         last = ""
         while True:
             query = urllib.parse.urlencode({"n": 1000, **({"last": last} if last else {})})
-            page = self._json(f"{path}?{query}", access).get(key) or []
-            items += page
-            if len(page) < 1000:
+            status, headers, body = self._request("GET", f"{path}?{query}", access)
+            if status == 404:
                 return items
-            last = page[-1]
+            document = _parse(body)
+            page = document.get(key) or []
+            if key not in document or not isinstance(page, list):
+                raise RegistryUnavailableError("The registry sent a list that cannot be read.")
+            items += page
+            # A page may be shorter than asked for; only the header tells whether more follow.
+            following = _NEXT_RE.search(headers.get("link", ""))
+            if following is None:
+                return items
+            # Only the position is used, so the request stays on our own address and path.
+            query = urllib.parse.urlsplit(following.group(1)).query
+            last = urllib.parse.parse_qs(query).get("last", [""])[0]
+            if last in seen:
+                raise RegistryUnavailableError("The registry sent a list that does not end.")
+            seen.add(last)
 
     def list_repositories(self) -> list[str]:
         return self._pages("/v2/_catalog", "repositories", [{"type": "registry", "name": "catalog", "actions": ["*"]}])
@@ -126,13 +144,13 @@ class DistributionRegistry:
         if status == 404:
             return None
         document = _parse(body)
-        media_type = str(document.get("mediaType") or headers.get("content-type") or "")[:255]
+        media_type = (_text(document.get("mediaType")) or _text(headers.get("content-type")))[:255]
         if media_type in _INDEX_TYPES or "manifests" in document:
             platforms = self._index_platforms(repository, document)
         else:
             config = document.get("config")
-            config_digest = config.get("digest") if isinstance(config, dict) else ""
-            platforms = [self._image_platform(repository, document, str(config_digest))]
+            config_digest = _text(config.get("digest")) if isinstance(config, dict) else ""
+            platforms = [self._image_platform(repository, document, config_digest)]
         return ImageManifest(
             digest=_digest(headers), media_type=media_type, platforms=tuple(p for p in platforms if p is not None)
         )
@@ -145,7 +163,7 @@ class DistributionRegistry:
             if not isinstance(described, dict):
                 continue
             # Build attestations are listed as platform unknown/unknown.
-            if described.get("os") in (None, "unknown") or not _DIGEST_RE.fullmatch(str(entry.get("digest"))):
+            if described.get("os") in (None, "unknown") or not _DIGEST_RE.fullmatch(_text(entry.get("digest"))):
                 continue
             _, _, body = self._request(
                 "GET", f"/v2/{repository}/manifests/{entry['digest']}", _pull(repository), accept=_ACCEPT
@@ -205,7 +223,8 @@ class DistributionRegistry:
         ).derive(settings.app_secret_key.encode())
         config = {
             "version": 0.1,
-            "log": {"level": "info", "accesslog": {"disabled": True}},
+            # At "info" the registry logs the notification headers, and so the events token.
+            "log": {"level": "warn", "accesslog": {"disabled": True}},
             "storage": self._storage(),
             "http": {
                 "addr": ":5000",
@@ -250,7 +269,7 @@ def _parse(body: bytes) -> dict[str, Any]:
     """Image content is written by tenants: anything that is not a JSON object reads as empty."""
     try:
         document = json.loads(body)
-    except ValueError:
+    except (ValueError, RecursionError):
         return {}
     return document if isinstance(document, dict) else {}
 
@@ -262,20 +281,26 @@ def _digest(headers: dict[str, str]) -> str:
     return digest
 
 
+def _text(value: Any) -> str:
+    """Empty unless PostgreSQL can store it: no NUL, no lone surrogates."""
+    return value if isinstance(value, str) and value.isprintable() else ""
+
+
 def _size(descriptor: Any) -> int:
     size = descriptor.get("size") if isinstance(descriptor, dict) else 0
-    return size if isinstance(size, int) and 0 <= size < 2**50 else 0
+    return size if isinstance(size, int) and 0 <= size < _MAX_SIZE else 0
 
 
 def _platform(described: dict[str, Any], manifest: dict[str, Any]) -> Platform | None:
-    name, architecture = described.get("os"), described.get("architecture")
-    if not isinstance(name, str) or not isinstance(architecture, str) or not name or not architecture:
+    name, architecture = _text(described.get("os")), _text(described.get("architecture"))
+    if not name or not architecture:
         return None
-    variant = described.get("variant")
     layers = manifest.get("layers")
     return Platform(
         os=name[:32],
         architecture=architecture[:32],
-        variant=variant[:16] if isinstance(variant, str) and variant else None,
-        size_bytes=sum(map(_size, layers if isinstance(layers, list) else [])) + _size(manifest.get("config")),
+        variant=_text(described.get("variant"))[:16] or None,
+        size_bytes=min(
+            sum(map(_size, layers if isinstance(layers, list) else [])) + _size(manifest.get("config")), _MAX_SIZE
+        ),
     )

@@ -35,13 +35,14 @@ function Pager({
   onChange: (page: number) => void;
 }) {
   const pages = Math.ceil(total / PAGE_SIZE);
-  if (pages <= 1) return null;
+  // Deleting the last item of the last page leaves `page` past the end: keep a way back.
+  if (pages <= 1 && page <= 1) return null;
   return (
     <div className="flex items-center gap-3 text-sm text-muted-foreground">
-      <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+      <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => onChange(Math.max(1, Math.min(page - 1, pages)))}>
         Previous
       </Button>
-      Page {page} of {pages}
+      Page {page} of {Math.max(1, pages)}
       <Button
         variant="secondary"
         size="sm"
@@ -56,15 +57,19 @@ function Pager({
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
   async function copy() {
     try {
       await navigator.clipboard.writeText(value);
+      setFailed(false);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Not available on plain http; the text is visible to copy by hand.
+      // Not available on plain http: show the text to copy by hand.
+      setFailed(true);
     }
   }
+  if (failed) return <code className="select-all break-all text-xs">{value}</code>;
   return (
     <Button variant="ghost" size="sm" onClick={copy} aria-label={label}>
       {copied ? "Copied" : "Copy"}
@@ -94,6 +99,7 @@ function Tags({
     queryKey: ["image-tags", organizationId, repository, page, token],
     queryFn: () => listImageTags(token!, organizationId, repository, page, PAGE_SIZE),
     enabled: Boolean(token),
+    refetchInterval: 15_000,
   });
   if (tagsQuery.isError) {
     return <p className="p-4 text-sm">Could not load the tags.</p>;
