@@ -56,7 +56,7 @@ Counters are summed across API replicas; fleet gauges are the same on every repl
 | Fleet | `meteorcloud_devices` | state: online, offline, never_seen |
 | | `meteorcloud_devices_disabled`, `meteorcloud_devices_software_unhealthy` | |
 | Registration | `meteorcloud_device_registrations_total` | result |
-| | `meteorcloud_enrollment_requests_total`, `meteorcloud_enrollment_polls_total` | result / status |
+| | `meteorcloud_enrollment_requests_total`, `meteorcloud_enrollment_polls_total` | result (submitted, auto_approved, error) / status |
 | | `meteorcloud_agent_heartbeats_total` | |
 | | `meteorcloud_rate_limited_total` | limiter |
 | | `meteorcloud_auth_logins_total` | result |

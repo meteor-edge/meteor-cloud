@@ -92,6 +92,9 @@ present only on the first successful claim after approval.
 | `GET` | `/api/v1/organizations/{org}/enrollment-requests?status=pending` |
 | `POST` | `/api/v1/organizations/{org}/enrollment-requests/{id}/approve` |
 | `POST` | `/api/v1/organizations/{org}/enrollment-requests/{id}/reject` |
+| `POST` | `/api/v1/organizations/{org}/enrollment-requests/approve` (bulk) |
+| `POST` | `/api/v1/organizations/{org}/enrollment-requests/reject` (bulk) |
+| `PUT` / `DELETE` | `/api/v1/organizations/{org}/enrollment-keys/{id}/auto-approve` |
 
 Admin list/approve/reject responses include `enrollment_key_id`,
 `enrollment_key_name`, and `enrollment_key_prefix` (null if the key was
@@ -123,6 +126,50 @@ when approving is used as it is; repeated names are allowed, and the console war
 about them. Renaming a device later does not change its existing public addresses.
 Reject body (optional): `{ "reason" }`. Mutation requires **owner** or **admin**.
 
+### Bulk approve and reject
+
+`POST .../enrollment-requests/approve` takes `{ "request_ids": [...], "device_type_id",
+"device_group_id" }` (up to 500 ids; type and group optional) and approves every
+pending one with a generated name, as if each was approved without a name. `POST
+.../enrollment-requests/reject` takes `{ "request_ids": [...], "reason" }`. Both return
+`{ "updated": [...], "skipped": [{ "request_id", "reason" }] }`, where the reason is
+`not_found` (unknown id or another organization) or `not_pending`. Each approval is
+audited on its own with `"bulk": true`.
+
+### Auto-approve rules (factory batches)
+
+An enrollment key can approve matching requests itself, as soon as they arrive, so a
+batch of flashed devices joins without anyone clicking through the queue. Set the rule
+when creating the key (`"auto_approve": {...}` in the create body) or later with `PUT
+.../enrollment-keys/{id}/auto-approve`; `DELETE` turns it off.
+
+```jsonc
+{
+  "device_type_id": "…",            // optional, assigned to approved requests
+  "device_group_id": "…",           // optional
+  "allowlist": ["SN-0001", "dc:a6:32:00:00:01"],
+  "max_devices": 500,               // optional total for this rule
+  "until": "2026-12-31T00:00:00Z"   // optional end time
+}
+```
+
+A request is approved by the rule when all of these hold; otherwise it waits in the
+queue as usual:
+
+- the rule is on and not past `until`, and fewer than `max_devices` requests were
+  approved by it (the count is kept when the rule is replaced, so it is a total);
+- when `allowlist` is not empty, the device's serial number or primary MAC is on it
+  (entries written with `:` or `-` are read as MAC addresses; up to 10,000 entries);
+- the device reports a serial or a MAC;
+- the hardware is **not** already a device, here or in another organization. Claiming
+  would replace that device's credential, so a person always decides that case.
+
+A rule needs an allow-list, a maximum, or both, so a leaked key cannot enroll an
+unlimited number of devices. Setting one needs `enrollment_key.manage` and
+`device.create`. Requests approved this way show `auto_approved: true` with no
+reviewer, and are audited as `enrollment_request.auto_approve` by the key. They do not
+count against the pending cap. The key list shows the rule and `approved_count`.
+
 ## Rate limiting and security
 
 - Submit and key check: a limit per source IP that runs **before** the key is looked up
@@ -153,7 +200,7 @@ If a secret leaks:
 
 | Secret | Attacker can | Attacker cannot | Mitigate |
 | --- | --- | --- | --- |
-| `key_` | Create or refresh pending requests (rate-limited); see org name via check; obtain `dev_` for an approved, unclaimed request made with that key by submitting its serial and primary MAC | Join the fleet without any approval; call org APIs; take over a request made with another key | Revoke the key (a `clm_` already issued can still poll); never auto-approve; approved requests cannot be rejected, so revoke the device credential if an unexpected device claims one |
+| `key_` | Create or refresh pending requests (rate-limited); see org name via check; obtain `dev_` for an approved, unclaimed request made with that key by submitting its serial and primary MAC | Join the fleet without any approval (unless the key has an auto-approve rule that covers the device); call org APIs; take over a request made with another key | Revoke the key (a `clm_` already issued can still poll); give an auto-approve rule an allow-list and a small maximum, or none at all; approved requests cannot be rejected, so revoke the device credential if an unexpected device claims one |
 | `clm_` + `request_id` | Poll; steal `dev_` on the first poll after approve | Approve; use other requests | Approve only expected hardware; reject; rotate the device credential if stolen |
 | `dev_` | Act as **that one device** (heartbeat, MQTT for its id, its desired software, its WireGuard) | Other devices; org admin HTTP | Rotate or revoke the device credential |
 | `reg_` | Register up to `max_uses` immediately | Admin APIs | `max_uses: 1`, revoke, expiry |

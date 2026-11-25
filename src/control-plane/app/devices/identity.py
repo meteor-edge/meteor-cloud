@@ -114,6 +114,42 @@ class DeviceIdentity:
         return self.primary_mac in stored if self.primary_mac else not stored
 
 
+def normalize_allowlist(values: list[str] | None) -> list[str]:
+    """Clean an auto-approve allow-list of serial numbers and MAC addresses.
+
+    Entries written like a MAC address (with ``:`` or ``-``) are stored normalized;
+    anything else is kept as a serial number. Blank and duplicate entries are dropped.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for raw in values or []:
+        cleaned = (raw or "").strip()
+        if not cleaned:
+            continue
+        if ":" in cleaned or "-" in cleaned:
+            cleaned = normalize_mac(cleaned) or cleaned
+        if cleaned not in seen:
+            seen.add(cleaned)
+            result.append(cleaned)
+    return result
+
+
+def identity_in_allowlist(identity: DeviceIdentity, allowlist: list[str]) -> bool:
+    """Whether the serial number or primary MAC of ``identity`` is on the allow-list.
+
+    A bare 12-digit entry may be either; it matches the serial as written or the MAC.
+    """
+    if not allowlist:
+        return False
+    entries = set(allowlist)
+    if identity.serial_number and identity.serial_number in entries:
+        return True
+    primary = identity.primary_mac
+    if primary is None:
+        return False
+    return primary in entries or any(normalize_mac(entry) == primary for entry in entries)
+
+
 @dataclass(frozen=True)
 class MatchResult:
     """Outcome of matching an identity against existing devices."""

@@ -7,8 +7,9 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
+from app.devices.identity import normalize_allowlist
 from app.devices.status import ConnectivityStatus
 from app.mqtt.schemas import MqttConnectInfo
 from app.tenancy.schemas import validate_slug
@@ -397,9 +398,47 @@ class AgentHeartbeatResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 # Enrollment API keys (admin)
 # --------------------------------------------------------------------------- #
+AUTO_APPROVE_ALLOWLIST_MAX = 10_000
+
+
+class EnrollmentAutoApproveRule(BaseModel):
+    """Approve matching enrollment requests from this key without a person.
+
+    A request matches when the rule is not past ``until``, fewer than
+    ``max_devices`` requests were approved by it, and (when ``allowlist`` is not
+    empty) the device's serial number or primary MAC address is on it. A rule
+    needs an allow-list, a maximum, or both, so a leaked key cannot enroll an
+    unlimited number of devices.
+    """
+
+    device_type_id: uuid.UUID | None = None
+    device_group_id: uuid.UUID | None = None
+    allowlist: list[Annotated[str, Field(max_length=255)]] = Field(
+        default_factory=list, max_length=AUTO_APPROVE_ALLOWLIST_MAX
+    )
+    max_devices: int | None = Field(default=None, ge=1, le=1_000_000)
+    until: datetime | None = None
+
+    @field_validator("allowlist")
+    @classmethod
+    def _normalize_allowlist(cls, value: list[str]) -> list[str]:
+        return normalize_allowlist(value)
+
+    @model_validator(mode="after")
+    def _bounded(self) -> EnrollmentAutoApproveRule:
+        if not self.allowlist and self.max_devices is None:
+            raise ValueError("An auto-approve rule needs an allow-list of serials/MACs, a maximum count, or both")
+        return self
+
+
+class EnrollmentAutoApproveRuleResponse(EnrollmentAutoApproveRule):
+    approved_count: int = 0
+
+
 class EnrollmentApiKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     expires_at: datetime | None = None
+    auto_approve: EnrollmentAutoApproveRule | None = None
 
     @field_validator("name")
     @classmethod
@@ -425,6 +464,7 @@ class EnrollmentApiKeyResponse(BaseModel):
     created_by_user_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    auto_approve_rule: EnrollmentAutoApproveRuleResponse | None = None
 
 
 class EnrollmentApiKeyCreateResponse(EnrollmentApiKeyResponse):
@@ -470,6 +510,7 @@ class DeviceEnrollmentRequestResponse(BaseModel):
     reviewed_by_user_id: uuid.UUID | None
     reviewed_at: datetime | None
     rejection_reason: str | None
+    auto_approved: bool = False
     claimed_at: datetime | None
     device_id: uuid.UUID | None
     enrollment_key_id: uuid.UUID | None = None
@@ -498,6 +539,31 @@ class EnrollmentRejectRequest(BaseModel):
     @classmethod
     def _strip_reason(cls, value: str | None) -> str | None:
         return _strip_optional(value)
+
+
+BULK_REVIEW_MAX = 500
+
+
+class EnrollmentBulkApproveRequest(BaseModel):
+    """Approve many pending requests with one device type and group; names are generated."""
+
+    request_ids: list[uuid.UUID] = Field(min_length=1, max_length=BULK_REVIEW_MAX)
+    device_type_id: uuid.UUID | None = None
+    device_group_id: uuid.UUID | None = None
+
+
+class EnrollmentBulkRejectRequest(EnrollmentRejectRequest):
+    request_ids: list[uuid.UUID] = Field(min_length=1, max_length=BULK_REVIEW_MAX)
+
+
+class EnrollmentBulkSkipped(BaseModel):
+    request_id: uuid.UUID
+    reason: Literal["not_found", "not_pending"]
+
+
+class EnrollmentBulkResult(BaseModel):
+    updated: list[DeviceEnrollmentRequestResponse]
+    skipped: list[EnrollmentBulkSkipped]
 
 
 # --------------------------------------------------------------------------- #
