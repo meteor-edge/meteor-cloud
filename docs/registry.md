@@ -41,7 +41,7 @@ ports (default `8080 → 8080`), environment, and **Public URL**. The sheet foll
 the device" over "Pulling and starting" to "Healthy" or "Failed", then offers **Open URL**.
 
 It creates a release (named after the app, version from the tag) and an immediate Deploy to that one
-device, plus the [endpoint](endpoints.md). Needs `deployment.create`, and `endpoint.create` for the URL;
+device, plus the public address. Needs `deployment.create`, and `endpoint.create` for the URL;
 operators can run apps without being able to manage releases. A device has one app per name
 (`app_exists`). Environment values are stored with the release and readable by everyone who can read
 releases.
