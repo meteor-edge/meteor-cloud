@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -71,10 +72,18 @@ class CatalogService:
             if event.get("action") == "push" and _TAG_RE.fullmatch(tag):
                 actor = event.get("actor")
                 pushed_by = self._pushed_by(organization_id, actor.get("name") if isinstance(actor, dict) else None)
+                self._wait_for(repository, tag, target.get("digest"))
                 self.sync_tag(organization_id, repository, path, tag, pushed_by=pushed_by)
             elif event.get("action") == "delete":
                 self._sync_repository(organization_id, repository, path)
             self.session.commit()
+
+    def _wait_for(self, repository: str, tag: str, digest: Any) -> None:
+        """The registry announces a push before it writes the tag."""
+        for _ in range(10):
+            if not isinstance(digest, str) or self.registry.digest(repository, tag) == digest:
+                return
+            time.sleep(0.2)
 
     def _owner(self, repository: str) -> tuple[uuid.UUID, str] | None:
         namespace, _, path = repository.partition("/")
