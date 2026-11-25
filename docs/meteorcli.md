@@ -184,3 +184,8 @@ Every device on the default `release_url` updates to that release when it is ord
 - [Heartbeat](fleet/heartbeat.md)
 - [MQTT](fleet/mqtt.md)
 - [meteorcli internals](meteorcli-go.md)
+
+## Container images
+
+`meteorcli login`, `push`, `pull` and `logout` work with the organization's container registry from a
+developer machine or CI, without an agent. See [Push and run in 2 minutes](registry.md#push-and-run-in-2-minutes).

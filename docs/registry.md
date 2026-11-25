@@ -23,6 +23,28 @@ slug and never changes, so renaming the organization does not move its images. A
 organization's namespace is never given to another one (a new organization with that slug gets
 `acme-2`).
 
+## Push and run in 2 minutes
+
+`meteorcli` on a Linux laptop or CI machine (the binary alone; no agent or enrollment needed), with Docker:
+
+```bash
+meteorcli login registry.example.com     # paste a token from Settings → Registry
+docker build -t my-app:1.0 .
+meteorcli push my-app:1.0                # → registry.example.com/<org>/my-app:1.0
+```
+
+Then **Images → my-app → Run**, choose a device, turn on **Public URL**, and **Run**.
+
+- `push LOCAL NAME:TAG` pushes under another name; `meteorcli pull my-app:1.0` pulls; `logout` forgets
+  the sign-in (revoke the token in the console to end it). `--registry` picks one of several sign-ins.
+- CI: set `METEORCLI_REGISTRY_TOKEN` to a robot token instead of pasting.
+- The token is kept in `~/.config/meteorcli/registry.json` (0600) and not shown while you paste it. Push and pull use a private copy of
+  your Docker settings, so `~/.docker/config.json` is not changed.
+- For plain `docker push` and `docker compose`, use the credential helper: link
+  `docker-credential-meteorcli` to `meteorcli` on your `PATH` and add
+  `"credHelpers": {"registry.example.com": "meteorcli"}` to `~/.docker/config.json`.
+- Build for the device's CPU: `docker buildx build --platform linux/arm64 …`.
+
 ## Images page
 
 Console → **Software → Images** lists the organization's images with tags, digest, platforms, size,

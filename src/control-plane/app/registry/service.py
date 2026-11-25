@@ -23,6 +23,7 @@ from app.registry.models import ContainerImage, RegistryNamespace, RegistryToken
 from app.registry.schemas import (
     COMPONENT,
     RegistryAccessTokenResponse,
+    RegistryAccountResponse,
     RegistryInfoResponse,
     RegistryTokenCreateRequest,
     RegistryTokenCreateResponse,
@@ -133,6 +134,19 @@ class RegistryService:
         ttl = self.settings.registry_token_ttl_seconds
         self.session.commit()
         return RegistryAccessTokenResponse(token=signed, access_token=signed, expires_in=ttl, issued_at=now)
+
+    def account(self, *, presented: str | None) -> RegistryAccountResponse:
+        self._require_enabled()
+        token = self._authenticate(presented)
+        namespace = namespace_for(self.session, self.session.get(Organization, token.organization_id))
+        response = RegistryAccountResponse(
+            host=self.settings.registry_public_host,
+            namespace=namespace,
+            token_name=token.name,
+            access="push" if "push" in self._allowed_actions(token) else "pull",
+        )
+        self.session.commit()
+        return response
 
     def _device_access(self, presented: str, scopes: list[RequestedScope]) -> tuple[str, list[dict[str, Any]]]:
         # Imported here: it names images with this module's namespace_for.

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest -q)",
+      "Bash(xargs rm -rf)",
+      "Bash(git mv *)"
+    ]
+  }
+}
