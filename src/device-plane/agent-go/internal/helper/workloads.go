@@ -31,7 +31,7 @@ const deployTimeout = 15 * time.Minute
 const DockerHealthTemplate = "{{.State.Running}}|{{.State.Status}}|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}"
 
 var (
-	imageRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$`)
+	imageRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,511}$`) // as long as docker.pull takes
 	restartRe = regexp.MustCompile(`^(no|always|unless-stopped|on-failure(:[0-9]{1,4})?)$`)
 	portRe    = regexp.MustCompile(`^[0-9\[][0-9A-Za-z.:\[\]/-]{0,99}$`)
 	envKeyRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)

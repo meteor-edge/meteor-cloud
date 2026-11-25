@@ -223,6 +223,71 @@ def test_platform_mismatch(registry: TestClient, db_session: Session, fake: Fake
     assert by_device[ids["aarch64"]] == by_device[ids[None]] == "pending"
 
 
+def test_platform_check_outlives_the_tag(registry: TestClient, db_session: Session, fake: FakeRegistry) -> None:  # noqa: F811
+    from app.registry.catalog import CatalogService
+
+    org, headers = _setup(registry, db_session)
+    registry.get(f"/api/v1/organizations/{org.id}/registry", headers=headers)  # claims the namespace
+    fake.push("acme/web", "1.0")
+    fake.push("acme/web", "kept")  # the registry still has the old digest after the tag moves
+    release = _release(registry, org, headers, "web:1.0").json()
+    device_id, _ = _device(registry, org, headers)
+    db_session.get(Device, uuid.UUID(device_id)).architecture = "x86_64"
+    db_session.commit()
+    fake.push("acme/web", "1.0", "b")
+    catalog = CatalogService(db_session, registry_settings(), fake)
+    catalog.sync_tag(org.id, "acme/web", "web", "1.0")
+    db_session.commit()
+    refused = _deploy(registry, org, headers, release["id"], device_id)
+    assert refused.json()["error"]["code"] == "image_platform_mismatch"
+    fake.down = True  # nobody knows
+    assert _deploy(registry, org, headers, release["id"], device_id).status_code == 201
+
+
+def test_platforms_are_read_once_per_deployment(
+    registry: TestClient,  # noqa: F811
+    db_session: Session,
+    fake: FakeRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org, headers = _setup(registry, db_session)
+    fake.push("acme/web", "1.0")
+    release = _release(registry, org, headers, "web:1.0").json()
+    ids = [_device(registry, org, headers, f"d{n}", f"aa:bb:cc:dd:ee:2{n}")[0] for n in range(3)]
+    for device_id in ids:
+        db_session.get(Device, uuid.UUID(device_id)).architecture = "aarch64"
+    db_session.commit()
+    read = fake.manifest
+    calls: list[str] = []
+    monkeypatch.setattr(fake, "manifest", lambda repository, ref: calls.append(ref) or read(repository, ref))
+    assert _deploy(registry, org, headers, release["id"], *ids).status_code == 201
+    assert calls == [DIGEST_A]
+
+
+@pytest.mark.parametrize(
+    ("device", "architecture", "variant", "runs"),
+    [
+        ("armv6l", "arm", "v7", False),
+        ("armv6l", "arm", "v6", True),
+        ("armv7l", "arm", "v6", True),
+        ("armv7l", "arm", "v7", True),
+        ("armv7l", "arm", "v8", False),
+        ("armv7l", "arm64", "v8", False),
+        ("armv6l", "arm", None, True),  # the image does not say
+        ("arm", "arm", "v7", True),  # the device does not say
+        ("aarch64", "arm", "v7", True),
+        ("aarch64", "arm64", "v8", True),
+        ("x86_64", "386", None, True),
+        ("x86_64", "arm", "v7", False),
+    ],
+)
+def test_cpu_variants(device: str, architecture: str, variant: str | None, runs: bool) -> None:
+    both = {"os": "linux", "architecture": "arm", "variant": "v5"}, {"os": "linux", "architecture": "amd64"}
+    platforms = {"sidecar": list(both), "web": [{"os": "linux", "architecture": architecture, "variant": variant}]}
+    mismatch = RegistryImages.platform_mismatch(platforms, Device(architecture=device))
+    assert (mismatch is None) == runs
+
+
 def test_architecture_names() -> None:
     assert [image_architecture(a) for a in ("AARCH64", "x86_64", "armv7l", "sparc", None)] == [
         "arm64", "amd64", "arm", None, None,
@@ -267,3 +332,17 @@ def test_compose_images_are_pinned_and_pullable(
     assert issued.status_code == 200, issued.text
     found = RegistryImages(db_session, registry_settings(), fake).pullable_repositories(issued.json()["password"])
     assert found is not None and found[1] == {"acme/web", "acme/team/db"}
+
+
+def test_compose_platforms_outlive_the_tag(registry: TestClient, db_session: Session, fake: FakeRegistry) -> None:  # noqa: F811
+    org, headers = _setup(registry, db_session)
+    registry.get(f"/api/v1/organizations/{org.id}/registry", headers=headers)  # claims the namespace
+    fake.push("acme/web", "1.0")
+    fake.push("acme/db", "2", "b")
+    images = RegistryImages(db_session, registry_settings(), fake)
+    spec = images.pin_all(org.id, {"registry_images": ["web:1.0", "db:2"]}, None)
+    fake.push("acme/db", "2", "c")  # moves; the pin keeps the old digest
+    platforms = images.platforms(org.id, spec)
+    assert [[p["architecture"] for p in built_for] for built_for in platforms.values()] == [["arm64"], ["arm64"]]
+    assert "linux/amd64" in (images.platform_mismatch(platforms, Device(architecture="x86_64")) or "")
+    assert images.platform_mismatch(platforms, Device(architecture="aarch64")) is None

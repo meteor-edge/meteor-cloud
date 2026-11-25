@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -89,6 +91,82 @@ func TestStore(t *testing.T) {
 	}
 }
 
+func TestStoreKeepsWhatItDoesNotKnow(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "registry.json")}
+	old := `{"version":7,"later":true,"accounts":[{"host":"one","token":"t","new":"x"},{"host":"two","token":"u"}]}`
+	if err := os.WriteFile(s.Path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(Account{Host: "two", Token: "v"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(s.Path)
+	var file map[string]any
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	accounts, _ := file["accounts"].([]any)
+	if file["version"] != 7.0 || file["later"] != true || len(accounts) != 2 || accounts[1].(map[string]any)["new"] != "x" {
+		t.Errorf("%s", data)
+	}
+	if a, err := s.Get(""); err != nil || a.Host != "two" || a.Token != "v" {
+		t.Errorf("%+v %v", a, err)
+	}
+}
+
+func TestDamagedStoreIsMovedAside(t *testing.T) {
+	for _, damaged := range []string{`{"accounts":[`, `null`, `[]`, `{"accounts":[null]}`, `{"accounts":[{"host":3}]}`} {
+		s := Store{Path: filepath.Join(t.TempDir(), "registry.json")}
+		if err := os.WriteFile(s.Path, []byte(damaged), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if all, err := s.List(); err != nil || len(all) != 0 {
+			t.Errorf("%s: %+v %v", damaged, all, err)
+		}
+		if moved, _ := filepath.Glob(s.Path + ".corrupt-*"); len(moved) != 1 {
+			t.Errorf("%s: not kept", damaged)
+		}
+		if err := s.Put(Account{Host: "one"}); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestStoreChangesDoNotOverwriteEachOther(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.json")
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			host := "h" + strconv.Itoa(i)
+			if err := (Store{Path: path}).Put(Account{Host: host}); err != nil {
+				t.Error(err)
+			}
+			if i%2 == 0 {
+				if err := (Store{Path: path}).Remove(host); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if all, err := (Store{Path: path}).List(); err != nil || len(all) != 10 {
+		t.Errorf("%d accounts, %v", len(all), err)
+	}
+}
+
+func TestDockerSettingsThatAreNull(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte("null"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := Docker{Account: Account{Host: "r", Token: "t"}, ConfigDir: home, Run: func(context.Context, ...string) error { return nil }}
+	if err := d.Pull(context.Background(), "r/acme/web:1"); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestPushUsesAPrivateConfigAndLeavesTheUsersAlone(t *testing.T) {
 	home := t.TempDir()
 	original := `{"credsStore":"desktop","currentContext":"rootless","auths":{"other":{"auth":"eA=="}}}`
@@ -141,8 +219,14 @@ func TestPushUsesAPrivateConfigAndLeavesTheUsersAlone(t *testing.T) {
 	if d.Push(context.Background(), "--all", target) == nil {
 		t.Error("an option was accepted as an image")
 	}
-	for _, bad := range []string{"-x", "other.example.com/acme/web:1", "../x", "Web", "a b", ""} {
-		if _, err := a.Image(bad); err == nil && bad != "other.example.com/acme/web:1" {
+	if full, err := a.Image(target); err != nil || full != target {
+		t.Errorf("%q, %v", full, err)
+	}
+	for _, bad := range []string{
+		"-x", "other.example.com/acme/web:1", "r.example.com/other/web:1", "r.example.com/acme", "localhost/web",
+		"localhost:5000/acme/web:1", "../x", "Web", "a b", "",
+	} {
+		if _, err := a.Image(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
 	}

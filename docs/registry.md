@@ -38,7 +38,7 @@ Then **Images → my-app → Run**, choose a device, turn on **Public URL**, and
 - `push LOCAL NAME:TAG` pushes under another name; `meteorcli pull my-app:1.0` pulls; `logout` forgets
   the sign-in (revoke the token in the console to end it). `--registry` picks one of several sign-ins.
 - CI: set `METEORCLI_REGISTRY_TOKEN` to a robot token instead of pasting.
-- The token is kept in `~/.config/meteorcli/registry.json` (0600). Push and pull use a private copy of
+- The token is kept in `~/.config/meteorcli/registry.json` (0600) and not shown while you paste it. Push and pull use a private copy of
   your Docker settings, so `~/.docker/config.json` is not changed.
 - For plain `docker push` and `docker compose`, use the credential helper: link
   `docker-credential-meteorcli` to `meteorcli` on your `PATH` and add
@@ -97,7 +97,8 @@ in the organization (`my-app:1.0`) or the full name:
 ```
 
 Saving the release fixes the digest (`image_digest`); it fails when the image is not there. Moving the
-tag later does not change the release. A Deploy skips devices whose CPU the image was not built for,
+tag later does not change the release. A Deploy skips devices whose CPU (with its ARM version, such as
+`arm/v7`) the image was not built for,
 and fails with `image_platform_mismatch` when that is all of them.
 
 Devices need no registry token. For a desired release the agent asks for a password that works for

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -51,8 +50,8 @@ func runLogin(ctx context.Context, env *Env, args []string) int {
 	token := normalizeSecret(env.Getenv(envRegistryToken))
 	if token == "" {
 		fmt.Fprint(env.Stderr, "Registry token (Settings → Registry in the console): ")
-		line, err := bufio.NewReader(io.LimitReader(stdin, 4096)).ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
+		line, err := readSecret(ctx, stdin, env.Stderr)
+		if err != nil {
 			return failRegistry(env, err)
 		}
 		token = normalizeSecret(line)

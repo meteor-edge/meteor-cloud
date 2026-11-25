@@ -675,7 +675,7 @@ test-only `debian:12.8-slim` image ([licensing](licensing.md)).
 
 `internal/registry` and `internal/cli/registry.go` serve developers, not devices: they use no agent, helper
 or device identity. A token is sent only to the registry's own sign-in address (HTTPS, or this machine),
-is read from stdin or the environment, and reaches Docker through a private `--config` directory.
+is read from stdin (hidden on a terminal) or the environment, and reaches Docker through a private `--config` directory.
 `docker-credential-meteorcli` is the same binary under another name.
 
 ## Container engines

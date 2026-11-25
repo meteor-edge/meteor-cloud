@@ -80,8 +80,16 @@ class CatalogService:
             if event.get("action") == "push" and not tag.startswith(PIN_PREFIX) and _TAG_RE.fullmatch(tag):
                 actor = event.get("actor")
                 pushed_by = self._pushed_by(organization_id, actor.get("name") if isinstance(actor, dict) else None)
-                self._wait_for(repository, tag, target.get("digest"))
-                self.sync_tag(organization_id, repository, path, tag, pushed_by=pushed_by)
+                digest = target.get("digest")
+                self._wait_for(repository, tag, digest)
+                self.sync_tag(
+                    organization_id,
+                    repository,
+                    path,
+                    tag,
+                    pushed_by=pushed_by,
+                    pushed_digest=digest if isinstance(digest, str) else None,
+                )
             elif event.get("action") == "delete":
                 self._sync_repository(organization_id, repository, path)
             self.session.commit()
@@ -118,12 +126,22 @@ class CatalogService:
         tag: str,
         *,
         pushed_by: uuid.UUID | None = None,
+        pushed_digest: str | None = None,
     ) -> None:
+        # Until the commit: what was read here cannot overwrite what another worker reads later.
+        lock = func.hashtextextended(f"registry-tag:{repository}:{tag}", 0)
+        self.session.execute(select(func.pg_advisory_xact_lock(lock)))
         manifest = self.registry.manifest(repository, tag)
         key = {"organization_id": organization_id, "repository": path, "tag": tag}
         if manifest is None:
             self.session.execute(delete(ContainerImage).filter_by(**key))
             return
+        if manifest.digest != pushed_digest:
+            # A comparison, or a late event: keep what the push's own event stored.
+            if self.session.scalar(select(ContainerImage.digest).filter_by(**key)) == manifest.digest:
+                return
+            if pushed_digest is not None:
+                pushed_by = None  # the tag has moved on: not the push that was announced
         values = {
             "digest": manifest.digest,
             "media_type": manifest.media_type,
@@ -144,25 +162,31 @@ class CatalogService:
 
     def _sync_repository(self, organization_id: uuid.UUID, repository: str, path: str) -> None:
         # Read before the registry: a tag pushed meanwhile is not in it, so it is not removed.
-        known = dict(
-            self.session.execute(
-                select(ContainerImage.tag, ContainerImage.digest).where(
+        known = {
+            tag: (digest, pushed_at)
+            for tag, digest, pushed_at in self.session.execute(
+                select(ContainerImage.tag, ContainerImage.digest, ContainerImage.pushed_at).where(
                     ContainerImage.organization_id == organization_id, ContainerImage.repository == path
                 )
-            ).all()
-        )
+            )
+        }
         found = [tag for tag in self.registry.list_tags(repository) if _TAG_RE.fullmatch(tag)]
         tags = [tag for tag in found if not tag.startswith(PIN_PREFIX)]
         for tag in tags:
-            if known.get(tag) != self.registry.digest(repository, tag):
+            stored = known.get(tag)
+            if stored is None or stored[0] != self.registry.digest(repository, tag):
                 self.sync_tag(organization_id, repository, path, tag)
-        gone = known.keys() - set(tags)
-        if gone:
+                self.session.commit()  # one tag's lock at a time
+        for tag in known.keys() - set(tags):
+            # Only the row that was read: the tag may have been pushed again since.
+            digest, pushed_at = known[tag]
             self.session.execute(
                 delete(ContainerImage).where(
                     ContainerImage.organization_id == organization_id,
                     ContainerImage.repository == path,
-                    ContainerImage.tag.in_(gone),
+                    ContainerImage.tag == tag,
+                    ContainerImage.digest == digest,
+                    ContainerImage.pushed_at == pushed_at,
                 )
             )
 
@@ -296,24 +320,39 @@ class CatalogService:
         )
         if tag is not None:
             statement = statement.where(ContainerImage.tag == tag)
-        images = self.session.scalars(statement).all()
+        images = {image.tag: image for image in self.session.scalars(statement)}
         if not images:
             raise NotFoundError("image_not_found", "Image was not found.")
         full_name = f"{self._namespace(organization_id)}/{repository}"
-        for image in images:
+        tags = list(images)
+        if tag is None:
             try:
-                self.registry.delete_tag(full_name, image.tag)
+                # Also the tags whose notification was missed, but not what keeps the images of releases.
+                listed = [name for name in self.registry.list_tags(full_name) if not name.startswith(PIN_PREFIX)]
+            except RegistryUnavailableError as exc:
+                raise AppError("registry_unavailable", str(exc), status_code=503) from exc
+            tags += [name for name in listed if name not in images and _TAG_RE.fullmatch(name)]
+        for name in tags:
+            image = images.get(name)
+            try:
+                self.registry.delete_tag(full_name, name)
             except RegistryUnavailableError as exc:
                 self.session.rollback()
                 raise AppError("registry_unavailable", str(exc), status_code=503) from exc
-            self.session.delete(image)
+            if image is not None:
+                self.session.delete(image)
             self.audit.record(
                 actor=actor,
                 organization_id=organization_id,
                 action="image.delete",
                 resource_type="image",
-                resource_id=image.id,
-                metadata={"repository": repository, "tag": image.tag, "digest": image.digest},
+                resource_id=image.id if image is not None else None,
+                metadata={
+                    "repository": repository,
+                    "tag": name,
+                    # As last seen: the tag may have moved before it was deleted.
+                    "catalog_digest": image.digest if image is not None else None,
+                },
             )
             self.session.commit()
 

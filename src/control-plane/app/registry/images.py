@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import uuid
 from typing import Any
 
@@ -20,6 +22,8 @@ from app.registry.models import ContainerImage, RegistryNamespace
 from app.registry.schemas import PULL_PASSWORD_SECONDS, REFERENCE_RE, AgentPullTokenResponse
 from app.registry.service import namespace_for
 from app.tenancy.models import Organization
+
+logger = logging.getLogger(__name__)
 
 REGISTRY_NAME = "meteorcloud"
 PULL_USERNAME = "device"
@@ -44,6 +48,8 @@ _ARCHITECTURES = {
 }
 # 64-bit CPUs also run these.
 _ALSO_RUNS = {"amd64": {"386"}, "arm64": {"arm"}}
+# The newest 32-bit ARM version the CPU runs, where its name says so. It runs the older ones too.
+_ARM_VERSIONS = {"armv6": 6, "armv6l": 6, "armv7": 7, "armv7l": 7}
 
 
 def image_architecture(device_architecture: str | None) -> str | None:
@@ -57,6 +63,15 @@ def registry_images(spec: dict[str, Any]) -> list[tuple[str, str]]:
     if spec.get("registry") == REGISTRY_NAME and spec.get("image_digest"):
         return [(str(spec.get("image")), str(spec["image_digest"]))]
     return []
+
+
+def _runs(platform: dict[str, Any], device_architecture: str | None) -> bool:
+    architecture = image_architecture(device_architecture) or ""
+    if platform["architecture"] not in {architecture} | _ALSO_RUNS.get(architecture, set()):
+        return False
+    newest = _ARM_VERSIONS.get((device_architecture or "").strip().lower())
+    variant = re.fullmatch(r"v([0-9])", platform.get("variant") or "")
+    return newest is None or variant is None or int(variant[1]) <= newest
 
 
 class RegistryImages:
@@ -124,22 +139,47 @@ class RegistryImages:
         except RegistryUnavailableError as exc:
             raise AppError("registry_unavailable", str(exc), status_code=503) from exc
 
-    def platform_mismatch(self, organization_id: uuid.UUID, spec: dict[str, Any], device: Device) -> str | None:
-        """Why the image cannot run on the device, or None when it can (or nobody knows)."""
+    def platforms(self, organization_id: uuid.UUID, spec: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        """What each of the release's images in our registry is built for; empty when nobody knows."""
+        return {image: self._platforms(organization_id, image, digest) for image, digest in registry_images(spec)}
+
+    def _platforms(self, organization_id: uuid.UUID, image: str, digest: str) -> list[dict[str, Any]]:
+        platforms = self.session.scalar(
+            select(ContainerImage.platforms)
+            .where(ContainerImage.organization_id == organization_id, ContainerImage.digest == digest)
+            .limit(1)
+        )
+        if platforms is not None:
+            return platforms
+        # Its tag moved or was deleted since the release: the catalog only lists current tags.
+        repository = image.removeprefix(f"{self.settings.registry_public_host}/")
+        owner = self.session.get(RegistryNamespace, repository.partition("/")[0])
+        if self.registry is None or owner is None or owner.organization_id != organization_id:
+            return []
+        try:
+            manifest = self.registry.manifest(repository.rpartition(":")[0], digest)
+        except RegistryUnavailableError as exc:
+            logger.warning("Could not read the platforms of %s: %s", repository, exc)
+            return []
+        if manifest is None:
+            return []
+        return [{"os": p.os, "architecture": p.architecture, "variant": p.variant} for p in manifest.platforms]
+
+    @staticmethod
+    def platform_mismatch(platforms: dict[str, list[dict[str, Any]]], device: Device) -> str | None:
+        """Why one of the images cannot run on the device, or None when they can (or nobody knows)."""
         architecture = image_architecture(device.architecture)
         if architecture is None:
             return None
-        for image, digest in registry_images(spec):
-            platforms = self.session.scalar(
-                select(ContainerImage.platforms)
-                .where(ContainerImage.organization_id == organization_id, ContainerImage.digest == digest)
-                .limit(1)
-            )
-            built_for = {p["architecture"] for p in platforms or [] if p["os"] == "linux"}
-            if not platforms or built_for & ({architecture} | _ALSO_RUNS.get(architecture, set())):
+        for image, built_for in platforms.items():
+            if not built_for or any(p["os"] == "linux" and _runs(p, device.architecture) for p in built_for):
                 continue
-            names = ", ".join(sorted(f"{p['os']}/{p['architecture']}" for p in platforms))
-            return f"The image {image} is built for {names}, but the device is linux/{architecture}."
+            names = ", ".join(
+                sorted("/".join(filter(None, (p["os"], p["architecture"], p.get("variant")))) for p in built_for)
+            )
+            version = _ARM_VERSIONS.get((device.architecture or "").strip().lower())
+            variant = f"/v{version}" if version else ""
+            return f"The image {image} is built for {names}, but the device is linux/{architecture}{variant}."
         return None
 
     # --- devices ------------------------------------------------------------
