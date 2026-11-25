@@ -34,6 +34,24 @@ delete, and the API compares both at start and every hour (`REGISTRY_RECONCILE_I
 turns it off), or now with `python -m app.cli registry-reconcile`. Deleting removes the tag; the data
 stays in storage, and the image can still be pulled by digest.
 
+## Run an app
+
+**Images → Run**, or **device → Software → Run an app**: choose an image and tag (or a public image),
+ports (default `8080 → 8080`), environment, and **Public URL**. The sheet follows it from "Waiting for
+the device" over "Pulling and starting" to "Healthy" or "Failed", then offers **Open URL**.
+
+It creates a release (named after the app, version from the tag) and an immediate Deploy to that one
+device, plus the [endpoint](endpoints.md). Needs `deployment.create`, and `endpoint.create` for the URL;
+operators can run apps without being able to manage releases. A device has one app per name
+(`app_exists`). Environment values are stored with the release and readable by everyone who can read
+releases.
+
+```bash
+curl -X POST "$API/api/v1/organizations/$ORG/devices/$DEVICE/apps/run" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"image": "my-app:1.0", "ports": ["8080:8080"], "endpoint": {}}'
+```
+
 ## Deploy to devices
 
 A `docker` release uses the registry when its spec has `"registry": "meteorcloud"`. `image` is a name

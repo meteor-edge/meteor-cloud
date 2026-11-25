@@ -13,9 +13,10 @@ import {
   type ImageTag,
 } from "@/api/registry";
 import { useAuth } from "@/auth/AuthContext";
+import { RunAppSheet } from "@/components/apps/RunAppSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { canDeleteImages } from "@/lib/permissions";
+import { canDeleteImages, canManageDeployments, canManageEndpoints } from "@/lib/permissions";
 import { formatBytes, formatDateTime } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
@@ -77,12 +78,15 @@ function Tags({
   pullName,
   canDelete,
   onDelete,
+  onRun,
 }: {
   organizationId: string;
   repository: string;
   pullName: string;
   canDelete: boolean;
   onDelete: (repository: string, tag: string) => void;
+  /** Absent when the user may not deploy. */
+  onRun?: (image: string) => void;
 }) {
   const { token } = useAuth();
   const [page, setPage] = useState(1);
@@ -129,6 +133,16 @@ function Tags({
                   />
                 </td>
                 <td className="px-3 py-2">
+                  {onRun && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      aria-label={`Run ${repository}:${image.tag}`}
+                      onClick={() => onRun(`${repository}:${image.tag}`)}
+                    >
+                      Run
+                    </Button>
+                  )}
                   {canDelete && (
                     <Button
                       variant="ghost"
@@ -156,6 +170,7 @@ export function ImagesPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [running, setRunning] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -179,7 +194,9 @@ export function ImagesPage() {
     refetchInterval: 15_000,
   });
 
-  const canDelete = canDeleteImages(orgQuery.data?.current_user_role);
+  const role = orgQuery.data?.current_user_role;
+  const canDelete = canDeleteImages(role);
+  const canDeploy = canManageDeployments(role);
   const base = `${registry?.host}/${registry?.namespace}`;
   const images: ImageRepository[] = imagesQuery.data?.items ?? [];
 
@@ -293,6 +310,7 @@ export function ImagesPage() {
                     pullName={`${base}/${image.repository}`}
                     canDelete={canDelete}
                     onDelete={onDelete}
+                    onRun={canDeploy ? setRunning : undefined}
                   />
                 )}
               </li>
@@ -300,6 +318,15 @@ export function ImagesPage() {
           </ul>
           <Pager total={imagesQuery.data?.total ?? 0} page={page} onChange={setPage} />
         </>
+      )}
+      {running && token && (
+        <RunAppSheet
+          token={token}
+          organizationId={organizationId}
+          image={running}
+          canPublish={canManageEndpoints(role)}
+          onClose={() => setRunning(null)}
+        />
       )}
     </section>
   );

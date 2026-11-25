@@ -7,15 +7,33 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
+from app.deployments.apps import AppRunRequest, AppRunResponse, AppService
 from app.deployments.dependencies import DeploymentSvc
 from app.deployments.schemas import DeploymentCreate, DeploymentResponse, RollbackResponse
 from app.devices.schemas import Page
 from app.identity.dependencies import CurrentUser
+from app.releases.service import ReleaseService
 
 router = APIRouter(
     prefix="/api/v1/organizations/{organization_id}/deployments",
     tags=["deployments"],
 )
+
+apps_router = APIRouter(prefix="/api/v1/organizations/{organization_id}/devices/{device_id}/apps", tags=["apps"])
+
+
+@apps_router.post("/run", response_model=AppRunResponse, status_code=201)
+def run_app(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    current_user: CurrentUser,
+    service: DeploymentSvc,
+    payload: AppRunRequest,
+) -> AppRunResponse:
+    """Create a release from an image and deploy it to this device, with a public URL if asked."""
+    return AppService(service, ReleaseService(service.session)).run(
+        actor=current_user, organization_id=organization_id, device_id=device_id, payload=payload
+    )
 
 
 @router.get("", response_model=Page[DeploymentResponse])

@@ -30,6 +30,7 @@ from app.core.logging import configure_logging
 from app.core.metrics import BUILD_INFO, MetricsMiddleware, configure_metrics, metrics_enabled, metrics_response
 from app.core.request_id import RequestIdMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.deployments.router import apps_router
 from app.deployments.router import router as deployments_router
 from app.deployments.sweeper import run_sweeper
 from app.device_actions.router import router as device_actions_router
@@ -128,6 +129,7 @@ def create_app() -> FastAPI:
     application.include_router(registry_agent_router)
     application.include_router(releases_router)
     application.include_router(deployments_router)
+    application.include_router(apps_router)
     application.include_router(endpoints_router)
     application.include_router(connectivity_router)
     application.include_router(shell_router)

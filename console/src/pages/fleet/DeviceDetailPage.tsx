@@ -24,6 +24,7 @@ import { DeviceMqttStatus } from "@/components/fleet/DeviceMqttStatus";
 import { DeviceNetworkPanel } from "@/components/fleet/DeviceNetworkPanel";
 import { DeviceUplinkPanel } from "@/components/fleet/DeviceUplinkPanel";
 import { DeviceResourceMeters } from "@/components/fleet/DeviceResourceMeters";
+import { RunAppSheet } from "@/components/apps/RunAppSheet";
 import { DeviceSoftwarePanel } from "@/components/fleet/DeviceSoftwarePanel";
 import { DeviceTelemetryCharts } from "@/components/fleet/DeviceTelemetryCharts";
 import {
@@ -115,6 +116,7 @@ export function DeviceDetailPage() {
   });
 
   const canManage = canManageFleet(orgQuery.data?.current_user_role);
+  const [runOpen, setRunOpen] = useState(false);
   const canDeploy = canManageDeployments(orgQuery.data?.current_user_role);
   const canEndpoints = canManageEndpoints(orgQuery.data?.current_user_role);
   // Effective permissions cover custom roles; the role check is the fallback.
@@ -314,7 +316,14 @@ export function DeviceDetailPage() {
 
       {activeTab === "software" && (
         <div className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-glow">
-          <h2 className="text-lg font-semibold">Software</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">Software</h2>
+            {canDeploy && (
+              <Button size="sm" variant="secondary" onClick={() => setRunOpen(true)}>
+                Run an app
+              </Button>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
             Desired vs installed releases on this device. Empty until a release is deployed.
           </p>
@@ -336,6 +345,16 @@ export function DeviceDetailPage() {
             />
           )}
         </div>
+      )}
+
+      {runOpen && token && (
+        <RunAppSheet
+          token={token}
+          organizationId={organizationId}
+          deviceId={deviceId}
+          canPublish={canEndpoints}
+          onClose={() => setRunOpen(false)}
+        />
       )}
 
       {activeTab === "software" && token && (
