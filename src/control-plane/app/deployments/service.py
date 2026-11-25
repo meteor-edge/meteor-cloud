@@ -408,8 +408,10 @@ class DeploymentService:
         # Devices without the release's runtime (or whose agent cannot install
         # the kind) are skipped: they change no workload and bind nothing.
         mismatches: dict[uuid.UUID, str] = {}
+        images = RegistryImages(self.session)
+        platforms = images.platforms(organization_id, release.spec)
         for device in devices:
-            mismatch = RegistryImages(self.session).platform_mismatch(organization_id, release.spec, device)
+            mismatch = images.platform_mismatch(platforms, device)
             if mismatch is not None:
                 mismatches[device.id] = mismatch
         if mismatches and len(mismatches) == len(devices):

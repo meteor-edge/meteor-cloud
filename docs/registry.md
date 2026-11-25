@@ -62,7 +62,8 @@ in the organization (`my-app:1.0`) or the full name:
 ```
 
 Saving the release fixes the digest (`image_digest`); it fails when the image is not there. Moving the
-tag later does not change the release. A Deploy skips devices whose CPU the image was not built for,
+tag later does not change the release. A Deploy skips devices whose CPU (with its ARM version, such as
+`arm/v7`) the image was not built for,
 and fails with `image_platform_mismatch` when that is all of them.
 
 Devices need no registry token. For a desired release the agent asks for a password that works for

@@ -535,6 +535,19 @@ func TestShowLogs(t *testing.T) {
 		!s.ran("docker logs --timestamps --tail 200 --since 900s --follow -- web") {
 		t.Errorf("docker: %v %v", err, s.calls)
 	}
+	other := h
+	other.Engine = Engine{Name: "other", CLI: "other", Endpoint: "unix:///run/other.sock"}
+	s.answers["other --host"] = "web\trunning\tshop\n"
+	for _, want := range []string{"--tail 200 -- web", "--tail 0 --follow -- web"} {
+		follow := strings.Contains(want, "follow")
+		r := ShowLogsRequest{Kind: "docker", Name: "web", Follow: follow}
+		if follow {
+			r.Grep = "x"
+		}
+		if err := ShowLogs(ctx, other, r, io.Discard); err != nil || !s.ran("other --host unix:///run/other.sock logs --timestamps "+want) {
+			t.Errorf("another engine: %v %v", err, s.calls)
+		}
+	}
 	for name, r := range map[string]ShowLogsRequest{
 		"not listed":    {Kind: "systemd", Name: "ssh.service"},
 		"other project": {Kind: "docker", Name: "web", Project: "other"},
