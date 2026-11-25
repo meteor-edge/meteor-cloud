@@ -6,16 +6,19 @@ import {
   createEnrollmentKey,
   listEnrollmentKeys,
   revokeEnrollmentKey,
+  type EnrollmentApiKey,
   type EnrollmentApiKeyWithSecret,
 } from "@/api/fleet";
 import { ApiError } from "@/api/http";
 import { getOrganization } from "@/api/organizations";
 import { useAuth } from "@/auth/AuthContext";
+import { AutoApproveRuleDialog } from "@/components/fleet/AutoApproveRuleDialog";
 import { OneTimeSecretDialog } from "@/components/fleet/OneTimeSecretDialog";
 import { PendingEnrollmentRequests } from "@/components/fleet/PendingEnrollmentRequests";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { describeAutoApproveRule } from "@/lib/autoApprove";
 import { canManageEnrollmentKeys } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 
@@ -31,6 +34,7 @@ export function ApiKeysPage() {
   const [keyName, setKeyName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [createdKey, setCreatedKey] = useState<EnrollmentApiKeyWithSecret | null>(null);
+  const [ruleKey, setRuleKey] = useState<EnrollmentApiKey | null>(null);
 
   const orgQuery = useQuery({
     queryKey: ["organization", organizationId, token],
@@ -87,7 +91,8 @@ export function ApiKeysPage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Enrollment API keys</h1>
           <p className="mt-2 text-muted-foreground">
-            Keys that let devices request enrollment into {orgQuery.data?.name ?? "this organization"}.
+            Keys that let devices request enrollment into{" "}
+            {orgQuery.data?.name ?? "this organization"}.
           </p>
         </div>
         <Button variant="secondary" asChild>
@@ -146,6 +151,7 @@ export function ApiKeysPage() {
               <th className="px-4 py-3 font-semibold">Prefix</th>
               <th className="px-4 py-3 font-semibold">Created</th>
               <th className="px-4 py-3 font-semibold">Status</th>
+              <th className="px-4 py-3 font-semibold">Auto-approve</th>
               {canManage && <th className="px-4 py-3 font-semibold">Actions</th>}
             </tr>
           </thead>
@@ -158,12 +164,20 @@ export function ApiKeysPage() {
                   {formatDateTime(entry.created_at)}
                 </td>
                 <td className="px-4 py-3">{entry.revoked_at ? "Revoked" : "Active"}</td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {describeAutoApproveRule(entry)}
+                </td>
                 {canManage && (
                   <td className="px-4 py-3">
                     {!entry.revoked_at && (
-                      <Button variant="ghost" size="sm" onClick={() => onRevoke(entry.id)}>
-                        Revoke
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => setRuleKey(entry)}>
+                          Auto-approve
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => onRevoke(entry.id)}>
+                          Revoke
+                        </Button>
+                      </div>
                     )}
                   </td>
                 )}
@@ -173,7 +187,7 @@ export function ApiKeysPage() {
               <tr>
                 <td
                   className="px-4 py-6 text-center text-muted-foreground"
-                  colSpan={canManage ? 5 : 4}
+                  colSpan={canManage ? 6 : 5}
                 >
                   No API keys yet.
                 </td>
@@ -182,6 +196,19 @@ export function ApiKeysPage() {
           </tbody>
         </table>
       </div>
+
+      {ruleKey && token && (
+        <AutoApproveRuleDialog
+          token={token}
+          organizationId={organizationId}
+          enrollmentKey={ruleKey}
+          onClose={() => setRuleKey(null)}
+          onSaved={() => {
+            setRuleKey(null);
+            void queryClient.invalidateQueries({ queryKey: ["enrollment-keys", organizationId] });
+          }}
+        />
+      )}
 
       {createdKey && (
         <OneTimeSecretDialog
