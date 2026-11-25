@@ -147,7 +147,21 @@ class ReleaseService:
     ) -> ReleaseResponse:
         membership = self._require_membership(organization_id, actor.id)
         self.authz.require(membership, "artifact.create")
+        try:
+            release = self.add_release(actor=actor, membership=membership, payload=payload)
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise ConflictError(
+                "release_exists",
+                "A release with this kind, name, and version already exists.",
+            ) from exc
+        self.session.refresh(release)
+        return ReleaseResponse.model_validate(release)
 
+    def add_release(self, *, actor: User, membership: OrganizationMembership, payload: ReleaseCreate) -> Release:
+        """Validate and add a release. The caller checks permissions and commits."""
+        organization_id = membership.organization_id
         normalized_spec = self._pin_image(
             membership, payload.kind, validate_release_spec(payload.kind, payload.spec)
         )
@@ -188,29 +202,21 @@ class ReleaseService:
             spec=normalized_spec,
             created_by_user_id=actor.id,
         )
-        try:
-            self.releases.create(release)
-            self.audit.record(
-                actor=actor,
-                organization_id=organization_id,
-                action="release.create",
-                resource_type="release",
-                resource_id=release.id,
-                metadata={
-                    "name": release.name,
-                    "version": release.version,
-                    "kind": release.kind.value,
-                },
-            )
-            self.session.commit()
-        except IntegrityError as exc:
-            self.session.rollback()
-            raise ConflictError(
-                "release_exists",
-                "A release with this kind, name, and version already exists.",
-            ) from exc
-        self.session.refresh(release)
-        return ReleaseResponse.model_validate(release)
+        self.releases.create(release)
+        self.session.flush()
+        self.audit.record(
+            actor=actor,
+            organization_id=organization_id,
+            action="release.create",
+            resource_type="release",
+            resource_id=release.id,
+            metadata={
+                "name": release.name,
+                "version": release.version,
+                "kind": release.kind.value,
+            },
+        )
+        return release
 
     def update_release(
         self,
