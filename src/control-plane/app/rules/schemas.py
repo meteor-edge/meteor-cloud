@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, HttpUrl, UrlConstraints, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    HttpUrl,
+    UrlConstraints,
+    model_validator,
+)
 
 
 class RuleWrite(BaseModel):
@@ -99,7 +109,11 @@ class AlertEventResponse(BaseModel):
     values: dict[str, Any]
 
 
-class AlertDetail(AlertResponse):
+class AlertListItem(AlertResponse):
+    device_name: str
+
+
+class AlertDetail(AlertListItem):
     events: list[AlertEventResponse]
 
 
@@ -133,19 +147,59 @@ class SilenceResponse(BaseModel):
 
 # As long as the column.
 IntegrationUrl = Annotated[HttpUrl, UrlConstraints(max_length=2048)]
+IntegrationKind = Literal["webhook", "slack", "email", "telegram"]
+TELEGRAM_TOKEN = re.compile(r"^[0-9]{5,20}:[A-Za-z0-9_-]{20,100}\Z")
+TELEGRAM_CHAT = re.compile(r"^(-?[0-9]{1,20}|@[A-Za-z0-9_]{4,64})\Z")
+Recipients = Annotated[list[EmailStr], Field(max_length=20)]
+
+
+def check_integration(kind: str, *, url: Any, recipients: Any, chat_id: str | None, secret: str | None) -> None:
+    """What each kind needs, checked on the complete integration. Raises ValueError."""
+    if kind in ("webhook", "slack"):
+        if not url:
+            raise ValueError("url is required")
+        if recipients or chat_id:
+            raise ValueError("recipients and chat_id do not apply to this kind")
+        if secret and len(secret) < 16:
+            raise ValueError("secret must be at least 16 characters")
+        return
+    if url:
+        raise ValueError("url does not apply to this kind")
+    if kind == "email":
+        if not recipients:
+            raise ValueError("at least one recipient is required")
+        if chat_id or secret:
+            raise ValueError("chat_id and secret do not apply to email")
+        return
+    if recipients:
+        raise ValueError("recipients do not apply to telegram")
+    if not chat_id or not TELEGRAM_CHAT.match(chat_id):
+        raise ValueError("chat_id must be a number or @channelname")
+    if not secret or not TELEGRAM_TOKEN.match(secret):
+        raise ValueError("secret must be the bot token from @BotFather")
 
 
 class IntegrationCreate(BaseModel):
-    kind: Literal["webhook", "slack"] = "webhook"
+    kind: IntegrationKind = "webhook"
     name: str = Field(min_length=1, max_length=120)
-    url: IntegrationUrl
+    url: IntegrationUrl | None = None
+    recipients: Recipients | None = None
+    chat_id: str | None = Field(default=None, max_length=80)
     enabled: bool = True
-    secret: str | None = Field(default=None, min_length=16, max_length=512)
+    # Signing secret (webhook, slack) or bot token (telegram).
+    secret: str | None = Field(default=None, min_length=1, max_length=512)
+
+    @model_validator(mode="after")
+    def _kind(self) -> IntegrationCreate:
+        check_integration(self.kind, url=self.url, recipients=self.recipients, chat_id=self.chat_id, secret=self.secret)
+        return self
 
 
 class IntegrationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     url: IntegrationUrl | None = None
+    recipients: Recipients | None = None
+    chat_id: str | None = Field(default=None, max_length=80)
     enabled: bool | None = None
     # "" removes the secret; omitted keeps it.
     secret: str | None = Field(default=None, max_length=512)
@@ -157,10 +211,106 @@ class IntegrationResponse(BaseModel):
     kind: str
     name: str
     url: str
+    recipients: list[str]
+    chat_id: str | None
     enabled: bool
     has_secret: bool
     created_at: datetime
     updated_at: datetime
+
+
+class ChannelCapabilities(BaseModel):
+    """Which channels can deliver on this platform now."""
+
+    engine: bool
+    email: bool
+
+
+class DeliveryTestResult(BaseModel):
+    delivered: bool
+    error: str | None = None
+
+
+# ---- metrics and live device state ----------------------------------------
+
+
+class MetricResponse(BaseModel):
+    field: str
+    label: str
+    unit: str
+    group: str
+    description: str
+    suggested_operator: str
+    suggested_value: float
+    devices: int  # devices whose last message carries it
+    min: float | None
+    max: float | None
+
+
+NumericOperator = Literal["gt", "gte", "lt", "lte", "eq", "ne", "between"]
+
+
+class LiveCondition(BaseModel):
+    field: str = Field(max_length=128)
+    operator: NumericOperator = "gt"
+    value: float = Field(allow_inf_nan=False)
+    max: float | None = Field(default=None, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _between(self) -> LiveCondition:
+        if self.operator == "between" and (self.max is None or self.max < self.value):
+            raise ValueError("between needs max, not less than value")
+        return self
+
+
+class LiveQuery(BaseModel):
+    """Devices whose last readings match, whether or not a rule watches them."""
+
+    conditions: list[LiveCondition] = Field(default_factory=list, max_length=10)
+    match: Literal["all", "any"] = "all"
+    search: str = Field(default="", max_length=200)
+    state: Literal["any", "online", "offline"] = "any"
+    alerts: Literal["any", "active", "none"] = "any"
+    group_id: uuid.UUID | None = None
+    device_type_id: uuid.UUID | None = None
+    # Readings older than this do not count as "now".
+    fresh_minutes: int = Field(default=5, ge=1, le=10080)
+    limit: int = Field(default=100, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
+
+
+class LiveAlert(BaseModel):
+    id: uuid.UUID
+    rule_id: uuid.UUID
+    rule_name: str
+    severity: str
+    status: str
+
+
+class LiveDevice(BaseModel):
+    id: uuid.UUID
+    name: str
+    device_group_id: uuid.UUID | None
+    device_type_id: uuid.UUID | None
+    online: bool
+    metrics_at: datetime | None
+    fresh: bool
+    metrics: dict[str, float]
+    alerts: list[LiveAlert]
+
+
+class LiveResult(BaseModel):
+    total: int  # devices in view
+    matching: int
+    devices: list[LiveDevice]
+
+
+class AlertSummary(BaseModel):
+    firing: int
+    acknowledged: int
+    devices: int  # devices with an active alert
+    by_severity: dict[str, int]
+    by_rule: dict[uuid.UUID, int]
 
 
 # ---- internal (engine and dispatcher) ------------------------------------
@@ -245,20 +395,42 @@ class CommandResult(BaseModel):
     detail: str | None = None
 
 
+class DeliveryDevice(BaseModel):
+    device_id: uuid.UUID
+    at: datetime
+
+
 class DeliveryRequest(BaseModel):
     integration_id: uuid.UUID
     organization_id: uuid.UUID
     rule_id: uuid.UUID
     device_id: uuid.UUID
     at: datetime
+    # A message for several devices of the rule: their names and silences in one call.
+    devices: list[DeliveryDevice] = Field(default_factory=list, max_length=1000)
+
+
+class DeliveryDeviceState(BaseModel):
+    name: str
+    silenced: bool
+
+
+class DeliveryTestRequest(BaseModel):
+    integration_id: uuid.UUID
+    organization_id: uuid.UUID
 
 
 class DeliveryResponse(BaseModel):
+    organization_id: uuid.UUID
     url: str
     kind: str
     secret: str
     enabled: bool
     silenced: bool
+    config: dict[str, Any] = Field(default_factory=dict)
+    device_name: str = ""
+    organization_name: str = ""
+    devices: list[DeliveryDeviceState] = Field(default_factory=list)  # in request order
 
 
 class RuleTestEvent(BaseModel):

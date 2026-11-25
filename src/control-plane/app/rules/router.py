@@ -14,11 +14,18 @@ from app.rules.models import Alert, AlertSilence, Rule, RuleVersion
 from app.rules.schemas import (
     AlertDetail,
     AlertEventResponse,
+    AlertListItem,
     AlertResponse,
+    AlertSummary,
+    ChannelCapabilities,
+    DeliveryTestResult,
     DevicePreview,
     IntegrationCreate,
     IntegrationResponse,
     IntegrationUpdate,
+    LiveQuery,
+    LiveResult,
+    MetricResponse,
     RuleResponse,
     RuleTestRequest,
     RuleVersionResponse,
@@ -34,6 +41,7 @@ router = APIRouter(prefix=PREFIX, tags=["rules"])
 
 Limit = Annotated[int, Query(ge=1, le=200)]
 AlertStatus = Literal["firing", "acknowledged", "resolved"]
+Search = Annotated[str, Query(max_length=200)]
 Severity = Literal["info", "warning", "critical"]
 
 
@@ -51,6 +59,10 @@ def _view(service: RuleService, rule: Rule) -> RuleResponse:
         created_at=rule.created_at,
         updated_at=rule.updated_at,
     )
+
+
+def _alert_view(alert: Alert, device_name: str) -> AlertListItem:
+    return AlertListItem(**AlertResponse.model_validate(alert).model_dump(), device_name=device_name)
 
 
 # ---- rules ---------------------------------------------------------------
@@ -101,6 +113,18 @@ def test_rule(
 ) -> dict[str, Any]:
     """Run a definition over sample events in the engine with a virtual clock; returns every step."""
     return service.test_rule(actor=current_user, organization_id=organization_id, payload=payload)
+
+
+@router.get("/rules/metrics", response_model=list[MetricResponse])
+def list_metrics(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, search: Search = ""):
+    """Metrics rules can use, with how many devices report each and the range of current readings."""
+    return service.list_metrics(actor=current_user, organization_id=organization_id, search=search)
+
+
+@router.post("/rules/live-devices", response_model=LiveResult)
+def live_devices(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: LiveQuery):
+    """Devices by their last readings and active alerts, whether or not a rule watches them."""
+    return service.live_devices(actor=current_user, organization_id=organization_id, query=payload)
 
 
 @router.get("/rules/{rule_id}/status")
@@ -164,7 +188,7 @@ def list_rule_versions(
     return service.list_versions(actor=current_user, organization_id=organization_id, rule_id=rule_id)
 
 
-@router.get("/rules/{rule_id}/alerts", response_model=list[AlertResponse])
+@router.get("/rules/{rule_id}/alerts", response_model=list[AlertListItem])
 def list_rule_alerts(
     organization_id: uuid.UUID,
     rule_id: uuid.UUID,
@@ -176,7 +200,7 @@ def list_rule_alerts(
     limit: Limit = 50,
 ) -> list[Alert]:
     service.get_rule(actor=current_user, organization_id=organization_id, rule_id=rule_id)
-    return service.list_alerts(
+    rows = service.list_alerts(
         actor=current_user,
         organization_id=organization_id,
         rule_id=rule_id,
@@ -185,12 +209,13 @@ def list_rule_alerts(
         before_id=before_id,
         limit=limit,
     )
+    return [_alert_view(alert, name) for alert, name in rows]
 
 
 # ---- alerts --------------------------------------------------------------
 
 
-@router.get("/alerts", response_model=list[AlertResponse])
+@router.get("/alerts", response_model=list[AlertListItem])
 def list_alerts(
     organization_id: uuid.UUID,
     current_user: CurrentUser,
@@ -200,11 +225,13 @@ def list_alerts(
     rule_id: uuid.UUID | None = None,
     device_id: uuid.UUID | None = None,
     severity: Severity | None = None,
+    search: Search = "",
+    metric: Annotated[str, Query(max_length=128, description="Only alerts triggered by this metric.")] = "",
     before: Annotated[datetime | None, Query(description="Page: fired_at of the last row already shown.")] = None,
     before_id: Annotated[uuid.UUID | None, Query(description="Page: id of the last row already shown.")] = None,
     limit: Limit = 50,
-) -> list[Alert]:
-    return service.list_alerts(
+) -> list[AlertListItem]:
+    rows = service.list_alerts(
         actor=current_user,
         organization_id=organization_id,
         status=status,
@@ -214,17 +241,26 @@ def list_alerts(
         severity=severity,
         before=before,
         before_id=before_id,
+        search=search,
+        metric=metric,
         limit=limit,
     )
+    return [_alert_view(alert, name) for alert, name in rows]
+
+
+@router.get("/alerts/summary", response_model=AlertSummary)
+def alert_summary(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+    """Active alerts by status, severity and rule."""
+    return service.alert_summary(actor=current_user, organization_id=organization_id)
 
 
 @router.get("/alerts/{alert_id}", response_model=AlertDetail)
 def get_alert(
     organization_id: uuid.UUID, alert_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
 ) -> AlertDetail:
-    alert, events = service.get_alert(actor=current_user, organization_id=organization_id, alert_id=alert_id)
+    alert, name, events = service.get_alert(actor=current_user, organization_id=organization_id, alert_id=alert_id)
     return AlertDetail(
-        **AlertResponse.model_validate(alert).model_dump(),
+        **_alert_view(alert, name).model_dump(),
         events=[AlertEventResponse.model_validate(e) for e in events],
     )
 
@@ -268,6 +304,20 @@ def list_integrations(
     organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
 ) -> list[IntegrationResponse]:
     return service.list_integrations(actor=current_user, organization_id=organization_id)
+
+
+@router.get("/notification-integrations/capabilities", response_model=ChannelCapabilities)
+def channel_capabilities(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+    """Whether notifications can be delivered, and whether the platform has a mail server."""
+    return service.channel_capabilities(actor=current_user, organization_id=organization_id)
+
+
+@router.post("/notification-integrations/{integration_id}/test", response_model=DeliveryTestResult)
+def test_integration(
+    organization_id: uuid.UUID, integration_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
+):
+    """Send a sample alert now and report whether it arrived."""
+    return service.test_integration(actor=current_user, organization_id=organization_id, integration_id=integration_id)
 
 
 @router.post("/notification-integrations", response_model=IntegrationResponse, status_code=201)

@@ -43,7 +43,7 @@ func (c *ControlPlane) Post(ctx context.Context, path string, body, out any) err
 		return err
 	}
 	defer resp.Body.Close()
-	if err := statusError("control plane "+path, resp); err != nil {
+	if err := statusError("control plane "+path, resp, true); err != nil {
 		return err
 	}
 	if out == nil {
@@ -56,12 +56,16 @@ func (c *ControlPlane) Post(ctx context.Context, path string, body, out any) err
 	return nil
 }
 
-func statusError(what string, resp *http.Response) error {
+// statusError is nil for a 2xx answer. withBody adds the start of the answer.
+func statusError(what string, resp *http.Response, withBody bool) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
-	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	err := fmt.Errorf("%s answered HTTP %d: %s", what, resp.StatusCode, strings.TrimSpace(string(snippet)))
+	err := fmt.Errorf("%s answered HTTP %d", what, resp.StatusCode)
+	if withBody {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		err = fmt.Errorf("%w: %s", err, oneLine(string(snippet)))
+	}
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout &&
 		resp.StatusCode != http.StatusTooManyRequests {
 		return Permanent(err)
@@ -100,6 +104,49 @@ func (s *AlertSender) Send(ctx context.Context, item state.OutboxItem, _ *engine
 		return Skipped, nil
 	}
 	return Delivered, nil
+}
+
+// Alert records of one organization go in batches; each is applied on its own.
+func (s *AlertSender) Groups(context.Context, state.OutboxItem, *engine.ActionPayload) (ok, anyRule bool, limit int) {
+	return true, true, 100
+}
+
+func (s *AlertSender) SendGroup(ctx context.Context, items []state.OutboxItem, ps []*engine.ActionPayload) []Result {
+	results := make([]Result, len(items))
+	var body []any
+	for _, it := range items {
+		m, err := envelope(it)
+		if err != nil {
+			return s.each(ctx, items, ps)
+		}
+		body = append(body, m)
+	}
+	var out struct {
+		Results []struct {
+			Status string `json:"status"`
+		} `json:"results"`
+	}
+	err := s.CP.Post(ctx, "/internal/rules/alert-transitions", map[string]any{"items": body}, &out)
+	if IsPermanent(err) || (err == nil && len(out.Results) != len(items)) {
+		// One refused item must not take the others with it.
+		return s.each(ctx, items, ps)
+	}
+	for i := range results {
+		results[i] = Result{Delivered, err}
+		if err == nil && out.Results[i].Status == "ignored" {
+			results[i].Outcome = Skipped
+		}
+	}
+	return results
+}
+
+func (s *AlertSender) each(ctx context.Context, items []state.OutboxItem, ps []*engine.ActionPayload) []Result {
+	results := make([]Result, len(items))
+	for i := range items {
+		out, err := s.Send(ctx, items[i], ps[i])
+		results[i] = Result{out, err}
+	}
+	return results
 }
 
 // CommandSender asks the control plane to send a device command. The control plane

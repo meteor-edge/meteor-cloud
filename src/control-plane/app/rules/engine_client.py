@@ -25,6 +25,9 @@ class RulesEngineClient:
         query = urllib.parse.urlencode({"after": after, "limit": limit})
         return self._request("GET", f"/internal/rules/status/{rule_id}?{query}", None)
 
+    def test_delivery(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/internal/rules/test-delivery", body)
+
     def engine(self) -> dict[str, Any]:
         return self._request("GET", "/internal/rules/engine", None)
 

@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"meteorcloud/dataplane/internal/rules/dsl"
@@ -40,13 +42,15 @@ func (e *Engine) FireDue(ctx context.Context) (int, error) {
 			e.metrics.StateErrors.WithLabelValues("timers").Inc()
 			return fired, err
 		}
-		for _, t := range due {
+		_ = inParallel(e.cfg.TimerWorkers, due, func(t state.Timer) error {
 			if err := e.Tick(ctx, t); err != nil {
 				// The lease expires and another pass retries it.
-				e.log.Error("timer evaluation failed", "organization_id", t.OrgID, "device_id", t.DeviceID, "rule_id", t.RuleID, "error", err)
+				e.log.Error("timer evaluation failed", "organization_id", logSafe(t.OrgID), "device_id", logSafe(t.DeviceID),
+					"rule_id", logSafe(t.RuleID), "error", logSafe(err.Error()))
 			}
-			fired++
-		}
+			return nil
+		})
+		fired += len(due)
 		if len(due) < e.cfg.TimerBatch {
 			if timers, outbox, err := e.store.Counts(ctx); err == nil {
 				e.metrics.PendingTimers.Set(float64(timers))
@@ -55,6 +59,40 @@ func (e *Engine) FireDue(ctx context.Context) (int, error) {
 			return fired, nil
 		}
 	}
+}
+
+// inParallel runs fn over items with n workers and returns the first error, after which
+// no further item is started. Evaluations of one device still run one at a time (device
+// locks), and running many together lets them share group commits.
+func inParallel[T any](n int, items []T, fn func(T) error) error {
+	var (
+		wg     sync.WaitGroup
+		once   sync.Once
+		failed atomic.Bool
+		first  error
+	)
+	next := make(chan T)
+	for range min(n, len(items)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for it := range next {
+				if failed.Load() {
+					continue
+				}
+				if err := fn(it); err != nil {
+					once.Do(func() { first = err })
+					failed.Store(true)
+				}
+			}
+		}()
+	}
+	for _, it := range items {
+		next <- it
+	}
+	close(next)
+	wg.Wait()
+	return first
 }
 
 // Tick re-evaluates one rule on one device at the current time, without an event.
@@ -186,7 +224,7 @@ func (e *Engine) Reconcile(ctx context.Context, cur *RuleSet) error {
 	}
 	for _, id := range ids {
 		r, exists := cur.Rule(id)
-		if err := e.eachState(ctx, id, func(st *state.RuleState) error {
+		if err := e.eachState(ctx, id, e.cfg.TimerWorkers, func(st *state.RuleState) error {
 			if st.Retired() {
 				return nil
 			}
@@ -240,18 +278,18 @@ func (e *Engine) retireLocked(ctx context.Context, st *state.RuleState, r *Rule,
 	}
 }
 
-func (e *Engine) eachState(ctx context.Context, ruleID string, fn func(*state.RuleState) error) error {
+func (e *Engine) eachState(ctx context.Context, ruleID string, workers int, fn func(*state.RuleState) error) error {
 	after := ""
 	for {
 		page, err := e.store.StatesForRule(ctx, ruleID, after, 500)
 		if err != nil {
 			return err
 		}
-		for _, st := range page {
-			if err := fn(st); err != nil {
-				return err
-			}
-			after = st.DeviceID
+		if err := inParallel(workers, page, fn); err != nil {
+			return err
+		}
+		if len(page) > 0 {
+			after = page[len(page)-1].DeviceID
 		}
 		if len(page) < 500 {
 			return nil
@@ -261,21 +299,21 @@ func (e *Engine) eachState(ctx context.Context, ruleID string, fn func(*state.Ru
 
 func (e *Engine) seedAbsence(ctx context.Context, rs *RuleSet, r *Rule) error {
 	known := map[string]bool{}
-	if err := e.eachState(ctx, r.ID, func(st *state.RuleState) error {
+	if err := e.eachState(ctx, r.ID, 1, func(st *state.RuleState) error {
 		known[st.DeviceID] = st.ConditionHash == r.Hash
 		return nil
 	}); err != nil {
 		return err
 	}
+	var missing []*Device
 	for _, d := range rs.MatchingDevices(r) {
-		if known[d.ID] {
-			continue
-		}
-		if err := e.Tick(ctx, state.Timer{RuleID: r.ID, DeviceID: d.ID, OrgID: d.OrganizationID, Due: e.clock.Now()}); err != nil {
-			return err
+		if !known[d.ID] {
+			missing = append(missing, d)
 		}
 	}
-	return nil
+	return inParallel(e.cfg.TimerWorkers, missing, func(d *Device) error {
+		return e.Tick(ctx, state.Timer{RuleID: r.ID, DeviceID: d.ID, OrgID: d.OrganizationID, Due: e.clock.Now()})
+	})
 }
 
 // Status pages through the evaluation state of one rule.

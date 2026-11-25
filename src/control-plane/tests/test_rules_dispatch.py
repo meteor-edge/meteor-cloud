@@ -55,16 +55,34 @@ def test_delivery_returns_integration_secret_and_silence(client: TestClient, db_
     got = client.post("/internal/rules/deliveries", headers=INTERNAL, json=body)
     assert got.status_code == 200, got.text
     assert got.json() == {
+        "organization_id": str(org.id),
         "url": "https://hooks.example.com/a",
         "kind": "webhook",
         "secret": "x" * 20,
         "enabled": True,
         "silenced": False,
+        "config": {},
+        "device_name": device.name,
+        "organization_name": org.name,
+        "devices": [],
     }
     ends = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     client.post(f"/api/v1/organizations/{org.id}/alert-silences", headers=headers, json={"ends_at": ends})
     later = {**body, "at": (datetime.now(UTC) + timedelta(seconds=1)).isoformat()}
     assert client.post("/internal/rules/deliveries", headers=INTERNAL, json=later).json()["silenced"] is True
+    # A grouped message asks for several devices, each judged at its own time.
+    before = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    listed = [
+        {"device_id": str(device.id), "at": later["at"]},
+        {"device_id": str(device.id), "at": before},
+        {"device_id": str(uuid.uuid4()), "at": before},
+    ]
+    grouped = client.post("/internal/rules/deliveries", headers=INTERNAL, json={**body, "devices": listed})
+    assert grouped.json()["devices"] == [
+        {"name": device.name, "silenced": True},
+        {"name": device.name, "silenced": False},
+        {"name": "", "silenced": False},
+    ]
     # Another organization's action cannot read this integration.
     foreign = {**body, "organization_id": str(other.id)}
     assert client.post("/internal/rules/deliveries", headers=INTERNAL, json=foreign).status_code == 404

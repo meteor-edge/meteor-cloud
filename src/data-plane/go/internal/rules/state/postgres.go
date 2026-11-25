@@ -80,6 +80,13 @@ var migrations = []string{
 	// 2: per-key ordering for the dispatcher (an older pending action of the same
 	// rule, device and type is always delivered first).
 	`CREATE INDEX action_outbox_order ON rules.action_outbox (rule_id, device_id, action_type, id) WHERE status = 'pending';`,
+	// 3: order is kept per target too, so one unreachable channel of a rule does not
+	// hold back its other channels.
+	`ALTER TABLE rules.action_outbox ADD COLUMN target text NOT NULL DEFAULT '';
+	DROP INDEX rules.action_outbox_order;
+	CREATE INDEX action_outbox_order ON rules.action_outbox (rule_id, device_id, action_type, target, id) WHERE status = 'pending';`,
+	// 4: finding the actions that can share one message.
+	`CREATE INDEX action_outbox_group ON rules.action_outbox (action_type, target, organization_id, next_attempt_at) WHERE status = 'pending';`,
 }
 
 // Postgres is the durable Store.
@@ -334,9 +341,9 @@ func applyBatch(ctx context.Context, tx pgx.Tx, b *Batch) error {
 			status = OutboxPending
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO rules.action_outbox
-			(idempotency_key, organization_id, rule_id, rule_version, device_id, transition, action_type, payload, status, next_attempt_at, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (idempotency_key) DO NOTHING`,
-			o.Key, o.OrgID, o.RuleID, o.RuleVersion, o.DeviceID, o.Transition, o.ActionType, []byte(o.Payload), status,
+			(idempotency_key, organization_id, rule_id, rule_version, device_id, transition, action_type, target, payload, status, next_attempt_at, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (idempotency_key) DO NOTHING`,
+			o.Key, o.OrgID, o.RuleID, o.RuleVersion, o.DeviceID, o.Transition, o.ActionType, o.Target, []byte(o.Payload), status,
 			o.NextAttempt, o.CreatedAt); err != nil {
 			return err
 		}

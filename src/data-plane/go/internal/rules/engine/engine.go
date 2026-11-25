@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -75,7 +77,11 @@ type Config struct {
 	TimerLease   time.Duration // how long a claimed timer is hidden from other workers
 	TimerBatch   int           // timers claimed per scheduler pass
 	TimerEvery   time.Duration // scheduler pass interval
-	Limits       dsl.Limits
+	TimerWorkers int           // timers evaluated at once
+	// NotifyWait holds notifications back this long, so the dispatcher can put devices
+	// that change together into one message. 0 sends at once.
+	NotifyWait time.Duration
+	Limits     dsl.Limits
 }
 
 func (c *Config) defaults() {
@@ -99,6 +105,9 @@ func (c *Config) defaults() {
 	}
 	if c.TimerEvery <= 0 {
 		c.TimerEvery = time.Second
+	}
+	if c.TimerWorkers <= 0 {
+		c.TimerWorkers = 16
 	}
 	if c.Limits.MaxNodes == 0 {
 		c.Limits = dsl.DefaultLimits()
@@ -150,7 +159,7 @@ func (e *Engine) Apply(rs *RuleSet) *RuleSet {
 	e.metrics.RuleLoadErrors.Set(float64(len(rs.Errors)))
 	e.metrics.SnapshotAge.Set(float64(e.clock.Now().Unix()))
 	for _, re := range rs.Errors {
-		e.log.Warn("rule refused", "rule_id", re.RuleID, "error", re.Error)
+		e.log.Warn("rule refused", "rule_id", logSafe(re.RuleID), "error", logSafe(re.Error))
 	}
 	return old
 }
@@ -188,7 +197,8 @@ func (e *Engine) Handle(ctx context.Context, ev *eval.Event) error {
 			return err
 		}
 		e.metrics.StateErrors.WithLabelValues("commit").Inc()
-		e.log.Error("rule evaluation not committed", "organization_id", ev.OrgID, "device_id", ev.DeviceID, "event_id", ev.ID, "error", err)
+		e.log.Error("rule evaluation not committed", "organization_id", logSafe(ev.OrgID), "device_id", logSafe(ev.DeviceID),
+			"event_id", logSafe(ev.ID), "error", logSafe(err.Error()))
 		return err
 	}
 	e.metrics.EventsEvaluated.Inc()
@@ -207,7 +217,8 @@ func (e *Engine) candidates(rs *RuleSet, ev *eval.Event) (*Device, []*Rule) {
 	if dev.OrganizationID != ev.OrgID {
 		// Never evaluate an event against another tenant's rules.
 		e.metrics.EventsDropped.WithLabelValues("organization_mismatch").Inc()
-		e.log.Warn("event organization does not own the device", "organization_id", ev.OrgID, "device_id", ev.DeviceID, "event_id", ev.ID)
+		e.log.Warn("event organization does not own the device", "organization_id", logSafe(ev.OrgID),
+			"device_id", logSafe(ev.DeviceID), "event_id", logSafe(ev.ID))
 		return nil, nil
 	}
 	cands := rs.Candidates(dev, ev.Stream)
@@ -327,6 +338,16 @@ func (e *Engine) reconcileVersion(st *state.RuleState, r *Rule, now time.Time) [
 	return out
 }
 
+// merged is old with the newer readings over it; neither map is changed.
+func merged(old, newer map[string]float64) map[string]float64 {
+	if len(old) == 0 {
+		return newer
+	}
+	out := maps.Clone(old)
+	maps.Copy(out, newer)
+	return out
+}
+
 // advance runs the alert state machine for one evaluation.
 func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time.Time, ev *eval.Event, ooo bool) []Transition {
 	var ts []Transition
@@ -335,10 +356,15 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 		eventID = ev.ID
 	}
 	fire := func() {
+		values := out.Values
+		if ev == nil && st.Phase == state.PhasePending {
+			// A timer carries no readings; the ones that kept the rule pending caused this.
+			values = merged(st.LastValues, out.Values)
+		}
 		st.Episode++
 		st.Phase, st.PhaseSince, st.ActiveAlerts = state.PhaseFiring, now, 1
-		st.LastValues = out.Values
-		ts = append(ts, Transition{Kind: TransitionFiring, Episode: st.Episode, At: now, EventID: eventID, Values: out.Values})
+		st.LastValues = values
+		ts = append(ts, Transition{Kind: TransitionFiring, Episode: st.Episode, At: now, EventID: eventID, Values: values})
 	}
 	if st.Phase == state.PhaseCooldown && !now.Before(st.CooldownUntil) {
 		st.Phase, st.PhaseSince, st.CooldownUntil = state.PhaseNormal, now, time.Time{}
@@ -349,12 +375,15 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 			fire()
 		} else if out.Pending {
 			st.Phase, st.PhaseSince = state.PhasePending, now
+			st.LastValues = out.Values
 		}
 	case state.PhasePending:
 		if out.Fire {
 			fire()
 		} else if !out.Pending {
 			st.Phase, st.PhaseSince = state.PhaseNormal, now
+		} else if ev != nil && !ooo {
+			st.LastValues = merged(st.LastValues, out.Values)
 		}
 	case state.PhaseFiring:
 		resolve := !out.Fire
@@ -362,6 +391,7 @@ func (e *Engine) advance(st *state.RuleState, r *Rule, out eval.Output, now time
 			resolve = *out.Resolve && !out.Fire
 		}
 		if resolve {
+			st.LastValues = merged(st.LastValues, out.Values)
 			ts = append(ts, Transition{Kind: TransitionResolved, Reason: ReasonCleared, Episode: st.Episode, At: now, EventID: eventID, Values: out.Values})
 			st.ActiveAlerts = 0
 			if cd := r.Def.Cooldown.D(); cd > 0 {
@@ -445,10 +475,14 @@ func (e *Engine) enqueue(b *state.Batch, ts []pending) {
 			}
 			payload, _ := json.Marshal(ActionPayload{RuleID: p.rule.ID, RuleVersion: p.rule.Version, RuleName: p.rule.Def.Name,
 				OrganizationID: p.st.OrgID, DeviceID: p.st.DeviceID, Severity: sev, Transition: p.t, Action: a})
+			next := p.t.At
+			if a.Type == dsl.ActionNotification {
+				next = next.Add(e.cfg.NotifyWait)
+			}
 			b.Outbox = append(b.Outbox, state.OutboxItem{Key: IdempotencyKey(p.rule.ID, p.st.DeviceID, p.t, i),
 				OrgID: p.st.OrgID, RuleID: p.rule.ID, RuleVersion: p.rule.Version, DeviceID: p.st.DeviceID,
-				Transition: p.t.Kind, ActionType: a.Type, Payload: payload, Status: state.OutboxPending,
-				NextAttempt: p.t.At, CreatedAt: e.clock.Now()})
+				Transition: p.t.Kind, ActionType: a.Type, Target: a.IntegrationID, Payload: payload, Status: state.OutboxPending,
+				NextAttempt: next, CreatedAt: e.clock.Now()})
 		}
 	}
 }
@@ -468,10 +502,16 @@ func (e *Engine) afterCommit(ts []pending) {
 				e.metrics.ActionsQueued.WithLabelValues(a.Type).Inc()
 			}
 		}
-		e.log.Info("alert transition", "organization_id", p.st.OrgID, "device_id", p.st.DeviceID, "rule_id", p.rule.ID,
-			"rule_version", p.rule.Version, "transition", p.t.Kind, "reason", p.t.Reason, "episode", p.t.Episode, "event_id", p.t.EventID)
+		e.log.Info("alert transition", "organization_id", logSafe(p.st.OrgID), "device_id", logSafe(p.st.DeviceID),
+			"rule_id", logSafe(p.rule.ID), "rule_version", p.rule.Version, "transition", p.t.Kind, "reason", p.t.Reason,
+			"episode", p.t.Episode, "event_id", logSafe(p.t.EventID))
 	}
 	e.metrics.ActiveAlerts.Set(float64(e.counted.len()))
+}
+
+// logSafe keeps a value that came from outside on one log line.
+func logSafe(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", " ")
 }
 
 func contains(list []string, s string) bool {

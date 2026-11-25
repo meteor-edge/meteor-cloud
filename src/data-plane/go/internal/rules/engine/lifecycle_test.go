@@ -68,3 +68,18 @@ func TestAbsenceCoversDevicesAddedAfterTheRule(t *testing.T) {
 	h.advance(6 * time.Minute)
 	h.expect(tr{"dev-new", "firing", ""})
 }
+
+// A rule that must hold for a while usually fires from its timer: the alert still says
+// which readings caused it, and the newest ones.
+func TestTimerFiringCarriesTheReadings(t *testing.T) {
+	h := newHarness(t, rule("r", "org-1", `{"schema_version":1,"name":"hot","scope":{"type":"organization"},"condition":{"type":"duration","duration":"2m","condition":{"type":"any","conditions":[{"type":"comparison","field":"cpu","operator":"gt","value":80},{"type":"comparison","field":"mem","operator":"gt","value":80}]}}}`))
+	h.send("dev-a", 0, `{"cpu":90}`)
+	h.send("dev-a", time.Minute, `{"cpu":95}`)
+	h.send("dev-a", time.Minute+time.Second, `{"mem":10}`)
+	h.advance(2 * time.Minute)
+	h.expect(tr{"dev-a", "firing", ""})
+	st, _ := h.store.LoadStates(context.Background(), "dev-a", []string{"r"})
+	if v := st["r"].LastValues; v["cpu"] != 95 || v["mem"] != 10 {
+		t.Fatalf("readings %v", v)
+	}
+}

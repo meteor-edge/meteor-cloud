@@ -151,6 +151,7 @@ type OutboxItem struct {
 	DeviceID    string          `json:"device_id"`
 	Transition  string          `json:"transition"`
 	ActionType  string          `json:"action_type"`
+	Target      string          `json:"target,omitempty"` // what the action is sent to; order is kept per target
 	Payload     json.RawMessage `json:"payload"`
 	Status      string          `json:"status"`
 	Attempts    int             `json:"attempts"`

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"meteorcloud/dataplane/internal/rules/dispatch"
 	"meteorcloud/dataplane/internal/rules/dsl"
 	"meteorcloud/dataplane/internal/rules/engine"
 	"meteorcloud/dataplane/internal/rules/eval"
@@ -139,5 +140,47 @@ func TestInternalAPI(t *testing.T) {
 	}
 	if code, body := call("GET", "/internal/rules/status/r1", "tok", ""); code != 200 || body != "{\"devices\":[]}\n" {
 		t.Fatalf("status %d %s", code, body)
+	}
+}
+
+// A test message names an integration; the request cannot say where it goes.
+func TestTestDeliveryUsesTheControlPlanesAnswer(t *testing.T) {
+	hit := make(chan string, 1)
+	hook := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { hit <- r.URL.Path }))
+	defer hook.Close()
+	cp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if r.URL.Path != "/internal/rules/test-deliveries" || r.Header.Get("X-Data-Plane-Internal-Token") != "tok" || req["integration_id"] != "i1" {
+			http.Error(w, "no", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"kind": "webhook", "url": hook.URL + "/right", "organization_id": "o1"})
+	}))
+	defer cp.Close()
+	e := engine.New(engine.Config{}, state.NewMemory(), nil, nil, nil)
+	defer e.Close()
+	sender := &dispatch.WebhookSender{Client: dispatch.NewWebhookClient(true),
+		Resolver: &dispatch.ControlPlaneResolver{CP: &dispatch.ControlPlane{URL: cp.URL, Token: "tok"}}}
+	srv := httptest.NewServer((&API{Engine: e, Token: "tok", Limits: dsl.DefaultLimits(), Sender: sender}).Handler())
+	defer srv.Close()
+	post := func(body string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/internal/rules/test-delivery", strings.NewReader(body))
+		req.Header.Set("X-Data-Plane-Internal-Token", "tok")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post(`{"organization_id":"o1","integration_id":"i1","delivery":{"kind":"webhook","url":"` + hook.URL + `/wrong"}}`); code != 200 {
+		t.Fatal(code)
+	}
+	if got := <-hit; got != "/right" {
+		t.Fatal(got)
+	}
+	if code := post(`{"organization_id":"o1","integration_id":"other"}`); code != http.StatusBadGateway {
+		t.Fatal(code)
 	}
 }

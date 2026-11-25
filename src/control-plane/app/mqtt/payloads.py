@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from typing import Any
 
 _STATUS_VALUES = frozenset({"online", "offline"})
 _PERCENT_KEYS = ("cpu_percent", "memory_percent", "disk_percent")
+# Other readings (load, network, per-application) are kept as sent, so people can find
+# and filter on every metric a rule can use. Bounded: a device cannot grow its row.
+METRIC_NAME = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){0,7}\Z")
+_MAX_EXTRA = 200
 _TEMP_MIN = -40.0
 _TEMP_MAX = 150.0
 
@@ -50,6 +56,17 @@ def parse_metrics_payload(payload: str) -> dict[str, Any] | None:
             snapshot["temperature_c"] = parsed
     if not any(key in snapshot for key in (*_PERCENT_KEYS, "temperature_c", "timestamp")):
         return None
+    extra = 0
+    for key, raw in data.items():
+        if key in (*_PERCENT_KEYS, "temperature_c", "timestamp") or len(key) > 128 or not METRIC_NAME.match(key):
+            continue
+        value = _optional_float(raw)
+        if value is None:
+            continue
+        snapshot[key] = value
+        extra += 1
+        if extra >= _MAX_EXTRA:
+            break
     return snapshot
 
 
@@ -64,5 +81,9 @@ def _optional_float(value: object) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        try:
+            parsed = float(value)
+        except OverflowError:
+            return None
+        return parsed if math.isfinite(parsed) else None
     return None
