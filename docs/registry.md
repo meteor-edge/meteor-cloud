@@ -38,7 +38,7 @@ Then **Images → my-app → Run**, choose a device, turn on **Public URL**, and
 - `push LOCAL NAME:TAG` pushes under another name; `meteorcli pull my-app:1.0` pulls; `logout` forgets
   the sign-in (revoke the token in the console to end it). `--registry` picks one of several sign-ins.
 - CI: set `METEORCLI_REGISTRY_TOKEN` to a robot token instead of pasting.
-- The token is kept in `~/.config/meteorcli/registry.json` (0600). Push and pull use a private copy of
+- The token is kept in `~/.config/meteorcli/registry.json` (0600) and not shown while you paste it. Push and pull use a private copy of
   your Docker settings, so `~/.docker/config.json` is not changed.
 - For plain `docker push` and `docker compose`, use the credential helper: link
   `docker-credential-meteorcli` to `meteorcli` on your `PATH` and add

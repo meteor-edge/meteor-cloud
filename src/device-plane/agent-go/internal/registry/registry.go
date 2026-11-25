@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,14 +38,19 @@ type Account struct {
 }
 
 // Image returns the full name of path ("web:1.0") in the account's namespace.
-// A name that is full already is checked against it.
+// A name that is full already must be in that namespace: like Docker, a first
+// part with a dot (or "localhost") is a registry host.
 func (a Account) Image(path string) (string, error) {
 	prefix := a.Host + "/" + a.Namespace + "/"
-	path = strings.TrimPrefix(path, prefix)
-	if !pathRe.MatchString(path) {
+	name, full := strings.CutPrefix(path, prefix)
+	if !pathRe.MatchString(name) {
 		return "", fmt.Errorf("%q is not an image name such as web:1.0", path)
 	}
-	return prefix + path, nil
+	first, _, nested := strings.Cut(name, "/")
+	if !full && nested && (strings.Contains(first, ".") || first == "localhost" || first == a.Host) {
+		return "", fmt.Errorf("%q is not in %s", path, strings.TrimSuffix(prefix, "/"))
+	}
+	return prefix + name, nil
 }
 
 // insecure reports whether host is this machine, where plain HTTP is fine.
@@ -119,106 +123,6 @@ func SignIn(ctx context.Context, host, token string) (Account, error) {
 	return a, nil
 }
 
-// Store keeps accounts in one private file, the newest sign-in first.
-type Store struct{ Path string }
-
-// UserStore is the store of the user running the command.
-func UserStore() (Store, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return Store{}, err
-	}
-	return Store{Path: filepath.Join(dir, "meteorcli", "registry.json")}, nil
-}
-
-// List returns the accounts, none when nobody signed in.
-func (s Store) List() ([]Account, error) {
-	data, err := os.ReadFile(s.Path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var all []Account
-	if err := json.Unmarshal(data, &all); err != nil {
-		return nil, fmt.Errorf("%s: %w", s.Path, err)
-	}
-	return all, nil
-}
-
-// Get returns the account of host, or the newest one for "".
-func (s Store) Get(host string) (Account, error) {
-	all, err := s.List()
-	if err != nil {
-		return Account{}, err
-	}
-	for _, a := range all {
-		if host == "" || a.Host == host {
-			return a, nil
-		}
-	}
-	return Account{}, errors.New("not signed in; run 'meteorcli login registry.example.com'")
-}
-
-// Put adds or replaces an account.
-func (s Store) Put(a Account) error {
-	all, err := s.without(a.Host)
-	if err != nil {
-		return err
-	}
-	return s.write(append([]Account{a}, all...))
-}
-
-// Remove forgets host.
-func (s Store) Remove(host string) error {
-	all, err := s.without(host)
-	if err != nil {
-		return err
-	}
-	return s.write(all)
-}
-
-func (s Store) without(host string) ([]Account, error) {
-	all, err := s.List()
-	if err != nil {
-		return nil, err
-	}
-	var kept []Account
-	for _, a := range all {
-		if a.Host != host {
-			kept = append(kept, a)
-		}
-	}
-	return kept, nil
-}
-
-func (s Store) write(all []Account) error {
-	if all == nil {
-		all = []Account{}
-	}
-	data, err := json.MarshalIndent(all, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(s.Path), ".registry-*") // 0600
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), s.Path)
-}
-
 // Docker runs the docker CLI signed in as Account, through a private copy of
 // the user's Docker settings that is removed afterwards. Run executes docker.
 type Docker struct {
@@ -257,6 +161,9 @@ func (d Docker) signedIn(ctx context.Context, args ...string) error {
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return fmt.Errorf("%s: %w", filepath.Join(d.ConfigDir, "config.json"), err)
 		}
+	}
+	if settings == nil { // the file says null
+		settings = map[string]any{}
 	}
 	delete(settings, "credsStore")
 	delete(settings, "credHelpers")
