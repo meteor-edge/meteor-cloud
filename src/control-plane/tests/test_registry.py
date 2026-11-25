@@ -298,3 +298,10 @@ def test_distribution_s3_config(endpoint: str, public: str, redirect_disabled: b
     assert storage["s3"]["rootdirectory"] == "/registry"
     assert ("regionendpoint" in storage["s3"]) == bool(endpoint)
     assert storage["redirect"]["disable"] is redirect_disabled
+
+
+@pytest.mark.parametrize("header", ["Basic", "Basic !!", "Basic /w==", "Bearer x", "Basic bWU6"])
+def test_malformed_sign_in(registry: TestClient, db_session: Session, header: str) -> None:
+    _setup(registry, db_session)
+    answer = registry.get("/api/v1/registry/token", params={"service": HOST}, headers={"Authorization": header})
+    assert answer.status_code == 401
