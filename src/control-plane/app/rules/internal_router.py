@@ -14,6 +14,7 @@ from app.rules.schemas import (
     CommandResult,
     DeliveryRequest,
     DeliveryResponse,
+    DeliveryTestRequest,
     EngineAction,
     RulesSnapshot,
 )
@@ -51,6 +52,12 @@ def alert_transitions(service: RuleSvc, payload: AlertTransitionBatch) -> AlertT
 def delivery(service: RuleSvc, payload: DeliveryRequest) -> DeliveryResponse:
     """URL, kind and secret of an integration for one webhook, and whether a silence holds it."""
     return service.delivery(payload)
+
+
+@router.post("/test-deliveries", response_model=DeliveryResponse)
+def test_delivery(service: RuleSvc, payload: DeliveryTestRequest) -> DeliveryResponse:
+    """The same for a test message of an integration (no rule, no silence)."""
+    return service.test_delivery(payload)
 
 
 @router.post("/commands", response_model=CommandResult)

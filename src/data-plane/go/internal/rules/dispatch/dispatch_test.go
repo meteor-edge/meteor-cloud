@@ -184,7 +184,9 @@ func TestBlockedAddresses(t *testing.T) {
 		blocked bool
 	}{{"127.0.0.1", true}, {"10.1.2.3", true}, {"192.168.1.1", true}, {"169.254.169.254", true}, {"100.64.0.1", true},
 		{"::1", true}, {"fd00::1", true}, {"fe80::1", true}, {"::ffff:10.0.0.1", true}, {"0.0.0.0", true},
-		{"93.184.216.34", false}, {"2606:4700::1111", false}} {
+		{"0.1.2.3", true}, {"198.18.0.1", true}, {"255.255.255.255", true}, {"64:ff9b::a9fe:a9fe", true},
+		{"2002:a00:1::", true}, {"::127.0.0.1", true}, {"fe80::1%eth0", true}, {"2001::1", true},
+		{"93.184.216.34", false}, {"2001:4860:4860::8888", false}, {"2606:4700::1111", false}} {
 		if got := blocked(mustAddr(tc.ip)); got != tc.blocked {
 			t.Errorf("%s blocked=%v", tc.ip, got)
 		}

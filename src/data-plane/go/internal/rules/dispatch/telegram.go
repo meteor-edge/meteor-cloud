@@ -58,5 +58,5 @@ func (t *Telegram) Send(ctx context.Context, token, chat, text string) error {
 		return fmt.Errorf("telegram: %w", err)
 	}
 	defer resp.Body.Close()
-	return statusError("telegram", resp)
+	return statusError("telegram", resp, true)
 }

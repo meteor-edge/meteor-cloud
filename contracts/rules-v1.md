@@ -150,7 +150,7 @@ How each is delivered (`internal/rules/dispatch`):
   loopback and link-local addresses are refused, redirects are not followed, and an
   active silence skips the delivery.
 - `command` sends `reboot` or `shutdown` (the only commands rules accept in v1) as a
-  device action, as the rule's author and with their current permission
+  device action, as the author of the rule version that fired and with their current permission
   (`device.reboot`) and device-group scope. An author who lost it gets the action
   dead-lettered, never sent.
 - `platform_event` is written to the organization's audit log as `rule.event`.

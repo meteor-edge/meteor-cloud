@@ -150,7 +150,11 @@ func message(from *mail.Address, to []string, subject, body, key string) []byte 
 	var b bytes.Buffer
 	header := func(k, v string) { fmt.Fprintf(&b, "%s: %s\r\n", k, v) }
 	header("From", from.String())
-	header("To", strings.Join(to, ", "))
+	list := make([]string, len(to))
+	for i, a := range to { // quoted where needed, so one recipient never reads as two
+		list[i] = strings.Trim((&mail.Address{Address: a}).String(), "<>")
+	}
+	header("To", strings.Join(list, ", "))
 	header("Subject", mime.QEncoding.Encode("utf-8", oneLine(subject)))
 	header("Date", time.Now().UTC().Format(time.RFC1123Z))
 	header("Message-ID", "<"+hex.EncodeToString(sum[:16])+"@"+domain+">")

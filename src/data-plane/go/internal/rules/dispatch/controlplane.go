@@ -43,7 +43,7 @@ func (c *ControlPlane) Post(ctx context.Context, path string, body, out any) err
 		return err
 	}
 	defer resp.Body.Close()
-	if err := statusError("control plane "+path, resp); err != nil {
+	if err := statusError("control plane "+path, resp, true); err != nil {
 		return err
 	}
 	if out == nil {
@@ -56,12 +56,16 @@ func (c *ControlPlane) Post(ctx context.Context, path string, body, out any) err
 	return nil
 }
 
-func statusError(what string, resp *http.Response) error {
+// statusError is nil for a 2xx answer. withBody adds the start of the answer.
+func statusError(what string, resp *http.Response, withBody bool) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
-	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	err := fmt.Errorf("%s answered HTTP %d: %s", what, resp.StatusCode, strings.TrimSpace(string(snippet)))
+	err := fmt.Errorf("%s answered HTTP %d", what, resp.StatusCode)
+	if withBody {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		err = fmt.Errorf("%w: %s", err, oneLine(string(snippet)))
+	}
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout &&
 		resp.StatusCode != http.StatusTooManyRequests {
 		return Permanent(err)

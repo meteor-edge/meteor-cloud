@@ -45,7 +45,8 @@ func (e *Engine) FireDue(ctx context.Context) (int, error) {
 		_ = inParallel(e.cfg.TimerWorkers, due, func(t state.Timer) error {
 			if err := e.Tick(ctx, t); err != nil {
 				// The lease expires and another pass retries it.
-				e.log.Error("timer evaluation failed", "organization_id", t.OrgID, "device_id", t.DeviceID, "rule_id", t.RuleID, "error", err)
+				e.log.Error("timer evaluation failed", "organization_id", logSafe(t.OrgID), "device_id", logSafe(t.DeviceID),
+					"rule_id", logSafe(t.RuleID), "error", logSafe(err.Error()))
 			}
 			return nil
 		})

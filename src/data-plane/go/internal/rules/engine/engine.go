@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -158,7 +159,7 @@ func (e *Engine) Apply(rs *RuleSet) *RuleSet {
 	e.metrics.RuleLoadErrors.Set(float64(len(rs.Errors)))
 	e.metrics.SnapshotAge.Set(float64(e.clock.Now().Unix()))
 	for _, re := range rs.Errors {
-		e.log.Warn("rule refused", "rule_id", re.RuleID, "error", re.Error)
+		e.log.Warn("rule refused", "rule_id", logSafe(re.RuleID), "error", logSafe(re.Error))
 	}
 	return old
 }
@@ -196,7 +197,8 @@ func (e *Engine) Handle(ctx context.Context, ev *eval.Event) error {
 			return err
 		}
 		e.metrics.StateErrors.WithLabelValues("commit").Inc()
-		e.log.Error("rule evaluation not committed", "organization_id", ev.OrgID, "device_id", ev.DeviceID, "event_id", ev.ID, "error", err)
+		e.log.Error("rule evaluation not committed", "organization_id", logSafe(ev.OrgID), "device_id", logSafe(ev.DeviceID),
+			"event_id", logSafe(ev.ID), "error", logSafe(err.Error()))
 		return err
 	}
 	e.metrics.EventsEvaluated.Inc()
@@ -215,7 +217,8 @@ func (e *Engine) candidates(rs *RuleSet, ev *eval.Event) (*Device, []*Rule) {
 	if dev.OrganizationID != ev.OrgID {
 		// Never evaluate an event against another tenant's rules.
 		e.metrics.EventsDropped.WithLabelValues("organization_mismatch").Inc()
-		e.log.Warn("event organization does not own the device", "organization_id", ev.OrgID, "device_id", ev.DeviceID, "event_id", ev.ID)
+		e.log.Warn("event organization does not own the device", "organization_id", logSafe(ev.OrgID),
+			"device_id", logSafe(ev.DeviceID), "event_id", logSafe(ev.ID))
 		return nil, nil
 	}
 	cands := rs.Candidates(dev, ev.Stream)
@@ -499,10 +502,16 @@ func (e *Engine) afterCommit(ts []pending) {
 				e.metrics.ActionsQueued.WithLabelValues(a.Type).Inc()
 			}
 		}
-		e.log.Info("alert transition", "organization_id", p.st.OrgID, "device_id", p.st.DeviceID, "rule_id", p.rule.ID,
-			"rule_version", p.rule.Version, "transition", p.t.Kind, "reason", p.t.Reason, "episode", p.t.Episode, "event_id", p.t.EventID)
+		e.log.Info("alert transition", "organization_id", logSafe(p.st.OrgID), "device_id", logSafe(p.st.DeviceID),
+			"rule_id", logSafe(p.rule.ID), "rule_version", p.rule.Version, "transition", p.t.Kind, "reason", p.t.Reason,
+			"episode", p.t.Episode, "event_id", logSafe(p.t.EventID))
 	}
 	e.metrics.ActiveAlerts.Set(float64(e.counted.len()))
+}
+
+// logSafe keeps a value that came from outside on one log line.
+func logSafe(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", " ")
 }
 
 func contains(list []string, s string) bool {

@@ -181,7 +181,10 @@ class NotificationIntegration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     kind: Mapped[str] = mapped_column(String(16), nullable=False)  # webhook | slack | email | telegram
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    url: Mapped[str] = mapped_column(String(2048), nullable=False)  # "" for email and telegram
+    # What anyone may see: scheme and host ("" for email and telegram). The complete URL may
+    # be a posting credential (Slack) and is sealed.
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    url_sealed: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     # AES-GCM sealed (app.core.secretbox); never returned by the API.

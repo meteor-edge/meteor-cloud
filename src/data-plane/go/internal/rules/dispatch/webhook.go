@@ -44,6 +44,7 @@ type Delivery struct {
 	} `json:"config"`
 	DeviceName       string `json:"device_name"`
 	OrganizationName string `json:"organization_name"`
+	OrganizationID   string `json:"organization_id"`
 	Link             string `json:"-"` // console page, set by the sender
 	// Group lists the devices of a message that covers several; empty for one device.
 	Group []string `json:"-"`
@@ -64,6 +65,19 @@ func (r *ControlPlaneResolver) Resolve(ctx context.Context, item state.OutboxIte
 		"integration_id": p.Action.IntegrationID, "organization_id": item.OrgID, "rule_id": item.RuleID,
 		"device_id": item.DeviceID, "at": p.Transition.At,
 	}, &d)
+	return &d, err
+}
+
+// TestResolver looks up an integration for a test message.
+type TestResolver interface {
+	ResolveTest(ctx context.Context, organizationID, integrationID string) (*Delivery, error)
+}
+
+// ResolveTest asks POST /internal/rules/test-deliveries.
+func (r *ControlPlaneResolver) ResolveTest(ctx context.Context, organizationID, integrationID string) (*Delivery, error) {
+	var d Delivery
+	err := r.CP.Post(ctx, "/internal/rules/test-deliveries", map[string]any{
+		"integration_id": integrationID, "organization_id": organizationID}, &d)
 	return &d, err
 }
 
@@ -107,12 +121,28 @@ func NewWebhookClient(allowPrivate bool) *http.Client {
 	}
 }
 
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+// notPublic is what the netip predicates below do not cover: ranges that are not on the
+// internet, and IPv6 ranges that carry an IPv4 address a gateway would unwrap.
+var notPublic = func() (out []netip.Prefix) {
+	for _, p := range []string{
+		"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24",
+		"203.0.113.0/24", "240.0.0.0/4",
+		"::/96", "64:ff9b::/96", "64:ff9b:1::/48", "100::/64", "2001::/32", "2001:db8::/32", "2002::/16", "fec0::/10",
+	} {
+		out = append(out, netip.MustParsePrefix(p))
+	}
+	return out
+}()
 
 func blocked(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() || cgnat.Contains(ip)
+	ip = ip.Unmap().WithZone("")
+	for _, p := range notPublic {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return !ip.IsValid() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }
 
 func (s *WebhookSender) Send(ctx context.Context, item state.OutboxItem, p *engine.ActionPayload) (Outcome, error) {
@@ -173,7 +203,7 @@ func (s *WebhookSender) Deliver(ctx context.Context, d *Delivery, item state.Out
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
-		return "", Permanent(err)
+		return "", Permanent(errors.New("integration URL is not valid"))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "MeteorCloud-Rules/1")
@@ -188,6 +218,12 @@ func (s *WebhookSender) Deliver(ctx context.Context, d *Delivery, item state.Out
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		// The URL may be a credential (Slack), and url.Error prints it: keep only the cause,
+		// because errors are logged and stored.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = fmt.Errorf("webhook: %w", ue.Err)
+		}
 		var opErr *net.OpError
 		if errors.As(err, &opErr) && strings.Contains(err.Error(), "is not public") {
 			return "", Permanent(err)
@@ -199,7 +235,8 @@ func (s *WebhookSender) Deliver(ctx context.Context, d *Delivery, item state.Out
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		return "", Permanent(fmt.Errorf("webhook answered HTTP %d; redirects are not followed", resp.StatusCode))
 	}
-	if err := statusError("webhook", resp); err != nil {
+	// Without the answer's body: it belongs to the receiver and errors are shown and stored.
+	if err := statusError("webhook", resp, false); err != nil {
 		return "", err
 	}
 	return Delivered, nil

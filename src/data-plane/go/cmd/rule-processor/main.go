@@ -74,6 +74,18 @@ func loadSMTP(e *natsjs.Env) *dispatch.SMTP {
 		From: e.String("RULES_SMTP_FROM", ""), TLS: e.String("RULES_SMTP_TLS", "starttls")}
 }
 
+// maxConns bounds the pool size to what PostgreSQL could ever accept.
+func maxConns(n int) int32 {
+	const most = 10000
+	if n < 1 {
+		return 1
+	}
+	if n > most {
+		return most
+	}
+	return int32(n)
+}
+
 func loadEngineConfig(e *natsjs.Env) engineConfig {
 	groupWait := e.Duration("RULES_NOTIFY_GROUP_WAIT", 10*time.Second)
 	return engineConfig{
@@ -81,7 +93,7 @@ func loadEngineConfig(e *natsjs.Env) engineConfig {
 		telegramAPI:   e.String("RULES_TELEGRAM_API_URL", dispatch.TelegramAPI),
 		smtp:          loadSMTP(e),
 		databaseURL:   e.String("RULES_DATABASE_URL", ""),
-		maxConns:      int32(e.Int("RULES_DATABASE_MAX_CONNS", 20)),
+		maxConns:      maxConns(e.Int("RULES_DATABASE_MAX_CONNS", 20)),
 		controlPlane:  e.String("CONTROL_PLANE_URL", ""),
 		token:         e.Secret("DATA_PLANE_INTERNAL_TOKEN"),
 		snapshotEvery: e.Duration("RULES_SNAPSHOT_INTERVAL", 15*time.Second),

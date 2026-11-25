@@ -113,28 +113,38 @@ func (a *API) engineInfo(w http.ResponseWriter, _ *http.Request) {
 }
 
 // testDelivery sends one sample alert to an integration, now and without retries, and
-// answers whether it arrived. The control plane has already checked who may do this.
+// answers whether it arrived. The request only names the integration: where it goes and
+// its secret come from the control plane, which has already checked who may do this.
 func (a *API) testDelivery(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		OrganizationID string            `json:"organization_id"`
-		Delivery       dispatch.Delivery `json:"delivery"`
+		OrganizationID string `json:"organization_id"`
+		IntegrationID  string `json:"integration_id"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
-	if a.Sender == nil {
+	var resolver dispatch.TestResolver
+	if a.Sender != nil {
+		resolver, _ = a.Sender.Resolver.(dispatch.TestResolver)
+	}
+	if resolver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "this rule processor does not deliver notifications"})
 		return
 	}
-	now := time.Now().UTC()
-	key := "test:" + req.OrganizationID + ":" + strconv.FormatInt(now.UnixNano(), 36)
-	p := &engine.ActionPayload{RuleName: "Test notification", OrganizationID: req.OrganizationID, DeviceID: "example",
-		Severity: dsl.SeverityInfo, Transition: engine.Transition{Kind: engine.TransitionFiring, At: now,
-			Values: map[string]float64{"cpu_percent": 92.5}}}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	if _, err := a.Sender.Deliver(ctx, &req.Delivery, state.OutboxItem{Key: key}, p); err != nil {
+	d, err := resolver.ResolveTest(ctx, req.OrganizationID, req.IntegrationID)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "the control plane did not answer for this integration"})
+		return
+	}
+	now := time.Now().UTC()
+	key := "test:" + d.OrganizationID + ":" + strconv.FormatInt(now.UnixNano(), 36)
+	p := &engine.ActionPayload{RuleName: "Test notification", OrganizationID: d.OrganizationID, DeviceID: "example",
+		Severity: dsl.SeverityInfo, Transition: engine.Transition{Kind: engine.TransitionFiring, At: now,
+			Values: map[string]float64{"cpu_percent": 92.5}}}
+	if _, err := a.Sender.Deliver(ctx, d, state.OutboxItem{Key: key}, p); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"delivered": false, "error": err.Error()})
 		return
 	}

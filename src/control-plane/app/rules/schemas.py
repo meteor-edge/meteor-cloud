@@ -415,7 +415,13 @@ class DeliveryDeviceState(BaseModel):
     silenced: bool
 
 
+class DeliveryTestRequest(BaseModel):
+    integration_id: uuid.UUID
+    organization_id: uuid.UUID
+
+
 class DeliveryResponse(BaseModel):
+    organization_id: uuid.UUID
     url: str
     kind: str
     secret: str

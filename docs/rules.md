@@ -114,6 +114,11 @@ admin or owner role, and acknowledging or silencing also works for operators.
 - **Commands.** Rules can send `reboot` and `shutdown`. Saving such a rule needs
   `device.reboot`, and every delivery re-checks that the author still has it for that
   device (including device-group scope).
+- **Members limited to device groups** manage only rules whose scope is one of their
+  groups or devices in them, and preview, acknowledge and silence only their devices. A
+  silence without a device needs organization-wide access.
+- **Duplicates.** The engine remembers the last 64 event ids per device. An event that is
+  redelivered after more than 64 newer ones of the same device can count twice.
 - **Acknowledged and silenced** are states of the alert record. They never change what
   the engine evaluates. A silence holds notifications; the alert is still recorded.
 
@@ -162,7 +167,9 @@ Both need the `X-Data-Plane-Internal-Token` header (`DATA_PLANE_INTERNAL_TOKEN`)
   device, or another tenant's), with `alert_id` and `silenced`.
 - `POST /internal/rules/deliveries`: URL, kind, settings and secret of an integration for one
   webhook, only for the integration's own organization, and whether a silence holds it.
-- `POST /internal/rules/commands`: send a rule's `reboot` or `shutdown` as its author
+- `POST /internal/rules/test-deliveries`: the same for a test message of an integration
+  (no rule, no silence). The engine's test route only takes the integration's id.
+- `POST /internal/rules/commands`: send a rule's `reboot` or `shutdown` as the author of that rule version
   (403 when the author lost `device.reboot` for that device).
 - `POST /internal/rules/platform-events`: record a `rule.event` audit row (once per key).
 

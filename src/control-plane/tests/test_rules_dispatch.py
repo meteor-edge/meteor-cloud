@@ -55,6 +55,7 @@ def test_delivery_returns_integration_secret_and_silence(client: TestClient, db_
     got = client.post("/internal/rules/deliveries", headers=INTERNAL, json=body)
     assert got.status_code == 200, got.text
     assert got.json() == {
+        "organization_id": str(org.id),
         "url": "https://hooks.example.com/a",
         "kind": "webhook",
         "secret": "x" * 20,

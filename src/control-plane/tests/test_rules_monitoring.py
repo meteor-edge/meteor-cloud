@@ -276,7 +276,14 @@ def test_email_and_telegram_channels(client: TestClient, db_session: Session, fa
 
     tested = client.post(f"{path}/test", headers=headers)
     assert tested.json() == {"delivered": True, "error": None}
-    assert fake_engine.sent[0]["delivery"]["secret"] == TOKEN and fake_engine.sent[0]["organization_id"] == str(org.id)
+    # The engine is told which integration, and asks for the rest with the internal token.
+    request = {"organization_id": str(org.id), "integration_id": path.rsplit("/", 1)[1]}
+    assert fake_engine.sent[0] == request
+    got = client.post("/internal/rules/test-deliveries", headers=INTERNAL, json=request).json()
+    assert got["secret"] == TOKEN and got["enabled"] is True and got["organization_id"] == str(org.id)
+    assert client.post("/internal/rules/test-deliveries", json=request).status_code == 401
+    other = request | {"organization_id": str(uuid.uuid4())}
+    assert client.post("/internal/rules/test-deliveries", headers=INTERNAL, json=other).status_code == 404
     fake_engine.result = {"delivered": False, "error": "chat not found"}
     assert client.post(f"{path}/test", headers=headers).json() == {"delivered": False, "error": "chat not found"}
     outcomes = db_session.scalars(
