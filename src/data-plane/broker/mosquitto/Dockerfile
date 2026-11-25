@@ -3,7 +3,7 @@
 #
 # Mosquitto comes from Debian (EPL-2.0 / EDL-1.0, security updates from Debian).
 # The plugin is our own Go code with no third-party modules.
-FROM golang:1.24-trixie AS plugin
+FROM golang:1.25-trixie AS plugin
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends mosquitto-dev libmosquitto-dev \
