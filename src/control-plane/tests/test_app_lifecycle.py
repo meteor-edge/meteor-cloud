@@ -187,9 +187,10 @@ def test_unknown_settings_are_refused(registry: TestClient, ready) -> None:  # n
     assert _redeploy(registry, org, headers, device_id, resources={"cpus": 1}).status_code == 422
 
 
-def _report(client: TestClient, device_headers, release_id: str, sync_status: str) -> None:
+def _report(client: TestClient, device_headers, release_id: str, sync_status: str, **more) -> None:
     item = {
         "workload_key": "web", "installed_release_id": release_id, "health": "healthy", "sync_status": sync_status,
+        **more,
     }  # fmt: skip
     answer = client.post("/api/v1/agent/heartbeat", headers=device_headers, json={"software_report": [item]})
     assert answer.status_code == 200, answer.text
@@ -203,4 +204,17 @@ def test_a_report_about_a_replaced_release_does_not_finish_the_new_one(registry:
     _report(registry, device_headers, first, "in_sync")
     assert registry.get(url, headers=headers).json()["devices"][0]["status"] == "updating"
     _report(registry, device_headers, second["release_id"], "in_sync")
+    assert registry.get(url, headers=headers).json()["devices"][0]["status"] == "succeeded"
+
+
+def test_a_late_rollback_report_does_not_fail_the_new_deploy(registry: TestClient, ready) -> None:  # noqa: F811
+    org, headers, device_id, device_headers = ready
+    first = _run(registry, org, headers, device_id).json()["release_id"]
+    fixed = _redeploy(registry, org, headers, device_id, env={"A": "2"}).json()
+    url = f"/api/v1/organizations/{org.id}/deployments/{fixed['deployment']['id']}"
+    _report(registry, device_headers, first, "rolled_back", revision=1, last_error="Rolled back to 0")
+    (device,) = registry.get(url, headers=headers).json()["devices"]
+    assert device["status"] not in {"failed", "succeeded"}
+    assert device["last_error"] is None
+    _report(registry, device_headers, fixed["release_id"], "in_sync", revision=2)
     assert registry.get(url, headers=headers).json()["devices"][0]["status"] == "succeeded"
