@@ -39,7 +39,7 @@ Prefix: `/api/v1/organizations/{organization_id}`. Every change is written to th
 | `POST` | `/alerts/{id}/acknowledge` | `alert.acknowledge` | Firing to acknowledged; repeating it is harmless |
 | `GET`/`POST` | `/alert-silences` | `alert.read` / `alert.silence` | Silence by rule, device, both or neither until `ends_at` |
 | `DELETE` | `/alert-silences/{id}` | `alert.silence` | End a silence |
-| `GET`/`POST` | `/notification-integrations` | `rule.read` / `integration.manage` | Webhook targets; `secret` is sealed and never returned |
+| `GET`/`POST` | `/notification-integrations` | `rule.read` / `integration.manage` | Webhook targets; `secret` is sealed and never returned; `url` is complete only for `integration.manage`, others see its host |
 | `PATCH`/`DELETE` | `/notification-integrations/{id}` | `integration.manage` | Change; `"secret": ""` removes it. A target a rule uses cannot be deleted |
 
 Validation errors answer 422 with every problem in the message, for example

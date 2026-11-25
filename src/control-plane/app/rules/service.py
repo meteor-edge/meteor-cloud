@@ -12,6 +12,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -26,7 +27,15 @@ from app.core.secretbox import SecretBoxError, seal, unseal
 from app.device_actions.service import DeviceActionService
 from app.devices.models import Device, DeviceGroup, DeviceType
 from app.identity.models import User
-from app.rules.definition import Problem, RuleDefinitionError, condition_hash, severity_of, validate_definition
+from app.rules.definition import (
+    Problem,
+    RuleDefinitionError,
+    condition_hash,
+    normalize_definition,
+    scope_problems,
+    severity_of,
+    validate_definition,
+)
 from app.rules.engine_client import RulesEngineClient
 from app.rules.models import (
     ACTIVE_ALERT_STATUSES,
@@ -89,13 +98,19 @@ def scope_matches(scope: dict[str, Any], organization_id: uuid.UUID | None, devi
     return all(str(labels.get(k)) == str(v) and k in labels for k, v in (scope.get("labels") or {}).items())
 
 
-def _integration_view(row: NotificationIntegration) -> IntegrationResponse:
+def _redacted_url(url: str) -> str:
+    """The URL's scheme and host: its user, path and query may be the posting credential (Slack)."""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}/…"
+
+
+def _integration_view(row: NotificationIntegration, *, full_url: bool = True) -> IntegrationResponse:
     return IntegrationResponse(
         id=row.id,
         organization_id=row.organization_id,
         kind=row.kind,
         name=row.name,
-        url=row.url,
+        url=row.url if full_url else _redacted_url(row.url),
         enabled=row.enabled,
         has_secret=row.secret_sealed is not None,
         created_at=row.created_at,
@@ -193,6 +208,7 @@ class RuleService:
         self._authorize(actor, organization_id, "rule.read")
         if not isinstance(definition, dict):
             return ValidationResult(valid=False, problems=[ProblemResponse(path="", message="must be an object")])
+        definition = normalize_definition(definition)
         problems = self._validate(organization_id, definition)
         return ValidationResult(
             valid=not problems,
@@ -202,9 +218,10 @@ class RuleService:
 
     def preview_devices(self, *, actor: User, organization_id: uuid.UUID, definition: Any) -> DevicePreview:
         self._authorize(actor, organization_id, "rule.read")
-        scope = definition.get("scope") if isinstance(definition, dict) else None
-        if not isinstance(scope, dict) or scope.get("type") == "platform":
-            raise ValidationAppError("invalid_scope", "definition.scope must be an organization scope object.")
+        scope = normalize_definition(definition).get("scope") if isinstance(definition, dict) else None
+        problems = scope_problems(scope)
+        if problems:
+            raise ValidationAppError("invalid_scope", str(RuleDefinitionError(problems)))
         devices = self.session.scalars(
             select(Device)
             .where(Device.organization_id == organization_id, Device.is_enabled.is_(True))
@@ -257,6 +274,7 @@ class RuleService:
 
     def create_rule(self, *, actor: User, organization_id: uuid.UUID, definition: dict[str, Any]) -> Rule:
         membership = self._authorize(actor, organization_id, "rule.create")
+        definition = normalize_definition(definition)
         self._require_valid(organization_id, definition)
         self._require_action_rights(membership, definition)
         rule = Rule(
@@ -287,6 +305,7 @@ class RuleService:
     ) -> Rule:
         membership = self._authorize(actor, organization_id, "rule.update")
         rule = self._rule(organization_id, rule_id)
+        definition = normalize_definition(definition)
         self._require_valid(organization_id, definition)
         self._require_action_rights(membership, definition)
         previous = self.definition_of(rule)
@@ -386,10 +405,11 @@ class RuleService:
                 )
             else:
                 statement = statement.where(Alert.fired_at < before)
-        return list(self.session.scalars(statement.order_by(Alert.fired_at.desc(), Alert.id.desc()).limit(limit)))
+        rows = self.session.scalars(statement.order_by(Alert.fired_at.desc(), Alert.id.desc()).limit(limit))
+        return self._with_current_silence(organization_id, list(rows))
 
-    def _alert(self, organization_id: uuid.UUID, alert_id: uuid.UUID) -> Alert:
-        row = self.session.get(Alert, alert_id)
+    def _alert(self, organization_id: uuid.UUID, alert_id: uuid.UUID, *, lock: bool = False) -> Alert:
+        row = self.session.get(Alert, alert_id, with_for_update=lock, populate_existing=lock)
         if row is None or row.organization_id != organization_id:
             raise NotFoundError("alert_not_found", "Alert was not found.")
         return row
@@ -399,6 +419,7 @@ class RuleService:
     ) -> tuple[Alert, list[AlertEvent]]:
         self._authorize(actor, organization_id, "alert.read")
         alert = self._alert(organization_id, alert_id)
+        self._with_current_silence(organization_id, [alert])
         events = list(
             self.session.scalars(
                 select(AlertEvent).where(AlertEvent.alert_id == alert.id).order_by(AlertEvent.at, AlertEvent.id)
@@ -408,7 +429,9 @@ class RuleService:
 
     def acknowledge(self, *, actor: User, organization_id: uuid.UUID, alert_id: uuid.UUID) -> Alert:
         self._authorize(actor, organization_id, "alert.acknowledge")
-        alert = self._alert(organization_id, alert_id)
+        # Locked, so a resolve that arrives meanwhile is not overwritten.
+        alert = self._alert(organization_id, alert_id, lock=True)
+        self._with_current_silence(organization_id, [alert])
         if alert.status == ALERT_ACKNOWLEDGED:
             return alert
         if alert.status == ALERT_RESOLVED:
@@ -450,6 +473,16 @@ class RuleService:
             (s.rule_id is None or s.rule_id == rule_id) and (s.device_id is None or s.device_id == device_id)
             for s in silences
         )
+
+    def _with_current_silence(self, organization_id: uuid.UUID, alerts: list[Alert]) -> list[Alert]:
+        """Set the silenced flag of active alerts from the silences in force now, because a
+        silence starts and ends without any write. A resolved alert keeps what it had."""
+        active = [a for a in alerts if a.status in ACTIVE_ALERT_STATUSES]
+        if active:
+            silences = self._active_silences(organization_id, datetime.now(UTC))
+            for alert in active:
+                alert.silenced = self._silenced(silences, alert.rule_id, alert.device_id)
+        return alerts
 
     def _refresh_silenced(self, organization_id: uuid.UUID) -> None:
         silences = self._active_silences(organization_id, datetime.now(UTC))
@@ -526,13 +559,14 @@ class RuleService:
     # ---- notification integrations -------------------------------------
 
     def list_integrations(self, *, actor: User, organization_id: uuid.UUID) -> list[IntegrationResponse]:
-        self._authorize(actor, organization_id, "rule.read")
+        membership = self._authorize(actor, organization_id, "rule.read")
+        manager = self.authz.has_permission(membership, "integration.manage")
         rows = self.session.scalars(
             select(NotificationIntegration)
             .where(NotificationIntegration.organization_id == organization_id)
             .order_by(NotificationIntegration.name)
         )
-        return [_integration_view(row) for row in rows]
+        return [_integration_view(row, full_url=manager) for row in rows]
 
     def _seal(self, row: NotificationIntegration, secret: str | None) -> None:
         row.secret_sealed = seal(self.settings, secret, context=f"integration:{row.id}") if secret else None
@@ -686,6 +720,8 @@ class RuleService:
         seen = self.session.scalar(select(AlertEvent).where(AlertEvent.idempotency_key == key))
         if seen is not None:
             alert = self.session.get(Alert, seen.alert_id)
+            if alert is not None:
+                self._with_current_silence(alert.organization_id, [alert])
             return AlertTransitionResult(
                 idempotency_key=key, alert_id=seen.alert_id, status="duplicate", silenced=bool(alert and alert.silenced)
             )
@@ -707,6 +743,19 @@ class RuleService:
         )
         if ev.transition == "firing":
             return self._fire(item, base)
+        if not ev.fingerprint:
+            # The episode is over: in per_event mode it may have opened further alerts.
+            further = select(Alert).where(
+                Alert.rule_id == item.rule_id,
+                Alert.device_id == item.device_id,
+                Alert.episode == ev.episode,
+                Alert.fingerprint != "",
+                Alert.status.in_(ACTIVE_ALERT_STATUSES),
+            )
+            for other in self.session.scalars(further).all():
+                self._resolve(
+                    other, ev.at, ev.reason or "condition_cleared", key=None, values=ev.values, event_id=ev.event_id
+                )
         alert = self.session.scalar(base.where(Alert.episode == ev.episode).order_by(Alert.fired_at.desc()))
         if alert is None:
             return AlertTransitionResult(idempotency_key=key, alert_id=None, status="ignored", detail="no such alert")
@@ -722,6 +771,7 @@ class RuleService:
         active = self.session.scalar(base.where(Alert.status.in_(ACTIVE_ALERT_STATUSES)))
         if active is not None:
             if active.episode == ev.episode:
+                self._with_current_silence(item.organization_id, [active])
                 return AlertTransitionResult(
                     idempotency_key=item.idempotency_key,
                     alert_id=active.id,
@@ -796,6 +846,7 @@ class RuleService:
 
     def test_rule(self, *, actor: User, organization_id: uuid.UUID, payload: RuleTestRequest) -> dict[str, Any]:
         self._authorize(actor, organization_id, "rule.read")
+        payload = payload.model_copy(update={"definition": normalize_definition(payload.definition)})
         self._require_valid(organization_id, payload.definition)
         return self.engine.simulate(payload.model_dump(mode="json", exclude_none=True))
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, HttpUrl, UrlConstraints, model_validator
 
 
 class RuleWrite(BaseModel):
@@ -107,8 +107,8 @@ class SilenceCreate(BaseModel):
     rule_id: uuid.UUID | None = None
     device_id: uuid.UUID | None = None
     comment: str | None = Field(default=None, max_length=2000)
-    starts_at: datetime | None = None
-    ends_at: datetime
+    starts_at: AwareDatetime | None = None
+    ends_at: AwareDatetime
 
     @model_validator(mode="after")
     def _window(self) -> SilenceCreate:
@@ -131,17 +131,21 @@ class SilenceResponse(BaseModel):
     created_at: datetime
 
 
+# As long as the column.
+IntegrationUrl = Annotated[HttpUrl, UrlConstraints(max_length=2048)]
+
+
 class IntegrationCreate(BaseModel):
     kind: Literal["webhook", "slack"] = "webhook"
     name: str = Field(min_length=1, max_length=120)
-    url: HttpUrl
+    url: IntegrationUrl
     enabled: bool = True
     secret: str | None = Field(default=None, min_length=16, max_length=512)
 
 
 class IntegrationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    url: HttpUrl | None = None
+    url: IntegrationUrl | None = None
     enabled: bool | None = None
     # "" removes the secret; omitted keeps it.
     secret: str | None = Field(default=None, max_length=512)

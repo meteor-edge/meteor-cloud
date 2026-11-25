@@ -10,7 +10,7 @@ from fastapi import APIRouter, Query
 
 from app.identity.dependencies import CurrentUser
 from app.rules.dependencies import RuleSvc
-from app.rules.models import Rule
+from app.rules.models import Alert, AlertSilence, Rule, RuleVersion
 from app.rules.schemas import (
     AlertDetail,
     AlertEventResponse,
@@ -64,7 +64,7 @@ def list_rules(
     enabled: bool | None = None,
     limit: Limit = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-):
+) -> list[RuleResponse]:
     rows = service.list_rules(
         actor=current_user, organization_id=organization_id, enabled=enabled, limit=limit, offset=offset
     )
@@ -72,19 +72,25 @@ def list_rules(
 
 
 @router.post("/rules", response_model=RuleResponse, status_code=201)
-def create_rule(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleWrite):
+def create_rule(
+    organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleWrite
+) -> RuleResponse:
     rule = service.create_rule(actor=current_user, organization_id=organization_id, definition=payload.definition)
     return _view(service, rule)
 
 
 @router.post("/rules/validate", response_model=ValidationResult)
-def validate_rule(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleWrite):
+def validate_rule(
+    organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleWrite
+) -> ValidationResult:
     """Check a definition without saving it. Always 200; ``valid`` and ``problems`` say why."""
     return service.validate(actor=current_user, organization_id=organization_id, definition=payload.definition)
 
 
 @router.post("/rules/preview-devices", response_model=DevicePreview)
-def preview_devices(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleWrite):
+def preview_devices(
+    organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleWrite
+) -> DevicePreview:
     """Devices the definition's scope selects now (first 200, with the total)."""
     return service.preview_devices(actor=current_user, organization_id=organization_id, definition=payload.definition)
 
@@ -113,14 +119,16 @@ def rule_status(
 
 
 @router.get("/rules/{rule_id}", response_model=RuleResponse)
-def get_rule(organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+def get_rule(
+    organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
+) -> RuleResponse:
     return _view(service, service.get_rule(actor=current_user, organization_id=organization_id, rule_id=rule_id))
 
 
 @router.put("/rules/{rule_id}", response_model=RuleResponse)
 def update_rule(
     organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: RuleWrite
-):
+) -> RuleResponse:
     """Save a new version. If the condition, scope, sources or mode changed, engine state resets."""
     rule = service.update_rule(
         actor=current_user, organization_id=organization_id, rule_id=rule_id, definition=payload.definition
@@ -129,13 +137,17 @@ def update_rule(
 
 
 @router.post("/rules/{rule_id}/enable", response_model=RuleResponse)
-def enable_rule(organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+def enable_rule(
+    organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
+) -> RuleResponse:
     rule = service.set_enabled(actor=current_user, organization_id=organization_id, rule_id=rule_id, enabled=True)
     return _view(service, rule)
 
 
 @router.post("/rules/{rule_id}/disable", response_model=RuleResponse)
-def disable_rule(organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+def disable_rule(
+    organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
+) -> RuleResponse:
     rule = service.set_enabled(actor=current_user, organization_id=organization_id, rule_id=rule_id, enabled=False)
     return _view(service, rule)
 
@@ -146,7 +158,9 @@ def delete_rule(organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: Cu
 
 
 @router.get("/rules/{rule_id}/versions", response_model=list[RuleVersionResponse])
-def list_rule_versions(organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+def list_rule_versions(
+    organization_id: uuid.UUID, rule_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
+) -> list[RuleVersion]:
     return service.list_versions(actor=current_user, organization_id=organization_id, rule_id=rule_id)
 
 
@@ -160,7 +174,7 @@ def list_rule_alerts(
     before: datetime | None = None,
     before_id: uuid.UUID | None = None,
     limit: Limit = 50,
-):
+) -> list[Alert]:
     service.get_rule(actor=current_user, organization_id=organization_id, rule_id=rule_id)
     return service.list_alerts(
         actor=current_user,
@@ -189,7 +203,7 @@ def list_alerts(
     before: Annotated[datetime | None, Query(description="Page: fired_at of the last row already shown.")] = None,
     before_id: Annotated[uuid.UUID | None, Query(description="Page: id of the last row already shown.")] = None,
     limit: Limit = 50,
-):
+) -> list[Alert]:
     return service.list_alerts(
         actor=current_user,
         organization_id=organization_id,
@@ -205,7 +219,9 @@ def list_alerts(
 
 
 @router.get("/alerts/{alert_id}", response_model=AlertDetail)
-def get_alert(organization_id: uuid.UUID, alert_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+def get_alert(
+    organization_id: uuid.UUID, alert_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
+) -> AlertDetail:
     alert, events = service.get_alert(actor=current_user, organization_id=organization_id, alert_id=alert_id)
     return AlertDetail(
         **AlertResponse.model_validate(alert).model_dump(),
@@ -214,7 +230,9 @@ def get_alert(organization_id: uuid.UUID, alert_id: uuid.UUID, current_user: Cur
 
 
 @router.post("/alerts/{alert_id}/acknowledge", response_model=AlertResponse)
-def acknowledge_alert(organization_id: uuid.UUID, alert_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+def acknowledge_alert(
+    organization_id: uuid.UUID, alert_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
+) -> Alert:
     return service.acknowledge(actor=current_user, organization_id=organization_id, alert_id=alert_id)
 
 
@@ -224,12 +242,14 @@ def acknowledge_alert(organization_id: uuid.UUID, alert_id: uuid.UUID, current_u
 @router.get("/alert-silences", response_model=list[SilenceResponse])
 def list_silences(
     organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, include_expired: bool = False
-):
+) -> list[AlertSilence]:
     return service.list_silences(actor=current_user, organization_id=organization_id, include_expired=include_expired)
 
 
 @router.post("/alert-silences", response_model=SilenceResponse, status_code=201)
-def create_silence(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: SilenceCreate):
+def create_silence(
+    organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: SilenceCreate
+) -> AlertSilence:
     return service.create_silence(actor=current_user, organization_id=organization_id, payload=payload)
 
 
@@ -244,14 +264,16 @@ def delete_silence(
 
 
 @router.get("/notification-integrations", response_model=list[IntegrationResponse])
-def list_integrations(organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc):
+def list_integrations(
+    organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc
+) -> list[IntegrationResponse]:
     return service.list_integrations(actor=current_user, organization_id=organization_id)
 
 
 @router.post("/notification-integrations", response_model=IntegrationResponse, status_code=201)
 def create_integration(
     organization_id: uuid.UUID, current_user: CurrentUser, service: RuleSvc, payload: IntegrationCreate
-):
+) -> IntegrationResponse:
     return service.create_integration(actor=current_user, organization_id=organization_id, payload=payload)
 
 
@@ -262,7 +284,7 @@ def update_integration(
     current_user: CurrentUser,
     service: RuleSvc,
     payload: IntegrationUpdate,
-):
+) -> IntegrationResponse:
     return service.update_integration(
         actor=current_user, organization_id=organization_id, integration_id=integration_id, payload=payload
     )

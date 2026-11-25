@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -120,6 +122,10 @@ func DefaultLimits() Limits {
 // Duration is a JSON duration string such as "90s", "5m" or "1h30m".
 type Duration time.Duration
 
+// durationForm is the one spelling the engine, the API and the schema accept. Go alone
+// would also take "0", a sign and ".5s".
+var durationForm = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`)
+
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
 func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(time.Duration(d).String()) }
@@ -130,7 +136,7 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("duration must be a string like \"5m\"")
 	}
 	v, err := time.ParseDuration(s)
-	if err != nil {
+	if err != nil || !durationForm.MatchString(s) {
 		return fmt.Errorf("invalid duration %q", s)
 	}
 	*d = Duration(v)
@@ -161,6 +167,25 @@ type Scope struct {
 	GroupID      string            `json:"group_id,omitempty"`
 	DeviceTypeID string            `json:"device_type_id,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
+
+	// keys are the JSON keys the scope was written with (nil when built in code).
+	keys map[string]bool
+}
+
+// has reports whether the scope carries a key, whatever its value.
+func (s Scope) has(name string) bool {
+	if s.keys != nil {
+		return s.keys[name]
+	}
+	switch name {
+	case "device_ids":
+		return len(s.DeviceIDs) > 0
+	case "group_id":
+		return s.GroupID != ""
+	case "device_type_id":
+		return s.DeviceTypeID != ""
+	}
+	return false
 }
 
 // Source names the event streams that feed a rule.
@@ -311,40 +336,92 @@ func Parse(raw []byte) (*Rule, error) {
 	if _, err := dec.Token(); err != io.EOF {
 		return nil, &ValidationError{Problems: []Problem{{Path: "", Message: "trailing data after the rule"}}}
 	}
-	var keys struct {
-		Condition any `json:"condition"`
-		Resolve   any `json:"resolve"`
-	}
-	if err := json.Unmarshal(raw, &keys); err != nil {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, &ValidationError{Problems: []Problem{{Path: "", Message: cleanJSONError(err)}}}
 	}
-	noteKeys(r.Condition, keys.Condition)
-	noteKeys(r.Resolve, keys.Resolve)
+	if problems := checkKeys(&r, doc); len(problems) > 0 {
+		return nil, &ValidationError{Problems: problems}
+	}
 	return &r, nil
 }
 
-// noteKeys records which JSON keys each node was written with.
-func noteKeys(n *Node, raw any) {
-	obj, ok := raw.(map[string]any)
-	if n == nil || !ok {
-		return
+// The exact keys of each object. encoding/json matches keys without case, so a strict
+// decode alone would accept "Name", which the API and the schema refuse.
+var (
+	topKeys = keySet("schema_version", "name", "description", "enabled", "severity", "scope", "source",
+		"condition", "resolve", "cooldown", "alerting", "actions", "late_tolerance")
+	scopeKeys    = keySet("type", "device_ids", "group_id", "device_type_id", "labels")
+	sourceKeys   = keySet("streams")
+	alertingKeys = keySet("mode", "max_active")
+	actionKeys   = keySet("type", "on", "severity", "integration_id", "command", "params", "timeout")
+	nodeKeys     = keySet("type", "field", "operator", "value", "values", "min", "max", "conditions",
+		"condition", "duration", "window", "min_count", "count", "function", "streams")
+)
+
+func keySet(names ...string) map[string]bool {
+	out := make(map[string]bool, len(names))
+	for _, n := range names {
+		out[n] = true
 	}
-	n.keys = make(map[string]bool, len(obj))
-	for k, v := range obj {
-		k = strings.ToLower(k) // encoding/json matches keys without case
-		n.keys[k] = true
-		switch k {
-		case "condition":
-			noteKeys(n.Condition, v)
-		case "conditions":
-			list, _ := v.([]any)
-			for i, c := range list {
-				if i < len(n.Conditions) {
-					noteKeys(n.Conditions[i], c)
-				}
+	return out
+}
+
+// checkKeys refuses misspelled keys and records which keys the scope and the nodes were
+// written with. The rule has already been decoded, so the shapes are known to fit.
+func checkKeys(r *Rule, doc map[string]json.RawMessage) []Problem {
+	var problems []Problem
+	check := func(path string, raw json.RawMessage, allowed map[string]bool) map[string]json.RawMessage {
+		var obj map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &obj)
+		for _, k := range slices.Sorted(maps.Keys(obj)) {
+			if !allowed[k] {
+				problems = append(problems, Problem{Path: strings.TrimPrefix(path+"."+k, "."), Message: "unknown field"})
+			}
+		}
+		return obj
+	}
+	for _, k := range slices.Sorted(maps.Keys(doc)) {
+		if !topKeys[k] {
+			problems = append(problems, Problem{Path: k, Message: "unknown field"})
+		}
+	}
+	if raw, ok := doc["enabled"]; ok && r.Enabled == nil {
+		problems = append(problems, Problem{Path: "enabled", Message: fmt.Sprintf("must be true or false, not %s", raw)})
+	}
+	r.Scope.keys = map[string]bool{}
+	for k := range check("scope", doc["scope"], scopeKeys) {
+		r.Scope.keys[k] = true
+	}
+	check("source", doc["source"], sourceKeys)
+	check("alerting", doc["alerting"], alertingKeys)
+	var actions []json.RawMessage
+	_ = json.Unmarshal(doc["actions"], &actions)
+	for i, a := range actions {
+		check(fmt.Sprintf("actions[%d]", i), a, actionKeys)
+	}
+	var node func(path string, n *Node, raw json.RawMessage)
+	node = func(path string, n *Node, raw json.RawMessage) {
+		if n == nil {
+			return
+		}
+		obj := check(path, raw, nodeKeys)
+		n.keys = make(map[string]bool, len(obj))
+		for k := range obj {
+			n.keys[k] = true
+		}
+		node(path+".condition", n.Condition, obj["condition"])
+		var list []json.RawMessage
+		_ = json.Unmarshal(obj["conditions"], &list)
+		for i, c := range list {
+			if i < len(n.Conditions) {
+				node(fmt.Sprintf("%s.conditions[%d]", path, i), n.Conditions[i], c)
 			}
 		}
 	}
+	node("condition", r.Condition, doc["condition"])
+	node("resolve", r.Resolve, doc["resolve"])
+	return problems
 }
 
 func cleanJSONError(err error) string {
@@ -355,15 +432,18 @@ func cleanJSONError(err error) string {
 // ConditionHash fingerprints everything that shapes evaluation state: condition,
 // resolve condition, scope, sources and alerting mode. Presentation changes (name,
 // severity, actions, cooldown) keep the hash, so state carries over; anything else
-// resets the state deliberately.
+// resets the state deliberately. Device ids and sources are sets: their order is not part
+// of the fingerprint (streams named only by absence nodes are part of the condition).
 func ConditionHash(r *Rule) string {
+	scope := r.Scope
+	scope.DeviceIDs = sortedSet(scope.DeviceIDs)
 	shape := struct {
 		Condition *Node     `json:"c"`
 		Resolve   *Node     `json:"r,omitempty"`
 		Scope     Scope     `json:"s"`
 		Streams   []string  `json:"st"`
 		Alerting  *Alerting `json:"a,omitempty"`
-	}{r.Condition, r.Resolve, r.Scope, r.Streams(), nil}
+	}{r.Condition, r.Resolve, scope, sortedSet(r.SourceStreams()), nil}
 	// The effective settings, so spelling out a default changes nothing.
 	if mode, n := r.Mode(); mode == ModePerEvent {
 		shape.Alerting = &Alerting{Mode: mode, MaxActive: &n}
@@ -371,4 +451,10 @@ func ConditionHash(r *Rule) string {
 	b, _ := json.Marshal(shape)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:12])
+}
+
+func sortedSet(list []string) []string {
+	out := slices.Clone(list)
+	slices.Sort(out)
+	return slices.Compact(out)
 }

@@ -25,6 +25,10 @@ var ErrPermanent = errors.New("event cannot be processed")
 // ErrNotReady means no rule snapshot has been loaded yet.
 var ErrNotReady = errors.New("rule engine has no snapshot yet")
 
+// ErrStale means another worker already evaluated the device with a newer version of a
+// rule than this worker has loaded. Retry after the next snapshot.
+var ErrStale = errors.New("rule snapshot is older than the stored state")
+
 // Transition kinds.
 const (
 	TransitionFiring   = "firing"
@@ -111,7 +115,7 @@ type Engine struct {
 	rules   atomic.Pointer[RuleSet]
 	locks   *stripes
 	commits *committer
-	firing  atomic.Int64
+	counted firingSet
 }
 
 // New creates an engine. Call Close to stop its committer.
@@ -157,40 +161,32 @@ func (e *Engine) Apply(rs *RuleSet) *RuleSet {
 func (e *Engine) Handle(ctx context.Context, ev *eval.Event) error {
 	start := time.Now()
 	e.metrics.EventsReceived.Inc()
-	rs := e.rules.Load()
-	if rs == nil {
+	if e.rules.Load() == nil {
 		return ErrNotReady
 	}
 	if ev.ID == "" || ev.OrgID == "" || ev.DeviceID == "" || ev.Time.IsZero() {
 		e.metrics.EventsDropped.WithLabelValues("invalid").Inc()
 		return fmt.Errorf("%w: event id, organization, device and time are required", ErrPermanent)
 	}
-	dev, ok := rs.Device(ev.DeviceID)
-	if !ok {
-		e.metrics.EventsDropped.WithLabelValues("unknown_device").Inc()
-		return nil
-	}
-	if dev.OrganizationID != ev.OrgID {
-		// Never evaluate an event against another tenant's rules.
-		e.metrics.EventsDropped.WithLabelValues("organization_mismatch").Inc()
-		e.log.Warn("event organization does not own the device", "organization_id", ev.OrgID, "device_id", ev.DeviceID, "event_id", ev.ID)
-		return nil
-	}
-	cands := rs.Candidates(dev, ev.Stream)
-	if len(cands) == 0 {
-		e.metrics.EventsDropped.WithLabelValues("no_rules").Inc()
-		return nil
-	}
 	unlock := e.locks.lock(ev.DeviceID)
 	defer unlock()
 	var err error
 	for attempt := 0; attempt <= e.cfg.Retries; attempt++ {
+		// Under the lock and again for every attempt: a queued event must not write what
+		// an older snapshot says.
+		dev, cands := e.candidates(e.rules.Load(), ev)
+		if len(cands) == 0 {
+			return nil
+		}
 		if err = e.process(ctx, ev, dev, cands); !errors.Is(err, state.ErrConflict) {
 			break
 		}
 		e.metrics.Conflicts.Inc()
 	}
 	if err != nil {
+		if errors.Is(err, ErrStale) {
+			return err
+		}
 		e.metrics.StateErrors.WithLabelValues("commit").Inc()
 		e.log.Error("rule evaluation not committed", "organization_id", ev.OrgID, "device_id", ev.DeviceID, "event_id", ev.ID, "error", err)
 		return err
@@ -198,6 +194,27 @@ func (e *Engine) Handle(ctx context.Context, ev *eval.Event) error {
 	e.metrics.EventsEvaluated.Inc()
 	e.metrics.EvalLatency.Observe(time.Since(start).Seconds())
 	return nil
+}
+
+// candidates returns the device and the rules that evaluate the event. None: the event
+// is dropped, counted by reason.
+func (e *Engine) candidates(rs *RuleSet, ev *eval.Event) (*Device, []*Rule) {
+	dev, ok := rs.Device(ev.DeviceID)
+	if !ok {
+		e.metrics.EventsDropped.WithLabelValues("unknown_device").Inc()
+		return nil, nil
+	}
+	if dev.OrganizationID != ev.OrgID {
+		// Never evaluate an event against another tenant's rules.
+		e.metrics.EventsDropped.WithLabelValues("organization_mismatch").Inc()
+		e.log.Warn("event organization does not own the device", "organization_id", ev.OrgID, "device_id", ev.DeviceID, "event_id", ev.ID)
+		return nil, nil
+	}
+	cands := rs.Candidates(dev, ev.Stream)
+	if len(cands) == 0 {
+		e.metrics.EventsDropped.WithLabelValues("no_rules").Inc()
+	}
+	return dev, cands
 }
 
 func (e *Engine) process(ctx context.Context, ev *eval.Event, dev *Device, cands []*Rule) error {
@@ -238,6 +255,9 @@ func (e *Engine) process(ctx context.Context, ev *eval.Event, dev *Device, cands
 		st, isNew := states[r.ID], false
 		if st == nil {
 			st, isNew = e.newState(r, dev, wall), true
+		}
+		if st.RuleVersion > r.Version {
+			return ErrStale
 		}
 		before := snapshotOf(st)
 		ts := e.reconcileVersion(st, r, frontier)
@@ -439,9 +459,9 @@ func (e *Engine) afterCommit(ts []pending) {
 		e.metrics.Transitions.WithLabelValues(p.t.Kind).Inc()
 		switch {
 		case p.t.Kind == TransitionResolved:
-			e.firing.Add(-1)
+			e.counted.remove(p.st.Key())
 		case p.t.Fingerprint == "": // further alerts of an episode do not count again
-			e.firing.Add(1)
+			e.counted.add(p.st.Key())
 		}
 		for _, a := range p.rule.Actions {
 			if contains(a.On, p.t.Kind) {
@@ -451,7 +471,7 @@ func (e *Engine) afterCommit(ts []pending) {
 		e.log.Info("alert transition", "organization_id", p.st.OrgID, "device_id", p.st.DeviceID, "rule_id", p.rule.ID,
 			"rule_version", p.rule.Version, "transition", p.t.Kind, "reason", p.t.Reason, "episode", p.t.Episode, "event_id", p.t.EventID)
 	}
-	e.metrics.ActiveAlerts.Set(float64(e.firing.Load()))
+	e.metrics.ActiveAlerts.Set(float64(e.counted.len()))
 }
 
 func contains(list []string, s string) bool {

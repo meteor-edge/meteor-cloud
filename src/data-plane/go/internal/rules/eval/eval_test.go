@@ -387,7 +387,7 @@ func TestRateBelowAMillisecond(t *testing.T) {
 	st := State{}
 	run(p, st, ev(100*time.Microsecond, `{"v":1}`))
 	o := run(p, st, ev(900*time.Microsecond, `{"v":2}`))
-	if r := o.Values["rate(v)"]; r < 1249 || r > 1251 {
+	if r := o.Values["rate(v)"]; !(r >= 1249 && r <= 1251) {
 		t.Fatalf("rate %v", r)
 	}
 	st = State{}
