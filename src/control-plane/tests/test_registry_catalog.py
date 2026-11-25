@@ -106,6 +106,23 @@ def test_push_and_delete_notifications(registry: TestClient, db_session: Session
     assert registry.get(base, headers=headers).json()["total"] == 0
 
 
+def test_a_push_is_announced_before_its_tag_is_written(
+    registry: TestClient,  # noqa: F811
+    db_session: Session,
+    fake: FakeRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, headers, base = _claim(registry, db_session)
+    fake.push("acme/app", "1")
+    for seed in ("b", "c"):
+        event = _event("push", "acme/app", "1")
+        event["target"]["digest"] = f"sha256:{seed * 64}"
+        monkeypatch.setattr("app.registry.catalog.time.sleep", lambda _, s=seed: fake.push("acme/app", "1", s))
+        assert _notify(registry, event).status_code == 204
+        (tag,) = registry.get(f"{base}/tags", headers=headers, params={"repository": "app"}).json()["items"]
+        assert tag["digest"] == event["target"]["digest"]
+
+
 def test_notifications_are_not_trusted(registry: TestClient, db_session: Session, fake: FakeRegistry) -> None:  # noqa: F811
     _, headers, base = _claim(registry, db_session)
     other, other_headers, _ = _claim(registry, db_session, slug="other", email="other@example.com")
