@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/enroll/check (200)",
+  "description": "The API key is valid; which organization it enrolls into.",
+  "type": "object",
+  "required": [
+    "ok",
+    "organization_id",
+    "organization_name",
+    "key_name",
+    "key_prefix",
+    "expires_at"
+  ],
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "organization_id": {
+      "$ref": "../common.json#/$defs/uuid"
+    },
+    "organization_name": {
+      "type": "string"
+    },
+    "key_name": {
+      "type": "string"
+    },
+    "key_prefix": {
+      "type": "string"
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "$ref": "../common.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

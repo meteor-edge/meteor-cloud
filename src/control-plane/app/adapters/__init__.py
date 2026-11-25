@@ -59,7 +59,9 @@ def metrics_backend(settings: Settings) -> Metrics:
     return NoopMetrics()
 
 
-def rate_limiter(settings: Settings, *, limit: int, window_seconds: int, prefix: str) -> RateLimiter:
+def rate_limiter(
+    settings: Settings, *, limit: int, window_seconds: int, prefix: str, fail_open: bool = True
+) -> RateLimiter:
     if settings.cache_provider == "memory":
         return InMemoryRateLimiter(limit=limit, window_seconds=window_seconds)
     if settings.cache_provider != "redis":
@@ -73,6 +75,7 @@ def rate_limiter(settings: Settings, *, limit: int, window_seconds: int, prefix:
         limit=limit,
         window_seconds=window_seconds,
         prefix=prefix,
+        fail_open=fail_open,
     )
 
 

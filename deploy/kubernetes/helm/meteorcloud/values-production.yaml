@@ -2,7 +2,8 @@
 # PostgreSQL/Redis/S3 and two replicas. Copy and adjust; nothing here is
 # cloud-specific.
 # Prerequisites you provide (see docs/kubernetes.md):
-#   - images pushed to your registry
+#   - images: the signed release images on ghcr.io/meteor-edge (docs/release-images.md),
+#     or your own registry mirror of them
 #   - PostgreSQL 14+ (managed or self-hosted)
 #   - an S3-compatible bucket (or a ReadWriteMany volume)
 #   - an ingress controller and a TLS certificate (e.g. cert-manager)
@@ -22,13 +23,14 @@ secrets:
 
 imagePullSecrets: []
 backend:
-  image: { repository: registry.example.com/meteorcloud/backend, tag: "0.2.0" }
+  image: { repository: ghcr.io/meteor-edge/meteorcloud-backend, tag: "0.2.0" }
   replicaCount: 2
 console:
-  image: { repository: registry.example.com/meteorcloud/console, tag: "0.2.0" }
+  image: { repository: ghcr.io/meteor-edge/meteorcloud-console, tag: "0.2.0" }
   replicaCount: 2
-dataPlane:
-  image: { repository: registry.example.com/meteorcloud/data-plane, tag: "0.2.0" }
+# The MQTT forwarder (dataPlane) runs from the data API image.
+dataApi:
+  image: { repository: ghcr.io/meteor-edge/meteorcloud-data-api, tag: "0.2.0" }
 
 postgresql:
   mode: external              # DATABASE_URL comes from the existing Secret

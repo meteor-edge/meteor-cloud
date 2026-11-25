@@ -47,14 +47,24 @@ module "cloud_app" {
   iam_instance_profile = local.route53 ? module.dns_role[0].instance_profile_name : ""
   # Traefik reaches the instance role through IMDSv2 from inside a container.
   metadata_hop_limit = 2
-  # Devices dial WireGuard on this host; only their addresses may reach UDP 51820.
-  extra_ingress = var.vpn_placement == "same_host" ? [{
-    description = "WireGuard VPN"
-    from_port   = 51820
-    to_port     = 51820
-    protocol    = "udp"
-    cidr_blocks = local.device_cidrs
-  }] : []
+  # Devices dial the MQTT broker and (same_host) WireGuard on this host; only their addresses
+  # may reach them.
+  extra_ingress = concat(
+    [{
+      description = "MQTT over TLS"
+      from_port   = 8883
+      to_port     = 8883
+      protocol    = "tcp"
+      cidr_blocks = local.device_cidrs
+    }],
+    var.vpn_placement == "same_host" ? [{
+      description = "WireGuard VPN"
+      from_port   = 51820
+      to_port     = 51820
+      protocol    = "udp"
+      cidr_blocks = local.device_cidrs
+    }] : [],
+  )
   tags = local.tags
 }
 

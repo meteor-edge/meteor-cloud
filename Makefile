@@ -1,4 +1,4 @@
-.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-data-plane install-console install-website install-installer install-agent clean migrate seed backend-test data-plane-test data-api-test sdk-test console-test agent-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
+.PHONY: help join-help dev stop up down plan status-aws logs test lint format typecheck install install-backend install-console install-website install-installer clean migrate seed backend-test data-api-test sdk-test console-test agent-test agent-go-test agent-go-build agent-go-dist agent-go-systemd-test agent-go-install-test agent-contract-test installer-test terraform-check ansible-check ansible-lint compose-config compose-smoke backup restore helm-lint images smoke observability observability-check mqtt-certs test-mqtt test-cloud-e2e dev-control-plane dev-data-plane dev-console dev-website stop-control-plane stop-data-plane stop-console stop-website k8s-up k8s-deploy k8s-status k8s-test k8s-down e2e-check e2e-up e2e-test e2e-down install-selfhost aws-up aws-down check-plane-imports agent-dist
 
 COMPOSE_DIR := deploy/compose
 # Bundled broker service the dev targets restart: mosquitto (default), emqx, or vernemq.
@@ -6,10 +6,16 @@ MQTT_BROKER_SERVICE ?= mosquitto
 ENV_FILE := $(COMPOSE_DIR)/.env
 COMPOSE := docker compose -f $(COMPOSE_DIR)/docker-compose.yml -f $(COMPOSE_DIR)/docker-compose.dev.yml
 OBS_COMPOSE := $(COMPOSE) -f $(COMPOSE_DIR)/docker-compose.observability.yml
-# make dev OBS=1 also starts the observability stack (same as make observability).
-OBS ?= 0
+# Observability switch. make up / make k8s-deploy default to on (Prometheus + Grafana);
+# pass OBS=0 to skip. make dev stays off unless OBS=1 (same as make observability).
+OBS ?=
 # Observability components to run (Compose profiles); drop any to turn that component off.
 OBS_PROFILES ?= metrics,logs,alerting,dashboards
+# k8s-deploy defaults on when OBS is unset; make up leaves OBS unset so the installer
+# can reuse install.env / the checkbox (still defaulting to on).
+K8S_OBS = $(or $(OBS),1)
+# Local k3d Grafana password when observability is on and GRAFANA_ADMIN_PASSWORD is unset.
+K8S_GRAFANA_ADMIN_PASSWORD ?= meteorcloud-local
 # Profiles already chosen in .env (postgres, mqtt, ...), kept when observability profiles are added.
 ENV_PROFILES = $(shell sed -n 's/^COMPOSE_PROFILES=//p' $(ENV_FILE) 2>/dev/null | tail -1)
 OBS_IMAGES_PROMETHEUS := prom/prometheus:v2.55.1
@@ -20,13 +26,13 @@ CP_COMPOSE := docker compose -p meteorcloud-cp -f $(COMPOSE_DIR)/control-plane.y
 DP_COMPOSE := docker compose -p meteorcloud-dp -f $(COMPOSE_DIR)/data-plane.yml
 CONSOLE_COMPOSE := docker compose -p meteorcloud-console -f $(COMPOSE_DIR)/console.yml
 BACKEND_DIR := src/control-plane
-DATA_PLANE_DIR := src/data-plane
 DATA_API_DIR := src/data-plane/go
 SDK_DIR := sdk/python
 CONSOLE_DIR := console
 INSTALLER_DIR := infrastructure/installer
-AGENT_DIR := src/device-plane/agent
 INFRA_DIR := infrastructure
+# Terraform-compatible CLI: terraform, or OpenTofu (MPL-2.0) when only tofu is installed.
+TERRAFORM ?= $(shell command -v terraform >/dev/null 2>&1 && echo terraform || (command -v tofu >/dev/null 2>&1 && echo tofu) || echo terraform)
 ANSIBLE_DIR := deploy/ansible
 ANSIBLE_PLAYBOOKS := site.yml provision.yml deploy.yml upgrade.yml destroy.yml services/cloud_app.yml services/vpn.yml wireguard.yml device.yml
 CHART := deploy/kubernetes/helm/meteorcloud
@@ -41,7 +47,8 @@ K8S_MQTT_PORT ?= 18883
 K8S_CERTS_DIR := .k8s/certs
 K8S_MQTT_SANS ?= $(K8S_RELEASE)-mqtt $(K8S_RELEASE)-mqtt.$(K8S_NAMESPACE).svc $(K8S_RELEASE)-emqx $(K8S_RELEASE)-emqx.$(K8S_NAMESPACE).svc
 IMAGE_TAG ?= dev
-# make k8s-deploy OBS=1: kube-prometheus-stack (Apache-2.0; bundles Grafana, AGPLv3) in k3d only.
+# make k8s-deploy (OBS=1 default): kube-prometheus-stack (Apache-2.0; bundles Grafana, AGPLv3) in k3d only.
+# Production clusters bring their own Prometheus; use OBS=0 to skip the local stack.
 K8S_OBS_NAMESPACE ?= monitoring
 K8S_OBS_CHART_VERSION := 93.1.1
 
@@ -150,8 +157,8 @@ stop-console: ## Stop the console Compose project
 stop-website: ## Website is not in this repo
 	@echo "The public website is not in this tree. From a meteor-ui clone: make stop-website"
 
-up: ## Install on this VM (PLATFORM_DOMAIN=example.com)
-	PLATFORM_DOMAIN="$(or $(PLATFORM_DOMAIN),$(DOMAIN))" $(ANSIBLE_DIR)/install-selfhost.sh $(ARGS)
+up: ## Install on this VM (PLATFORM_DOMAIN=example.com; OBS=0 skips Prometheus/Grafana)
+	$(if $(filter 0 1,$(OBS)),OBS="$(OBS)") PLATFORM_DOMAIN="$(or $(PLATFORM_DOMAIN),$(DOMAIN))" $(ANSIBLE_DIR)/install-selfhost.sh $(ARGS)
 
 install-selfhost: up
 
@@ -191,9 +198,6 @@ seed: ## Seed development users and organization
 install-backend: ## Install control-plane Python dependencies
 	cd $(BACKEND_DIR) && python -m pip install -e ".[dev]"
 
-install-data-plane: ## Install data-plane Python dependencies
-	cd $(DATA_PLANE_DIR) && python -m pip install -e ".[dev]"
-
 install-console: ## Install console Node dependencies
 	cd $(CONSOLE_DIR) && npm install
 
@@ -204,20 +208,13 @@ install-website: ## Website lives in meteor-ui, not this tree
 install-installer: ## Install installer Python dependencies
 	cd $(INSTALLER_DIR) && python -m pip install -e ".[dev]"
 
-install-agent: ## Install reference agent Python dependencies
-	cd $(AGENT_DIR) && python -m pip install -e ".[dev]"
-
-install: install-backend install-data-plane install-installer install-agent install-console ## Install local dependencies
+install: install-backend install-installer install-console ## Install local dependencies
 
 backend-test: ## Run control-plane tests (dedicated *_test database, never the app DB)
 	@python -c "import sqlalchemy" >/dev/null 2>&1 || (echo "Control-plane deps missing. Run: make install-backend" && exit 1)
 	cd $(BACKEND_DIR) && python -m pytest -q
 
-data-plane-test: ## Run data-plane tests
-	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
-	cd $(DATA_PLANE_DIR) && python -m pytest -q
-
-data-api-test: ## Run application data plane (Go) tests; DATAPLANE_TEST_DATABASE_URL and DATAPLANE_TEST_CLICKHOUSE_URL add the PostgreSQL and ClickHouse suites
+data-api-test: ## Run data plane (Go) tests; DATAPLANE_TEST_DATABASE_URL, DATAPLANE_TEST_CLICKHOUSE_URL and RULES_TEST_DATABASE_URL add the PostgreSQL, ClickHouse and rule engine store suites
 	cd $(DATA_API_DIR) && go vet ./... && go test -race ./...
 
 sdk-test: ## Run Python SDK tests against the real data plane binary (needs Go)
@@ -227,11 +224,30 @@ console-test: ## Run console tests
 	@test -d $(CONSOLE_DIR)/node_modules || (echo "Console deps missing. Run: make install-console" && exit 1)
 	cd $(CONSOLE_DIR) && npm test -- --run
 
-agent-test: ## Run reference agent tests
-	cd $(AGENT_DIR) && python -m pytest -q
+agent-test: agent-go-test ## Same as agent-go-test (the device agent is the Go meteorcli)
 
-agent-dist: ## Pack meteorcli (agent + runtime) into dist/ for a GitHub Release
-	./scripts/agent-dist.sh
+# The race detector needs 48-bit virtual addresses: Raspberry Pi kernels (39-bit)
+# and 32-bit ARM cannot run it. There: make agent-go-test GO_RACE=
+GO_RACE ?= -race
+agent-go-test: ## Go meteorcli: gofmt, vet, go test -race (src/device-plane/agent-go; on a Pi: GO_RACE=)
+	cd src/device-plane/agent-go && test -z "$$(gofmt -l .)" && go vet ./... && go test $(GO_RACE) -cover ./...
+
+agent-go-build: ## Go meteorcli: static binaries for linux arm64, arm v6, amd64 into src/device-plane/agent-go/bin
+	cd src/device-plane/agent-go && ./scripts/build.sh bin
+
+agent-go-dist: ## Go meteorcli: release files (binaries, packaging, installers, first-boot scripts, SHA256SUMS) into src/device-plane/agent-go/dist
+	cd src/device-plane/agent-go && ./scripts/dist.sh dist "0.0.0-dev+$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+agent-go-install-test: ## Go meteorcli: board installer end to end under systemd in a container (Docker, --privileged)
+	cd src/device-plane/agent-go && ./test/install/run.sh
+
+agent-go-systemd-test: ## Go meteorcli: units, sockets and group policy under systemd in a container (Docker, --privileged)
+	cd src/device-plane/agent-go && ./test/systemd/run.sh
+
+agent-contract-test: ## Device agent contract suite (Go meteorcli vs contracts/device-agent-v1.md; needs Go and Docker for Mosquitto)
+	cd tests/agent-contract && python -m pytest -q && AGENT_CONTRACT_MODE=replay python -m pytest -q
+
+agent-dist: agent-go-dist ## Same as agent-go-dist (the agent-v* release is the Go meteorcli)
 
 check-plane-imports: ## Fail if planes import each other's private Python packages
 	python scripts/check_plane_imports.py
@@ -245,11 +261,6 @@ test: ## Run all tests
 	@echo "==> Control-plane tests"
 	@python -c "import sqlalchemy" >/dev/null 2>&1 || (echo "Control-plane deps missing. Run: make install-backend" && exit 1)
 	cd $(BACKEND_DIR) && python -m pytest -q
-	@echo "==> Data-plane tests"
-	@python -c "import paho.mqtt.client" >/dev/null 2>&1 || (echo "Data-plane deps missing. Run: make install-data-plane" && exit 1)
-	cd $(DATA_PLANE_DIR) && python -m pytest -q
-	@echo "==> Agent tests"
-	cd $(AGENT_DIR) && python -m pytest -q
 	@echo "==> Console tests"
 	@test -d $(CONSOLE_DIR)/node_modules || (echo "Console deps missing. Run: make install-console" && exit 1)
 	cd $(CONSOLE_DIR) && npm test -- --run
@@ -259,10 +270,6 @@ lint: ## Lint all projects
 	cd $(INSTALLER_DIR) && python -m ruff check .
 	@echo "==> Control-plane lint"
 	cd $(BACKEND_DIR) && python -m ruff check .
-	@echo "==> Data-plane lint"
-	cd $(DATA_PLANE_DIR) && python -m ruff check .
-	@echo "==> Agent lint"
-	cd $(AGENT_DIR) && python -m ruff check .
 	@echo "==> SDK lint"
 	cd $(SDK_DIR) && python -m ruff check .
 	@echo "==> Console lint"
@@ -273,39 +280,31 @@ format: ## Format all projects
 	cd $(INSTALLER_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Control-plane format"
 	cd $(BACKEND_DIR) && python -m ruff format . && python -m ruff check --fix .
-	@echo "==> Data-plane format"
-	cd $(DATA_PLANE_DIR) && python -m ruff format . && python -m ruff check --fix .
-	@echo "==> Agent format"
-	cd $(AGENT_DIR) && python -m ruff format . && python -m ruff check --fix .
 	@echo "==> Console format"
 	cd $(CONSOLE_DIR) && npm run format
 
 typecheck: ## Run static type checks where configured
 	@echo "==> Control-plane typecheck (compileall)"
 	cd $(BACKEND_DIR) && python -m compileall app tests scripts
-	@echo "==> Data-plane typecheck (compileall)"
-	cd $(DATA_PLANE_DIR) && python -m compileall data_plane tests
 	@echo "==> Installer typecheck (compileall)"
 	cd $(INSTALLER_DIR) && python -m compileall edge_installer tests
-	@echo "==> Agent typecheck (compileall)"
-	cd $(AGENT_DIR) && python -m compileall meteorcli edge_agent tests
 
 installer-test: ## Run installer tests only
 	cd $(INSTALLER_DIR) && python -m pytest -q
 
 terraform-check: ## Validate Terraform formatting and syntax (no cloud credentials)
-	cd $(INFRA_DIR)/terraform && terraform fmt -check -recursive
-	cd $(INFRA_DIR)/terraform/aws && terraform init -backend=false -input=false
-	cd $(INFRA_DIR)/terraform/aws && terraform validate
+	cd $(INFRA_DIR)/terraform && $(TERRAFORM) fmt -check -recursive
+	cd $(INFRA_DIR)/terraform/aws && $(TERRAFORM) init -backend=false -input=false
+	cd $(INFRA_DIR)/terraform/aws && $(TERRAFORM) validate
 
 E2E_DIR := tests/e2e
 
 e2e-check: ## Full-stack E2E tooling checks (unit tests, Terraform validate, shellcheck; no credentials)
 	cd $(E2E_DIR) && python -m pytest -q tests
-	cd $(E2E_DIR)/terraform && terraform fmt -check -recursive
+	cd $(E2E_DIR)/terraform && $(TERRAFORM) fmt -check -recursive
 	for root in aws onprem; do \
-		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate terraform init -backend=false -input=false >/dev/null \
-		&& TF_DATA_DIR=.terraform-validate terraform validate) || exit 1; done
+		(cd $(E2E_DIR)/terraform/$$root && TF_DATA_DIR=.terraform-validate $(TERRAFORM) init -backend=false -input=false >/dev/null \
+		&& TF_DATA_DIR=.terraform-validate $(TERRAFORM) validate) || exit 1; done
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $(E2E_DIR)/meteorcloud-testenv $(E2E_DIR)/testapp/serve.sh; \
 	else echo "shellcheck not installed; skipped"; fi
 
@@ -352,8 +351,17 @@ observability-check: ## Validate Prometheus, Loki and Alertmanager config and al
 	docker run --rm -v $(CURDIR)/$(COMPOSE_DIR)/config/observability/alertmanager:/cfg:ro --entrypoint amtool \
 		$(OBS_IMAGES_ALERTMANAGER) check-config /cfg/alertmanager.yml /cfg/alertmanager.webhook.yml /cfg/alertmanager.webhook-heartbeat.yml
 
-compose-smoke: ## Start the minimal production Compose stack, smoke-test it, remove it
+compose-smoke: ## Start the minimal production Compose stack, smoke-test it, check backup + restore, remove it
 	IMAGE_TAG=$(IMAGE_TAG) ./scripts/compose-smoke.sh
+
+# Local (make dev) stack. Installs from `make up` get a nightly systemd timer and
+# /usr/local/sbin/meteorcloud-backup and meteorcloud-restore instead (docs/backups.md).
+backup: ## Back up the local Compose stack (PostgreSQL, ClickHouse, artifacts) into deploy/compose/backups
+	BACKUP_DIR=$(COMPOSE_DIR)/backups COMPOSE="$(COMPOSE)" ./scripts/backup.sh
+
+restore: ## Restore a backup into the running Compose stack: make restore BACKUP=deploy/compose/backups/<timestamp>
+	@test -n "$(BACKUP)" || (echo "Set BACKUP=<backup directory>" && exit 1)
+	COMPOSE="$(COMPOSE)" ./scripts/restore.sh --yes $(BACKUP)
 
 # values-monitoring.yaml renders Prometheus Operator objects, so declare their API.
 # helm lint cannot, so that overlay is only rendered (and must fail without the CRDs).
@@ -368,6 +376,9 @@ helm-lint: ## Lint the Helm chart and render it with every values file
 		--set mqtt.enabled=true,mqtt.tls.existingSecret=ci,mqtt.publicHost=mqtt.example.com \
 		-f $(CHART)/values-monitoring.yaml > /dev/null
 	! helm template meteorcloud $(CHART) -f $(CHART)/values-monitoring.yaml > /dev/null 2>&1
+	@# Bundled PostgreSQL backup CronJob.
+	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set postgresql.bundled.backup.enabled=true \
+		| grep -q 'kind: CronJob'
 	@# Application data API: off (defaults), MQTT bus with EMQX direct MQTT, and fail-closed cases.
 	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml --set dataApi.enabled=false > /dev/null
 	helm template meteorcloud $(CHART) -f $(CHART)/values-ci.yaml \
@@ -378,11 +389,10 @@ helm-lint: ## Lint the Helm chart and render it with every values file
 		--set mqtt.enabled=true,mqtt.tls.existingSecret=ci,mqtt.publicHost=mqtt.example.com \
 		--set dataApi.bus=mqtt,dataApi.mqtt.direct=true > /dev/null 2>&1
 
-images: ## Build the backend, data-plane, MQTT broker, and console images (IMAGE_TAG=dev)
+images: ## Build the backend, data API (also the MQTT forwarder), MQTT broker, and console images (IMAGE_TAG=dev)
 	docker build -t meteorcloud/backend:$(IMAGE_TAG) $(BACKEND_DIR)
-	docker build -t meteorcloud/data-plane:$(IMAGE_TAG) $(DATA_PLANE_DIR)
 	docker build -t meteorcloud/data-api:$(IMAGE_TAG) $(DATA_API_DIR)
-	docker build -t meteorcloud/mosquitto:$(IMAGE_TAG) $(DATA_PLANE_DIR)/broker/mosquitto
+	docker build -t meteorcloud/mosquitto:$(IMAGE_TAG) src/data-plane/broker/mosquitto
 	docker build -t meteorcloud/console:$(IMAGE_TAG) $(CONSOLE_DIR)
 
 smoke: ## End-to-end HTTP smoke test (URL=http://localhost:8088)
@@ -395,8 +405,8 @@ k8s-up: ## Create a local k3d cluster (ingress on localhost:8088, MQTT on 18883)
 			-p "$(K8S_HTTP_PORT):80@loadbalancer" -p "$(K8S_MQTT_PORT):8883@loadbalancer"
 	kubectl config use-context k3d-$(K8S_CLUSTER)
 
-k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (OBS=1 adds Prometheus, Grafana)
-	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-plane:$(IMAGE_TAG) meteorcloud/data-api:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
+k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --install (Prometheus/Grafana on by default; OBS=0 to skip)
+	k3d image import -c $(K8S_CLUSTER) meteorcloud/backend:$(IMAGE_TAG) meteorcloud/data-api:$(IMAGE_TAG) meteorcloud/mosquitto:$(IMAGE_TAG) meteorcloud/console:$(IMAGE_TAG)
 	kubectl --context k3d-$(K8S_CLUSTER) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
 	@# Re-issue the server certificate (same CA) when it lacks any broker Service name.
 	@sans=$$(openssl x509 -in $(K8S_CERTS_DIR)/server.crt -noout -ext subjectAltName 2>/dev/null | tr -d ' ' | tr ',' '\n'); \
@@ -406,17 +416,18 @@ k8s-deploy: images ## Build images, import them into k3d, and helm upgrade --ins
 	kubectl --context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) create secret generic meteorcloud-mqtt-tls \
 		--from-file=ca.crt=$(K8S_CERTS_DIR)/ca.crt --from-file=server.crt=$(K8S_CERTS_DIR)/server.crt \
 		--from-file=server.key=$(K8S_CERTS_DIR)/server.key --dry-run=client -o yaml | kubectl --context k3d-$(K8S_CLUSTER) apply -f -
-ifeq ($(OBS),1)
-	@test -n "$$GRAFANA_ADMIN_PASSWORD" || (echo "Set GRAFANA_ADMIN_PASSWORD for the k3d Grafana (OBS=1)." && exit 1)
-	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+ifeq ($(filter 1,$(K8S_OBS)),1)
+	@pass="$${GRAFANA_ADMIN_PASSWORD:-$(K8S_GRAFANA_ADMIN_PASSWORD)}"; \
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null && \
 	helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 		--version $(K8S_OBS_CHART_VERSION) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_OBS_NAMESPACE) --create-namespace \
-		-f deploy/kubernetes/k3d-monitoring.yaml --set grafana.adminPassword="$$GRAFANA_ADMIN_PASSWORD" \
-		--wait --timeout 10m
+		-f deploy/kubernetes/k3d-monitoring.yaml --set grafana.adminPassword="$$pass" \
+		--wait --timeout 10m && \
+	echo "Grafana admin password: $$pass"
 endif
 	helm upgrade --install $(K8S_RELEASE) $(CHART) --kube-context k3d-$(K8S_CLUSTER) -n $(K8S_NAMESPACE) \
-		-f $(CHART)/values-dev.yaml $(if $(filter 1,$(OBS)),-f $(CHART)/values-monitoring.yaml) --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
-		--set dataPlane.image.tag=$(IMAGE_TAG) --set dataApi.image.tag=$(IMAGE_TAG) --set mqtt.mosquitto.image.tag=$(IMAGE_TAG) \
+		-f $(CHART)/values-dev.yaml $(if $(filter 1,$(K8S_OBS)),-f $(CHART)/values-monitoring.yaml) --set backend.image.tag=$(IMAGE_TAG) --set console.image.tag=$(IMAGE_TAG) \
+		--set dataApi.image.tag=$(IMAGE_TAG) --set mqtt.mosquitto.image.tag=$(IMAGE_TAG) \
 		--set config.publicUrl=http://localhost:$(K8S_HTTP_PORT) \
 		--wait --timeout 10m
 	# Restart so pods pick up images re-imported under the same tag.
@@ -425,11 +436,12 @@ endif
 	@echo ""
 	@echo "Console and API: http://localhost:$(K8S_HTTP_PORT)  (admin@example.com / LocalAdmin123!)"
 	@echo "MQTT TLS:        mqtts://localhost:$(K8S_MQTT_PORT)  (CA: $(K8S_CERTS_DIR)/ca.crt)"
-ifeq ($(OBS),1)
+ifeq ($(filter 1,$(K8S_OBS)),1)
 	@echo "Grafana:         kubectl -n $(K8S_OBS_NAMESPACE) port-forward svc/kube-prometheus-stack-grafana 3001:80"
 	@echo "Prometheus:      kubectl -n $(K8S_OBS_NAMESPACE) port-forward svc/kube-prometheus-stack-prometheus 9090:9090"
+	@echo "  (password: $${GRAFANA_ADMIN_PASSWORD:-$(K8S_GRAFANA_ADMIN_PASSWORD)}; user admin)"
 else
-	@echo "Observability:   make k8s-deploy OBS=1  (kube-prometheus-stack in k3d)"
+	@echo "Observability:   skipped (OBS=0). Re-run without OBS=0 for kube-prometheus-stack in k3d."
 endif
 
 k8s-status: ## Show MeteorCloud pods, services, ingress, and volumes in k3d

@@ -32,6 +32,8 @@ import {
   DeviceLogHistory,
 } from "@/components/fleet/DeviceHistoryPanels";
 import { DeviceTerminal } from "@/components/fleet/DeviceTerminal";
+import { AgentModulesPanel } from "@/components/fleet/AgentModulesPanel";
+import { AgentUpdatePanel } from "@/components/fleet/AgentUpdatePanel";
 import { DeviceActionsPanel } from "@/components/fleet/DeviceActionsPanel";
 import { DeviceWifiPanel } from "@/components/fleet/DeviceWifiPanel";
 import { MqttConsole } from "@/components/fleet/MqttConsole";
@@ -49,8 +51,10 @@ import {
   canManageFleet,
   canOpenDeviceShell,
   canRebootDevice,
+  canUpdateDeviceAgent,
   canViewDeviceLogs,
 } from "@/lib/permissions";
+import { agentCapabilities, supportsAction } from "@/lib/agentCapabilities";
 import { formatDateTime } from "@/lib/utils";
 
 function Detail({ label, value }: { label: string; value: string | null | undefined }) {
@@ -132,6 +136,9 @@ export function DeviceDetailPage() {
   const canUsers = orgAccess
     ? orgAccess.permissions.includes("device.users")
     : canManageDeviceUsers(orgQuery.data?.current_user_role);
+  const canUpdateAgent = orgAccess
+    ? orgAccess.permissions.includes("device.update_agent")
+    : canUpdateDeviceAgent(orgQuery.data?.current_user_role);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["device", organizationId, deviceId] });
@@ -200,7 +207,9 @@ export function DeviceDetailPage() {
     { id: "network", label: "Network" },
     { id: "mqtt", label: "MQTT" },
     ...(canShell || canLogs ? [{ id: "access" as const, label: "Access" }] : []),
-    ...(canManage ? [{ id: "settings" as const, label: "Settings" }] : []),
+    ...(canManage || canUpdateAgent || canPower || canUsers || canWifi
+      ? [{ id: "settings" as const, label: "Settings" }]
+      : []),
   ];
 
   async function onSave() {
@@ -488,6 +497,7 @@ export function DeviceDetailPage() {
             />
             <Detail label="MAC address" value={device.mac_addresses.join(", ")} />
             <Detail label="Local IP" value={device.local_ip} />
+            <Detail label="Agent version" value={device.agent_version} />
             <Detail
               label="Last seen"
               value={device.last_seen_at ? formatDateTime(device.last_seen_at) : "Never"}
@@ -503,6 +513,15 @@ export function DeviceDetailPage() {
             metrics={device.mqtt_metrics}
             updatedAt={device.mqtt_metrics_at ? formatDateTime(device.mqtt_metrics_at) : null}
           />
+          {token ? (
+            <AgentModulesPanel
+              token={token}
+              organizationId={organizationId}
+              deviceId={deviceId}
+              device={device}
+              canRepair={canUpdateAgent}
+            />
+          ) : null}
           {token ? (
             <DeviceTelemetryCharts
               token={token}
@@ -611,6 +630,16 @@ export function DeviceDetailPage() {
         </div>
       )}
 
+      {activeTab === "settings" && canUpdateAgent && token && (
+        <AgentUpdatePanel
+          token={token}
+          organizationId={organizationId}
+          deviceId={deviceId}
+          agentVersion={device.agent_version}
+          supported={supportsAction(agentCapabilities(device), "update_agent")}
+        />
+      )}
+
       {activeTab === "settings" && canManage && (canPower || canUsers) && token && (
         <DeviceActionsPanel
           token={token}
@@ -618,6 +647,7 @@ export function DeviceDetailPage() {
           deviceId={deviceId}
           canPower={canPower}
           canUsers={canUsers}
+          supportedActions={agentCapabilities(device).actions}
         />
       )}
 

@@ -5,7 +5,7 @@
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Python | 3.13+ | Installer |
-| Terraform | 1.5+ | AWS infrastructure |
+| Terraform 1.5+ or OpenTofu 1.6+ | | AWS infrastructure (set `EDGE_INSTALLER_TERRAFORM=tofu` to force OpenTofu; see docs/licensing.md) |
 | Ansible | 2.15+ | Host configuration |
 | OpenSSH | any recent | SSH to EC2 |
 | AWS CLI | recommended | Verify credentials |
@@ -77,10 +77,12 @@ Scoped EC2 permissions in the deployment region are sufficient.
 
 `make aws-up` and `make plan` generate these if they are unset (and print them
 after `make aws-up`): `EDGE_PLATFORM_POSTGRES_PASSWORD`,
-`EDGE_PLATFORM_JWT_SECRET`, `EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN`. Saved
-at `~/.meteorcloud/secrets.env`. Export a value first to keep your own.
+`EDGE_PLATFORM_JWT_SECRET`, `EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN`,
+`EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD` (observability dashboards are on by default).
+Saved at `~/.meteorcloud/secrets.env`. Export a value first to keep your own.
 
-Calling `edge-installer` directly still requires the env vars.
+Calling `edge-installer` directly still requires the env vars (including Grafana
+when dashboards stay enabled).
 
 Optional: `EDGE_PLATFORM_ADMIN_EMAIL`, `EDGE_PLATFORM_ADMIN_PASSWORD`,
 `EDGE_PLATFORM_ACME_EMAIL`, `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY`,

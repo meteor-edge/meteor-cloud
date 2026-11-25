@@ -24,7 +24,7 @@ Details: [docs/install-quickstart.md](docs/install-quickstart.md). Laptop testin
 curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | bash
 ```
 
-See [docs/meteorcli.md](docs/meteorcli.md). Maintainers: `make agent-dist` then `git tag agent-v<version> && git push origin agent-v<version>`.
+See [docs/meteorcli.md](docs/meteorcli.md). Maintainers: bump the agent version in a PR; merging it to `master` publishes `agent-v<version>` (or push that tag by hand).
 
 **Bugs and features:** [GitHub Issues](https://github.com/meteor-edge/meteor-cloud/issues).
 
@@ -62,9 +62,9 @@ Commands from the [Makefile](Makefile). Do not invent others.
 ```bash
 make test                  # installer, control-plane, data-plane, agent, console
 make backend-test
-make data-plane-test
 make agent-test
-make agent-dist            # pack meteorcli for a GitHub Release
+make agent-contract-test   # device agent vs contracts/device-agent-v1.md (needs Docker)
+make agent-dist            # Go meteorcli release files (same as make agent-go-dist)
 make console-test
 make check-plane-imports   # planes must not import each other
 make lint
@@ -88,6 +88,6 @@ make ansible-check ansible-lint
 - Update [docs/](docs/README.md) when install, CLI, APIs, contracts, or operator flows change.
 - Do not commit secrets, `.env` files with real passwords, private keys, or tokens. `deploy/compose/.env` is local; `~/.meteorcloud/secrets.env` is generated on the host.
 - Keep HTTP/MQTT compatibility unless the PR is an explicit breaking change.
-- Planes talk over HTTP/MQTT only. Do not import `app` from the data plane or agent, or `data_plane` / `edge_agent` from the control plane.
+- Planes talk over HTTP/MQTT only. Do not import `app` (the control plane's package) from other planes.
 
 Architecture and allowed dependencies: [docs/architecture.md](docs/architecture.md).

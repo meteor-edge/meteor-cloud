@@ -7,7 +7,9 @@ The data plane lets applications publish data, subscribe to live data, query his
 | Write an application | [SDK guide](../../sdk/python/README.md) |
 | Register applications, permissions and credentials | [Applications and credentials](applications.md) |
 | Run, configure, monitor and troubleshoot it | [Operations](operations.md) |
+| Understand how device MQTT reaches the control plane (`data-plane` service, shared subscription, backpressure) | [MQTT forwarder](mqtt-forwarder.md) |
 | Understand the device event path (MQTT → NATS JetStream → rule processor, ClickHouse writer) | [Device event path](jetstream.md) |
+| Understand rules: conditions, alert lifecycle, actions | [Rules contract](../../contracts/rules-v1.md) · [Rule engine packages](../../src/data-plane/go/README.md#rule-engine-internalrules) |
 | Understand device CPU, memory, disk and temperature history (ClickHouse, console charts) | [Device telemetry history](device-telemetry.md) |
 | Understand online/offline, deployment, app lifecycle and saved-warning history | [Platform history](platform-history.md) |
 | Write a client in another language, or use MQTT directly | [Protocol contract](../../contracts/data-plane-v1.md) · [OpenAPI](../../src/data-plane/go/api/openapi.yaml) |
@@ -26,8 +28,6 @@ make dev        # the data-api profile is on in deploy/compose/.env.example
    export METEORCLOUD_TOKEN_FILE=./my-app.token
    pip install ./sdk/python && python sdk/python/examples/quickstart.py
    ```
-
-To check a whole installation, `python scripts/data-plane-e2e.py` runs the full developer workflow: it registers a device and two applications, deploys a Docker release bound to an application, runs the real agent, and verifies publish, subscribe, history, commands, token rotation, revocation, tenant isolation and the audit trail.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ These differ from the first plan. Each was chosen to keep the system simple to r
 | Small publishes are grouped by ClickHouse, and still confirmed | ClickHouse dislikes many tiny inserts. The data API uses its asynchronous inserts and waits for the flush, so a publish still answers only when the data is stored |
 | No Kafka | The ingestion queue is bounded and in process, with backpressure to the caller, and MQTT shared subscriptions split MQTT load between replicas. Kafka becomes worthwhile for replaying streams into several independent consumers or ingestion that must outlive long storage outages. Neither is needed yet |
 | Direct MQTT uses a short-lived signed token with the topic list inside | EMQX 5.8 allows one HTTP authorization source, which the device fleet uses. A signed token needs no call from the broker to the data API and expires on its own |
-| The Go service lives beside the Python data plane | `src/data-plane/data_plane` keeps serving device management topics (`devices/...`). The Go service owns `meteor/v1/...`. Nothing was migrated or broken |
+| Two Go services | The MQTT forwarder (`cmd/mqtt-forwarder`) serves the device management topics (`devices/...`); the data API owns `meteor/v1/...` |
 
 ## Guarantees in short
 

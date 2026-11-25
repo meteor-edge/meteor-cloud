@@ -165,6 +165,10 @@ DEVICE_REGISTRATIONS = counter(
     "meteorcloud_device_registrations_total", "Agent registration attempts by outcome", ["result"]
 )
 AGENT_HEARTBEATS = counter("meteorcloud_agent_heartbeats_total", "Agent heartbeats accepted")
+# mode: redirect (presigned object-storage URL) | stream (bytes through the API)
+ARTIFACT_DOWNLOADS = counter(
+    "meteorcloud_agent_artifact_downloads_total", "Agent artifact downloads by how they were served", ["mode"]
+)
 # result: submitted | error
 ENROLLMENT_REQUESTS = counter(
     "meteorcloud_enrollment_requests_total", "Enrollment requests submitted by agents", ["result"]

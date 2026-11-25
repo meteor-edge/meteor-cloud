@@ -32,6 +32,8 @@ dist/
 .env.*.local
 .env.smoke
 .meteorenv
+# Laptop browser-SSH key when SHELL_SSH_DIR is left at the dev Compose default.
+deploy/compose/shell/
 
 # IDE
 .idea/
@@ -98,3 +100,4 @@ deploy/ansible/artifacts/
 tests/e2e/.env
 tests/e2e/.state/
 tests/e2e/terraform/*/.terraform-validate/
+deploy/compose/backups/

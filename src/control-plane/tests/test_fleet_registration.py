@@ -340,6 +340,7 @@ def test_heartbeat_refreshes_serial_cpu_and_local_ip(client: TestClient, db_sess
             "cpu_model": "ARM Cortex-A76",
             "cpu_cores": 4,
             "local_ip": "192.168.1.20",
+            "agent_version": "0.3.4",
             "hardware_model": "Raspberry Pi 5 Model B Rev 1.0",
         },
     )
@@ -350,6 +351,7 @@ def test_heartbeat_refreshes_serial_cpu_and_local_ip(client: TestClient, db_sess
     assert detail["cpu_model"] == "ARM Cortex-A76"
     assert detail["cpu_cores"] == 4
     assert detail["local_ip"] == "192.168.1.20"
+    assert detail["agent_version"] == "0.3.4"
     assert detail["hardware_model"] == "Raspberry Pi 5 Model B Rev 1.0"
 
     # A later heartbeat that omits inventory, or sends a value that is not an IP, keeps what we have.
@@ -363,6 +365,13 @@ def test_heartbeat_refreshes_serial_cpu_and_local_ip(client: TestClient, db_sess
     assert detail["serial_number"] == "10000000abcd1234"
     assert detail["cpu_model"] == "ARM Cortex-A76"
     assert detail["local_ip"] == "192.168.1.20"
+    assert detail["agent_version"] == "0.3.4"
+
+    # A development build names its commit as semver build metadata; text that is no version is ignored.
+    for sent in ("0.0.0-e2e.2+b0c96c9", "latest"):
+        response = client.post("/api/v1/agent/heartbeat", headers=device_headers, json={"agent_version": sent})
+        assert response.status_code == 200, response.text
+        assert client.get(device_url, headers=headers).json()["agent_version"] == "0.0.0-e2e.2+b0c96c9"
 
     # Whitespace is not a serial, and a non-string address is not an IP. Neither clears inventory.
     blank = client.post(

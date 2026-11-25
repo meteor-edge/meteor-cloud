@@ -1,7 +1,8 @@
 # Local and dev share this file on purpose: the same configuration model runs on
 # a laptop k3d cluster (make k8s-up && make k8s-deploy) and on a shared dev
-# cluster. Images are built locally and imported with `k3d image import`; on a
-# shared dev cluster, override the image repository/tag and config.publicUrl.
+# cluster. Images are built locally and imported with `k3d image import` under the
+# local meteorcloud/* names (values.yaml defaults to the published ghcr.io images);
+# on a shared dev cluster, override the image repository/tag and config.publicUrl.
 config:
   appEnv: development
   publicUrl: http://localhost:8088
@@ -23,8 +24,6 @@ backend:
   image: { repository: meteorcloud/backend, tag: dev, pullPolicy: IfNotPresent }
 console:
   image: { repository: meteorcloud/console, tag: dev, pullPolicy: IfNotPresent }
-dataPlane:
-  image: { repository: meteorcloud/data-plane, tag: dev, pullPolicy: IfNotPresent }
 
 dataApi:
   enabled: true
@@ -59,6 +58,7 @@ mqtt:
   tls:
     existingSecret: meteorcloud-mqtt-tls
   mosquitto:
+    image: { repository: meteorcloud/mosquitto, tag: dev, pullPolicy: IfNotPresent }
     # k3s servicelb publishes it on the k3d load balancer (port 8883 on the host).
     service: { type: LoadBalancer }
 

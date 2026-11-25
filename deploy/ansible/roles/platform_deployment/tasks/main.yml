@@ -62,8 +62,7 @@
         platform_bundled_mosquitto: "{{ mqtt_enabled | bool and mqtt_broker == 'bundled' and mqtt_provider == 'mosquitto' }}"
         platform_built_images: >-
           {{ [backend_image, frontend_image]
-             + ([data_plane_image] if mqtt_enabled | bool else [])
-             + ([data_api_image] if data_api_enabled | bool else [])
+             + ([data_api_image] if data_api_enabled | bool or mqtt_enabled | bool else [])
              + ([mosquitto_image] if platform_bundled_mosquitto | bool else []) }}
       register: platform_images
       changed_when: false
@@ -243,6 +242,86 @@
 - name: Apply metadata service guard now
   ansible.builtin.command: /usr/local/sbin/meteorcloud-imds-guard {{ compose_project_name }}
   changed_when: false
+
+- name: Install the backup script
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../../scripts/backup.sh"
+    dest: /usr/local/sbin/meteorcloud-backup
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the restore script
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../../scripts/restore.sh"
+    dest: /usr/local/sbin/meteorcloud-restore
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the backup settings
+  ansible.builtin.copy:
+    dest: "{{ platform_root }}/backup.env"
+    owner: root
+    group: root
+    mode: "0600"
+    # systemd EnvironmentFile syntax (double-quoted, C escapes). Do not shell-source this
+    # file: restore via systemd-run --property=EnvironmentFile=… (docs/backups.md).
+    content: |
+      {% macro systemd_env(value) -%}"{{ value | string | replace('\\', '\\\\') | replace('"', '\\"') | replace('\n', '\\n') }}"{%- endmacro %}
+      COMPOSE_DIR={{ systemd_env(platform_compose_dir) }}
+      COMPOSE={{ systemd_env(platform_compose | trim) }}
+      BACKUP_DIR={{ systemd_env(platform_root ~ '/backups') }}
+      BACKUP_LOCK_FILE={{ systemd_env(platform_root ~ '/backups/.lock') }}
+      BACKUP_RETENTION_DAYS={{ systemd_env(backup_retention_days) }}
+      BACKUP_S3_URI={{ systemd_env(backup_s3_uri) }}
+      BACKUP_S3_ENDPOINT_URL={{ systemd_env(backup_s3_endpoint_url) }}
+      AWS_REGION={{ systemd_env(backup_s3_region) }}
+      AWS_ACCESS_KEY_ID={{ systemd_env(backup_s3_access_key_id) }}
+      AWS_SECRET_ACCESS_KEY={{ systemd_env(backup_s3_secret_access_key) }}
+      AWS_SESSION_TOKEN={{ systemd_env(backup_s3_session_token) }}
+  no_log: true
+
+- name: Install the backup units
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ item.content }}"
+  loop:
+    - name: meteorcloud-backup.service
+      content: |
+        [Unit]
+        Description=Back up MeteorCloud (PostgreSQL, ClickHouse, artifacts)
+        After=docker.service
+        Requires=docker.service
+
+        [Service]
+        Type=oneshot
+        EnvironmentFile={{ platform_root }}/backup.env
+        ExecStart=/usr/local/sbin/meteorcloud-backup
+    - name: meteorcloud-backup.timer
+      content: |
+        [Unit]
+        Description=Nightly MeteorCloud backup
+
+        [Timer]
+        OnCalendar={{ backup_on_calendar }}
+        RandomizedDelaySec=10m
+        Persistent=true
+
+        [Install]
+        WantedBy=timers.target
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Enable or disable the nightly backup
+  ansible.builtin.systemd:
+    name: meteorcloud-backup.timer
+    enabled: "{{ backup_enabled | bool }}"
+    state: "{{ 'started' if backup_enabled | bool else 'stopped' }}"
+    daemon_reload: true
 
 # Bind-mounted config files are not part of the Compose config hash.
 - name: Restart services whose mounted configuration changed

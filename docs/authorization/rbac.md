@@ -117,6 +117,7 @@ Stored as `resource` + `action` columns; id is derived.
 | `device.delete` | Delete devices | Remove devices. |
 | `device.reboot` | Restart and shut down devices | Restart or shut down a device from the console. See [Device actions](../fleet/device-actions.md). |
 | `device.shell` | Open device terminal | Open a browser SSH session over WireGuard. |
+| `software.manage` | Manage device software | Restart, stop and start software deployed to a device. See [Software on a device](../fleet/software.md). |
 | `device.logs` | View device logs | Read logs over WireGuard (read-only). Without `device.shell`, only the logs of workloads MeteorCloud deployed; see [Device logs](../fleet/logs.md#who-sees-which-logs). |
 | `device.network` | Device Wi-Fi and connection | See which networks a device uses (Wi-Fi, Ethernet, mobile) and add, change or remove its Wi-Fi. A wrong network can take it offline. See [Wi-Fi](../fleet/wifi.md). |
 | `device.users` | Manage device SSH users | Change a user's password or add an SSH user on a device. As sensitive as a shell. See [Device actions](../fleet/device-actions.md). |
@@ -139,6 +140,14 @@ Stored as `resource` + `action` columns; id is derived.
 | `deployment.rollback` | Rollback deployments | Roll back a deployment. |
 | `enrollment_key.read` | View enrollment API keys | List enrollment keys. |
 | `enrollment_key.manage` | Manage enrollment API keys | Create and revoke enrollment keys. |
+| `rule.read` | View rules | List rules, their versions and matching devices. See [Rules and alerts](../rules.md). |
+| `rule.create` | Create rules | Create alerting and automation rules. |
+| `rule.update` | Update rules | Change, enable and disable rules. Every save is a new version. |
+| `rule.delete` | Delete rules | Delete rules. Their alert history stays. |
+| `alert.read` | View alerts | List alerts, their history and silences. |
+| `alert.acknowledge` | Acknowledge alerts | Mark firing alerts as acknowledged. |
+| `alert.silence` | Silence alerts | Hold notifications for matching alerts for a while. |
+| `integration.manage` | Manage notification integrations | Add, change and remove the webhooks rules deliver to, including their signing secrets. |
 | `mqtt.test` | Use MQTT test tools | Publish/listen in the org MQTT test UI. |
 
 **v1 rules:**
@@ -177,6 +186,7 @@ System roles: `organization_id IS NULL`, `is_system = true`, immutable via API.
 | device.reboot | ✓ | ✓ | | | |
 | device.shell | ✓ | ✓ | | | |
 | device.logs | ✓ | ✓ | ✓ | ✓ | |
+| software.manage | ✓ | ✓ | ✓ | | |
 | device.network | ✓ | ✓ | | | |
 | device.users | ✓ | ✓ | | | |
 | endpoint.read | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -198,6 +208,14 @@ System roles: `organization_id IS NULL`, `is_system = true`, immutable via API.
 | deployment.rollback | ✓ | ✓ | | | |
 | enrollment_key.read | ✓ | ✓ | | | |
 | enrollment_key.manage | ✓ | ✓ | | | |
+| rule.read | ✓ | ✓ | ✓ | ✓ | ✓ |
+| rule.create | ✓ | ✓ | | ✓ | |
+| rule.update | ✓ | ✓ | | ✓ | |
+| rule.delete | ✓ | ✓ | | ✓ | |
+| alert.read | ✓ | ✓ | ✓ | ✓ | ✓ |
+| alert.acknowledge | ✓ | ✓ | ✓ | ✓ | |
+| alert.silence | ✓ | ✓ | ✓ | ✓ | |
+| integration.manage | ✓ | ✓ | | ✓ | |
 | mqtt.test | ✓ | ✓ | ✓ | ✓ | |
 
 **Migration of today’s enum:**

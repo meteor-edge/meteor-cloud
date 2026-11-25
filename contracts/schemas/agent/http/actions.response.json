@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GET /api/v1/agent/actions (200)",
+  "description": "Actions waiting for this device. Each is handed out once. May hold a password: never log the body.",
+  "type": "object",
+  "required": [
+    "actions"
+  ],
+  "properties": {
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "../common.json#/$defs/uuid"
+          },
+          "kind": {
+            "$ref": "../common.json#/$defs/action_kind"
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sudo": {
+            "type": "boolean",
+            "default": false
+          },
+          "authorized_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "from_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "module": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "restart_module: the agent module to restart (a parked module runs again). Added in v1 (additive)."
+          },
+          "workload_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "workload_*: the workload to act on. Added in v1 (additive)."
+          },
+          "service": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "workload_restart, _stop, _start: one service of a compose workload (null: all of it). Added in v1 (additive)."
+          }
+        }
+      }
+    }
+  }
+}

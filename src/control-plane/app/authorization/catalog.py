@@ -59,6 +59,12 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
         "Restart and shut down devices",
         "Restart or shut down a device from the console.",
     ),
+    PermissionDef(
+        "device",
+        "update_agent",
+        "Update device agent",
+        "Order meteorcli on a device to install the latest published release.",
+    ),
     PermissionDef("device_type", "read", "View device types", "List and open device types."),
     PermissionDef("device_type", "create", "Create device types", "Create hardware models."),
     PermissionDef("device_type", "update", "Update device types", "Edit device types."),
@@ -95,6 +101,9 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
         "Manage device SSH users",
         "Change a user's password or add an SSH user on a device. As sensitive as a shell session.",
     ),
+    PermissionDef(
+        "software", "manage", "Manage device software", "Restart, stop and start software deployed to a device."
+    ),
     PermissionDef("enrollment_key", "read", "View enrollment API keys", "List enrollment API keys."),
     PermissionDef("enrollment_key", "manage", "Manage enrollment API keys", "Create and revoke enrollment API keys."),
     PermissionDef("application", "read", "View applications", "List applications and their credentials."),
@@ -108,13 +117,26 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
         "Create, rotate and revoke data-plane credentials for applications.",
     ),
     PermissionDef("application", "command", "Send application commands", "Send commands to running applications."),
+    PermissionDef("rule", "read", "View rules", "List rules, their versions and matching devices."),
+    PermissionDef("rule", "create", "Create rules", "Create alerting and automation rules."),
+    PermissionDef("rule", "update", "Update rules", "Change, enable and disable rules. Every save is a new version."),
+    PermissionDef("rule", "delete", "Delete rules", "Delete rules. Their alert history stays."),
+    PermissionDef("alert", "read", "View alerts", "List alerts, their history and silences."),
+    PermissionDef("alert", "acknowledge", "Acknowledge alerts", "Mark firing alerts as acknowledged."),
+    PermissionDef("alert", "silence", "Silence alerts", "Hold notifications for matching alerts for a while."),
+    PermissionDef(
+        "integration",
+        "manage",
+        "Manage notification integrations",
+        "Add, change and remove the webhooks rules deliver to, including their signing secrets.",
+    ),
     PermissionDef("mqtt", "test", "Use MQTT test tools", "Publish and listen in the organization MQTT test UI."),
 )
 
 PERMISSION_BY_ID: dict[str, PermissionDef] = {item.id: item for item in PERMISSIONS}
 
 # Resources whose instances are limited by device-group scope.
-DEVICE_SCOPED_RESOURCES = frozenset({"device", "device_group", "endpoint"})
+DEVICE_SCOPED_RESOURCES = frozenset({"device", "device_group", "endpoint", "software"})
 
 _ALL = frozenset(PERMISSION_BY_ID)
 _VIEWER = frozenset(
@@ -127,10 +149,18 @@ _VIEWER = frozenset(
         "deployment.read",
         "endpoint.read",
         "application.read",
+        "rule.read",
+        "alert.read",
     }
 )
 _DEVELOPER = _VIEWER | frozenset(
     {
+        "rule.create",
+        "rule.update",
+        "rule.delete",
+        "alert.acknowledge",
+        "alert.silence",
+        "integration.manage",
         "application.create",
         "application.update",
         "application.delete",
@@ -154,12 +184,15 @@ _DEVELOPER = _VIEWER | frozenset(
 )
 _OPERATOR = _VIEWER | frozenset(
     {
+        "alert.acknowledge",
+        "alert.silence",
         "team.read",
         "device.create",
         "device.update",
         "application.command",
-        # device.reboot / device.shell / device.users are owner/admin only.
+        # device.reboot / device.update_agent / device.shell / device.users are owner/admin only.
         "device.logs",
+        "software.manage",
         "deployment.create",
         "deployment.cancel",
         "endpoint.create",

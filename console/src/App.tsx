@@ -12,6 +12,7 @@ import { DeploymentDetailPage } from "@/pages/deployments/DeploymentDetailPage";
 import { DeploymentsPage } from "@/pages/deployments/DeploymentsPage";
 import { EndpointsPage } from "@/pages/endpoints/EndpointsPage";
 import { ReleasesPage } from "@/pages/releases/ReleasesPage";
+import { SoftwareDetailPage } from "@/pages/fleet/SoftwareDetailPage";
 import { DeviceDetailPage } from "@/pages/fleet/DeviceDetailPage";
 import { DeviceGroupDetailPage } from "@/pages/fleet/DeviceGroupDetailPage";
 import { DeviceGroupsPage } from "@/pages/fleet/DeviceGroupsPage";
@@ -29,6 +30,11 @@ import { OrganizationOverviewPage } from "@/pages/organizations/OrganizationOver
 import { OrganizationSettingsPage } from "@/pages/organizations/OrganizationSettingsPage";
 import { TeamDetailPage } from "@/pages/organizations/TeamDetailPage";
 import { TeamsPage } from "@/pages/organizations/TeamsPage";
+import { AlertsPage } from "@/pages/rules/AlertsPage";
+import { ChannelsPage } from "@/pages/rules/ChannelsPage";
+import { DeviceHealthPage } from "@/pages/rules/DeviceHealthPage";
+import { RuleEditorPage } from "@/pages/rules/RuleEditorPage";
+import { RulesPage } from "@/pages/rules/RulesPage";
 
 export function App() {
   return (
@@ -90,6 +96,46 @@ export function App() {
           }
         />
         <Route
+          path="organizations/:organizationId/alerts"
+          element={
+            <ProtectedRoute>
+              <AlertsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/device-health"
+          element={
+            <ProtectedRoute>
+              <DeviceHealthPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/channels"
+          element={
+            <ProtectedRoute>
+              <ChannelsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/rules"
+          element={
+            <ProtectedRoute>
+              <RulesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/rules/:ruleId"
+          element={
+            <ProtectedRoute>
+              <RuleEditorPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="organizations/:organizationId/teams"
           element={
             <ProtectedRoute>
@@ -126,6 +172,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <DeviceDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="organizations/:organizationId/devices/:deviceId/software/:softwareId"
+          element={
+            <ProtectedRoute>
+              <SoftwareDetailPage />
             </ProtectedRoute>
           }
         />

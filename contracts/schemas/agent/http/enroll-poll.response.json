@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/enroll/poll (200)",
+  "description": "On 'approved' the identity fields are set exactly once; the next poll no longer returns the device_token.",
+  "type": "object",
+  "required": [
+    "status",
+    "poll_interval_seconds"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "expired"
+      ]
+    },
+    "poll_interval_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "device_id": {
+      "anyOf": [
+        {
+          "$ref": "../common.json#/$defs/uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "device_token": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "organization_id": {
+      "anyOf": [
+        {
+          "$ref": "../common.json#/$defs/uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "heartbeat_interval_seconds": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "mqtt": {
+      "anyOf": [
+        {
+          "$ref": "../common.json#/$defs/mqtt_connect"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rejection_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

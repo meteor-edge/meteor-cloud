@@ -32,6 +32,20 @@ metrics_enabled: true
 registration_require_https: false
 docs_public_url: http://localhost:3000/docs
 
+# Nightly backups (scripts/backup.sh, docs/backups.md): PostgreSQL, ClickHouse and
+# artifacts into {{ platform_root }}/backups, kept backup_retention_days days. Set
+# backup_s3_uri (s3://bucket/prefix) to also copy each backup off the host; give keys
+# here, since containers cannot use the EC2 instance role (metadata guard).
+backup_enabled: true
+backup_on_calendar: "*-*-* 03:15:00"
+backup_retention_days: 7
+backup_s3_uri: ""
+backup_s3_endpoint_url: ""
+backup_s3_region: ""
+backup_s3_access_key_id: "{{ EDGE_PLATFORM_BACKUP_S3_ACCESS_KEY_ID | default(lookup('env', 'EDGE_PLATFORM_BACKUP_S3_ACCESS_KEY_ID'), true) }}"
+backup_s3_secret_access_key: "{{ EDGE_PLATFORM_BACKUP_S3_SECRET_ACCESS_KEY | default(lookup('env', 'EDGE_PLATFORM_BACKUP_S3_SECRET_ACCESS_KEY'), true) }}"
+backup_s3_session_token: "{{ EDGE_PLATFORM_BACKUP_S3_SESSION_TOKEN | default(lookup('env', 'EDGE_PLATFORM_BACKUP_S3_SESSION_TOKEN'), true) }}"
+
 # Images. image_source=git clones repository_url and builds on the host;
 # image_source=archive copies platform_source_archive (a controller .tar.gz of the
 # repository, e.g. `git archive`) and builds on the host (private repos, air-gapped);
@@ -41,7 +55,8 @@ platform_source_archive: ""
 repository_url: https://github.com/meteor-edge/meteor-cloud.git
 git_ref: master
 backend_image: edge-platform-backend:0.2.0
-data_plane_image: edge-platform-data-plane:0.2.0
+# The MQTT gateway (the "data-plane" Compose service, needs mqtt_enabled) is the Go MQTT
+# forwarder from data_api_image.
 # Application data API (Go). Off by default; enable for SDK publish/subscribe/query/commands.
 data_api_enabled: false
 data_api_image: meteorcloud/data-api:0.2.0
@@ -83,6 +98,9 @@ external_redis_url: "{{ EDGE_PLATFORM_REDIS_URL | default(lookup('env', 'EDGE_PL
 object_storage_provider: filesystem
 minio_enabled: false
 object_storage_endpoint_url: ""
+# Address devices download artifacts from through presigned URLs. Not needed for AWS S3;
+# empty with another endpoint (or with filesystem storage) streams downloads via the API.
+object_storage_public_endpoint_url: ""
 object_storage_region: us-east-1
 object_storage_bucket: meteorcloud-artifacts
 object_storage_auto_create_bucket: true
@@ -108,8 +126,9 @@ mqtt_certs_src_dir: ""
 mqtt_platform_password: "{{ EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD'), true) }}"
 mqtt_internal_token: "{{ EDGE_PLATFORM_MQTT_INTERNAL_TOKEN | default(lookup('env', 'EDGE_PLATFORM_MQTT_INTERNAL_TOKEN'), true) }}"
 
-# Observability (Prometheus, Loki, Grafana on this host; UIs bind to localhost)
-observability_enabled: false
+# Observability (Prometheus, Loki, Grafana on this host; UIs bind to localhost).
+# On by default; set observability_enabled=false or make up OBS=0 / --no-observability to skip.
+observability_enabled: true
 observability_backend: prometheus
 grafana_admin_user: admin
 grafana_admin_password: "{{ EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD'), true) }}"

@@ -106,9 +106,9 @@ helm -n meteorcloud test meteorcloud --logs
 | WireGuard not running | Set `EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY` and re-deploy |
 | Cannot connect | Check UDP port in SG (`services.vpn.listen_port`, default 51820) |
 | No peer config | Run the gateway agent (`src/device-plane/gateway/connectivity_agent.py`) so it applies `wg set` from the control plane. Do not paste `[Peer]` blocks into `wg0.conf` |
-| Logs window: "did not list its logs" (`log_sources_unavailable`) | Re-run `sudo ./installcli.sh` (installs `meteorcli-logs` and its sudo rule); check `meteorcli logs` on the device |
-| Device has no WG IP | `CONNECTIVITY_PROVIDER=wireguard`, `wireguard-tools` installed, and `meteorcli run` (passwordless sudo for the `meteorcli-wg` helper from `installcli.sh`; re-run `sudo ./installcli.sh` after upgrading) |
-| Deploy systemd unit: Permission denied on `/etc/systemd/system` | `meteorcli run` is not root. Re-run the installer as root to add the `meteorcli-systemd` helper: `curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh \| sudo bash` (from a checkout: `sudo ./installcli.sh`). A root install also starts `meteorcli.service`, which runs as root |
+| Logs window: "did not list its logs" (`log_sources_unavailable`) | Re-run the installer with `sudo` (installs `meteorcli-logs` and its sudo rule); the SSH user must be in the `meteorcli` group; check `meteorcli logs` on the device |
+| Device has no WG IP | `CONNECTIVITY_PROVIDER=wireguard`, `wireguard-tools` installed, and `meteorcli.service` plus `meteorcli-helper.socket` running (the root helper brings up wg0); `journalctl -u meteorcli -u meteorcli-helper` |
+| Deploy systemd unit fails | The root helper writes the unit; check `systemctl status meteorcli-helper.socket` and `journalctl -u meteorcli-helper`. Re-run the installer with `sudo` if the helper units are missing |
 | Browser terminal fails | Device `sshd` up, `SHELL_PROVIDER=ssh_gateway`, gateway host can route to `10.8.0.0/16`, connectivity status `active` |
 | Browser: `UNPROTECTED PRIVATE KEY` then Permission denied | Platform key must be `0600`. Re-run `make up`, or `sudo chmod 600 /opt/edge-platform/shell/id_ed25519` then Reconnect. Do not use `0640` or group `meteorcloud-shell` |
 | Device card shows **Reconnecting** | The agent checks in but the tunnel is down. On the device: `sudo wg show` (handshake?), UDP 51820 reachable, `vpn.<domain>` resolves. The agent re-resolves the DNS name and restarts `wg0` on its own |
@@ -123,7 +123,7 @@ helm -n meteorcloud test meteorcloud --logs
 
 ## Security notes
 
-This deployment is suitable for demos and early production. Not included: full OS hardening, WAF, centralized monitoring, automated backups.
+This deployment is suitable for demos and early production. Not included: full OS hardening, WAF, centralized monitoring. Nightly local backups are on by default ([Backups and restore](backups.md)); copy them off the host with `backup_s3_uri`.
 
 Lock down `network.allowed_ssh_cidrs` to your IP in production.
 

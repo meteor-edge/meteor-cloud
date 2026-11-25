@@ -49,3 +49,26 @@ def test_workload_keys() -> None:
     assert workload_key_from_spec(ReleaseKind.SYSTEMD, {"unit_name": "a.service"}) == "a.service"
     assert workload_key_from_spec(ReleaseKind.DOCKER, {"container_name": "nginx"}) == "nginx"
     assert workload_key_from_spec(ReleaseKind.DOCKER_COMPOSE, {"project_name": "app"}) == "app"
+
+
+def test_health_check_gets_defaults_and_is_left_out_when_unset() -> None:
+    spec = validate_release_spec(
+        ReleaseKind.DOCKER,
+        {"container_name": "web", "image": "nginx", "health_check": {"http_url": "http://127.0.0.1/"}},
+    )
+    assert spec["health_check"] == {
+        "timeout_seconds": 60,
+        "stable_seconds": 10,
+        "http_url": "http://127.0.0.1/",
+        "rollback": True,
+    }
+    assert "health_check" not in validate_release_spec(ReleaseKind.SYSTEMD, {"unit_name": "cam.service"})
+
+
+@pytest.mark.parametrize(
+    "health_check",
+    [{"timeout_seconds": 1}, {"timeout_seconds": 99999}, {"http_url": "file:///etc/passwd"}, {"stable_seconds": -1}],
+)
+def test_health_check_limits(health_check: dict) -> None:
+    with pytest.raises(ValidationAppError):
+        validate_release_spec(ReleaseKind.DOCKER_COMPOSE, {"project_name": "cam", "health_check": health_check})

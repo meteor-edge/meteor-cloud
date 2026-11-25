@@ -32,7 +32,8 @@ def test_terraform_variables_include_tags(tmp_path: Path) -> None:
     assert variables["tags"]["ManagedBy"] == "edge-installer"
     assert variables["vpn_placement"] == "same_host"
     assert variables["vpn_instance_type"] == "t3.micro"
-    assert variables["instance_type"] == "t3.medium"
+    # Example defaults observability on; full ops stack sizes to large.
+    assert variables["instance_type"] == "t3.large"
     assert int(variables["root_volume_size_gb"]) >= 40
     assert variables["platform_domain"] == ""
     assert variables["dns_zone_id"] == ""
@@ -94,3 +95,19 @@ def test_terraform_variables_open_mqtt_only_for_bundled_broker(tmp_path: Path) -
 
     config.services.mqtt.enabled = False
     assert TerraformRunner(config, tmp_path).variables()["mqtt_listen_port"] == 0
+
+
+def test_terraform_binary_prefers_env_then_terraform_then_tofu(monkeypatch) -> None:
+    from edge_installer.providers.aws import terraform as tf
+
+    found: set[str] = set()
+    monkeypatch.setattr(tf.shutil, "which", lambda name: f"/usr/bin/{name}" if name in found else None)
+    monkeypatch.delenv(tf.TERRAFORM_ENV, raising=False)
+
+    assert tf.terraform_binary() == "terraform"  # nothing installed: the error names terraform
+    found.add("tofu")
+    assert tf.terraform_binary() == "tofu"
+    found.add("terraform")
+    assert tf.terraform_binary() == "terraform"
+    monkeypatch.setenv(tf.TERRAFORM_ENV, "/opt/tofu/bin/tofu")
+    assert tf.terraform_binary() == "/opt/tofu/bin/tofu"

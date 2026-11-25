@@ -1,4 +1,4 @@
-"""Write an outbox event for every change of a device's status in a Deploy.
+"""Write an outbox event for every change of a device's status in a Deploy, and of a workload's health.
 
 One ``before_flush`` hook sees every change, wherever in the code the status is
 set (heartbeat reports, the sweeper, cancel, rollback, timeouts), and adds the
@@ -19,6 +19,7 @@ from app.core.config import get_settings
 from app.history.models import PlatformEventOutbox
 
 DEPLOYMENTS_STREAM = "meteor.deployments"
+SOFTWARE_STREAM = "meteor.software"
 TERMINAL = frozenset({"succeeded", "failed", "cancelled", "skipped", "timed_out"})
 
 
@@ -61,13 +62,58 @@ def _deployment_event(
     )
 
 
+def _before(row: Any, field: str) -> Any:
+    """The value of ``field`` before this flush."""
+    history = inspect(row).attrs[field].history
+    return history.deleted[0] if history.deleted else getattr(row, field)
+
+
+def _software_events(session: Session, now: datetime) -> list[PlatformEventOutbox]:
+    """One event per workload whose health, or stopped state, changes in this flush."""
+    from app.deployments.software_models import DeviceSoftware
+
+    def shown(stopped: bool | None, health: str | None) -> str:
+        return "stopped" if stopped else (health or "unknown")
+
+    events = []
+    for row in (*session.new, *session.dirty):
+        if not isinstance(row, DeviceSoftware):
+            continue
+        after = shown(row.stopped_by_user, row.health)
+        if inspect(row).pending:
+            before = "unknown"
+        else:
+            before = shown(_before(row, "stopped_by_user"), _before(row, "health"))
+        if before == after:
+            continue
+        data: dict[str, Any] = {"workload_key": row.workload_key, "from": before, "to": after}
+        if after == "unhealthy" and row.last_error:
+            data["reason"] = str(row.last_error)[:500]
+        events.append(
+            PlatformEventOutbox(
+                id=uuid.uuid4(),
+                organization_id=row.organization_id,
+                device_id=row.device_id,
+                stream=SOFTWARE_STREAM,
+                type="software.health.changed",
+                occurred_at=now,
+                data=data,
+            )
+        )
+    return events
+
+
 def _before_flush(session: Session, _context: object, _instances: object) -> None:
     from app.deployments.models import Deployment, DeploymentDevice
 
     candidates = [obj for obj in (*session.new, *session.dirty) if isinstance(obj, DeploymentDevice)]
-    if not candidates or not history_enabled():
+    if not history_enabled():
         return
     now = datetime.now(UTC)
+    with session.no_autoflush:
+        session.add_all(_software_events(session, now))
+    if not candidates:
+        return
     # A Deploy created in this flush is not in the database yet: find it among the new objects.
     pending = {obj.id: obj for obj in session.new if isinstance(obj, Deployment)}
     with session.no_autoflush:

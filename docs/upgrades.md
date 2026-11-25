@@ -59,6 +59,10 @@ Push Git changes first when using `image_source: git`.
 - **Re-registering known hardware needs proof** (agent 0.3.5): the device's current
   token, or **Allow re-registration** on the device page. See
   [Device registration](fleet/device-registration.md#re-registering-known-hardware).
+- **Signed desired software** (agent 0.4.0): devices pin the organization's signing key
+  on first use and then refuse unsigned or tampered updates. The key is encrypted with
+  `SECRETS_ENCRYPTION_KEY` / `APP_SECRET_KEY`: do not change those after upgrading. See
+  [Signed updates](fleet/signed-updates.md).
 
 ## Idempotency
 
@@ -68,6 +72,11 @@ Running `apply` again is safe — it will not duplicate EC2 instances or reset a
 
 `helm upgrade --install` with new image tags. The API's init container runs
 migrations before the new pods serve traffic. See [Kubernetes](kubernetes.md).
+
+The chart's image repositories default to the published release images
+(`ghcr.io/meteor-edge/meteorcloud-*`, see [Release images](release-images.md)). If you
+build and push your own images, keep setting `backend.image.repository` and the other
+`*.image.repository` values in your values file.
 
 ## Upgrading hosts deployed before `deploy/compose/`
 

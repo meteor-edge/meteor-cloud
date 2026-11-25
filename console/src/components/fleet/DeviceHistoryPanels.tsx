@@ -21,7 +21,7 @@ import { cn, formatBytes, formatDateTime, formatDuration } from "@/lib/utils";
 const noRetryOnApiError = (count: number, error: unknown) =>
   !(error instanceof ApiError) && count < 1;
 
-function unavailableText(error: unknown): string {
+export function unavailableText(error: unknown): string {
   if (error instanceof ApiError && error.code === "telemetry_unavailable") {
     return "History is not enabled on this installation. It needs the data API with NATS and ClickHouse.";
   }
@@ -217,7 +217,7 @@ const EVENT_LABELS: Record<string, string> = {
 
 const BAD_EVENTS = new Set(["app.crash_loop", "app.oom_killed", "app.unhealthy"]);
 
-function describeEvent(event: AppEvent): string {
+export function describeEvent(event: AppEvent): string {
   const parts = [EVENT_LABELS[event.type] ?? event.type.replace(/^app\./, "")];
   if (event.exit_code != null && event.type === "app.exited") parts.push(`exit ${event.exit_code}`);
   if (event.oom_killed && event.type === "app.exited") parts.push("out of memory");

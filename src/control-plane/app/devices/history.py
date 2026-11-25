@@ -23,6 +23,7 @@ from app.core.exceptions import AppError
 from app.deployments.models import Deployment
 from app.devices.telemetry import RANGES, TelemetryRange
 from app.ports.data_plane import DataPlaneApi
+from app.releases.kinds import ReleaseKind, workload_key_from_spec
 from app.releases.models import Release
 
 STATUS_STREAM = "meteor.device.status"
@@ -329,7 +330,19 @@ def device_deployment_history(
         organization_id=organization_id,
         params={"stream": DEPLOYMENTS_STREAM, "device_id": str(device_id), "order": "desc", "limit": str(limit)},
     )
-    raw = body.get("events", [])
+    items = deployment_items(session, organization_id=organization_id, raw=body.get("events", []))
+    return DeviceDeploymentHistoryResponse(device_id=device_id, items=items)
+
+
+def deployment_items(
+    session: Session,
+    *,
+    organization_id: uuid.UUID,
+    raw: list[dict[str, Any]],
+    workload_key: str | None = None,
+    kind: ReleaseKind | str | None = None,
+) -> list[DeploymentHistoryItem]:
+    """Deployment events with their names; with ``workload_key``, only deploys of that workload."""
     deployment_ids = {d for d in (_uuid((e.get("data") or {}).get("deployment_id")) for e in raw) if d}
     release_ids = {r for r in (_uuid((e.get("data") or {}).get("release_id")) for e in raw) if r}
     deployments = (
@@ -363,6 +376,12 @@ def device_deployment_history(
         dep_id, rel_id = _uuid(data.get("deployment_id")), _uuid(data.get("release_id"))
         deployment = deployments.get(dep_id) if dep_id else None
         release = releases.get(rel_id) if rel_id else None
+        if workload_key is not None and (
+            release is None
+            or release.kind != kind
+            or workload_key_from_spec(release.kind, release.spec) != workload_key
+        ):
+            continue
         seconds = data.get("seconds")
         items.append(
             DeploymentHistoryItem(
@@ -378,7 +397,7 @@ def device_deployment_history(
                 error=data.get("error"),
             )
         )
-    return DeviceDeploymentHistoryResponse(device_id=device_id, items=items)
+    return items
 
 
 # ------------------------------------------------------------------ apps
@@ -432,6 +451,24 @@ def parse_app_readings(data: dict[str, Any]) -> list[AppReading]:
     return [AppReading.model_validate(entry) for _, entry in sorted(apps.items())]
 
 
+def app_event(event: dict[str, Any]) -> AppEvent | None:
+    """An app lifecycle event of the device events stream, None for any other event."""
+    kind = str(event.get("type", ""))
+    at = _parse_time(event.get("time"))
+    if not kind.startswith("app.") or at is None:
+        return None
+    data = event.get("data") or {}
+    exit_code = data.get("exit_code")
+    return AppEvent(
+        t=at,
+        type=kind,
+        app=data.get("app") if isinstance(data.get("app"), str) else None,
+        exit_code=exit_code if isinstance(exit_code, int) and not isinstance(exit_code, bool) else None,
+        oom_killed=data.get("oom_killed") if isinstance(data.get("oom_killed"), bool) else None,
+        detail=str(data["detail"])[:300] if data.get("detail") else None,
+    )
+
+
 def device_apps(
     data_plane: DataPlaneApi | None,
     *,
@@ -461,22 +498,10 @@ def device_apps(
     ).get("events", [])
     events: list[AppEvent] = []
     for event in raw:
-        kind = str(event.get("type", ""))
-        at = _parse_time(event.get("time"))
-        if not kind.startswith("app.") or at is None:
+        parsed = app_event(event)
+        if parsed is None:
             continue
-        data = event.get("data") or {}
-        exit_code = data.get("exit_code")
-        events.append(
-            AppEvent(
-                t=at,
-                type=kind,
-                app=data.get("app") if isinstance(data.get("app"), str) else None,
-                exit_code=exit_code if isinstance(exit_code, int) and not isinstance(exit_code, bool) else None,
-                oom_killed=data.get("oom_killed") if isinstance(data.get("oom_killed"), bool) else None,
-                detail=str(data["detail"])[:300] if data.get("detail") else None,
-            )
-        )
+        events.append(parsed)
         if len(events) >= 50:
             break
     return DeviceAppsResponse(device_id=device_id, reported_at=reported_at, apps=readings, events=events)

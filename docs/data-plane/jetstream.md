@@ -26,7 +26,7 @@ JetStream is internal messaging between data-plane services. **Devices never con
                   alerts / actions                  ClickHouse `events` table (+ `device_metrics` view)
 ```
 
-The existing path from the Python data plane to the control plane (`POST /internal/mqtt/ingest`, last known status and metrics shown in the console) is unchanged; both subscribe to the same device topics.
+The existing path from the MQTT forwarder to the control plane (`POST /internal/mqtt/ingest`, last known status and metrics shown in the console) is unchanged; both subscribe to the same device topics.
 
 Each box is its own process and can be scaled on its own. All three ship in the `data-api` image (`src/data-plane/go`) with different entrypoints.
 
@@ -132,7 +132,7 @@ type Handler interface {
 }
 ```
 
-`nil` acks. An error naks with a delay from `RULES_RETRY_BACKOFF` (`1s,5s,30s,2m`, by attempt). `ruleproc.Permanent(err)` terminates the message instead of retrying. The default handler counts and logs events; the rule engine plugs in at `newHandler` in `cmd/rule-processor/main.go`. Handlers see at-least-once delivery and must be idempotent on `ev.ID`; `ruleproc.Dedupe` adds an in-process guard.
+`nil` acks. An error naks with a delay from `RULES_RETRY_BACKOFF` (`1s,5s,30s,2m`, by attempt). `ruleproc.Permanent(err)` terminates the message instead of retrying. With `RULES_DATABASE_URL` set the handler is the rule engine ([Rules and alerts](../rules.md)); without it the handler only counts and logs events. Handlers see at-least-once delivery and must be idempotent on `ev.ID`; `ruleproc.Dedupe` adds an in-process guard.
 
 **ClickHouse writer** (`internal/chwriter`) buffers up to `CLICKHOUSE_WRITER_BATCH_SIZE` (1000) messages or `CLICKHOUSE_WRITER_FLUSH_INTERVAL` (1s), inserts the batch into the `events` table, and only then acks every message in it. Nothing more is pulled while a flush runs, so a slow ClickHouse slows consumption instead of growing memory.
 

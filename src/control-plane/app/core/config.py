@@ -76,6 +76,13 @@ class Settings(BaseSettings):
         default=30,
         alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
     )
+    # Whether anyone who reaches the API may create an account (POST /api/v1/auth/register).
+    # Off: people join only when an administrator adds them to an organization.
+    allow_signup: bool = Field(default=True, alias="ALLOW_SIGNUP")
+    # Sign-in attempts per fixed window, counted per email address and per source IP.
+    login_rate_limit_requests: int = Field(default=10, ge=0, alias="LOGIN_RATE_LIMIT_REQUESTS")
+    login_ip_rate_limit_requests: int = Field(default=60, ge=0, alias="LOGIN_IP_RATE_LIMIT_REQUESTS")
+    login_rate_limit_window_seconds: int = Field(default=300, ge=1, alias="LOGIN_RATE_LIMIT_WINDOW_SECONDS")
 
     redis_url: str = Field(
         default="redis://localhost:6379/0",
@@ -93,6 +100,11 @@ class Settings(BaseSettings):
     )
     # How long "Allow re-registration" lets known hardware register again without its
     # current device token (e.g. after the card was re-flashed).
+    # Docker releases: resolve the image tag to a digest when the release is saved, so
+    # devices pull exactly that image (docs/fleet/signed-updates.md). Public registries only.
+    release_resolve_image_digests: bool = True
+    # Refuse a docker release whose tag cannot be resolved (otherwise it keeps the tag).
+    release_require_image_digests: bool = False
     device_reregistration_window_seconds: int = Field(
         default=24 * 3600,
         ge=60,
@@ -191,6 +203,8 @@ class Settings(BaseSettings):
     data_plane_public_url: str = Field(default="", alias="DATA_PLANE_PUBLIC_URL")
     # Shared secret for /internal/data-plane/* (policy snapshot) and data-plane /internal/v1/*.
     data_plane_internal_token: str = Field(default="", alias="DATA_PLANE_INTERNAL_TOKEN")
+    # Internal API of the rule processor (rule tests, evaluation status). Empty: those routes answer 503.
+    rules_engine_url: str = Field(default="", alias="RULES_ENGINE_URL")
     # Seconds between sends of the platform history outbox (deployment changes) to the data plane.
     history_relay_interval_seconds: float = Field(default=5.0, gt=0, le=300, alias="HISTORY_RELAY_INTERVAL_SECONDS")
     # Lifetime of credentials the device agent mints for deployed workloads.
@@ -283,6 +297,9 @@ class Settings(BaseSettings):
         default=True,
         alias="OBJECT_STORAGE_AUTO_CREATE_BUCKET",
     )
+    # Endpoint devices use to reach the bucket, when it differs from the API's own
+    # (e.g. MinIO at http://minio:9000 inside Compose but https://s3.example.com outside).
+    object_storage_public_endpoint_url: str = Field(default="", alias="OBJECT_STORAGE_PUBLIC_ENDPOINT_URL")
 
     artifact_max_upload_bytes: int = Field(
         default=8 * 1024 * 1024 * 1024,
@@ -291,6 +308,12 @@ class Settings(BaseSettings):
     artifact_download_link_ttl_seconds: int = Field(
         default=300,
         alias="ARTIFACT_DOWNLOAD_LINK_TTL_SECONDS",
+    )
+    # Agents download artifacts straight from S3-compatible storage through a short-lived
+    # presigned URL instead of through the API (docs/fleet/artifacts.md).
+    artifact_download_redirect: bool = Field(default=True, alias="ARTIFACT_DOWNLOAD_REDIRECT")
+    artifact_download_url_ttl_seconds: int = Field(
+        default=900, ge=60, le=7 * 24 * 3600, alias="ARTIFACT_DOWNLOAD_URL_TTL_SECONDS"
     )
 
     # When True, agent registration over plain HTTP is rejected. Left False for

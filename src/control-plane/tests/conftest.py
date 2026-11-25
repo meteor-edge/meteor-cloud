@@ -9,6 +9,8 @@ from collections.abc import Generator
 os.environ["MQTT_ENABLED"] = "false"
 # Tests call sweep_deployments directly; no background sweeper against the test DB.
 os.environ["DEPLOY_TICK_INTERVAL_SECONDS"] = "0"
+# No registry lookups from tests; test_release_image_digest.py enables them with a fake.
+os.environ.setdefault("RELEASE_RESOLVE_IMAGE_DIGESTS", "false")
 os.environ.setdefault("CONNECTIVITY_PROVIDER", "wireguard")
 os.environ.setdefault("SHELL_PROVIDER", "echo")
 os.environ.setdefault(
@@ -54,13 +56,17 @@ from app.devices.rate_limit import InMemoryRateLimiter
 from app.endpoints import models as _endpoint_models  # noqa: F401
 from app.history import models as _history_models  # noqa: F401
 from app.identity import models as _identity_models  # noqa: F401
+from app.identity.dependencies import get_login_email_rate_limiter, get_login_ip_rate_limiter
 from app.identity.models import User
 from app.main import create_app
 from app.network import models as _network_models  # noqa: F401
 from app.releases import models as _release_models  # noqa: F401
+from app.rules import models as _rule_models  # noqa: F401
 from app.shell import models as _shell_models  # noqa: F401
+from app.signing import models as _signing_models  # noqa: F401
 from app.tenancy import models as _organization_models  # noqa: F401
 from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole
+from tests.agent_contract import check_response as check_agent_contract
 from tests.db_guard import assert_safe_test_database_url, ensure_database_exists
 from tests.storage import InMemoryObjectStorage
 
@@ -124,6 +130,12 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
     # Permissive limiter by default; tests that exercise rate limiting override
     # this on ``client.app.dependency_overrides``.
     application.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(limit=10_000, window_seconds=60)
+    application.dependency_overrides[get_login_email_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
+    application.dependency_overrides[get_login_ip_rate_limiter] = lambda: InMemoryRateLimiter(
+        limit=10_000, window_seconds=60
+    )
     application.dependency_overrides[get_enroll_request_rate_limiter] = lambda: InMemoryRateLimiter(
         limit=10_000, window_seconds=60
     )
@@ -143,6 +155,8 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
         limit=10_000, window_seconds=60
     )
     with TestClient(application) as test_client:
+        # Every /api/v1/agent/* answer is checked against contracts/schemas/agent.
+        test_client.event_hooks["response"].append(check_agent_contract)
         yield test_client
     application.dependency_overrides.clear()
 

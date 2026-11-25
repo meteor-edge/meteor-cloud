@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/enroll/request (201)",
+  "description": "A pending request. claim_secret is a secret; keep it (it survives reboot) and poll with it.",
+  "type": "object",
+  "required": [
+    "request_id",
+    "claim_secret",
+    "status",
+    "poll_interval_seconds",
+    "expires_at"
+  ],
+  "properties": {
+    "request_id": {
+      "$ref": "../common.json#/$defs/uuid"
+    },
+    "claim_secret": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "expired"
+      ]
+    },
+    "poll_interval_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "$ref": "../common.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

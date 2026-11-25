@@ -135,7 +135,8 @@ class ObservabilitySettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    # On by default (Prometheus + Grafana on localhost/SSH). Set false to skip the ops stack.
+    enabled: bool = True
     backend: Literal["prometheus", "cloudwatch"] = "prometheus"
     components: ObservabilityComponents = Field(default_factory=ObservabilityComponents)
     # Logs kept by Loki (hours) and metrics kept by Prometheus (whichever limit is hit first).

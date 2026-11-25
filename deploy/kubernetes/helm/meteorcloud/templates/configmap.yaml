@@ -21,6 +21,7 @@ data:
   DB_MAX_OVERFLOW: {{ .Values.backend.dbPool.maxOverflow | quote }}
   METRICS_ENABLED: {{ .Values.metrics.enabled | toString | quote }}
   REGISTRATION_REQUIRE_HTTPS: {{ .Values.config.registrationRequireHttps | toString | quote }}
+  ALLOW_SIGNUP: {{ .Values.config.allowSignup | toString | quote }}
   FORWARDED_ALLOW_IPS: {{ .Values.config.forwardedAllowIps | quote }}
   DATABASE_PROVIDER: postgresql
   TELEMETRY_PROVIDER: postgresql
@@ -55,6 +56,7 @@ data:
   OBJECT_STORAGE_PATH: /data/artifacts
   {{- with .Values.objectStorage.s3 }}
   OBJECT_STORAGE_ENDPOINT_URL: {{ .endpointUrl | quote }}
+  OBJECT_STORAGE_PUBLIC_ENDPOINT_URL: {{ .publicEndpointUrl | default "" | quote }}
   OBJECT_STORAGE_REGION: {{ .region | quote }}
   OBJECT_STORAGE_BUCKET: {{ .bucket | quote }}
   OBJECT_STORAGE_AUTO_CREATE_BUCKET: {{ .autoCreateBucket | toString | quote }}

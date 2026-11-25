@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GET /api/v1/agent/software (200)",
+  "description": "Desired software for this device. Items are verified against the pinned signing keys before anything is downloaded.",
+  "type": "array",
+  "items": {
+    "$ref": "../common.json#/$defs/desired_software_item"
+  }
+}

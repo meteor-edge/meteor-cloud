@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -23,3 +23,5 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Copied into each access token ("ver"). Raising it ends every token issued before.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)

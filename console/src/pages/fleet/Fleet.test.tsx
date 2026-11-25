@@ -121,6 +121,7 @@ const device = {
   cpu_cores: 4,
   memory_mb: 8000,
   local_ip: null,
+  agent_version: null,
   labels: {},
   metadata: {},
   credential_prefix: "dev_abc",
