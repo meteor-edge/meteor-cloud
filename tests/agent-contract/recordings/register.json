@@ -1,0 +1,83 @@
+{
+  "scenario": "register",
+  "contract": "contracts/device-agent-v1.md",
+  "http": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/register",
+        "headers": {
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "token": "<registration_token>",
+          "serial_number": "<inventory>",
+          "mac_addresses": "<inventory>",
+          "hostname": "<inventory>",
+          "os_name": "<inventory>",
+          "os_version": "<inventory>",
+          "kernel_version": "<inventory>",
+          "architecture": "<inventory>",
+          "hardware_model": "<inventory>",
+          "cpu_model": "<inventory>",
+          "cpu_cores": "<inventory>",
+          "memory_mb": "<inventory>",
+          "local_ip": "<inventory>",
+          "agent_version": "<inventory>"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "device_id": "<uuid:1>",
+          "device_token": "<device_token>",
+          "organization_id": "<uuid:2>",
+          "name": "contract-device",
+          "heartbeat_interval_seconds": 60,
+          "mqtt": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/register",
+        "headers": {
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
+        "body": {
+          "token": "<registration_token>",
+          "serial_number": "<inventory>",
+          "mac_addresses": "<inventory>",
+          "hostname": "<inventory>",
+          "os_name": "<inventory>",
+          "os_version": "<inventory>",
+          "kernel_version": "<inventory>",
+          "architecture": "<inventory>",
+          "hardware_model": "<inventory>",
+          "cpu_model": "<inventory>",
+          "cpu_cores": "<inventory>",
+          "memory_mb": "<inventory>",
+          "local_ip": "<inventory>",
+          "agent_version": "<inventory>",
+          "device_token": "<device_token>"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "device_id": "<uuid:1>",
+          "device_token": "<rotated_device_token>",
+          "organization_id": "<uuid:2>",
+          "name": "contract-device",
+          "heartbeat_interval_seconds": 60,
+          "mqtt": null
+        }
+      }
+    }
+  ]
+}

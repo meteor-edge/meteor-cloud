@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.applications.dependencies import get_data_plane_api
 from app.core.database import get_db
 from app.deployments.software_dependencies import DeviceSoftwareSvc
-from app.deployments.software_schemas import DeviceSoftwareResponse
+from app.deployments.software_schemas import DeviceSoftwareDetailResponse, DeviceSoftwareResponse
 from app.devices.dependencies import FleetSvc
 from app.devices.device_config import DeviceConfigRequest, DeviceConfigResponse
 from app.devices.history import (
@@ -54,6 +54,7 @@ from app.devices.schemas import (
     RegistrationTokenCreateResponse,
     RegistrationTokenResponse,
 )
+from app.devices.software_history import SoftwareHistoryResponse, SoftwareRange, software_history
 from app.devices.telemetry import DeviceTelemetryResponse, TelemetryRange, get_device_telemetry
 from app.identity.dependencies import CurrentUser
 from app.mqtt.control import request_device_disconnect
@@ -553,6 +554,38 @@ def list_device_software(
         organization_id=organization_id,
         device_id=device_id,
     )
+
+
+@router.get("/devices/{device_id}/software/{software_id}", response_model=DeviceSoftwareDetailResponse)
+def get_device_software(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    software_id: uuid.UUID,
+    current_user: CurrentUser,
+    software: DeviceSoftwareSvc,
+) -> DeviceSoftwareDetailResponse:
+    """One workload with its latest snapshot and what this agent and user can do with it."""
+    return software.detail_for_operator(
+        actor=current_user, organization_id=organization_id, device_id=device_id, software_id=software_id
+    )
+
+
+@router.get("/devices/{device_id}/software/{software_id}/history", response_model=SoftwareHistoryResponse)
+def get_device_software_history(
+    organization_id: uuid.UUID,
+    device_id: uuid.UUID,
+    software_id: uuid.UUID,
+    current_user: CurrentUser,
+    software: DeviceSoftwareSvc,
+    session: Annotated[Session, Depends(get_db)],
+    data_plane: Annotated[DataPlaneApi | None, Depends(get_data_plane_api)],
+    range_: Annotated[SoftwareRange, Query(alias="range")] = "24h",
+) -> SoftwareHistoryResponse:
+    """Health over time, lifecycle events, deploys and CPU/memory of one workload."""
+    row = software.readable(
+        actor=current_user, organization_id=organization_id, device_id=device_id, software_id=software_id
+    )
+    return software_history(data_plane, session, row=row, range_=range_, now=datetime.now(UTC))
 
 
 @router.patch("/devices/{device_id}", response_model=DeviceResponse)

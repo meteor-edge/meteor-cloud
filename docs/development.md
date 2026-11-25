@@ -31,7 +31,7 @@ For a product walkthrough (console + first device), start with [Getting started]
 ```bash
 make dev                 # all Compose files (shared network meteorcloud)
 make dev-control-plane   # bundled infra (postgres/redis/minio profiles) + control-plane API
-make dev-data-plane      # MQTT broker + data-plane MQTT gateway
+make dev-data-plane      # MQTT broker + data-plane MQTT forwarder (Go)
 make dev-console         # operator console
 ```
 
@@ -108,10 +108,10 @@ uvicorn app.main:app --reload
 ### Data plane
 
 ```bash
-cd src/data-plane
+cd src/data-plane/go
 export CONTROL_PLANE_URL=http://127.0.0.1:8000
 export MQTT_BROKER_HOST=127.0.0.1
-uvicorn data_plane.main:app --host 0.0.0.0 --port 8081 --reload
+go run ./cmd/mqtt-forwarder        # the data-plane service on :8081
 ```
 
 ### Console
@@ -135,10 +135,10 @@ edge-installer validate --config config/examples/installation.yaml
 ```bash
 make test
 make backend-test
-make data-plane-test
 make data-api-test       # Go data plane: go vet + go test -race (set DATAPLANE_TEST_DATABASE_URL for the PostgreSQL suite)
 make sdk-test            # Python SDK against the real data plane binary (needs Go)
-make agent-test
+make agent-test          # Go meteorcli: gofmt, vet, go test -race (same as agent-go-test)
+make agent-contract-test # Go meteorcli against contracts/device-agent-v1.md (needs Go, and Docker for Mosquitto)
 make console-test
 make check-plane-imports
 ```

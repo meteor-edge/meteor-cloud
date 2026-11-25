@@ -235,11 +235,11 @@ Automatic on current Raspberry Pi OS (bootfs has `user-data`). Do **not**
 edit `cmdline.txt`.
 
 1. Copy `.meteorenv` / `meteorenv.txt` onto **boot** / **bootfs** (`METEOR_DOMAIN`, `METEOR_API_KEY`).
-   With meteorcli **0.3.2+**, `meteorcli.service` reads that file and submits the
-   request itself (full Wi-Fi/user first-boot still needs the first-boot image).
+   `meteorcli.service` reads that file and submits the request itself (Wi-Fi, user
+   and SSH from the same file need `meteorcli-settings.service`, which OS images have).
 2. Append `packages:` and `runcmd:` from
-   [`cloud-init-user-data.yaml`](../../src/device-plane/agent/packaging/firstboot/cloud-init-user-data.yaml)
+   [`cloud-init-user-data.yaml`](../../src/device-plane/agent-go/packaging/firstboot/cloud-init-user-data.yaml)
    to `user-data`.
 3. Boot the Pi. Approve the pending device in the console.
 
-Details: [`packaging/firstboot/`](../../src/device-plane/agent/packaging/firstboot/README.md).
+Details: [`packaging/firstboot/`](../../src/device-plane/agent-go/packaging/firstboot/README.md).

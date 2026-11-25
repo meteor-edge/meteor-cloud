@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/software/snapshots (200)",
+  "type": "object",
+  "required": [
+    "accepted"
+  ],
+  "properties": {
+    "accepted": {
+      "type": "boolean",
+      "description": "false: the device has no such workload (any more)."
+    }
+  }
+}

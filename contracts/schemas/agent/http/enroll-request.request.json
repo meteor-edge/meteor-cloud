@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/enroll/request (request)",
+  "description": "Ask to join with an enrollment API key (Authorization: Bearer <key>). An operator approves it, or an auto-approve rule does.",
+  "allOf": [
+    {
+      "$ref": "../common.json#/$defs/inventory"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 255
+    },
+    "labels": {
+      "type": "object"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+#cloud-config
+# Easier than editing cmdline.txt. Merge this into bootfs `user-data`
+# (or replace a stock empty user-data). Cloud-init runs it once, with
+# networking, and does not lock the Pi into kernel-command-line.target.
+#
+# Also copy `.meteorenv` onto the same boot volume.
+packages:
+  - curl
+  - ca-certificates
+runcmd:
+  - |
+    curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli-firstboot.sh | bash

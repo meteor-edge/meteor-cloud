@@ -1,7 +1,21 @@
-# Publish meteorcli (agent + runtime only) as a GitHub Release.
-# Happens by itself when a merge to master changes the version in
-# src/device-plane/agent/pyproject.toml (the workflow creates tag agent-v<version>).
-# A hand-pushed tag still works: git tag agent-v0.3.5 && git push origin agent-v0.3.5
+# Publish the Go meteorcli as a GitHub Release (agent-v<version>, "latest").
+# Happens by itself on every merge to master that changes the agent
+# (src/device-plane/agent-go, not docs or tests): the workflow picks the next
+# version, creates the tag and the release. Nothing is committed back.
+#
+# Version: the newest agent-v* release with the patch number + 1, unless
+# src/device-plane/agent-go/VERSION is higher (bump it in a PR for a new minor or
+# major version: 0.6.0 releases as 0.6.0, the next merge as 0.6.1). A commit that
+# already has a release is not released again. Run it by hand (workflow_dispatch)
+# to release master now. A hand-pushed tag still works and must be >= VERSION:
+#   git tag agent-v0.5.3 && git push origin agent-v0.5.3
+#
+# Release files: meteorcli-linux-{arm64,armv6,amd64}, the signed manifest
+# (meteorcli-release.json + .sig, what `meteorcli updater` installs from),
+# meteorcli-packaging.tar.gz, install-meteorcli.sh (any board, picks the binary by
+# uname -m), install-rpi.sh, the first-boot / OS image scripts and SHA256SUMS.
+# Devices update from releases/latest/download by default, so a release is
+# refused unless its manifest is signed.
 name: meteorcli release
 
 on:
@@ -10,11 +24,17 @@ on:
       - "agent-v*"
     branches: [master]
     paths:
-      - src/device-plane/agent/pyproject.toml
+      - src/device-plane/agent-go/**
+      - "!src/device-plane/agent-go/**/*.md"
+      - "!src/device-plane/agent-go/**/*_test.go"
+      - "!src/device-plane/agent-go/test/**"
+      - "!src/device-plane/agent-go/internal/agenttest/**"
+      - "!src/device-plane/agent-go/internal/fakebroker/**"
+      - "!src/device-plane/agent-go/internal/fakecp/**"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: agent-release
@@ -22,78 +42,120 @@ concurrency:
 
 jobs:
   release:
-    name: Pack and publish meteorcli
+    name: Build, sign and publish meteorcli
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: src/device-plane/agent-go
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
         with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: src/device-plane/agent/pyproject.toml
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
       - name: Decide the release tag
         id: tag
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          ver="$(python -c "import tomllib; print(tomllib.load(open('src/device-plane/agent/pyproject.toml', 'rb'))['project']['version'])")"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME}"
-            if [[ "${tag#agent-v}" != "${ver}" ]]; then
-              echo "error: tag ${tag} does not match pyproject version ${ver}" >&2
+          floor="$(tr -d '[:space:]' < VERSION)"
+          semver='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if ! [[ "$floor" =~ $semver ]]; then
+            echo "error: VERSION must be MAJOR.MINOR.PATCH, got '$floor'" >&2
+            exit 1
+          fi
+          # agent-v* tags on the server as "<commit> <version>".
+          tags="$(git ls-remote --tags --refs "https://github.com/$REPO" 'agent-v*' \
+            | awk '{sub("refs/tags/agent-v", "", $2); print $1, $2}')"
+          newest="$(awk '{print $2}' <<<"$tags" | grep -E "$semver" | sort -V | tail -n1 || true)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+            ver="${tag#agent-v}"
+            if ! [[ "$ver" =~ $semver ]]; then
+              echo "error: tag $tag is not agent-vMAJOR.MINOR.PATCH" >&2
+              exit 1
+            fi
+            if [[ "$(printf '%s\n%s\n' "$floor" "$ver" | sort -V | head -n1)" != "$floor" ]]; then
+              echo "error: tag $tag is lower than VERSION $floor" >&2
               exit 1
             fi
           else
-            tag="agent-v${ver}"
+            released="$(awk -v sha="$GITHUB_SHA" '$1 == sha {print $2}' <<<"$tags" | head -n1)"
+            if [[ -n "$released" ]]; then
+              echo "This commit is already released as agent-v$released; nothing to publish."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            ver="$floor"
+            if [[ -n "$newest" ]]; then
+              IFS=. read -r major minor patch <<<"$newest"
+              next="$major.$minor.$((patch + 1))"
+              # VERSION wins when it is higher (a new minor or major version).
+              ver="$(printf '%s\n%s\n' "$floor" "$next" | sort -V | tail -n1)"
+            fi
+            tag="agent-v$ver"
           fi
-          if gh release view "${tag}" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists; nothing to publish."
+          if gh release view "$tag" -R "$REPO" >/dev/null 2>&1; then
+            echo "Release $tag already exists; nothing to publish."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "name=${tag}" >> "$GITHUB_OUTPUT"
-      - name: Install agent test deps
+          echo "Releasing $tag (newest release: ${newest:-none}, VERSION: $floor)"
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - name: Test
         if: steps.tag.outputs.skip != 'true'
-        run: python -m pip install -e "src/device-plane/agent[dev]"
-      - name: Test agent
+        run: go test -race ./...
+      # The installers point at this release's own download URL, so an install
+      # from it gets exactly these binaries even after a newer release.
+      - name: Release files (signed)
         if: steps.tag.outputs.skip != 'true'
-        working-directory: src/device-plane/agent
-        run: python -m pytest -q
-      - name: Pack release assets
+        env:
+          METEORCLI_RELEASE_SIGNING_KEY: ${{ secrets.METEORCLI_RELEASE_SIGNING_KEY }}
+          TAG: ${{ steps.tag.outputs.name }}
+          VER: ${{ steps.tag.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$METEORCLI_RELEASE_SIGNING_KEY" ]; then
+            echo "error: secret METEORCLI_RELEASE_SIGNING_KEY is not set; devices refuse an unsigned release" >&2
+            exit 1
+          fi
+          ./scripts/dist.sh "$RUNNER_TEMP/dist" "$VER" "https://github.com/$REPO/releases/download/$TAG"
+          test -s "$RUNNER_TEMP/dist/meteorcli-release.json.sig"
+      - name: Installer under systemd
         if: steps.tag.outputs.skip != 'true'
-        run: make agent-dist
+        run: ./test/install/run.sh
       - name: Create GitHub Release
         if: steps.tag.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.name }}
+          VER: ${{ steps.tag.outputs.version }}
+          REPO: ${{ github.repository }}
         run: |
-          ver="$(python -c "import tomllib; print(tomllib.load(open('src/device-plane/agent/pyproject.toml', 'rb'))['project']['version'])")"
-          gh release create "${TAG}" --target "${GITHUB_SHA}" \
-            --title "meteorcli ${ver}" \
-            --notes "Device agent only (not the cloud repo). Install:
+          notes="Device agent only (not the cloud repo). Linux with systemd; arm64, 32-bit ARM (ARMv6+) and amd64.
+
+          Install (picks the binary for this CPU):
           \`\`\`bash
-          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-meteorcli.sh | bash
+          curl -fsSL https://github.com/$REPO/releases/latest/download/install-meteorcli.sh | sudo bash -s -- --domain <server> --token <registration token>
           \`\`\`
-          First-boot enroll (install + request-token + poll until approved):
+          Enroll by approval instead: \`--api-key key_… --name <device name>\`. After the install, the installing user
+          is in the \`meteorcli-admin\` group and runs \`meteorcli\` commands without sudo.
+
+          First boot from a card's .meteorenv (Meteor Imager), or prepare a device to become an OS image:
           \`\`\`bash
-          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-meteorcli-firstboot.sh | sudo bash
+          curl -fsSL https://github.com/$REPO/releases/latest/download/install-meteorcli-firstboot.sh | sudo bash
+          curl -fsSLO https://github.com/$REPO/releases/latest/download/meteorcli-prepare-image.sh && sudo bash meteorcli-prepare-image.sh
           \`\`\`
-          Prepare a device to become an OS image (then back it up with Meteor Imager):
-          \`\`\`bash
-          curl -fsSLO https://github.com/${{ github.repository }}/releases/latest/download/meteorcli-prepare-image.sh && sudo bash meteorcli-prepare-image.sh
-          \`\`\`
-          Pin a version with \`METEORCLI_VERSION=${ver}\`.
-          Update an existing device (checksum, keep the previous install, roll back if the new service does not stay up):
-          \`\`\`bash
-          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/update-meteorcli.sh | sudo bash -s -- --check
-          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/update-meteorcli.sh | sudo bash -s -- --yes
-          \`\`\`" \
-            dist/meteorcli.tar.gz \
-            "dist/meteorcli-${ver}.tar.gz" \
-            dist/install-meteorcli.sh \
-            dist/install-meteorcli-firstboot.sh \
-            dist/meteorcli-prepare-image.sh \
-            dist/update-meteorcli.sh \
-            dist/SHA256SUMS
+          Devices update themselves from the newest release (console: Update meteorcli, or \`meteorcli update\`).
+          See docs/meteorcli.md."
+          gh release create "$TAG" -R "$REPO" --target "$GITHUB_SHA" --latest \
+            --title "meteorcli $VER" --notes "$notes" "$RUNNER_TEMP"/dist/*
+          echo "Install URL: https://github.com/$REPO/releases/latest/download/install-meteorcli.sh" >> "$GITHUB_STEP_SUMMARY"

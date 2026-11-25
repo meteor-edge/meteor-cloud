@@ -55,7 +55,8 @@ platform_source_archive: ""
 repository_url: https://github.com/meteor-edge/meteor-cloud.git
 git_ref: master
 backend_image: edge-platform-backend:0.2.0
-data_plane_image: edge-platform-data-plane:0.2.0
+# The MQTT gateway (the "data-plane" Compose service, needs mqtt_enabled) is the Go MQTT
+# forwarder from data_api_image.
 # Application data API (Go). Off by default; enable for SDK publish/subscribe/query/commands.
 data_api_enabled: false
 data_api_image: meteorcloud/data-api:0.2.0
@@ -125,8 +126,9 @@ mqtt_certs_src_dir: ""
 mqtt_platform_password: "{{ EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD'), true) }}"
 mqtt_internal_token: "{{ EDGE_PLATFORM_MQTT_INTERNAL_TOKEN | default(lookup('env', 'EDGE_PLATFORM_MQTT_INTERNAL_TOKEN'), true) }}"
 
-# Observability (Prometheus, Loki, Grafana on this host; UIs bind to localhost)
-observability_enabled: false
+# Observability (Prometheus, Loki, Grafana on this host; UIs bind to localhost).
+# On by default; set observability_enabled=false or make up OBS=0 / --no-observability to skip.
+observability_enabled: true
 observability_backend: prometheus
 grafana_admin_user: admin
 grafana_admin_password: "{{ EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD | default(lookup('env', 'EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD'), true) }}"

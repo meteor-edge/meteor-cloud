@@ -18,10 +18,13 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | NATS Server **2.15.3** (`nats:2.15.3-alpine`) | Optional internal messaging for the device event path (profile `nats`) | [Apache 2.0](https://github.com/nats-io/nats-server/blob/main/LICENSE) | **Yes** | Unmodified image, internal only (devices never connect). Synadia's commercial add-ons are separate products and are not used. Re-check the license on every upgrade |
 | Filesystem or customer S3 / R2 / GCS | Artifacts | N/A / cloud contract | **Yes** | **Preferred** production storage |
 | WireGuard / Docker | VPN / runtime | GPL family / Apache 2.0 | **Yes** | Normal host infra |
-| Prometheus / Alertmanager / node_exporter | Metrics / alerts | Apache 2.0 | **Yes** | Optional ops stack; fine |
-| kube-prometheus-stack **93.1.1** (Prometheus Operator, kube-state-metrics) | Local k3d monitoring (`make k8s-deploy OBS=1`) | [Apache 2.0](https://github.com/prometheus-community/helm-charts) | **Yes** | Local k3d only, off by default. Its bundled Grafana follows the Grafana row. Production clusters bring their own Prometheus |
-| Grafana / Loki / Alloy | Ops dashboards / logs | AGPLv3 | **Yes, with limits** | Optional **operator** tools on **localhost / SSH** only. Off by default. **Not** a customer-facing MeteorCloud UI feature. See [below](#grafana--loki--alloy-yes-with-limits) |
+| Prometheus / Alertmanager / node_exporter | Metrics / alerts | Apache 2.0 | **Yes** | Default ops stack on `make up` / installer; fine |
+| kube-prometheus-stack **93.1.1** (Prometheus Operator, kube-state-metrics) | Local k3d monitoring (`make k8s-deploy`, opt out with `OBS=0`) | [Apache 2.0](https://github.com/prometheus-community/helm-charts) | **Yes** | Local k3d only (default on for that path). Its bundled Grafana follows the Grafana row. Production clusters bring their own Prometheus |
+| Grafana / Loki / Alloy | Ops dashboards / logs | AGPLv3 | **Yes, with limits** | Default **operator** tools on **localhost / SSH** only (`make up`, installer, local k3d). Opt out with `OBS=0` / `observability.enabled: false`. **Not** a customer-facing MeteorCloud UI feature. See [below](#grafana--loki--alloy-yes-with-limits) |
 | Data API Go modules: `pgx` (MIT), `prometheus/client_golang` (Apache 2.0), `google/uuid` and `golang.org/x/time` (BSD-3-Clause), `coder/websocket` (ISC), `eclipse/paho.golang` (EPL-2.0 **or** EDL-1.0, BSD-3-Clause style), `nats-io/nats.go`, `nkeys`, `nuid` (Apache 2.0), `klauspost/compress` (BSD-3-Clause / Apache 2.0 / MIT) | Application data plane and device event services (`src/data-plane/go`) | Permissive | **Yes** | Linked into the `data-api` image binaries. `nats-io/nats-server/v2` (Apache 2.0) and its dependencies (`nats-io/jwt`, `minio/highwayhash`, `google/go-tpm`: Apache 2.0; `antithesis-sdk-go`: MIT) are only linked into tests (embedded JetStream server), never shipped. `paho.golang` is used unmodified under its EDL-1.0 option, like the Python `paho-mqtt` the platform already uses |
+| Go device agent module: `eclipse/paho.golang` v0.22.0 (EPL-2.0 **or** EDL-1.0, BSD-3-Clause style); only its `paho` and `packets` packages | MQTT session of the Go `meteorcli` (`src/device-plane/agent-go/internal/bus`) | Permissive | **Yes** | Linked into the `meteorcli` binary shipped to devices; used unmodified under the EDL-1.0 option, same version as the data plane. `autopaho` is not used, so `gorilla/websocket` and `golang.org/x/net` are not linked. No other third-party Go modules in the agent |
+| `jsonschema` 4.x (with `referencing`, `rpds-py`, `attrs`, `jsonschema-specifications`) and `rfc3339-validator` | Test only: checks `/api/v1/agent/*` answers and agent messages against `contracts/schemas/agent` (control-plane dev extra, `tests/agent-contract`) | [MIT](https://github.com/python-jsonschema/jsonschema/blob/main/COPYING) (all six MIT) | **Yes** | Never shipped in an image or on a device. `tests/agent-contract` also starts the unmodified `eclipse-mosquitto:2` image (Mosquitto row) |
+| `debian:12.8-slim` image with Debian `systemd` | Test only: `src/device-plane/agent-go/test/systemd` boots systemd in a container to check the meteorcli units, sockets and permissions | Mixed (systemd LGPL-2.1+, Debian userland GPL family) | **Yes** | Built and run in CI and by developers only; never shipped or pushed. Unmodified Debian packages |
 | Python SDK dependencies: `httpx`, `websockets` | `sdk/python` | BSD-3-Clause | **Yes** | Installed by application developers alongside the SDK |
 | `pg8000` 1.31 (with `scramp`, `python-dateutil`) | SDK example `sdk/python/examples/stream-to-database` | [BSD-3-Clause](https://github.com/tlocke/pg8000/blob/main/LICENSE) (scramp MIT-0, python-dateutil Apache 2.0 / BSD-3-Clause) | **Yes** | Example only, run by the customer against their own database. Chosen over `psycopg` (LGPL-3.0) to keep the example permissive |
 | `golang:1.26-alpine` (build) / `alpine:3.21` (runtime) images | Data API image | BSD-3-Clause (Go) / MIT and GPL-2.0 userland (Alpine, BusyBox) | **Yes** | Unmodified base image; only the static Go binary is added. Same position as the other Alpine-based images |
@@ -36,16 +39,16 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 
 **One-line policy**
 
-> Production defaults = only **Yes**.  
-> **Yes, with limits** = customer’s (or our) ops team on that install, not end-user product UI.  
+> Production defaults = **Yes**, plus **Yes, with limits** only when the limit is met (ops on localhost / SSH, not product UI).  
+> **Yes, with limits** = customer’s (or our) ops team on that install, not end-user product UI. Grafana/Loki/Alloy may be **on by default** under that limit; operators opt out with `OBS=0` / `observability.enabled: false`.  
 > **No (as default)** / **Only with commercial license** = do not enable without an explicit decision.
 
 ## Grafana / Loki / Alloy (“Yes, with limits”)
 
 | OK | Not OK (without counsel / Grafana commercial terms) |
 | --- | --- |
-| Observability flag off by default | Marketing “Observability included” that is really public Grafana |
-| Grafana on `127.0.0.1`, access via SSH tunnel | Grafana on the public Traefik hostname for all users |
+| Default ops stack on localhost / SSH; clear opt-out (`OBS=0`) | Marketing “Observability included” that is really public Grafana |
+| Grafana on `127.0.0.1`, access via SSH tunnel (or k3d port-forward) | Grafana on the public Traefik hostname for all users |
 | Customer SRE or MeteorEdge ops debugging **that** deployment | Multi-tenant SaaS where every customer opens Grafana in the browser as a MeteorCloud feature |
 | Unmodified images as sidecars next to the app | Shipping modified Grafana/Loki without AGPL compliance |
 
@@ -65,13 +68,14 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | NATS Server | `deploy/compose/data-plane.yml` → `nats:2.15.3-alpine` | `nats.enabled` (image `nats:2.15.3-alpine`) |
 | Data API base images | `src/data-plane/go/Dockerfile` → `golang:1.26-alpine`, `alpine:3.21` | not in the chart |
 | Data API Go modules | `src/data-plane/go/go.mod` | same |
+| Go meteorcli systemd test (test only) | `src/device-plane/agent-go/test/systemd/Dockerfile` → `debian:12.8-slim` | not in the chart |
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |
 | Observability | `deploy/compose/docker-compose.observability.yml` | not in the chart |
 
 ## Automated check
 
 CI job **Supply chain → Licences of shipped dependencies** (`.github/workflows/supply-chain.yml`) runs
-`scripts/check_licenses.py` on the console's production npm packages, the Python services, agent
+`scripts/check_licenses.py` on the console's production npm packages, the Python services
 and SDK (with all their dependencies), and the Go binaries (`go-licenses`). GPL, AGPL, LGPL, SSPL,
 BSL/BUSL, Commons Clause, Elastic and unknown licences fail the job unless the package is listed in
 `ALLOWED` in that script with a reason (today: `psycopg`, LGPL-3.0, used unmodified). Dev tooling

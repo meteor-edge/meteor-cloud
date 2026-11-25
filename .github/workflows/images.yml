@@ -34,7 +34,7 @@ jobs:
     name: Check tag matches the chart
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Compare tag with Chart.yaml appVersion
@@ -60,24 +60,23 @@ jobs:
       matrix:
         include:
           - { name: backend, context: src/control-plane }
-          - { name: data-plane, context: src/data-plane }
           - { name: data-api, context: src/data-plane/go }
           - { name: mosquitto, context: src/data-plane/broker/mosquitto }
           - { name: console, context: console }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
       - uses: sigstore/cosign-installer@v3
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE_PREFIX }}${{ matrix.name }}
           tags: |
@@ -87,7 +86,7 @@ jobs:
           labels: |
             org.opencontainers.image.licenses=Apache-2.0
       - id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           platforms: linux/amd64,linux/arm64
@@ -119,7 +118,7 @@ jobs:
           IMAGE: ${{ env.IMAGE_PREFIX }}${{ matrix.name }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: echo "${IMAGE}@${DIGEST}" > "meteorcloud-${{ matrix.name }}.digest"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom-${{ matrix.name }}
           path: |
@@ -134,7 +133,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: sbom-*
           merge-multiple: true

@@ -27,6 +27,8 @@ type MetricSpec = {
   /** Fixed domain, or null to fit the data. */
   domain: [number, number] | null;
   digits: number;
+  /** Lowest axis value of a fitted domain. */
+  floor?: number;
 };
 
 const METRICS: MetricSpec[] = [
@@ -81,7 +83,7 @@ function niceDomain(points: TelemetryPoint[], spec: MetricSpec): [number, number
     return [0, Math.max(1, Math.ceil(hi))];
   }
   const pad = Math.max(2, (hi - lo) * 0.15);
-  return [Math.floor((lo - pad) / 5) * 5, Math.ceil((hi + pad) / 5) * 5];
+  return [Math.max(spec.floor ?? -Infinity, Math.floor((lo - pad) / 5) * 5), Math.ceil((hi + pad) / 5) * 5];
 }
 
 type Geometry = {
@@ -107,7 +109,7 @@ function geometry(
   };
 }
 
-function MetricChart({
+export function MetricChart({
   spec,
   series,
   start,

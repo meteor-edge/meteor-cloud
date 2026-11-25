@@ -23,8 +23,9 @@ backend:
   image: { repository: ghcr.io/meteor-edge/meteorcloud-backend, tag: "0.2.0" }
 console:
   image: { repository: ghcr.io/meteor-edge/meteorcloud-console, tag: "0.2.0" }
-dataPlane:
-  image: { repository: ghcr.io/meteor-edge/meteorcloud-data-plane, tag: "0.2.0" }
+# The MQTT forwarder (dataPlane) runs from the data API image.
+dataApi:
+  image: { repository: ghcr.io/meteor-edge/meteorcloud-data-api, tag: "0.2.0" }
 
 postgresql:
   mode: external              # DATABASE_URL comes from the existing Secret

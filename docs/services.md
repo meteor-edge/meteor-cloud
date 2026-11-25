@@ -61,7 +61,8 @@ The installer:
 | Ansible | `deploy/ansible/playbooks/services/cloud_app.yml` (runs `deploy/compose/`) |
 | Config | `components:`, `deployment:`, `platform:` |
 
-Secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD`, `EDGE_PLATFORM_JWT_SECRET`
+Secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD`, `EDGE_PLATFORM_JWT_SECRET`, and
+`EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD` when observability dashboards stay on (the default)
 
 ### vpn
 

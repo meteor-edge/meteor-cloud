@@ -8,7 +8,8 @@ k3d, GKE, EKS, AKS, OpenShift, and customer clusters. The only exception is
 opt-in: `metrics.serviceMonitor` and `metrics.prometheusRule` (off by default)
 render Prometheus Operator objects for clusters that already run it
 ([Observability](observability.md#kubernetes-helm)). On the local k3d cluster,
-`make k8s-deploy OBS=1` installs kube-prometheus-stack next to the chart for testing.
+`make k8s-deploy` installs kube-prometheus-stack next to the chart by default
+(`OBS=0` skips it).
 
 ## What the chart deploys
 
@@ -62,14 +63,18 @@ create the Secret it references before installing. Never commit real secrets.
 ## Local cluster (k3d)
 
 ```bash
-make k8s-up && make k8s-deploy
+make k8s-up && make k8s-deploy      # includes Prometheus + Grafana (OBS=0 to skip)
 open http://localhost:8088          # admin@example.com / LocalAdmin123!
 make k8s-test                       # helm test + scripts/smoke_test.py
+# While the cluster is up (before k8s-down), port-forward as printed by k8s-deploy:
+#   kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3001:80
+#   kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090
+# Grafana: admin / meteorcloud-local (or GRAFANA_ADMIN_PASSWORD)
 make k8s-down
 ```
 
-`./scripts/k8s-smoke.sh` is what CI runs. It creates a throwaway cluster,
-installs with `values-ci.yaml`, runs `helm test` and the smoke test through the
+`./scripts/k8s-smoke.sh` is what CI runs. It creates a throwaway cluster, installs with
+`values-ci.yaml` (no monitoring stack), runs `helm test` and the smoke test through the
 ingress, uninstalls, and deletes the cluster.
 
 ## Production prerequisites
@@ -80,7 +85,7 @@ You provide:
 2. **Images.** The chart defaults to the signed release images on
    `ghcr.io/meteor-edge/meteorcloud-*` at the chart `appVersion`; see
    [Release images](release-images.md) to verify them and pin digests. To build your own,
-   use `src/control-plane`, `src/data-plane`, `src/data-plane/go` (application data API),
+   use `src/control-plane`, `src/data-plane/go` (application data API and MQTT forwarder),
    `console`, and the Mosquitto broker image from `src/data-plane/broker/mosquitto`
    (set `mqtt.mosquitto.image`). Set `imagePullSecrets` if your registry is private.
 3. **PostgreSQL 14+**, reachable from the cluster (Cloud SQL, RDS, Azure Database,
