@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -56,12 +57,17 @@ var commands = []command{
 	{name: "agent", aliases: []string{"run"}, summary: "Run the always-on device agent (meteorcli.service runs this).", run: runAgent},
 	{name: "claim", summary: "Report (or --wait for) the approval of a pending enrollment request.", run: runClaim},
 	{name: "config", summary: "Store the server domain and API key.", run: runConfig},
+	{name: "credential", summary: "Docker credential helper for the sign-ins of 'meteorcli login'.", run: runCredential},
 	{name: "doctor", summary: "Check server, enrollment, MQTT, helper, disk and modules, with hints.", run: runDoctor},
 	{name: "helper", summary: "Run the root helper (meteorcli-helper.service), or 'helper call' one operation.", run: runHelper},
+	{name: "login", summary: "Sign in to the container registry (developers and CI).", run: runLogin},
+	{name: "logout", summary: "Forget a container registry sign-in.", run: runLogout},
 	{name: "logs", summary: "List or print this device's logs (journal, systemd, Docker, /var/log).", run: runLogs},
 	{name: "mqtt-listen", summary: "Print the MQTT commands this device receives (default: devices/{id}/commands).", run: runMQTTListen},
 	{name: "mqtt-test", summary: "Publish one MQTT test message through the agent (default: devices/{id}/status).", run: runMQTTTest},
 	{name: "module", summary: "Restart a module of the running agent ('module restart <name>').", run: runModule},
+	{name: "pull", summary: "Pull an image from the container registry.", run: runPull},
+	{name: "push", summary: "Push a local image to the container registry.", run: runPush},
 	{name: "register", summary: "Enroll this device with a one-time registration token.", run: runRegister},
 	{name: "request-token", aliases: []string{"request"}, summary: "Ask an administrator to approve this device (the agent waits for it).", run: runRequest},
 	{name: "status", summary: "Show this device's configuration and enrollment (never secrets).", run: runStatus},
@@ -82,6 +88,9 @@ func Main(version string, args []string, stdout, stderr io.Writer) int {
 }
 
 func run(ctx context.Context, env *Env, args []string) int {
+	if len(os.Args) > 0 && filepath.Base(os.Args[0]) == CredentialHelper {
+		return runCredential(ctx, env, args)
+	}
 	fl := flag.NewFlagSet("meteorcli", flag.ContinueOnError)
 	fl.SetOutput(env.Stderr)
 	showVersion := fl.Bool("version", false, "Print the version and exit.")

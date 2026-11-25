@@ -22,6 +22,15 @@ REFERENCE_RE = re.compile(
 PULL_PASSWORD_SECONDS = 1800
 
 
+class RegistryAccountResponse(BaseModel):
+    """Who a registry token is, for `meteorcli login`."""
+
+    host: str
+    namespace: str
+    token_name: str
+    access: Literal["pull", "push"]
+
+
 class RegistryInfoResponse(BaseModel):
     enabled: bool
     # Host and namespace are null while the registry is off.

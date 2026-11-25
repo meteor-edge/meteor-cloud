@@ -31,6 +31,7 @@ from app.registry.schemas import (
     ImageRepositoryResponse,
     ImageTagResponse,
     RegistryAccessTokenResponse,
+    RegistryAccountResponse,
     RegistryEvents,
     RegistryInfoResponse,
     RegistryTokenCreateRequest,
@@ -99,6 +100,19 @@ def issue_registry_token(
     return registry.issue_access_token(
         password=credentials.password if credentials else None, service=service, scopes=scope or []
     )
+
+
+@token_router.get(
+    "/account", response_model=RegistryAccountResponse, dependencies=[Depends(enforce_registry_rate_limit)]
+)
+def registry_account(
+    response: Response,
+    credentials: Annotated[HTTPBasicCredentials | None, Depends(basic_scheme)],
+    registry: RegistrySvc,
+) -> RegistryAccountResponse:
+    """Who the registry token is and where it pushes to."""
+    response.headers["Cache-Control"] = "no-store"
+    return registry.account(password=credentials.password if credentials else None)
 
 
 @router.get("", response_model=RegistryInfoResponse)

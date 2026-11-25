@@ -300,3 +300,13 @@ def test_distribution_s3_config(endpoint: str, public: str, redirect_disabled: b
     assert storage["s3"]["rootdirectory"] == "/registry"
     assert ("regionendpoint" in storage["s3"]) == bool(endpoint)
     assert storage["redirect"]["disable"] is redirect_disabled
+
+
+def test_account_says_where_a_token_pushes(registry: TestClient, db_session: Session) -> None:
+    org, headers = _setup(registry, db_session)
+    for access in ("push", "pull"):
+        secret = _token(registry, org, headers, name=access, access=access)["token"]
+        answer = registry.get("/api/v1/registry/account", auth=("me", secret))
+        assert answer.json() == {"host": HOST, "namespace": "acme", "token_name": access, "access": access}
+    assert registry.get("/api/v1/registry/account", auth=("me", "rgt_wrong")).status_code == 401
+    assert registry.get("/api/v1/registry/account").status_code == 401

@@ -670,3 +670,10 @@ under EDL-1.0; the same version the data plane uses). Only its `paho` and `packe
 linked; `autopaho` is not used because it would pull in `gorilla/websocket` and `golang.org/x/net`.
 staticcheck (MIT) and govulncheck (BSD-3-Clause) run in CI and are not shipped; neither is the
 test-only `debian:12.8-slim` image ([licensing](licensing.md)).
+
+## Container registry commands
+
+`internal/registry` and `internal/cli/registry.go` serve developers, not devices: they use no agent, helper
+or device identity. A token is sent only to the registry's own sign-in address (HTTPS, or this machine),
+is read from stdin or the environment, and reaches Docker through a private `--config` directory.
+`docker-credential-meteorcli` is the same binary under another name.
