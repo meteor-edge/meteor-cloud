@@ -63,8 +63,8 @@ Permissions: `image.read` (every role), `image.push` (owner, admin, developer), 
 
 You need a host name for the registry, normally `registry.<domain>` ([DNS](dns.md)).
 
-**Ansible / `make up`**: set `registry_enabled: true` (needs `platform_domain`; or
-`registry_public_host` and an `https://` `platform_public_url` when your own proxy ends TLS), then run the install again.
+**Ansible / `make up`**: set `registry_enabled: true` (needs an `https://` `platform_public_url` and `platform_domain`; or
+`registry_public_host` instead of the domain when your own proxy ends TLS), then run the install again.
 
 **Compose**: add `registry` to `COMPOSE_PROFILES` and set:
 

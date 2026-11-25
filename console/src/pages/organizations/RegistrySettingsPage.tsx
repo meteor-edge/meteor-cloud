@@ -67,6 +67,7 @@ function RegistrySettings({ organizationId }: { organizationId: string }) {
   const role = orgQuery.data?.current_user_role;
   const canPush = canPushImages(role);
   const canRobots = canManageRegistryRobots(role);
+  const tokenKind = canRobots ? kind : "personal";
   const repository = `${registry?.host}/${registry?.namespace}`;
   const tokens = tokensQuery.data ?? [];
   const loadFailed = orgQuery.isError || registryQuery.isError || tokensQuery.isError;
@@ -75,9 +76,9 @@ function RegistrySettings({ organizationId }: { organizationId: string }) {
     mutationFn: () =>
       createRegistryToken(token!, organizationId, {
         name,
-        kind,
+        kind: tokenKind,
         access: canPush ? access : "pull",
-        repository_prefix: kind === "robot" && prefix.trim() ? prefix.trim() : null,
+        repository_prefix: tokenKind === "robot" && prefix.trim() ? prefix.trim() : null,
         expires_at: days ? new Date(Date.now() + Number(days) * 86_400_000).toISOString() : null,
       }),
     onSuccess: async (result) => {
@@ -196,7 +197,7 @@ function RegistrySettings({ organizationId }: { organizationId: string }) {
                 </select>
               </div>
             )}
-            {kind === "robot" && (
+            {tokenKind === "robot" && (
               <div>
                 <Label htmlFor="token-prefix">Only repositories under (optional)</Label>
                 <Input
