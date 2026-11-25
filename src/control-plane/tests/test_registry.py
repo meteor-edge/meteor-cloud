@@ -310,3 +310,10 @@ def test_account_says_where_a_token_pushes(registry: TestClient, db_session: Ses
         assert answer.json() == {"host": HOST, "namespace": "acme", "token_name": access, "access": access}
     assert registry.get("/api/v1/registry/account", auth=("me", "rgt_wrong")).status_code == 401
     assert registry.get("/api/v1/registry/account").status_code == 401
+
+
+@pytest.mark.parametrize("header", ["Basic", "Basic !!", "Basic /w==", "Bearer x", "Basic bWU6"])
+def test_malformed_sign_in(registry: TestClient, db_session: Session, header: str) -> None:
+    _setup(registry, db_session)
+    answer = registry.get("/api/v1/registry/token", params={"service": HOST}, headers={"Authorization": header})
+    assert answer.status_code == 401
