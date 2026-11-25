@@ -3,7 +3,7 @@
 # mqtt-forwarder (device MQTT -> control plane, the "data-plane" service),
 # device-ingest, rule-processor and clickhouse-writer (device event path over
 # NATS JetStream). Compose and Helm pick the binary with `entrypoint`.
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -13,7 +13,7 @@ RUN for c in dataplane mqtt-forwarder device-ingest rule-processor clickhouse-wr
       CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/$c ./cmd/$c || exit 1; \
     done
 
-FROM alpine:3.21
+FROM alpine:3.24
 RUN adduser -D -H -u 10001 dataplane
 COPY --from=build /out/ /usr/local/bin/
 USER 10001
