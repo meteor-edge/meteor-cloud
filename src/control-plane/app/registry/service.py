@@ -63,6 +63,10 @@ def parse_scopes(values: list[str]) -> list[RequestedScope]:
     return scopes
 
 
+# generate_registry_token: the prefix and 32 random bytes.
+_TOKEN_RE = re.compile(r"rgt_[A-Za-z0-9_-]{43}")
+
+
 def namespace_for(session: Session, organization: Organization) -> str:
     """The organization's namespace, claimed on first use. The caller commits."""
     statement = select(RegistryNamespace.name).where(RegistryNamespace.organization_id == organization.id)
@@ -111,16 +115,16 @@ class RegistryService:
     # --- Docker token endpoint ----------------------------------------------
 
     def issue_access_token(
-        self, *, password: str | None, service: str, scopes: list[str]
+        self, *, presented: str | None, service: str, scopes: list[str]
     ) -> RegistryAccessTokenResponse:
         self._require_enabled()
         if service != self.settings.registry_public_host:
             raise AppError("invalid_registry_service", "Unknown registry service.", status_code=400)
         now = datetime.now(UTC)
-        if password and "." in password:  # a device's pull password; registry tokens have no dots
-            subject, access = self._device_access(password, parse_scopes(scopes))
+        if presented and "." in presented:  # a device's pull password; registry tokens have no dots
+            subject, access = self._device_access(presented, parse_scopes(scopes))
         else:
-            token = self._authenticate(password)
+            token = self._authenticate(presented)
             access = self._grant(token, parse_scopes(scopes))
             self._touch(token, now)
             subject = str(token.id)
@@ -130,11 +134,11 @@ class RegistryService:
         self.session.commit()
         return RegistryAccessTokenResponse(token=signed, access_token=signed, expires_in=ttl, issued_at=now)
 
-    def _device_access(self, password: str, scopes: list[RequestedScope]) -> tuple[str, list[dict[str, Any]]]:
+    def _device_access(self, presented: str, scopes: list[RequestedScope]) -> tuple[str, list[dict[str, Any]]]:
         # Imported here: it names images with this module's namespace_for.
         from app.registry.images import RegistryImages
 
-        found = RegistryImages(self.session, self.settings).pullable_repository(password)
+        found = RegistryImages(self.session, self.settings).pullable_repository(presented)
         if found is None:
             raise RegistryAuthError()
         device, repository = found
@@ -146,10 +150,11 @@ class RegistryService:
         ]
         return f"device:{device.id}", access
 
-    def _authenticate(self, password: str | None) -> RegistryToken:
+    def _authenticate(self, presented: str | None) -> RegistryToken:
         token = None
-        if password:
-            token = self.session.scalar(select(RegistryToken).where(RegistryToken.token_hash == hash_token(password)))
+        # Only our own random tokens are looked up, never a password someone chose.
+        if presented and _TOKEN_RE.fullmatch(presented):
+            token = self.session.scalar(select(RegistryToken).where(RegistryToken.token_hash == hash_token(presented)))
         if token is None:
             raise RegistryAuthError()
         set_request_actor(actor_type="registry_token", actor_id=token.id)
