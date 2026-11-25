@@ -8,8 +8,13 @@ import { ArtifactUploadDialog } from "@/components/artifacts/ArtifactUploadDialo
 
 vi.mock("@/api/fleet", () => ({ uploadArtifact: vi.fn() }));
 
-beforeEach(() => vi.mocked(uploadArtifact).mockReset());
-afterEach(() => vi.restoreAllMocks());
+// Braces matter: a function returned from beforeEach (the mock) is run as its cleanup.
+beforeEach(() => {
+  vi.mocked(uploadArtifact).mockReset();
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const deviceTypes = ["Raspberry Pi 3", "Raspberry Pi 4", "Raspberry Pi 5"].map(
   (name, index) => ({ id: `type-${index + 3}`, name }) as DeviceType,

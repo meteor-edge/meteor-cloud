@@ -32,7 +32,9 @@ function renderWith(status: DeviceWifiStatus | null) {
 }
 
 describe("DeviceUplinkPanel", () => {
-  beforeEach(() => vi.mocked(getDeviceWifi).mockReset());
+  beforeEach(() => {
+    vi.mocked(getDeviceWifi).mockReset();
+  });
 
   it("shows Wi-Fi with the network name and signal", async () => {
     renderWith(base);

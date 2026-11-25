@@ -15,7 +15,7 @@ export function parseYamlObject(text: string): Record<string, unknown> {
   try {
     parsed = loadYaml(trimmed);
   } catch (err) {
-    throw new Error(err instanceof Error ? err.message : "Invalid YAML.");
+    throw new Error(err instanceof Error ? err.message : "Invalid YAML.", { cause: err });
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("YAML must be a mapping (object) at the top level.");
