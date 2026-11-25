@@ -40,6 +40,8 @@ if [[ "$BROKER" == "vernemq" && "${VERNEMQ_ACCEPT_EULA:-}" != "yes" ]]; then
   exit 1
 fi
 export MQTT_ALLOW_BROKER_RESTART="${MQTT_ALLOW_BROKER_RESTART:-1}"
+# The Go MQTT forwarder (Compose service data-plane).
+DATA_PLANE_SERVICE=data-plane
 # The suite registers many devices from one address within a minute.
 export REGISTRATION_RATE_LIMIT_REQUESTS="${REGISTRATION_RATE_LIMIT_REQUESTS:-1000}"
 export ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS="${ENROLLMENT_REQUEST_RATE_LIMIT_REQUESTS:-1000}"
@@ -65,9 +67,11 @@ dump_broker() {
   $COMPOSE logs "$BROKER" --tail 120 || true
   # shellcheck disable=SC2086
   $COMPOSE logs backend --tail 40 || true
+  # shellcheck disable=SC2086
+  $COMPOSE logs "$DATA_PLANE_SERVICE" --tail 40 || true
 }
 
-echo "==> Starting postgres, redis, backend, $BROKER, data-plane"
+echo "==> Starting postgres, redis, backend, $BROKER, $DATA_PLANE_SERVICE"
 BUILD_ARGS=()
 if [[ "${MQTT_COMPOSE_BUILD:-}" == "1" ]]; then
   BUILD_ARGS+=(--build)
@@ -75,14 +79,14 @@ fi
 # shellcheck disable=SC2086
 if $COMPOSE up --help 2>&1 | grep -q -- '--wait'; then
   # shellcheck disable=SC2086
-  if ! $COMPOSE up -d "${BUILD_ARGS[@]}" --wait --wait-timeout 180 postgres redis backend "$BROKER" data-plane; then
+  if ! $COMPOSE up -d "${BUILD_ARGS[@]}" --wait --wait-timeout 180 postgres redis backend "$BROKER" "$DATA_PLANE_SERVICE"; then
     dump_broker
     exit 1
   fi
 else
   echo "==> Compose --wait unavailable; starting without --wait"
   # shellcheck disable=SC2086
-  $COMPOSE up -d "${BUILD_ARGS[@]}" postgres redis backend "$BROKER" data-plane
+  $COMPOSE up -d "${BUILD_ARGS[@]}" postgres redis backend "$BROKER" "$DATA_PLANE_SERVICE"
 fi
 
 cleanup() {

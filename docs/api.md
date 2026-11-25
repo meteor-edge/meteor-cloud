@@ -62,9 +62,11 @@ Prefix: `/api/v1/organizations/{organization_id}`
 | Devices | `/devices`, `/devices/{device_id}`, enable/disable, MQTT revoke |
 | Connectivity | `/devices/{device_id}/connectivity`, `.../connectivity/revoke` |
 | Browser SSH | `POST .../devices/{device_id}/shell-sessions` then WebSocket `/api/v1/shell-sessions/{id}/ws?ticket=` |
+| Software on a device | `GET .../devices/{device_id}/software/{software_id}`, `.../history`, `GET`/`POST .../actions` ([Software on a device](fleet/software.md)) |
 | Device logs | `GET .../devices/{device_id}/log-sources`, `POST .../devices/{device_id}/log-sessions` then WebSocket `/api/v1/log-sessions/{id}/ws` ([Device logs](fleet/logs.md)) |
 | Endpoints | `/endpoints`, `/endpoints/{id}` |
 | MQTT test | `/mqtt/events` (SSE), `/mqtt/publish` |
+| Rules and alerts | `/rules` (+ validate, preview-devices, versions, enable/disable, metrics, live-devices), `/alerts` (+ acknowledge, summary), `/alert-silences`, `/notification-integrations` (+ test) ([Rules and alerts](rules.md)) |
 | Audit | `/audit-events` (filters and paging: [Audit log](audit-log.md)) |
 | Artifacts | `/artifacts` (separate router; upload, download, download-link) |
 

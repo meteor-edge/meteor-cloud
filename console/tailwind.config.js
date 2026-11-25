@@ -43,6 +43,8 @@ export default {
           foreground: "var(--secondary-foreground)",
           hover: "var(--secondary-hover)",
         },
+        // rgb, so opacity modifiers such as bg-destructive/10 work.
+        destructive: "rgb(239 68 68 / <alpha-value>)",
         muted: {
           DEFAULT: "var(--muted)",
           foreground: "var(--muted-foreground)",

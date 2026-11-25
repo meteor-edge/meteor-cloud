@@ -11,10 +11,12 @@ from sqlalchemy.orm import Session
 from app.artifacts.repository import ArtifactRepository
 from app.authorization.service import AuthzService
 from app.core.exceptions import NotFoundError
+from app.deployments.snapshot_schemas import WorkloadSnapshot
 from app.deployments.software_models import DeviceSoftware, SoftwareHealth, SoftwareSyncStatus
 from app.deployments.software_repository import DeviceSoftwareRepository
 from app.deployments.software_schemas import (
     DesiredSoftwareItem,
+    DeviceSoftwareDetailResponse,
     DeviceSoftwareResponse,
     ReleaseSummary,
     SoftwareReportItem,
@@ -29,7 +31,7 @@ from app.signing.service import SigningService
 
 
 def signed_desired_payload(device_id: uuid.UUID, item: DesiredSoftwareItem) -> dict[str, Any]:
-    """The fields a signature covers. Must match ``edge_agent.signing.desired_payload``."""
+    """The fields a signature covers. Must match ``signing.DesiredPayload`` in the Go agent."""
     return {
         "device_id": str(device_id),
         "workload_key": item.workload_key,
@@ -91,6 +93,7 @@ class DeviceSoftwareService:
             progress_percent=row.progress_percent,
             attempt_count=row.attempt_count,
             last_error=row.last_error,
+            stopped_by_user=row.stopped_by_user,
             reported_at=row.reported_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -109,6 +112,48 @@ class DeviceSoftwareService:
             raise NotFoundError("device_not_found", "Device was not found.")
         self.authz.require(membership, "device.read", device_group_id=device.device_group_id)
         return [self._to_response(row) for row in self.software.list_for_device(device_id=device_id)]
+
+    def readable(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID, software_id: uuid.UUID
+    ) -> DeviceSoftware:
+        """One workload of a device the user may read; 404 outside the organization or device."""
+        membership = self.authz.require_membership(user_id=actor.id, organization_id=organization_id)
+        device = self.devices.get(organization_id=organization_id, device_id=device_id)
+        if device is None:
+            raise NotFoundError("device_not_found", "Device was not found.")
+        self.authz.require(membership, "device.read", device_group_id=device.device_group_id)
+        row = self.session.get(DeviceSoftware, software_id)
+        if row is None or row.device_id != device.id or row.organization_id != organization_id:
+            raise NotFoundError("software_not_found", "This device has no such software.")
+        return row
+
+    def detail_for_operator(
+        self, *, actor: User, organization_id: uuid.UUID, device_id: uuid.UUID, software_id: uuid.UUID
+    ) -> DeviceSoftwareDetailResponse:
+        from app.device_actions.models import WORKLOAD_KINDS
+        from app.device_actions.service import advertised_actions
+
+        row = self.readable(actor=actor, organization_id=organization_id, device_id=device_id, software_id=software_id)
+        device = self.devices.get(organization_id=organization_id, device_id=device_id)
+        membership = self.authz.require_membership(user_id=actor.id, organization_id=organization_id)
+        return DeviceSoftwareDetailResponse(
+            **self._to_response(row).model_dump(),
+            snapshot=WorkloadSnapshot.model_validate(row.snapshot) if row.snapshot else None,
+            snapshot_at=row.snapshot_at,
+            supported_actions=sorted(WORKLOAD_KINDS.intersection(advertised_actions(device) or [])),
+            can_manage=self.authz.check(membership, "software.manage", device_group_id=device.device_group_id),
+        )
+
+    def store_snapshot(self, *, organization_id: uuid.UUID, device_id: uuid.UUID, snapshot: WorkloadSnapshot) -> bool:
+        """Keep a workload's latest snapshot. Unknown workloads are ignored."""
+        row = self.software.get_by_workload(device_id=device_id, workload_key=snapshot.workload_key)
+        if row is None or row.organization_id != organization_id:
+            return False
+        row.snapshot = snapshot.model_dump(mode="json")
+        # The server's time: a device clock may be wrong.
+        row.snapshot_at = datetime.now(UTC)
+        self.session.commit()
+        return True
 
     def set_desired_software(
         self,
@@ -274,6 +319,7 @@ class DeviceSoftwareService:
                 row.installed_version = report.installed_version
 
             row.health = report.health.value
+            row.stopped_by_user = report.stopped_by_user
             if report.progress_percent is not None:
                 row.progress_percent = report.progress_percent
             if "last_error" in report.model_fields_set:
@@ -341,14 +387,21 @@ class DeviceSoftwareService:
         )
 
     def apply_capabilities(self, *, device_id: uuid.UUID, capabilities: dict[str, Any]) -> None:
-        """Store agent-reported capabilities on the device metadata (best-effort)."""
+        """Store agent-reported capabilities (and module health) on the device metadata.
+
+        The latest report replaces the previous one; ``capabilities_reported_at`` says when
+        it arrived, so the console can tell stale module health from current.
+        """
         from sqlalchemy.orm.attributes import flag_modified
+
+        from app.devices.capabilities import normalize_capabilities
 
         device = self.session.get(Device, device_id)
         if device is None:
             return
         meta = dict(device.metadata_ or {})
-        meta["capabilities"] = capabilities
+        meta["capabilities"] = normalize_capabilities(capabilities)
+        meta["capabilities_reported_at"] = datetime.now(UTC).isoformat()
         device.metadata_ = meta
         # JSONB: force dirty so a heartbeat that only flips booleans always persists.
         flag_modified(device, "metadata_")

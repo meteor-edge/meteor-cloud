@@ -87,7 +87,9 @@ describe("DeviceActionsPanel", () => {
     });
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Restart" }));
-    expect(await screen.findByText("Waiting for the device (its next heartbeat).")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Waiting for the device (its next heartbeat)."),
+    ).toBeInTheDocument();
   });
 
   it("sends a password change", async () => {
@@ -115,5 +117,13 @@ describe("DeviceActionsPanel", () => {
     setup({ canUsers: false });
     expect(await screen.findByRole("button", { name: "Restart" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Change SSH password" })).not.toBeInTheDocument();
+  });
+
+  it("offers only the actions the agent says it can run", async () => {
+    setup({ supportedActions: ["reboot", "set_password"] });
+    expect(screen.getByRole("button", { name: "Restart" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Shut down" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change SSH password" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add SSH user" })).not.toBeInTheDocument();
   });
 });

@@ -1,0 +1,100 @@
+# Publish the Go meteorcli from master as the moving "meteorcli-go-edge"
+# prerelease, so a device can install the newest build with one line:
+#
+#   curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge/install-meteorcli.sh | sudo bash
+#
+# It is a prerelease and never "latest": releases/latest/download/ serves the
+# newest agent-v* release (agent-release.yml), which devices update from by
+# default. A device follows edge with: sudo meteorcli config --release-url
+# https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge
+# (edge versions are 0.0.0-edge.<run>, so such a device never moves to edge
+# from a newer agent-v* release by itself; reinstall from edge instead).
+name: meteorcli (Go) edge build
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - src/device-plane/agent-go/**
+      - .github/workflows/agent-go-edge.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-go-edge
+  cancel-in-progress: true
+
+env:
+  TAG: meteorcli-go-edge
+
+jobs:
+  publish:
+    name: Build, test and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: src/device-plane/agent-go
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
+      - name: Test
+        run: go test -race ./...
+      # The run number orders edge builds for the updater (0.0.0-edge.<run>).
+      # The manifest is signed with the release key; devices refuse an unsigned one.
+      - name: Release files (signed)
+        env:
+          METEORCLI_RELEASE_SIGNING_KEY: ${{ secrets.METEORCLI_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$METEORCLI_RELEASE_SIGNING_KEY" ]; then
+            echo "::warning::secret METEORCLI_RELEASE_SIGNING_KEY is not set: this edge release is unsigned and devices will not update to it"
+          fi
+          ./scripts/dist.sh "$RUNNER_TEMP/dist" "0.0.0-edge.${GITHUB_RUN_NUMBER}+${GITHUB_SHA::7}"
+      - name: Installer under systemd
+        run: ./test/install/run.sh
+      - name: Publish the meteorcli-go-edge prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          notes="Newest Go meteorcli from master ($GITHUB_SHA). For testing; replaced at every merge.
+
+          Linux with systemd (arm64, 32-bit ARM, amd64):
+          \`\`\`bash
+          curl -fsSL https://github.com/$REPO/releases/download/$TAG/install-meteorcli.sh | sudo bash -s -- --domain <server> --token <registration token>
+          \`\`\`
+          See docs/meteorcli.md."
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            # Move the tag to this commit, then replace the files.
+            gh api -X PATCH "repos/$REPO/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release edit "$TAG" -R "$REPO" --prerelease --latest=false --notes "$notes"
+            # Unsigned (no secret): drop the previous signed manifest first, or a
+            # device would verify it and then fail on the new binaries.
+            if [ ! -f "$RUNNER_TEMP/dist/meteorcli-release.json.sig" ]; then
+              for asset in meteorcli-release.json meteorcli-release.json.sig; do
+                gh release delete-asset "$TAG" "$asset" -R "$REPO" --yes 2>/dev/null || true
+              done
+            fi
+            # Binaries first, then the signed manifest (an updater never sees a
+            # manifest for binaries not uploaded yet), SHA256SUMS last: an install or
+            # update during the upload fails its checksum instead of mixing builds.
+            find "$RUNNER_TEMP/dist" -type f ! -name SHA256SUMS ! -name 'meteorcli-release.json*' -print0 |
+              xargs -0 gh release upload "$TAG" -R "$REPO" --clobber
+            if [ -f "$RUNNER_TEMP/dist/meteorcli-release.json.sig" ]; then
+              gh release upload "$TAG" -R "$REPO" --clobber "$RUNNER_TEMP/dist/meteorcli-release.json" "$RUNNER_TEMP/dist/meteorcli-release.json.sig"
+            fi
+            gh release upload "$TAG" -R "$REPO" --clobber "$RUNNER_TEMP/dist/SHA256SUMS"
+          else
+            gh release create "$TAG" -R "$REPO" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "meteorcli (Go) edge" --notes "$notes" "$RUNNER_TEMP"/dist/*
+          fi
+          echo "Install URL: https://github.com/$REPO/releases/download/$TAG/install-meteorcli.sh" >> "$GITHUB_STEP_SUMMARY"

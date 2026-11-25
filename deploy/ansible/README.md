@@ -53,8 +53,10 @@ Settings come from three places:
 | Secrets | `EDGE_PLATFORM_*` environment variables on the controller, or ansible-vault |
 | Application defaults | `roles/meteorcloud/defaults/main.yml` |
 
-Required secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD` and `EDGE_PLATFORM_JWT_SECRET`.
-Others are required only by the option that uses them, e.g.
+Required secrets: `EDGE_PLATFORM_POSTGRES_PASSWORD`, `EDGE_PLATFORM_JWT_SECRET`, and
+(with the default observability stack / `dashboards` component)
+`EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD`. Set `observability_enabled: false` to skip
+Grafana and that password. Others are required only by the option that uses them, e.g.
 `EDGE_PLATFORM_MQTT_PLATFORM_PASSWORD` and `EDGE_PLATFORM_MQTT_INTERNAL_TOKEN`
 with MQTT, `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN` with the application data API,
 or `EDGE_PLATFORM_OBJECT_STORAGE_ACCESS_KEY_ID` and
@@ -76,11 +78,13 @@ Infrastructure options:
 | `data_api_enabled` / `dataplane_bus` | `false`, or `true` with `memory` / `mqtt` (mqtt needs `mqtt_enabled`) | `false` / `memory` |
 | `dataplane_storage` | `postgres` (default) or `clickhouse` (`EDGE_PLATFORM_CLICKHOUSE_PASSWORD`, Compose profile `clickhouse`) | `postgres` |
 | `nats_enabled` | Device event path (MQTT → JetStream → rule-processor / clickhouse-writer). Needs `mqtt_enabled`, `dataplane_storage=clickhouse`, `EDGE_PLATFORM_DATA_PLANE_INTERNAL_TOKEN`, `EDGE_PLATFORM_CLICKHOUSE_PASSWORD`, and `EDGE_PLATFORM_NATS_*_PASSWORD` | `false` |
-| `observability_enabled` | Prometheus, Loki, Alloy, Alertmanager, Grafana on 127.0.0.1 | `false` |
+| `observability_enabled` | Prometheus, Loki, Alloy, Alertmanager, Grafana on 127.0.0.1 | `true` (set `false` / `make up OBS=0`) |
 | `observability_components` | Any of `metrics`, `logs`, `alerting`, `dashboards` (retention, webhook and external URLs: [Observability](../../docs/observability.md#ansible)) | all four |
 | `image_source` | `git` (build on host), `registry` (pull) | `git` |
 
-With the defaults the host runs only PostgreSQL, the API, the console, and Traefik.
+With the defaults the host runs PostgreSQL, the API, the console, Traefik, and the
+localhost observability stack (Prometheus + Grafana). Set `observability_enabled: false`
+(or `make up OBS=0`) to skip the ops containers.
 
 ## Run
 
@@ -89,6 +93,7 @@ With the defaults the host runs only PostgreSQL, the API, the console, and Traef
 # Secrets are generated, printed at the end, and saved to ~/.meteorcloud/secrets.env (mode 0600):
 make up
 # make up ARGS=--no-vpn
+# make up OBS=0                 # skip Prometheus/Grafana
 # make down                      # stop; data stays
 # make down ARGS=--destroy-data  # also wipe /opt/edge-platform
 
@@ -98,6 +103,8 @@ cp -r inventory/example inventory/production   # ignored by git
 $EDITOR inventory/production/hosts.yml inventory/production/group_vars/platform.yml
 
 export EDGE_PLATFORM_POSTGRES_PASSWORD=... EDGE_PLATFORM_JWT_SECRET=...
+export EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD=...   # required while observability_enabled (default)
+# or: set observability_enabled: false in group_vars/platform.yml
 ansible-galaxy collection install -r requirements.yml   # only with ansible-core
 ansible-playbook -i inventory/production/hosts.yml playbooks/site.yml
 ```

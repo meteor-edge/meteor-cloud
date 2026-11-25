@@ -61,10 +61,12 @@ from app.identity.models import User
 from app.main import create_app
 from app.network import models as _network_models  # noqa: F401
 from app.releases import models as _release_models  # noqa: F401
+from app.rules import models as _rule_models  # noqa: F401
 from app.shell import models as _shell_models  # noqa: F401
 from app.signing import models as _signing_models  # noqa: F401
 from app.tenancy import models as _organization_models  # noqa: F401
 from app.tenancy.models import Organization, OrganizationMembership, OrganizationRole
+from tests.agent_contract import check_response as check_agent_contract
 from tests.db_guard import assert_safe_test_database_url, ensure_database_exists
 from tests.storage import InMemoryObjectStorage
 
@@ -153,6 +155,8 @@ def client(db_session: Session, object_storage: InMemoryObjectStorage) -> Genera
         limit=10_000, window_seconds=60
     )
     with TestClient(application) as test_client:
+        # Every /api/v1/agent/* answer is checked against contracts/schemas/agent.
+        test_client.event_hooks["response"].append(check_agent_contract)
         yield test_client
     application.dependency_overrides.clear()
 

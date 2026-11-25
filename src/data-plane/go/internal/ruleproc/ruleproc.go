@@ -76,7 +76,7 @@ type Processor struct {
 func (p *Processor) slot(subject string, n int) int {
 	h := fnv.New32a()
 	h.Write([]byte(orgDeviceKey(subject)))
-	return int(h.Sum32() % uint32(n))
+	return int(uint64(h.Sum32()) % uint64(n))
 }
 
 // orgDeviceKey is "<org>.<device>" from a producer subject (….<org>.<device>).

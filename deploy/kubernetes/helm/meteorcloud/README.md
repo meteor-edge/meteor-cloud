@@ -18,6 +18,7 @@ helm -n meteorcloud test meteorcloud
 | `cache.provider` | `memory`, `redis` (`cache.redis.mode`: `bundled` / `external`) | `memory` |
 | `mqtt.enabled`, `mqtt.broker` | off, or `bundled` / `external` | off |
 | `mqtt.provider` | `mosquitto`, `emqx` (bundled or external), `vernemq` (external only) | `mosquitto` |
+| `dataPlane.forwarder` | MQTT gateway with `mqtt.enabled`: the Go MQTT forwarder from the data API image; `forwarder` sets `MQTT_FORWARDER_*`. Always 1 replica, Recreate. [Docs](../../../../docs/data-plane/mqtt-forwarder.md) | `go`, `{}` |
 | `dataApi.enabled` | application data API (image `meteorcloud/data-api` from `src/data-plane/go`) on `/v1`; `dataApi.bus`: `memory` / `mqtt` | off |
 | `clickhouse.enabled` | bundled ClickHouse (or set `clickhouse.external.url`) | off |
 | `nats.enabled` | device event path: JetStream + device-ingest / rule-processor / clickhouse-writer (needs MQTT + ClickHouse) | off |

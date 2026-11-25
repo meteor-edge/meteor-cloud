@@ -1,213 +1,186 @@
 # meteorcli
 
-Device-plane CLI. Runs on managed Linux devices: configure the control plane, enroll, heartbeat, and keep an MQTT session.
-
-Package details and install script: [`src/device-plane/agent/README.md`](../src/device-plane/agent/README.md).
+The device agent. One static Go binary runs on managed Linux devices: it enrolls the device,
+sends heartbeats, keeps an MQTT session, deploys software, runs console actions and updates
+itself. Source: [`src/device-plane/agent-go/`](../src/device-plane/agent-go/). Internals (file
+layout, socket policy, root helper, modules): [meteorcli internals](meteorcli-go.md).
 
 ## Install
 
-On the device (does **not** clone this repository):
+On the device (Linux with systemd; arm64, 32-bit ARM from ARMv6 (Raspberry Pi Zero and 1), or
+amd64). It does **not** clone this repository:
 
 ```bash
-curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh | sudo bash
-meteorcli --help
+# Enroll right away with a registration token
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh \
+  | sudo bash -s -- --domain meteor.example.com --token reg_XXXX --name lobby-cam
+# Or by approval: the agent sends a request by itself; approve it in the console
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/install-meteorcli.sh \
+  | sudo bash -s -- --domain meteor.example.com --api-key key_XXXX --name lobby-cam
 ```
 
-A root install also installs, enables and **starts** `meteorcli.service`. Until the
-device is configured and registered the service only waits (it logs what to run
-next). As soon as a token is stored or an enrollment request is approved, it
-connects: heartbeats, MQTT and WireGuard, with no `meteorcli run`. Re-running the
-installer still upgrades, but it replaces the install in place. To keep the
-previous version and roll back if the new service does not stay up, use
-[Update](#update).
+The installer:
 
-The service does not exit on its own. If the server refuses the device credential (the
-device was deleted or its token revoked), or something unexpected fails, it logs the reason
-and tries again after 30 s, doubling up to 15 min. Enroll the device again with
-`sudo meteorcli request-token --new`; the running service picks up the new credential. A
-damaged `config.json` is ignored with a warning, and the service waits for `meteorcli config`.
+- picks the binary for the CPU (`uname -m`) and checks it, the systemd units, sysusers.d and
+  tmpfiles.d files against `SHA256SUMS`;
+- installs `/usr/local/bin/meteorcli`, `meteorcli.service`, `meteorcli-helper.socket` and
+  `meteorcli-helper.service`, the `meteor` user and the `meteorcli` / `meteorcli-admin` groups,
+  and `wireguard-tools` (`--no-wireguard` skips it);
+- adds the user who ran it (`$SUDO_USER`, or `--user NAME`) to `meteorcli` and `meteorcli-admin`,
+  and makes that user the account the console's browser terminal signs in as;
+- runs `systemctl enable --now` for the agent, and `meteorcli register` when given a token.
 
-- `--no-service` skips the service (CLI only).
-- Without root, or where systemd is not running (most containers), there is no
-  service; use `meteorcli run` in the foreground. `--with-service` makes that an
-  error instead of a note.
+Running it again upgrades in place. `--no-start` installs only. `install-rpi.sh` from the same
+release is the same installer, but it refuses a board that is not a Raspberry Pi.
 
-Pin a version: `METEORCLI_VERSION=0.3.0` (must match a published `agent-v*` tag).
-
-Local build (`make agent-dist`, then `python -m http.server 8090` in `dist/`):
-
-```bash
-curl -fsSL http://192.168.0.118:8090/install-meteorcli.sh | sudo bash -s -- http://192.168.0.118:8090/meteorcli-0.3.2.tar.gz
-# or: sudo METEORCLI_DIST_URL=http://192.168.0.118:8090/meteorcli.tar.gz bash < install-meteorcli.sh
-```
-
-Use the **local** `install-meteorcli.sh` (or a release that accepts a URL argument). A
-URL after `bash -s --` is the tarball; do not pass it to an old installer that only
-understands `METEORCLI_DIST_URL`.
-
-**Publish a release** (maintainers): bump the version in
-`src/device-plane/agent/pyproject.toml` (and `meteorcli/__init__.py`) in a PR. When it
-merges to `master`, the **meteorcli release** workflow creates tag `agent-v<version>` and
-the release; if that release already exists it does nothing. Pushing the tag by hand
-still works, as does running the workflow manually (**Actions → meteorcli release**):
-
-```bash
-make agent-dist          # optional local check; writes dist/
-git tag agent-v0.3.0     # must match the pyproject version
-git push origin agent-v0.3.0
-```
-
-CI packs agent + `src/device-plane/runtime` (no tests, no secrets) and creates
-the GitHub Release. Laptop / from a checkout: `cd src/device-plane/agent && ./installcli.sh`.
-
-Config directory: with `meteorcli.service` installed, always `/etc/meteorcli`,
-the directory the service reads, so run enrollment commands with `sudo`
-(without it, meteorcli says so). Without the service: `~/.config/meteorcli`, or
-`/etc/meteorcli` as root.
-
-## Agent version and console update
-
-Each heartbeat sends the installed meteorcli version. The console device
-**Overview** shows it as **Agent version**.
-
-On **Manage device**, owners and admins can click **Update to latest**. That
-orders the device to run the same safe updater as `meteorcli update --yes`.
-The control plane does not download the release. Until the device has reported
-a version (and has the updater installed, meteorcli **0.3.4**+), the update
-reports a clear failure.
-
-## Update
-
-Use this when a newer `agent-vX.Y.Z` release is published. The updater checks
-`SHA256SUMS` (it stops if that file is missing or does not match), builds the
-new install beside the current one, and switches over only after
-`meteorcli --version` reports the new version. `meteorcli.service` is stopped
-only for that switch. If it was running and does not stay active for about 15
-seconds, the previous install is restored and started again. Device config
-(`/etc/meteorcli`, including the device token) is not modified.
-
-`meteorcli update` is in meteorcli **0.3.4** and later. On an older install, run
-the release script once; after that the command is on the device.
-
-```bash
-sudo meteorcli update --check          # exit 10 when a newer release exists
-sudo meteorcli update --yes
-# same procedure, including on a meteorcli that has no update command yet:
-curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/update-meteorcli.sh | sudo bash -s -- --check
-curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/latest/download/update-meteorcli.sh | sudo bash -s -- --yes
-```
-
-Install a specific version, or put back the previous one:
-
-```bash
-sudo meteorcli update --to 0.3.4 --yes
-sudo meteorcli update --to 0.3.3 --allow-downgrade --yes
-sudo meteorcli update --rollback --yes
-```
-
-`--to` refuses to replace a newer install unless `--allow-downgrade` is set.
-`METEORCLI_VERSION=0.3.4` is the same as `--to`. A local tarball works when
-`SHA256SUMS` is in the same directory:
-
-```bash
-sudo METEORCLI_DIST_URL=http://192.168.0.118:8090/meteorcli-0.3.4.tar.gz meteorcli update --yes
-```
-
-Without `--yes`, a terminal prompts before changing the device. A non-interactive
-shell stops and asks you to pass `--yes`.
-
-
-## Commands
-
-| Command | Purpose |
-| --- | --- |
-| `config` | Store control-plane domain / API base and enrollment API key |
-| `test` | Reachability + API key check |
-| `register` | Enroll with a registration token |
-| `request-token` | Device-initiated enroll; poll for approval |
-| `claim` | Fetch device token after a later approval |
-| `run` | The agent loop: heartbeats, MQTT, WireGuard (`--once` for a single pass). In a terminal it stays in the foreground (Ctrl+C to stop) and refuses if `meteorcli.service` is already active. As the service it first waits for setup, registration and approval |
-| `status` | Show non-secret local config, including systemd and WireGuard |
-| `mqtt-test` / `mqtt-listen` | MQTT diagnostics |
-| `logs` | List log sources (`--json`), or print one: `meteorcli logs systemd:nginx.service -f --grep error`. See [Device logs](fleet/logs.md) |
-| `update` | Install a newer meteorcli, or restore the previous one (`--check`, `--yes`, `--to`, `--rollback`). See [Update](#update) |
-
-Env overrides: `METEORCLI_DOMAIN`, `METEORCLI_SERVER`, `METEORCLI_API_KEY`, `METEORCLI_TOKEN`, `METEORCLI_CONFIG_DIR`.
-
-`--domain` is the **API host** (no `api.` subdomain). IP/localhost uses HTTP; names default to HTTPS unless `--http` or `--api-base` / `METEORCLI_SERVER` is set. For laptop `make dev`, include the control-plane port: `--domain 192.168.0.118:8000`. A bare IP is port 80 and will 404.
-
-Changing `--domain` to a different server clears the previous device token and `mqtt.json` (those pointed at the old cloud). Re-register on the new API.
-
-Uninstall (`./installcli.sh --uninstall`) removes the install **and** stored credentials (`~/.config/meteorcli` or `/etc/meteorcli`), so a later install does not keep talking to a previous MQTT broker.
-
-## Configure
-
-With `meteorcli.service` installed (root install), the config lives in
-`/etc/meteorcli`, so use `sudo`:
-
-```bash
-sudo meteorcli config --domain localhost:8000 --api-key key_...
-sudo meteorcli test
-sudo meteorcli config --show
-```
-
-Per-user install without the service: the same commands without `sudo`. Keep
-using the same form for every later command, so they all share one config dir.
-
-## Enroll
-
-**Registration token:**
-
-```bash
-sudo meteorcli register --server http://localhost:8000 --token-file /tmp/meteorcli.token --name edge-01
-# per-user install without the service:
-meteorcli register --server http://localhost:8000 --token-file /tmp/meteorcli.token --name edge-01
-```
-
-**Device-initiated:**
-
-```bash
-sudo meteorcli request-token --name edge-01
-# per-user install without the service:
-meteorcli request-token --name edge-01
-```
-
-With `meteorcli.service` running, `request-token` returns right away and the
-service waits for the approval (every 10 seconds, across reboots; an expired
-request is resubmitted with the stored API key), then connects. From **0.3.2**, if
-there is no pending request yet, the service also reads `meteorenv.txt` (or
-`.meteorenv`) on `/boot/firmware` or `/boot`, saves domain and API key, and
-submits the enrollment request itself—so you do not need a manual
-`request-token` when that file is present. Follow progress with
-`journalctl -u meteorcli -f`. Pass `--wait SECONDS` to wait in the terminal
-instead. A rejected request sends the service back to waiting for a new one.
-`request-token` waits in the terminal itself when the service is already
-connected (re-enrolling) or `--server` differs from the saved server, since the
-service would not collect that request.
-
-Without the service, `request-token` waits up to ~5 minutes (`--wait`); after a
-later approval run `meteorcli claim`, then start the agent in the foreground:
+**No sudo after the install.** The agent runs as the unprivileged `meteor` user, and members of
+`meteorcli-admin` talk to it over `/run/meteorcli/agent.sock`. Log in again after the install so
+both the `meteorcli` and `meteorcli-admin` groups apply (a single `newgrp` adds only one group),
+then:
 
 ```bash
 meteorcli status
-meteorcli run                           # foreground; Ctrl+C to stop
-meteorcli run --once                    # one heartbeat (allowed even if the service is running)
+meteorcli request-token --name lobby-cam     # the agent waits for the approval, across reboots
+meteorcli update
+meteorcli logs systemd:meteorcli.service -f
 ```
 
-`meteorcli run` is not a daemon. If `meteorcli.service` is already active, it exits instead of starting a second copy. Stop the unit first (`sudo systemctl stop meteorcli`) when you need a foreground session.
+Only `meteorcli config` (it writes `/etc/meteorcli`) needs root. See
+[Who may do what](meteorcli-go.md#who-may-do-what).
 
-Foreground `meteorcli run` is unprivileged. systemd Deploys go through
-`meteorcli-systemd` (installed by `sudo ./installcli.sh`). `meteorcli.service`
-already runs as root and does not need that helper.
+**From the Python meteorcli (0.4.x and older).** The Python agent is gone, and the installer no
+longer imports its identity. Wipe the device (or remove `/opt/meteorcli`, `/etc/meteorcli` and the
+old `meteorcli.service`), install as above, and enroll it again. Its hardware is already a device,
+so first click **Allow re-registration** on that device's page, or delete the device
+([Device registration](fleet/device-registration.md)).
 
-Wi-Fi changes ordered from the console go through `meteorcli-wifi` (same installer,
-NetworkManager only). See [Wi-Fi](fleet/wifi.md).
+**Local build.** `make agent-dist` (or `make agent-go-dist`) writes the same release files into
+`src/device-plane/agent-go/dist`. Run the installer as a file from that folder: it installs the
+files next to it. To install over the network, serve the folder (`python3 -m http.server`) and
+pass `--base-url http://laptop:8000`.
+
+## Agent version and console update
+
+Each heartbeat sends the installed version; the console shows it on the device **Overview**. On
+**Manage device**, owners and admins click **Update meteorcli**. A `meteorcli-admin` on the device
+runs `meteorcli update`. Both start `meteorcli updater` through the root helper.
+
+## Update
+
+The updater reads the newest release from `release_url`. The default is
+`https://github.com/meteor-edge/meteor-cloud/releases/latest/download`, the newest `agent-v*`
+release. The updater then:
+
+- installs the release only when its manifest carries the MeteorCloud release signature and the
+  binary matches the signed SHA-256;
+- keeps the old binary as `/usr/local/bin/meteorcli.previous`;
+- restarts the agent and waits up to 3 minutes for a heartbeat from the new version. Without one,
+  it puts the previous binary back. The console then shows the update as failed, with the reason.
+
+```bash
+meteorcli update                                  # as a meteorcli-admin; returns at once
+journalctl -u meteorcli-update -f                 # follow it
+sudo meteorcli config --release-url https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge
+sudo meteorcli config --release-url default       # back to the newest agent-v* release
+```
+
+The updater installs only a **higher** version. Edge builds are `0.0.0-edge.<run>`, which order
+below a released version such as `0.5.0`, so setting `release_url` to `meteorcli-go-edge` alone
+leaves a stable device on its current binary (`already_current`). To move a stable device onto
+edge builds, re-run the edge installer, then point `release_url` at the edge folder so later
+updates follow it:
+
+```bash
+curl -fsSL https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge/install-meteorcli.sh \
+  | sudo bash
+sudo meteorcli config --release-url https://github.com/meteor-edge/meteor-cloud/releases/download/meteorcli-go-edge
+```
+
+`meteorcli-go-edge` is a prerelease built from every merge to master. Details:
+[Updating](meteorcli-go.md#updating).
+
+## First boot and OS images
+
+A card written by Meteor Imager carries `.meteorenv` (Wi-Fi, host name, user, SSH, and the
+enrollment domain, key and name). The console's device page can also download it as
+`meteorenv.txt`. Two ways to have a device use it:
+
+- **Stock Raspberry Pi OS image.** Meteor Imager adds `meteor-firstrun.sh`, which installs
+  meteorcli on first boot and asks for approval.
+- **Your own OS image.** Prepare a device once, then back it up with Meteor Imager:
+
+  ```bash
+  curl -fsSLO https://github.com/meteor-edge/meteor-cloud/releases/latest/download/meteorcli-prepare-image.sh
+  sudo bash meteorcli-prepare-image.sh
+  ```
+
+  The script installs meteorcli and `meteorcli-settings.service` if they are missing (through
+  `install-meteorcli-firstboot.sh --image`). It removes this device's identity, Wi-Fi networks,
+  SSH host keys and logs, then powers off. On each card's first boot:
+  - `meteorcli-settings.service` applies the settings early, before the network starts.
+  - It moves the enrollment lines to `/etc/meteorcli/meteorenv` (root only) and deletes
+    `.meteorenv` from the card.
+  - `meteorcli.service` applies those lines (`meteorcli config meteorenv`, as root, before the
+    agent starts).
+  - The agent asks for approval by itself.
+
+A device without the settings service still reads `meteorenv.txt` or `.meteorenv` from
+`/boot/firmware` or `/boot` when the agent starts. Details and the file format:
+[packaging/firstboot](../src/device-plane/agent-go/packaging/firstboot/README.md).
+
+## Commands
+
+| Command | Purpose | Who |
+| --- | --- | --- |
+| `config` | Server domain / API base, enrollment API key, `--enroll-name`, `--ssh-user`, `--release-url`; `--show` | root |
+| `test` | Server reachable, API key valid | `meteorcli` |
+| `register` | Enroll with a registration token | `meteorcli-admin` |
+| `request-token` | Ask for approval; the agent keeps polling | `meteorcli-admin` |
+| `claim` | Report or wait for the approval | `meteorcli-admin` |
+| `status` | Configuration, enrollment and module health (never secrets) | `meteorcli` |
+| `module restart NAME` | Restart (or unpark) one agent module | `meteorcli-admin` |
+| `logs` | List log sources or print one (`meteorcli logs systemd:nginx.service -f --grep error`). See [Device logs](fleet/logs.md) | `meteorcli` |
+| `mqtt-test` / `mqtt-listen` | MQTT diagnostics through the agent's session | `meteorcli-admin` / `meteorcli` |
+| `update` | Update to the newest signed release | `meteorcli-admin` |
+| `agent` (alias `run`) | The agent itself; `meteorcli.service` runs it | service |
+
+`--domain` is the **API host**. IP addresses and localhost use HTTP; names use HTTPS unless
+`--http` or `--api-base` is given. For a laptop `make dev`, include the port:
+`--domain 192.168.0.118:8000`. Changing the server removes the old server's credentials, so the
+device enrolls again on the new one.
+
+## Publish a release (maintainers)
+
+Releases are automatic. Every merge to `master` that changes the agent
+(`src/device-plane/agent-go`, not its docs or tests) runs the **meteorcli release** workflow
+(`agent-release.yml`). It picks the version: the newest `agent-v*` release with the patch number
+plus one, or `src/device-plane/agent-go/VERSION` when that is higher. Bump `VERSION` in a PR only
+for a new minor or major version (`0.6.0`; later merges release `0.6.1`, `0.6.2`, …). To release
+`master` now, run the workflow by hand (**Run workflow**). The workflow:
+
+1. runs the Go tests and the installer test under systemd;
+2. builds `meteorcli-linux-{arm64,armv6,amd64}`;
+3. signs the manifest with the `METEORCLI_RELEASE_SIGNING_KEY` secret (without it, the workflow
+   fails instead of publishing an unsigned release);
+4. creates the `agent-v<version>` tag and publishes it as the latest release, with the installers, the first-boot
+   scripts and `SHA256SUMS`.
+
+If the release already exists, nothing happens. A hand-pushed tag works too and must match
+`VERSION`:
+
+```bash
+make agent-dist                 # optional local check
+git tag agent-v0.5.1 && git push origin agent-v0.5.1
+```
+
+Every device on the default `release_url` updates to that release when it is ordered to update.
 
 ## Related
 
 - [Getting started](getting-started.md)
 - [Registration tokens](fleet/registration-tokens.md)
 - [Device-initiated enrollment](fleet/device-request-enrollment.md)
-- [First-boot enroll on a Pi image](../src/device-plane/agent/packaging/firstboot/README.md) (`install-meteorcli-firstboot.sh`; build your own OS image with `meteorcli-prepare-image.sh`)
+- [Device actions](fleet/device-actions.md)
 - [Heartbeat](fleet/heartbeat.md)
 - [MQTT](fleet/mqtt.md)
+- [meteorcli internals](meteorcli-go.md)

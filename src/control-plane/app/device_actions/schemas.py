@@ -82,6 +82,62 @@ class AddUserRequest(BaseModel):
         return value
 
 
+# The agent's module names (internal/modules in the Go agent): lowercase words.
+_MODULE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+# Longest doctor report the server keeps (the agent cuts it to this).
+MAX_ACTION_OUTPUT = 16000
+
+
+class RestartModuleRequest(BaseModel):
+    """Restart one agent module; a module the crash-loop breaker parked runs again."""
+
+    module: str
+
+    @field_validator("module")
+    @classmethod
+    def _valid_module(cls, value: str) -> str:
+        value = value.strip()
+        if not _MODULE.match(value):
+            raise ValueError("The module name must be a lowercase word such as 'deploy'")
+        return value
+
+
+# Compose service names.
+_SERVICE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+class SoftwareActionRequest(BaseModel):
+    """Restart, stop or start a deployed workload, or ask the device to look at it again."""
+
+    kind: Literal["workload_restart", "workload_stop", "workload_start", "workload_snapshot"]
+    service: str | None = Field(default=None, description="One service of a compose workload; all of it when empty")
+
+    @field_validator("service")
+    @classmethod
+    def _valid_service(cls, value: str | None) -> str | None:
+        value = (value or "").strip()
+        if not value:
+            return None
+        if not _SERVICE.match(value):
+            raise ValueError("The service must be a compose service name")
+        return value
+
+
+class SoftwareActionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: str
+    state: str
+    service: str | None
+    last_error: str | None
+    # Who ordered it; only for callers who may see members.
+    requested_by: str | None = None
+    created_at: datetime
+    sent_at: datetime | None
+    reported_at: datetime | None
+
+
 class DeviceActionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -91,27 +147,47 @@ class DeviceActionResponse(BaseModel):
     username: str | None
     sudo: bool
     from_version: str | None = None
+    module: str | None = None
     last_error: str | None
+    # run_diagnostics: the device's doctor report.
+    output: str | None = None
     created_at: datetime
     sent_at: datetime | None
     reported_at: datetime | None
 
 
 class DeviceActionsResponse(BaseModel):
-    # Only the kinds the caller may order (power, users, update_agent).
+    # Only the kinds the caller may order (power, users, update_agent and repair).
     actions: list[DeviceActionResponse]
 
 
 # ------------------------------------------------------------------ agent side
 class AgentDeviceAction(BaseModel):
     id: uuid.UUID
-    kind: Literal["reboot", "shutdown", "set_password", "add_user", "update_agent"]
+    kind: Literal[
+        "reboot",
+        "shutdown",
+        "set_password",
+        "add_user",
+        "update_agent",
+        "restart_module",
+        "run_diagnostics",
+        "workload_restart",
+        "workload_stop",
+        "workload_start",
+        "workload_snapshot",
+    ]
     username: str | None = None
     password: str | None = None
     sudo: bool = False
     authorized_key: str | None = None
     # Version stored when update_agent was ordered (agent reports done when newer).
     from_version: str | None = None
+    # restart_module: which module.
+    module: str | None = None
+    # workload_*: which workload, and which compose service of it (None: all).
+    workload_key: str | None = None
+    service: str | None = None
 
 
 class AgentDeviceActionsResponse(BaseModel):
@@ -122,6 +198,8 @@ class AgentActionResult(BaseModel):
     id: uuid.UUID
     state: Literal["done", "failed"]
     error: str | None = Field(default=None, max_length=500)
+    # run_diagnostics: the doctor report. Added in v1 (additive); other kinds leave it out.
+    output: str | None = Field(default=None, max_length=MAX_ACTION_OUTPUT)
 
 
 class AgentActionReportRequest(BaseModel):

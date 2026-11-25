@@ -11,8 +11,7 @@ image_source: git
 git_ref: master
 # image_source: registry   # signed release images, see docs/release-images.md
 # backend_image: ghcr.io/meteor-edge/meteorcloud-backend:0.2.0
-# data_plane_image: ghcr.io/meteor-edge/meteorcloud-data-plane:0.2.0
-# data_api_image: ghcr.io/meteor-edge/meteorcloud-data-api:0.2.0
+# data_api_image: ghcr.io/meteor-edge/meteorcloud-data-api:0.2.0   # also runs the MQTT forwarder
 # mosquitto_image: ghcr.io/meteor-edge/meteorcloud-mosquitto:0.2.0
 # frontend_image: ghcr.io/meteor-edge/meteorcloud-console:0.2.0
 

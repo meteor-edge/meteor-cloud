@@ -7,7 +7,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -84,6 +85,11 @@ class DeviceSoftware(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A user stopped it (or a service of it) from the console; it stays so until Start or a new deploy.
+    stopped_by_user: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_false())
+    # What the workload is made of, as the device last saw it (WorkloadSnapshot).
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("device_id", "workload_key", name="uq_device_software_device_workload"),

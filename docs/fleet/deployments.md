@@ -305,5 +305,5 @@ compose project was removed entirely): the device shows
 - [Releases](releases.md)
 - [Automatic rollback on each device](rollback.md)
 - [Heartbeat](heartbeat.md)
-- [Agent README](../../src/device-plane/agent/README.md) (Raspberry Pi OS install)
+- [meteorcli](../meteorcli.md) (install on a device)
 - [RBAC](../authorization/rbac.md)

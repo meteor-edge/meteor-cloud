@@ -34,7 +34,7 @@ from app.mqtt.credentials import issue_mqtt_credentials, mqtt_config_version
 from app.mqtt.schemas import AgentMqttCredentialsResponse, AgentMqttStatusResponse
 
 # Match agent-v* / pyproject versions (X.Y.Z plus optional pre-release suffix).
-_AGENT_VERSION = re.compile(r"^\d+\.\d+\.\d+[0-9A-Za-z._-]*$")
+_AGENT_VERSION = re.compile(r"^\d+\.\d+\.\d+[0-9A-Za-z.+_-]*$")
 
 
 class RegistrationService:

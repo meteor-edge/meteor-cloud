@@ -1,4 +1,4 @@
-"""One-off actions ordered from the console: restart, shut down, SSH user changes.
+"""One-off actions ordered from the console: restart, shut down, SSH user changes, agent repair.
 
 The device collects an action once over its authenticated API and reports what
 happened. Actions are never handed out twice, so a device that restarts does not
@@ -22,9 +22,20 @@ KIND_SHUTDOWN = "shutdown"
 KIND_SET_PASSWORD = "set_password"
 KIND_ADD_USER = "add_user"
 KIND_UPDATE_AGENT = "update_agent"
+KIND_RESTART_MODULE = "restart_module"
+KIND_RUN_DIAGNOSTICS = "run_diagnostics"
+KIND_WORKLOAD_RESTART = "workload_restart"
+KIND_WORKLOAD_STOP = "workload_stop"
+KIND_WORKLOAD_START = "workload_start"
+KIND_WORKLOAD_SNAPSHOT = "workload_snapshot"
 POWER_KINDS = frozenset({KIND_REBOOT, KIND_SHUTDOWN})
 USER_KINDS = frozenset({KIND_SET_PASSWORD, KIND_ADD_USER})
 UPDATE_AGENT_KINDS = frozenset({KIND_UPDATE_AGENT})
+# Agent maintenance: restart (unpark) one agent module, or collect the agent's doctor report.
+REPAIR_KINDS = frozenset({KIND_RESTART_MODULE, KIND_RUN_DIAGNOSTICS})
+# One deployed workload: change it, or just look at it again.
+WORKLOAD_MANAGE_KINDS = frozenset({KIND_WORKLOAD_RESTART, KIND_WORKLOAD_STOP, KIND_WORKLOAD_START})
+WORKLOAD_KINDS = WORKLOAD_MANAGE_KINDS | {KIND_WORKLOAD_SNAPSHOT}
 
 STATE_PENDING = "pending"  # waiting for the device
 STATE_SENT = "sent"  # collected by the device, no answer yet
@@ -42,12 +53,17 @@ class DeviceAction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     device_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False
     )
-    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default=STATE_PENDING)
     # Version on the device when update_agent was ordered (X.Y.Z).
     from_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # User actions only.
     username: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # restart_module only: the agent module to restart (e.g. "deploy").
+    module: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # workload_* only: the workload, and the one compose service meant (None: all of it).
+    workload_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    service: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sudo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_false())
     authorized_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     # AES-GCM (app.core.secretbox). NULL once the device collected it, or the action expired.
@@ -58,6 +74,8 @@ class DeviceAction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # run_diagnostics: the agent's doctor report (plain text, no secrets).
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

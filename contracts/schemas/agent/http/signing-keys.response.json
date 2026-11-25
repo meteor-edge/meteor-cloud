@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GET /api/v1/agent/signing-keys (200)",
+  "description": "Organization Ed25519 public keys. 404 means the server does not sign; unsigned items are then accepted until keys exist.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "key_id",
+      "algorithm",
+      "public_key",
+      "created_at"
+    ],
+    "properties": {
+      "key_id": {
+        "type": "string"
+      },
+      "algorithm": {
+        "type": "string",
+        "const": "ed25519"
+      },
+      "public_key": {
+        "type": "string",
+        "description": "Raw 32-byte key, base64url without padding."
+      },
+      "endorsed_by": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "endorsement": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "created_at": {
+        "$ref": "../common.json#/$defs/timestamp"
+      },
+      "retired_at": {
+        "anyOf": [
+          {
+            "$ref": "../common.json#/$defs/timestamp"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -74,6 +74,7 @@ Counters are summed across API replicas; fleet gauges are the same on every repl
 | Data plane | `meteorcloud_dataplane_mqtt_connected` | |
 | | `meteorcloud_dataplane_mqtt_messages_received_total` | kind |
 | | `meteorcloud_dataplane_ingest_forward_total`, `meteorcloud_dataplane_publish_total` | result |
+| | `meteorcloud_dataplane_forward_queue_depth`, `meteorcloud_dataplane_forward_dropped_total`, `meteorcloud_dataplane_forward_retries_total` | (, reason) MQTT forwarder queue ([details](data-plane/mqtt-forwarder.md#metrics)) |
 
 Recording rules (`rules/recording.yml`) precompute the API request rate, 5xx rate and ratio,
 and p95 latency per `scope` (`public` = `/api`, `internal` = `/internal`). Downloads, the
@@ -126,9 +127,11 @@ runs the alert-rule unit tests (`rules/tests/alerts_test.yml`) with promtool.
 
 ### Installer (`installation.yaml`)
 
+Observability is **on by default**. Set `enabled: false` to skip it.
+
 ```yaml
 observability:
-  enabled: true
+  enabled: true          # default; false skips Prometheus/Grafana/Loki
   backend: prometheus
   components:
     metrics: true      # Prometheus + node_exporter
@@ -140,18 +143,19 @@ observability:
   metrics_retention_size: 5GB
 ```
 
-Put `EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD` (required only with `dashboards`; `validate`
-checks it) and, for alert delivery, `EDGE_PLATFORM_ALERT_WEBHOOK_URL` (https) in the
-environment, not in the file. Add `EDGE_PLATFORM_ALERT_HEARTBEAT_URL` (https, needs the
-webhook) to also get a dead-man's-switch heartbeat; see [Watchdog](#watchdog). `make aws-up` sizes the instance per enabled component and
+`make aws-up` / `ensure-platform-secrets.sh` generate `EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD`
+when dashboards are on (`validate` still requires it). For alert delivery, set
+`EDGE_PLATFORM_ALERT_WEBHOOK_URL` (https) in the environment, not in the file. Add
+`EDGE_PLATFORM_ALERT_HEARTBEAT_URL` (https, needs the webhook) to also get a dead-man's-switch
+heartbeat; see [Watchdog](#watchdog). `make aws-up` sizes the instance per enabled component and
 the root disk from `metrics_retention_size`; Terraform opens no extra ports, because every
 UI stays on 127.0.0.1. See [installer-configuration.md](installer-configuration.md).
 
-### Ansible
+### Ansible / `make up`
 
 | Variable | Default |
 | --- | --- |
-| `observability_enabled` | `false` |
+| `observability_enabled` | `true` (`make up OBS=0` or `ARGS=--no-observability` turns it off) |
 | `observability_components` | `metrics,logs,alerting,dashboards` |
 | `observability_log_retention` | `168h` |
 | `observability_metrics_retention_time`, `observability_metrics_retention_size` | `15d`, `5GB` |
@@ -175,7 +179,8 @@ ssh -L 3001:127.0.0.1:3001 -L 9090:127.0.0.1:9090 -L 9093:127.0.0.1:9093 user@pl
 
 ### Kubernetes (Helm)
 
-The chart does not install Prometheus, Grafana or Loki.
+The MeteorCloud chart does not install Prometheus, Grafana or Loki. Production clusters
+bring their own Prometheus Operator; opt in with the monitoring overlay:
 
 ```yaml
 metrics:
@@ -195,21 +200,23 @@ metrics:
 `data-plane`, so the rules and dashboards work unchanged. Logs go to stdout as JSON; collect
 them with your cluster's log agent.
 
-On the local k3d cluster, `make k8s-deploy OBS=1` installs kube-prometheus-stack
+On the local k3d cluster, `make k8s-deploy` installs kube-prometheus-stack by default
 (`deploy/kubernetes/k3d-monitoring.yaml`, namespace `monitoring`) and deploys MeteorCloud with
-`values-monitoring.yaml`. It needs `GRAFANA_ADMIN_PASSWORD`; reach the UIs with
+`values-monitoring.yaml`. Opt out with `make k8s-deploy OBS=0`. Grafana password defaults to
+`meteorcloud-local` (override with `GRAFANA_ADMIN_PASSWORD`). Reach the UIs with
 `kubectl port-forward` (the command prints them). This is for local testing only: on a real
 cluster, use the Prometheus your cluster already runs. No Loki in k3d.
 
 ### Summary
 
-| Setup | Turn it on |
-| --- | --- |
-| Laptop (Compose) | `make dev OBS=1` |
-| Server, Compose by hand | add `-f docker-compose.observability.yml` and the profiles ([Compose README](../deploy/compose/README.md)) |
-| Server, Ansible / installer | `observability_enabled: true` / `observability.enabled: true` |
-| Kubernetes (Helm) | `-f values-monitoring.yaml` on a cluster with the Prometheus Operator |
-| Laptop (k3d) | `make k8s-deploy OBS=1` |
+| Setup | Default | Opt out / turn on |
+| --- | --- | --- |
+| Laptop (Compose) | off | `make dev OBS=1` |
+| Server, Compose by hand | off | add `-f docker-compose.observability.yml` and the profiles ([Compose README](../deploy/compose/README.md)) |
+| Server, Ansible / `make up` | **on** | `make up OBS=0` or `ARGS=--no-observability` |
+| Installer (`aws-up`) | **on** | `observability.enabled: false` |
+| Kubernetes (Helm, production) | ServiceMonitors off | `-f values-monitoring.yaml` on a cluster with the Prometheus Operator |
+| Laptop (k3d) | **on** | `make k8s-deploy OBS=0` |
 
 ## CloudWatch
 

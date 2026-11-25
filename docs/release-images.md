@@ -8,8 +8,7 @@ and shipped with an SPDX SBOM.
 | --- | --- |
 | `ghcr.io/meteor-edge/meteorcloud-backend` | `src/control-plane` (API, migrations, worker) |
 | `ghcr.io/meteor-edge/meteorcloud-console` | `console` |
-| `ghcr.io/meteor-edge/meteorcloud-data-plane` | `src/data-plane` (MQTT gateway) |
-| `ghcr.io/meteor-edge/meteorcloud-data-api` | `src/data-plane/go` (application data API, JetStream workers) |
+| `ghcr.io/meteor-edge/meteorcloud-data-api` | `src/data-plane/go` (application data API, MQTT forwarder, JetStream workers) |
 | `ghcr.io/meteor-edge/meteorcloud-mosquitto` | `src/data-plane/broker/mosquitto` (broker + auth plugin) |
 
 Tags: `0.2.0` (exact release), `0.2` (latest patch of the minor) and `latest`. Pin the exact

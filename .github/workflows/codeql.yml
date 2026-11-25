@@ -33,9 +33,9 @@ jobs:
           - language: go
             build-mode: manual
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - if: matrix.language == 'go'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: src/data-plane/go/go.mod
       - uses: github/codeql-action/init@v4

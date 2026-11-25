@@ -1,0 +1,5 @@
+#!/bin/sh
+# The console's Logs window runs `sudo -n /usr/local/libexec/meteorcli-logs list|show ...`
+# over SSH (the Python agent's helper path). The Go agent keeps that path:
+# meteorcli logs takes the same arguments and checks them the same way.
+exec /usr/local/bin/meteorcli logs "$@"

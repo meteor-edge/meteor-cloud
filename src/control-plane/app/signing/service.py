@@ -5,7 +5,7 @@ refuses desired software whose signature does not verify. Signatures cover the d
 id, the release, the revision, the spec and the artifact's SHA-256, so a compromised
 artifact store or a replay to another device is rejected. The agent also refuses a
 revision older than the one it already applied. The format is shared with
-``edge_agent.signing`` on the device; change both together.
+the Go agent's ``internal/signing`` package; change both together.
 """
 
 from __future__ import annotations

@@ -83,3 +83,50 @@ def test_systemd_deploy_skips_device_without_systemd_capability(
     ).json()
     assert len(soft_ok) == 1
     assert soft_no == []
+
+
+def test_deploy_skips_device_whose_agent_cannot_install_the_kind(client: TestClient, db_session: Session) -> None:
+    """capabilities.deploy_kinds lists what the agent's code installs; other kinds are skipped."""
+    owner = create_user(db_session, email="owner@example.com")
+    org, _ = create_org_with_owner(db_session, owner)
+    headers = auth_header(client, "owner@example.com")
+    token = client.post(
+        f"/api/v1/organizations/{org.id}/registration-tokens", headers=headers, json={"name": "Bootstrap"}
+    ).json()["token"]
+    device = client.post(
+        "/api/v1/agent/register",
+        json={"token": token, "mac_addresses": ["aa:bb:cc:dd:ee:03"], "name": "docker-only-agent"},
+    ).json()
+    beat = client.post(
+        "/api/v1/agent/heartbeat",
+        headers={"Authorization": f"Bearer {device['device_token']}"},
+        json={"capabilities": {"systemd": True, "docker": True, "deploy_kinds": ["docker"]}},
+    )
+    assert beat.status_code == 200, beat.text
+
+    artifact = client.post(
+        f"/api/v1/organizations/{org.id}/artifacts",
+        headers=headers,
+        data={"name": "camera-agent", "version": "1.0", "type": "systemd"},
+        files={"file": ("camera-agent.service", UNIT, "text/plain")},
+    ).json()
+    release = client.post(
+        f"/api/v1/organizations/{org.id}/releases",
+        headers=headers,
+        json={
+            "name": "camera-agent",
+            "version": "1.2.0",
+            "kind": "systemd",
+            "artifact_id": artifact["id"],
+            "spec": {"unit_name": "camera-agent.service"},
+        },
+    ).json()
+    created = client.post(
+        f"/api/v1/organizations/{org.id}/deployments",
+        headers=headers,
+        json={"release_id": release["id"], "target": {"device_ids": [device["device_id"]]}},
+    )
+    assert created.status_code == 201, created.text
+    [row] = created.json()["devices"]
+    assert row["status"] == "skipped"
+    assert row["last_error"] == "The device's agent cannot install systemd releases."

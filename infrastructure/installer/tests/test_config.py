@@ -30,7 +30,7 @@ def test_load_example_configuration() -> None:
     assert config.platform.version == "0.2.0"
     assert config.aws.region == "eu-central-1"
     assert config.components.postgres.enabled is True
-    assert config.observability.enabled is False
+    assert config.observability.enabled is True
     assert config.observability.backend == "prometheus"
 
 
@@ -213,6 +213,7 @@ def test_validate_allows_enabled_prometheus(
     key_path.write_text("key", encoding="utf-8")
     monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "secret")
     monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "secret")
+    monkeypatch.setenv("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD", "grafana-secret")
 
     config = load_configuration(EXAMPLE)
     config.aws.ssh_private_key_path = str(key_path)
@@ -221,12 +222,13 @@ def test_validate_allows_enabled_prometheus(
     errors = validate_configuration(config)
 
     assert not any("cloudwatch" in item for item in errors)
+    assert not any("GRAFANA" in item for item in errors)
 
 
 def test_observability_settings_defaults() -> None:
     settings = ObservabilitySettings()
 
-    assert settings.enabled is False
+    assert settings.enabled is True
     assert settings.backend == "prometheus"
 
 

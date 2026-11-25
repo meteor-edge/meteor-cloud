@@ -1,16 +1,10 @@
 # MeteorCloud data plane
 
-Python process that owns the platform MQTT session to the broker (Mosquitto, EMQX, or VerneMQ). It publishes and
-subscribes on behalf of the control plane, then POSTs each inbound payload to
-`CONTROL_PLANE_URL/internal/mqtt/ingest`.
+| Path | What |
+| --- | --- |
+| [`go/`](go/README.md) | Go services: the MQTT forwarder (`cmd/mqtt-forwarder`, Compose service `data-plane`; [docs](../../docs/data-plane/mqtt-forwarder.md)) and the application data API (`cmd/dataplane`; [docs](../../docs/data-plane/README.md)) |
+| [`broker/mosquitto/`](broker/mosquitto/) | Mosquitto image with the `meteorcloud_auth` plugin |
 
-## Run
-
-```bash
-export CONTROL_PLANE_URL=http://127.0.0.1:8000
-export MQTT_BROKER_HOST=127.0.0.1
-uvicorn data_plane.main:app --host 0.0.0.0 --port 8081
-```
-
-See `contracts/mqtt-http.md` for the HTTP JSON contract. Telemetry storage stays
-in the control plane (`TELEMETRY_PROVIDER=postgresql`).
+The previous Python MQTT gateway (`data_plane`) was removed; the forwarder replaced it.
+Contracts: [`contracts/mqtt-http.md`](../../contracts/mqtt-http.md),
+[`contracts/data-plane-v1.md`](../../contracts/data-plane-v1.md).
