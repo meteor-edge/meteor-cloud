@@ -71,7 +71,12 @@ def normalize_capabilities(raw: dict[str, Any]) -> dict[str, Any]:
     whatever is stored. Every other key is kept as sent.
     """
     out = dict(raw)
-    for key, clean in (("actions", _kinds), ("deploy_kinds", _kinds), ("modules", _modules)):
+    for key, clean in (
+        ("actions", _kinds),
+        ("deploy_kinds", _kinds),
+        ("deploy_features", _kinds),
+        ("modules", _modules),
+    ):
         if key not in out:
             continue
         value = clean(out[key])

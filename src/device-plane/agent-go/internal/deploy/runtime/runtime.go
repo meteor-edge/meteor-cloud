@@ -69,6 +69,9 @@ type Workload struct {
 	// unless the image is in MeteorCloud's own registry. Called only when the
 	// image is not on the device yet.
 	PullAuth func(ctx context.Context) (PullAuth, error)
+	// SecretEnv obtains the values of spec.secret_env; nil when there are none.
+	// They go into the container's environment only and are never stored.
+	SecretEnv func(ctx context.Context) (map[string]string, error)
 	// ForceRecreate creates containers again although nothing changed (a
 	// mounted token file was replaced).
 	ForceRecreate bool

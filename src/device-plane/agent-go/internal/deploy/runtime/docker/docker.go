@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"meteorcloud/meteorcli/internal/deploy/runtime"
@@ -60,6 +61,10 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 			return runtime.Result{}, err
 		}
 	}
+	secrets, err := secretEnv(ctx, w)
+	if err != nil {
+		return runtime.Result{}, err
+	}
 	command, err := Split(w.Spec.Text("command", ""))
 	if err != nil {
 		return runtime.Result{}, err
@@ -68,6 +73,23 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 		Name: name, Image: image, Ports: w.Spec.Strings("ports"), Command: command,
 		Env:     runtime.BoundEnv(w.Spec.Env("env"), w.App),
 		Restart: restart(w.Spec),
+	}
+	for _, v := range w.Spec.Strings("volumes") {
+		req.Volumes = append(req.Volumes, name+"-"+v) // each app has its own volumes
+	}
+	if limits, ok := w.Spec["resources"].(map[string]any); ok {
+		if req.MemoryMB, err = limit(limits, "memory_mb"); err != nil {
+			return runtime.Result{}, err
+		}
+		if req.CPUMillis, err = limit(limits, "cpu_millis"); err != nil {
+			return runtime.Result{}, err
+		}
+	}
+	// Never over the variables of the application binding.
+	for k, v := range secrets {
+		if w.App == nil || w.App.Env[k] == "" {
+			req.Env[k] = v
+		}
 	}
 	if helper.ValidLabel(w.Key) {
 		req.Workload = w.Key
@@ -95,6 +117,45 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 		return runtime.Result{}, runtime.Failf("%s after apply.", h.Problem)
 	}
 	return runtime.Result{Health: h}, nil
+}
+
+// secretEnv returns the values of spec.secret_env. The signed spec names them,
+// so an answer with other names is refused.
+func secretEnv(ctx context.Context, w runtime.Workload) (map[string]string, error) {
+	names := w.Spec.Strings("secret_env")
+	if len(names) == 0 {
+		return nil, nil
+	}
+	if w.SecretEnv == nil {
+		return nil, runtime.Failf("This release has secrets, and they are not available.")
+	}
+	values, err := w.SecretEnv(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(values) != len(names) {
+		return nil, runtime.Failf("The server's secrets do not match this release.")
+	}
+	for _, n := range names {
+		if _, ok := values[n]; !ok {
+			return nil, runtime.Failf("The server's secrets do not match this release.")
+		}
+	}
+	return values, nil
+}
+
+// limit reads a whole number from spec.resources, 0 when it is missing or null.
+// A limit that cannot be read fails: the container must not run without it.
+func limit(m map[string]any, key string) (int, error) {
+	if m[key] == nil {
+		return 0, nil
+	}
+	// json.Number from the server, float64 from the applied state (a rollback).
+	n, err := strconv.ParseFloat(runtime.Stringify(m[key]), 64)
+	if err != nil || n < 1 || n > 1<<30 || n != float64(int(n)) {
+		return 0, runtime.Failf("Invalid resources.%s.", key)
+	}
+	return int(n), nil
 }
 
 // restart is spec.restart, "unless-stopped" when missing, none when null or "".

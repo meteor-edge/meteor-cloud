@@ -46,3 +46,10 @@ var order = []string{"systemd", "docker", "docker_compose"}
 
 // Kinds returns the deploy kinds this agent can apply, for capabilities.deploy_kinds.
 func Kinds() []string { return append([]string(nil), order...) }
+
+// features are the optional release settings this agent applies. The server
+// does not deploy a release that needs one the agent does not list.
+var features = []string{"registry", "run_options"}
+
+// Features returns them, for capabilities.deploy_features.
+func Features() []string { return append([]string(nil), features...) }

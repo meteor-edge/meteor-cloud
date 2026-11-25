@@ -23,7 +23,7 @@ import (
 // modules (socket, identity) are not listed: they run before enrollment.
 func All() []agent.Module {
 	return []agent.Module{
-		&heartbeat.Module{Actions: actions.Kinds(), DeployKinds: deploy.Kinds()},
+		&heartbeat.Module{Actions: actions.Kinds(), DeployKinds: deploy.Kinds(), DeployFeatures: deploy.Features()},
 		&mqtt.Module{},
 		&metrics.Module{},
 		&actions.Module{},

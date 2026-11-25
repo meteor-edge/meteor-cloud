@@ -15,7 +15,7 @@ from app.adapters.distribution_registry import DistributionRegistry, _platform
 from app.audit.models import AuditEvent
 from app.ports.registry import ImageManifest, Platform, RegistryUnavailableError
 from app.registry.access import events_secret
-from app.registry.catalog import CatalogService
+from app.registry.catalog import CatalogService, pin_tag
 from app.registry.models import ContainerImage
 from app.registry.router import get_catalog_service
 from app.tenancy.models import OrganizationRole
@@ -53,6 +53,10 @@ class FakeRegistry:
             return None
         media_type = "application/vnd.oci.image.manifest.v1+json"
         return ImageManifest(digest, media_type, (Platform("linux", "arm64", None, 7),))
+
+    def tag(self, repository: str, digest: str, tag: str) -> None:
+        self._check()
+        self.images[repository][tag] = digest
 
     def delete_tag(self, repository: str, tag: str) -> None:
         self._check()
@@ -169,8 +173,10 @@ def test_deleting_a_repository_includes_tags_missing_from_the_list(
     fake.push("acme/app", "1")
     CatalogService(db_session, registry_settings(), fake).reconcile()
     fake.push("acme/app", "2")
+    pin = pin_tag("sha256:" + "a" * 64)
+    fake.tag("acme/app", "sha256:" + "a" * 64, pin)  # a release uses the image
     assert registry.delete(base, headers=headers, params={"repository": "app"}).status_code == 204
-    assert fake.images["acme/app"] == {}
+    assert list(fake.images["acme/app"]) == [pin]
     events = db_session.scalars(select(AuditEvent).where(AuditEvent.action == "image.delete")).all()
     assert {e.metadata_["tag"]: e.metadata_["catalog_digest"] for e in events} == {
         "1": "sha256:" + "a" * 64,

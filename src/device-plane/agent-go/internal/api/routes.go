@@ -80,14 +80,16 @@ type ModuleHealth struct {
 
 // Capabilities says what this device has and what this agent can do.
 type Capabilities struct {
-	Systemd       bool                    `json:"systemd"`
-	Docker        bool                    `json:"docker"`
-	DockerCompose bool                    `json:"docker_compose"`
-	WireGuard     bool                    `json:"wireguard"`
-	SSH           bool                    `json:"ssh"`
-	Actions       []string                `json:"actions"`
-	DeployKinds   []string                `json:"deploy_kinds"`
-	Modules       map[string]ModuleHealth `json:"modules,omitempty"`
+	Systemd       bool     `json:"systemd"`
+	Docker        bool     `json:"docker"`
+	DockerCompose bool     `json:"docker_compose"`
+	WireGuard     bool     `json:"wireguard"`
+	SSH           bool     `json:"ssh"`
+	Actions       []string `json:"actions"`
+	DeployKinds   []string `json:"deploy_kinds"`
+	// DeployFeatures are the optional release settings this agent applies.
+	DeployFeatures []string                `json:"deploy_features"`
+	Modules        map[string]ModuleHealth `json:"modules,omitempty"`
 }
 
 // MarshalJSON always sends actions and deploy_kinds as arrays (never null), as
@@ -99,6 +101,9 @@ func (c Capabilities) MarshalJSON() ([]byte, error) {
 	}
 	if c.DeployKinds == nil {
 		c.DeployKinds = []string{}
+	}
+	if c.DeployFeatures == nil {
+		c.DeployFeatures = []string{}
 	}
 	return json.Marshal(plain(c))
 }

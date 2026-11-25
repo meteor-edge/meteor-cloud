@@ -235,6 +235,8 @@ def test_namespace_survives_rename_and_is_never_reused(registry: TestClient, db_
         "enabled": True,
         "host": HOST,
         "namespace": "acme",
+        "used_bytes": 0,
+        "quota_bytes": None,
     }
     assert registry.patch(url, headers=headers, json={"slug": "renamed"}).status_code == 200
     assert registry.get(f"{url}/registry", headers=headers).json()["namespace"] == "acme"

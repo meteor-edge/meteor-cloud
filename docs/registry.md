@@ -43,13 +43,26 @@ the device" over "Pulling and starting" to "Healthy" or "Failed", then offers **
 It creates a release (named after the app, version from the tag) and an immediate Deploy to that one
 device, plus the public address. Needs `deployment.create`, and `endpoint.create` for the URL;
 operators can run apps without being able to manage releases. A device has one app per name
-(`app_exists`). Environment values are stored with the release and readable by everyone who can read
-releases.
+(`app_exists`).
+
+| Setting | Meaning |
+| --- | --- |
+| Secret environment values | Stored encrypted, fetched by the device when it starts the app, never returned by the API. On the device they are visible to root (`docker inspect`). One line per value. Other values can be read by everyone who can read releases |
+| Volumes | `name:/path` or `name:/path:ro`. Docker volumes named `<app>-<name>`, kept when the app is updated or removed. Paths on the device cannot be mounted |
+| Memory, CPU | Limits of the container |
+
+An agent too old for the registry or for these settings is refused (`agent_update_needed`).
+
+**device → Software → Apps** lists running apps. **Edit** changes settings and deploys again;
+**Update** appears when the tag points to a newer image or a newer tag was pushed. Each makes a new
+release. A failed update rolls back to the release before; an app with secrets needs the server for
+that.
 
 ```bash
 curl -X POST "$API/api/v1/organizations/$ORG/devices/$DEVICE/apps/run" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"image": "my-app:1.0", "ports": ["8080:8080"], "endpoint": {}}'
+# change: POST …/apps/my-app/redeploy {"image": "my-app:2.0"}     list: GET …/apps/deployed
 ```
 
 ## Deploy to devices
@@ -115,6 +128,7 @@ You need a host name for the registry, normally `registry.<domain>` ([DNS](dns.m
 | `REGISTRY_STORAGE_PREFIX` | `registry` | S3 only. Prefix in the bucket |
 | `REGISTRY_INTERNAL_URL` | `http://registry:5000` | How the API reaches the registry (default fits Compose; Helm sets it) |
 | `REGISTRY_EVENTS_URL` | `http://backend:8000/internal/registry/events` | Where the registry sends push notifications (default fits Compose; Helm sets it) |
+| `REGISTRY_ORG_QUOTA_BYTES` | `0` | Image bytes one organization may store; 0 is unlimited (Helm `registry.orgQuotaBytes`, Ansible `registry_org_quota_bytes`) |
 | `REGISTRY_TOKEN_TTL_SECONDS` | `300` | Lifetime of access tokens |
 | `REGISTRY_TOKEN_RATE_LIMIT_REQUESTS` | `600` | Token requests per source IP per minute |
 
@@ -152,9 +166,23 @@ Images use the same storage choice as [artifacts](fleet/artifacts.md):
 A namespace claimed after that backup is forgotten by the database, and a new organization could
 claim it while the old images are still stored.
 
-**Not covered yet:** `scripts/backup.sh` does not include filesystem images (back up the volume
-yourself), there are no quotas, deleted images are not garbage-collected, and deleting an
-organization leaves its image data in storage.
+**Quota:** once an organization's tagged images reach `REGISTRY_ORG_QUOTA_BYTES`, pushes are refused
+until images are deleted; pulls go on. It is checked when a push starts, so the last push can go over.
+Layers shared by two images count for each, and untagged images (including those kept for releases) do
+not count. Settings → Registry shows the usage.
+
+**Garbage collection:** deleting an image or a tag frees no storage by itself. On Compose, run
+`scripts/registry-gc.sh` from `deploy/compose` (`--dry-run` first); the registry is stopped meanwhile.
+Images that a release uses are kept by hidden `meteorcloud-pin-…` tags, so rollbacks keep working after
+a tag moved or was deleted; deleting the release lets the image go. On Kubernetes, run
+`kubectl exec deploy/<release>-backend -c backend -- python -m app.cli registry-reconcile`, make sure
+nobody pushes, and run `registry garbage-collect --delete-untagged /etc/distribution/config.yml` in the
+registry pod, then restart it.
+
+**Deleting an organization:** its images are untagged by the next comparison (at most an hour) and
+freed by the next garbage collection. Its namespace is never given to another organization.
+
+**Not covered:** `scripts/backup.sh` does not include filesystem images; back up the volume yourself.
 
 ## How authorization works
 

@@ -50,6 +50,10 @@ class ContainerRegistry(Protocol):
 
     def manifest(self, repository: str, reference: str) -> ImageManifest | None: ...
 
+    def tag(self, repository: str, digest: str, tag: str) -> None:
+        """Point a tag at an image of the same repository."""
+        ...
+
     def delete_tag(self, repository: str, tag: str) -> None:
         """A tag that is already gone is not an error."""
         ...

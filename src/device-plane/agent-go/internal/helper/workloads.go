@@ -71,6 +71,11 @@ type DockerRunRequest struct {
 	// Workload and Release become labels: workload.* finds the container by them.
 	Workload string `json:"workload,omitempty"`
 	Release  string `json:"release,omitempty"`
+	// Volumes are the app's named volumes, "<name>-data:/path" or with ":ro".
+	Volumes []string `json:"volumes,omitempty"`
+	// MemoryMB and CPUMillis (1000 is one CPU) limit the container, 0 for no limit.
+	MemoryMB  int `json:"memory_mb,omitempty"`
+	CPUMillis int `json:"cpu_millis,omitempty"`
 }
 
 func (r *DockerRunRequest) validate(h Host) error {
@@ -85,6 +90,9 @@ func (r *DockerRunRequest) validate(h Host) error {
 		return badRequest("%q, %q are not workload and release labels", r.Workload, r.Release)
 	case len(r.Ports) > maxPorts || len(r.Env) > maxEnv || len(r.Command) > maxCommand:
 		return badRequest("too many ports, env entries or command arguments")
+	}
+	if err := r.validateOptions(); err != nil {
+		return err
 	}
 	for _, p := range r.Ports {
 		if !portRe.MatchString(p) {
@@ -189,6 +197,7 @@ func (h Host) dockerRunContainer(ctx context.Context, _ localrpc.Peer, raw json.
 	for _, p := range r.Ports {
 		args = append(args, "-p", p)
 	}
+	args = append(args, r.optionArgs()...)
 	// Everything that can fail is ready before the running container goes.
 	if len(r.Env) > 0 {
 		envFile, err := writeEnvFile(h.TempDir, r.Env)

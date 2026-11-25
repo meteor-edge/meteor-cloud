@@ -25,12 +25,20 @@ from app.ports.registry import ContainerRegistry, RegistryUnavailableError
 from app.registry.access import sign_access_token
 from app.registry.models import ContainerImage, RegistryNamespace, RegistryToken
 from app.registry.schemas import ImageRepositoryResponse, ImageTagResponse
+from app.releases.models import Release
 
 logger = logging.getLogger(__name__)
 
 # Fixed pg advisory lock key for the reconciliation ("images" in ASCII).
 RECONCILE_LOCK_KEY = 0x696D61676573
 _TAG_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}")
+
+# Tags that keep the images of releases (RegistryImages); not listed.
+PIN_PREFIX = "meteorcloud-pin-"
+
+
+def pin_tag(digest: str) -> str:
+    return PIN_PREFIX + digest.removeprefix("sha256:")
 
 
 def registry_client(session: Session, settings: Settings) -> ContainerRegistry | None:
@@ -69,7 +77,7 @@ class CatalogService:
             if owner is None:
                 continue
             organization_id, path = owner
-            if event.get("action") == "push" and _TAG_RE.fullmatch(tag):
+            if event.get("action") == "push" and not tag.startswith(PIN_PREFIX) and _TAG_RE.fullmatch(tag):
                 actor = event.get("actor")
                 pushed_by = self._pushed_by(organization_id, actor.get("name") if isinstance(actor, dict) else None)
                 digest = target.get("digest")
@@ -97,6 +105,11 @@ class CatalogService:
         namespace, _, path = repository.partition("/")
         row = self.session.get(RegistryNamespace, namespace) if path and len(path) <= 255 else None
         return (row.organization_id, path) if row is not None and row.organization_id is not None else None
+
+    def _is_deleted(self, repository: str) -> bool:
+        """In the namespace of an organization that was deleted; unknown namespaces are left alone."""
+        row = self.session.get(RegistryNamespace, repository.partition("/")[0])
+        return row is not None and row.organization_id is None
 
     def _pushed_by(self, organization_id: uuid.UUID, subject: Any) -> uuid.UUID | None:
         try:
@@ -157,7 +170,8 @@ class CatalogService:
                 )
             )
         }
-        tags = [tag for tag in self.registry.list_tags(repository) if _TAG_RE.fullmatch(tag)]
+        found = [tag for tag in self.registry.list_tags(repository) if _TAG_RE.fullmatch(tag)]
+        tags = [tag for tag in found if not tag.startswith(PIN_PREFIX)]
         for tag in tags:
             stored = known.get(tag)
             if stored is None or stored[0] != self.registry.digest(repository, tag):
@@ -176,6 +190,30 @@ class CatalogService:
                 )
             )
 
+    def _sync_pins(self, organization_id: uuid.UUID, repository: str) -> None:
+        """Keep exactly the images that releases use, besides the tagged ones."""
+        prefix = f"{self.settings.registry_public_host}/{repository}:"
+        pins = {tag for tag in self.registry.list_tags(repository) if tag.startswith(PIN_PREFIX)}
+        # After listing the tags: a release saved meanwhile has its pin already.
+        digests = self.session.scalars(
+            select(Release.spec["image_digest"].astext).where(
+                Release.organization_id == organization_id,
+                Release.spec["registry"].astext == "meteorcloud",
+                Release.spec["image"].astext.startswith(prefix, autoescape=True),
+            )
+        )
+        wanted = {pin_tag(digest): digest for digest in digests if digest}
+        for tag in pins - wanted.keys():
+            self.registry.delete_tag(repository, tag)
+        for tag in wanted.keys() - pins:
+            if self.registry.digest(repository, wanted[tag]) is not None:
+                self.registry.tag(repository, wanted[tag], tag)
+
+    def _erase(self, repository: str) -> None:
+        """Untag everything of a deleted organization; garbage collection frees the data."""
+        for tag in self.registry.list_tags(repository):
+            self.registry.delete_tag(repository, tag)
+
     def reconcile(self) -> int:
         """Compare every repository with the registry. Returns how many were compared."""
         repositories = set(self.registry.list_repositories())
@@ -185,18 +223,22 @@ class CatalogService:
             .distinct()
         ):
             repositories.add(f"{namespace}/{path}")
-        compared = 0
+        compared, self.failed = 0, 0
         for repository in sorted(repositories):
             owner = self._owner(repository)
-            if owner is None:
-                continue
             try:
+                if owner is None:
+                    if self._is_deleted(repository):
+                        self._erase(repository)
+                    continue
                 self._sync_repository(owner[0], repository, owner[1])
+                self._sync_pins(owner[0], repository)
                 self.session.commit()
                 compared += 1
             except RegistryUnavailableError as exc:
                 # One damaged image must not stop the others.
                 self.session.rollback()
+                self.failed += 1
                 logger.warning("Could not compare repository %s: %s", repository, exc)
         return compared
 
@@ -276,8 +318,8 @@ class CatalogService:
         tags = list(images)
         if tag is None:
             try:
-                # Also the tags whose notification was missed.
-                listed = self.registry.list_tags(full_name)
+                # Also the tags whose notification was missed, but not what keeps the images of releases.
+                listed = [name for name in self.registry.list_tags(full_name) if not name.startswith(PIN_PREFIX)]
             except RegistryUnavailableError as exc:
                 raise AppError("registry_unavailable", str(exc), status_code=503) from exc
             tags += [name for name in listed if name not in images and _TAG_RE.fullmatch(name)]

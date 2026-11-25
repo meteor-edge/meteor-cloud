@@ -231,3 +231,19 @@ func TestPullFromTheMeteorCloudRegistry(t *testing.T) {
 		t.Errorf("a tag was accepted: %v", err)
 	}
 }
+
+func TestLimit(t *testing.T) {
+	for _, v := range []any{json.Number("2000000"), float64(2000000), "2000000"} {
+		if n, err := limit(map[string]any{"memory_mb": v}, "memory_mb"); n != 2000000 || err != nil {
+			t.Errorf("%v: %d, %v", v, n, err)
+		}
+	}
+	if n, err := limit(map[string]any{"memory_mb": nil}, "memory_mb"); n != 0 || err != nil {
+		t.Errorf("null: %d, %v", n, err)
+	}
+	for _, v := range []any{"x", -1.0, 1.5, 1e300, true} {
+		if _, err := limit(map[string]any{"memory_mb": v}, "memory_mb"); err == nil {
+			t.Errorf("%v was accepted", v)
+		}
+	}
+}

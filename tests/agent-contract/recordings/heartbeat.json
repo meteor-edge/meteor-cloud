@@ -178,7 +178,11 @@
                 "restarts": 0,
                 "since": "<timestamp>"
               }
-            }
+            },
+            "deploy_features": [
+              "registry",
+              "run_options"
+            ]
           },
           "cpu_cores": "<inventory>",
           "cpu_model": "<inventory>",
@@ -347,7 +351,11 @@
                 "restarts": 0,
                 "since": "<timestamp>"
               }
-            }
+            },
+            "deploy_features": [
+              "registry",
+              "run_options"
+            ]
           },
           "cpu_cores": "<inventory>",
           "cpu_model": "<inventory>",

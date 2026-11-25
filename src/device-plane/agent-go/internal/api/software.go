@@ -96,6 +96,19 @@ func (c *Client) RegistryPullToken(ctx context.Context, deviceToken, workloadKey
 	return &out, nil
 }
 
+// ReleaseSecrets returns the values of a release's secret_env
+// (software-secrets.response.json). They are secrets.
+func (c *Client) ReleaseSecrets(ctx context.Context, deviceToken, workloadKey, releaseID string) (map[string]string, error) {
+	var out struct {
+		Env map[string]string `json:"env"`
+	}
+	body := map[string]string{"workload_key": workloadKey, "release_id": releaseID}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/agent/software/secrets", deviceToken, body, &out); err != nil {
+		return nil, err
+	}
+	return out.Env, nil
+}
+
 // SoftwareSnapshot sends what one workload is made of (software-snapshots.request.json).
 func (c *Client) SoftwareSnapshot(ctx context.Context, deviceToken string, snapshot any) error {
 	body := map[string]any{"snapshot": snapshot}

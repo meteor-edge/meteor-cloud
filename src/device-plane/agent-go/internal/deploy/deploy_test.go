@@ -482,3 +482,35 @@ func TestRegistryImageIsPulledWithAWorkloadToken(t *testing.T) {
 		t.Errorf("calls %v", calls)
 	}
 }
+
+func TestSecretsVolumesAndLimits(t *testing.T) {
+	e := newEnv(t)
+	release := "11111111-1111-1111-1111-111111111111"
+	e.desire(dockerItem(release, "1.0", 1, map[string]any{
+		"container_name": "web", "image": "nginx", "env": map[string]any{"A": "1"},
+		"secret_env": []string{"KEY"}, "volumes": []string{"data:/data", "conf:/etc/app:ro"},
+		"resources": map[string]any{"memory_mb": 256, "cpu_millis": 500}}))
+	path := "/api/v1/agent/software/secrets"
+	for _, bad := range []map[string]string{{}, {"OTHER": "x"}, {"KEY": "s3cret", "PATH": "/evil"}} {
+		e.cp.On("POST", path, fakecp.OK(map[string]any{"env": bad}))
+		if rep := e.cycle(); rep["demo-app"].status() != statusFailed || e.host.count("docker.run") != 0 {
+			t.Fatalf("secrets %v: report %v", bad, rep)
+		}
+	}
+	e.cp.On("POST", path, fakecp.OK(map[string]any{"env": map[string]string{"KEY": "s3cret"}}))
+	if rep := e.cycle(); rep["demo-app"].status() != statusInSync {
+		t.Fatalf("report %v", rep)
+	}
+	var run helper.DockerRunRequest
+	e.host.last(t, "docker.run", &run)
+	if run.Env["KEY"] != "s3cret" || run.Env["A"] != "1" || run.MemoryMB != 256 || run.CPUMillis != 500 {
+		t.Errorf("run %+v", run)
+	}
+	if len(run.Volumes) != 2 || run.Volumes[0] != "web-data:/data" || run.Volumes[1] != "web-conf:/etc/app:ro" {
+		t.Errorf("volumes %v", run.Volumes)
+	}
+	calls := e.cp.Calls("POST", path)
+	if b := calls[len(calls)-1].Body; b["release_id"] != release || b["workload_key"] != "demo-app" {
+		t.Errorf("body %v", b)
+	}
+}

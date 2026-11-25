@@ -320,6 +320,8 @@ class Settings(BaseSettings):
     registry_token_rate_limit_window_seconds: int = Field(
         default=60, alias="REGISTRY_TOKEN_RATE_LIMIT_WINDOW_SECONDS"
     )
+    # Image bytes one organization may store before pushes are refused. 0 = unlimited.
+    registry_org_quota_bytes: int = Field(default=0, ge=0, alias="REGISTRY_ORG_QUOTA_BYTES")
     # S3 storage only. Empty bucket: the artifact bucket, under the prefix.
     registry_storage_bucket: str = Field(default="", alias="REGISTRY_STORAGE_BUCKET")
     registry_storage_prefix: str = Field(default="registry", min_length=1, alias="REGISTRY_STORAGE_PREFIX")

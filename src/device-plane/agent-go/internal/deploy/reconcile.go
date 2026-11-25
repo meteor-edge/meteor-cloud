@@ -96,6 +96,10 @@ func (c *cycle) run(ctx context.Context) (reports []report, attempts map[string]
 			return nil, nil // reports would be sent with a token the server refused
 		}
 		if rep != nil {
+			// So the server does not take it for the result of a newer deploy.
+			if _, revision, ok := it.identity(); ok {
+				rep["revision"] = revision
+			}
 			reports = append(reports, rep)
 			if attempted {
 				attempts[it.key()] = true
@@ -258,7 +262,7 @@ func (c *cycle) apply(ctx context.Context, it item, app *runtime.App, wasApplied
 		// lost, and the containers must be created again to mount the new one.
 		ForceRecreate: kind == "docker_compose" && app != nil && wasApplied,
 	}
-	var pullErr error
+	var pullErr, secretErr error
 	if it.spec().Text("registry", "") == "meteorcloud" {
 		w.PullAuth = func(ctx context.Context) (runtime.PullAuth, error) {
 			t, err := c.r.d.API.RegistryPullToken(ctx, c.token, key)
@@ -269,11 +273,23 @@ func (c *cycle) apply(ctx context.Context, it item, app *runtime.App, wasApplied
 			return runtime.PullAuth{Registry: t.Registry, Username: t.Username, Password: t.Password}, nil
 		}
 	}
+	if kind == "docker" && len(it.spec().Strings("secret_env")) > 0 {
+		w.SecretEnv = func(ctx context.Context) (map[string]string, error) {
+			env, err := c.r.d.API.ReleaseSecrets(ctx, c.token, key, w.Release)
+			if err != nil {
+				secretErr = err
+				return nil, runtime.Failf("Could not get the app's secrets: %s", message(err))
+			}
+			return env, nil
+		}
+	}
 	actx, cancel := context.WithTimeout(ctx, applyTimeout)
 	defer cancel()
 	res, err := c.r.runtimes[kind].Apply(actx, w)
-	if pullErr != nil && api.IsAuth(pullErr) {
-		return nil, c.check(pullErr)
+	for _, e := range []error{pullErr, secretErr} {
+		if e != nil && api.IsAuth(e) {
+			return nil, c.check(e)
+		}
 	}
 	if err != nil {
 		return failed(key, message(err)), nil

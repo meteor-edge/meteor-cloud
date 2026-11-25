@@ -61,25 +61,37 @@ class DistributionRegistry:
     # --- client -------------------------------------------------------------
 
     def _request(
-        self, method: str, path: str, access: Access, *, accept: str = "*/*"
+        self,
+        method: str,
+        path: str,
+        access: Access,
+        *,
+        accept: str = "*/*",
+        body: bytes | None = None,
+        content_type: str = "",
     ) -> tuple[int, dict[str, str], bytes]:
         if self._sign is None:
             raise RuntimeError("this registry was built without credentials")
         request = urllib.request.Request(
             self.settings.registry_internal_url.rstrip("/") + path,
             method=method,
-            headers={"Authorization": f"Bearer {self._sign(access)}", "Accept": accept},
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self._sign(access)}",
+                "Accept": accept,
+                **({"Content-Type": content_type} if content_type else {}),
+            },
         )
         try:
             with _opener.open(request, timeout=_TIMEOUT_SECONDS) as response:
-                body = response.read(_MAX_BODY + 1)
-                if len(body) > _MAX_BODY:
+                answer = response.read(_MAX_BODY + 1)
+                if len(answer) > _MAX_BODY:
                     raise RegistryUnavailableError("The registry sent an answer that is too large.")
                 # A bounded read does not report a connection that closed early.
                 length = response.headers.get("Content-Length")
-                if method == "GET" and length is not None and len(body) != int(length):
+                if method == "GET" and length is not None and len(answer) != int(length):
                     raise RegistryUnavailableError("The registry sent an incomplete answer.")
-                return response.status, {k.lower(): v for k, v in response.headers.items()}, body
+                return response.status, {k.lower(): v for k, v in response.headers.items()}, answer
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 return 404, {}, b""
@@ -164,6 +176,14 @@ class DistributionRegistry:
             return None
         _, _, body = self._request("GET", f"/v2/{repository}/blobs/{config_digest}", _pull(repository))
         return _platform(_parse(body), document)
+
+    def tag(self, repository: str, digest: str, tag: str) -> None:
+        access = [{"type": "repository", "name": repository, "actions": ["pull", "push"]}]
+        path = f"/v2/{repository}/manifests"
+        status, headers, body = self._request("GET", f"{path}/{digest}", access, accept=_ACCEPT)
+        if status == 404:
+            raise RegistryUnavailableError("The image is gone.")
+        self._request("PUT", f"{path}/{tag}", access, body=body, content_type=headers.get("content-type", ""))
 
     def delete_tag(self, repository: str, tag: str) -> None:
         self._request(

@@ -89,3 +89,9 @@ Under `/api/v1/organizations/{org}/devices/{device}/software/{software}`:
 | `GET /history?range=24h\|7d\|30d` | Health segments, events, deploys, series; `503` without the data plane |
 | `GET /actions` | The last 50 actions |
 | `POST /actions` | `{"kind": "workload_restart", "service": "web"}`; kinds `workload_restart`, `workload_stop`, `workload_start`, `workload_snapshot` |
+
+## Run an app
+
+**Run an app** on the Software tab makes a release and an immediate Deploy for one container image, with
+ports, environment, secrets, volumes, limits and a public URL. **Apps** below it edits and updates them.
+See [Run an app](../registry.md#run-an-app) and, for the URL, [Endpoints](endpoints.md).

@@ -416,6 +416,14 @@
           },
           "description": "Release kinds this agent's code can apply. Whether the runtime is installed is the boolean of the same name. Added in v1 (additive)."
         },
+        "deploy_features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional release settings this agent applies: registry (pull from MeteorCloud's registry), run_options (volumes, resources, secret_env). Added in v1 (additive)."
+        },
         "modules": {
           "type": "object",
           "additionalProperties": {
