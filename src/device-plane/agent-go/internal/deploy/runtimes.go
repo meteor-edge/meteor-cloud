@@ -49,7 +49,7 @@ func Kinds() []string { return append([]string(nil), order...) }
 
 // features are the optional release settings this agent applies. The server
 // does not deploy a release that needs one the agent does not list.
-var features = []string{"registry", "run_options"}
+var features = []string{"registry", "run_options", "compose_registry"}
 
 // Features returns them, for capabilities.deploy_features.
 func Features() []string { return append([]string(nil), features...) }

@@ -8,9 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import ValidationAppError
+from app.deployments.software_models import DeviceSoftware
 from app.devices.models import Device
 from app.registry import images as registry_images
 from app.registry.images import RegistryImages, image_architecture
+from app.releases.kinds import DockerComposeSpec, ReleaseKind
+from app.releases.models import Release
 from tests.test_deployments import _register_device
 from tests.test_registry import HOST, _access, _login, _setup, _token, registry, registry_settings  # noqa: F401
 from tests.test_registry_catalog import FakeRegistry
@@ -223,3 +227,43 @@ def test_architecture_names() -> None:
     assert [image_architecture(a) for a in ("AARCH64", "x86_64", "armv7l", "sparc", None)] == [
         "arm64", "amd64", "arm", None, None,
     ]  # fmt: skip
+
+
+def test_compose_images_are_pinned_and_pullable(
+    registry: TestClient,  # noqa: F811
+    db_session: Session,
+    fake: FakeRegistry,
+) -> None:
+    org, headers = _setup(registry, db_session)
+    fake.push("acme/web", "1.0")
+    fake.push("acme/team/db", "2", seed="b")
+    fake.push("acme/other", "1")
+    spec = DockerComposeSpec(project_name="shop", registry_images=["web:1.0", f"{HOST}/acme/team/db:2"]).model_dump()
+    images = RegistryImages(db_session, registry_settings(), fake)
+    pinned = images.pin_all(org.id, spec, None)
+    web, db = f"{HOST}/acme/web:1.0@{DIGEST_A}", f"{HOST}/acme/team/db:2@sha256:{'b' * 64}"
+    assert pinned["registry_images"] == sorted([web, db])
+    fake.push("acme/web", "1.0", seed="c")
+    assert images.pin_all(org.id, spec, pinned)["registry_images"] == sorted([web, db])  # an edit keeps the pin
+    assert images.pin_all(org.id, pinned, None)["registry_images"] == sorted([web, db])  # as stored
+    for bad in ("nope:1", "other.example.com/x:1", f"{HOST}/foreign/web:1"):
+        with pytest.raises(ValidationAppError):
+            images.pin_all(org.id, {"registry_images": [bad]}, None)
+
+    device_id, device_headers = _device(registry, org, headers)
+    release = Release(
+        organization_id=org.id, name="shop", version="1", kind=ReleaseKind.DOCKER_COMPOSE, spec=pinned
+    )  # fmt: skip
+    db_session.add(release)
+    db_session.flush()
+    db_session.add(
+        DeviceSoftware(
+            organization_id=org.id, device_id=uuid.UUID(device_id), workload_key="shop", kind="docker_compose",
+            desired_release_id=release.id, desired_spec=pinned,
+        )
+    )  # fmt: skip
+    db_session.flush()
+    issued = registry.post("/api/v1/agent/registry/pull-token", headers=device_headers, json={"workload_key": "shop"})
+    assert issued.status_code == 200, issued.text
+    found = RegistryImages(db_session, registry_settings(), fake).pullable_repositories(issued.json()["password"])
+    assert found is not None and found[1] == {"acme/web", "acme/team/db"}

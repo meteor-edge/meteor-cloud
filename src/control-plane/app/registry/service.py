@@ -148,15 +148,15 @@ class RegistryService:
         # Imported here: it names images with this module's namespace_for.
         from app.registry.images import RegistryImages
 
-        found = RegistryImages(self.session, self.settings).pullable_repository(password)
+        found = RegistryImages(self.session, self.settings).pullable_repositories(password)
         if found is None:
             raise RegistryAuthError()
-        device, repository = found
+        device, repositories = found
         set_request_actor(actor_type="device", actor_id=device.id)
         access = [
-            {"type": "repository", "name": repository, "actions": ["pull"]}
+            {"type": "repository", "name": scope.repository, "actions": ["pull"]}
             for scope in scopes
-            if scope.repository == repository and "pull" in scope.actions
+            if scope.repository in repositories and "pull" in scope.actions
         ]
         return f"device:{device.id}", access
 

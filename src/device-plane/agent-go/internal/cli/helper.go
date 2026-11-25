@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"meteorcloud/meteorcli/internal/agent"
+	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/helper"
 	"meteorcloud/meteorcli/internal/localrpc"
 )
@@ -38,9 +39,19 @@ func runHelper(ctx context.Context, env *Env, args []string) int {
 		return 1
 	}
 
-	srv := &helper.Server{AllowedUID: uid, Host: helper.SystemHost(), Log: log}
+	host := helper.SystemHost()
+	engine, err := config.LoadEngine(env.Paths.EngineFile())
+	if err != nil {
+		// Not another engine than the administrator chose: the rest of the helper goes on.
+		log.Error("container engine", "err", err)
+		engine = config.Engine{Name: "none", Endpoint: "unix:///nonexistent"}
+	}
+	host.Engine = helper.Engine{Name: engine.Name, Endpoint: engine.Endpoint}
+	if engine.Endpoint != "" {
+		host.DockerSocket = engine.Socket()
+	}
+	srv := &helper.Server{AllowedUID: uid, Host: host, Log: log}
 	var l *net.UnixListener
-	var err error
 	if *listen != "" {
 		l, err = listenHelper(*listen)
 	} else {

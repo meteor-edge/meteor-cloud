@@ -214,6 +214,7 @@ func Ops(h Host) map[string]localrpc.Handler {
 		"docker.load":      {Timeout: deployTimeout, Run: h.dockerLoad},
 		"docker.has_image": {Timeout: 30 * time.Second, Run: h.dockerHasImage},
 		"docker.pull":      {Timeout: deployTimeout, Run: h.dockerPull, Audit: auditDockerPull},
+		"docker.tag":       {Timeout: 30 * time.Second, Run: h.dockerTag},
 		"docker.run":       {Timeout: deployTimeout, Run: h.dockerRunContainer, Audit: auditDockerRun},
 		"docker.health":    {Timeout: 30 * time.Second, Run: h.dockerHealth},
 		"docker.remove":    {Timeout: 2 * time.Minute, Run: h.dockerRemove, Audit: auditDockerName},

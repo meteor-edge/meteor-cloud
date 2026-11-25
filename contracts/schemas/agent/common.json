@@ -416,6 +416,10 @@
           },
           "description": "Release kinds this agent's code can apply. Whether the runtime is installed is the boolean of the same name. Added in v1 (additive)."
         },
+        "container_engine": {
+          "type": "string",
+          "description": "Engine behind Docker's API: docker, podman, or another name. Added in v1 (additive)."
+        },
         "deploy_features": {
           "type": "array",
           "uniqueItems": true,

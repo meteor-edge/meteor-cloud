@@ -14,6 +14,7 @@ import (
 
 	"meteorcloud/meteorcli/internal/agent"
 	"meteorcloud/meteorcli/internal/api"
+	"meteorcloud/meteorcli/internal/config"
 	"meteorcloud/meteorcli/internal/identity"
 	"meteorcloud/meteorcli/internal/state"
 	"meteorcloud/meteorcli/internal/telemetry"
@@ -157,8 +158,13 @@ func (l *loop) beat(ctx context.Context) time.Duration {
 // health of every module.
 func (l *loop) capabilities(ctx context.Context) *api.Capabilities {
 	t := l.tools.Get(ctx)
+	engine := ""
+	if e, err := config.LoadEngine(l.d.Paths.EngineFile()); err == nil && t.Docker {
+		engine = e.Name
+	}
 	return &api.Capabilities{
-		Systemd: t.Systemd, Docker: t.Docker, DockerCompose: t.DockerCompose,
+		ContainerEngine: engine,
+		Systemd:         t.Systemd, Docker: t.Docker, DockerCompose: t.DockerCompose,
 		WireGuard: t.WireGuard, SSH: t.SSH,
 		Actions: l.m.Actions, DeployKinds: l.m.DeployKinds, DeployFeatures: l.m.DeployFeatures,
 		Modules: l.d.Health.Snapshot(),

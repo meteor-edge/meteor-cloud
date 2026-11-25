@@ -57,7 +57,7 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 		return runtime.Result{}, runtime.Failf("A docker release needs an image name or a loadable tarball.")
 	}
 	if w.PullAuth != nil && w.Artifact == "" {
-		if err := r.pull(ctx, image, w.PullAuth); err != nil {
+		if err := runtime.Pull(ctx, r.Helper, image, w.PullAuth); err != nil {
 			return runtime.Result{}, err
 		}
 	}
@@ -164,34 +164,6 @@ func restart(s runtime.Spec) string {
 		return "unless-stopped"
 	}
 	return s.Text("restart", "")
-}
-
-// pull brings an image from MeteorCloud's registry to the device, unless it is
-// there already (a rollback or a lost container works offline).
-func (r Runtime) pull(ctx context.Context, image string, auth func(context.Context) (runtime.PullAuth, error)) error {
-	if !strings.Contains(image, "@sha256:") {
-		return runtime.Failf("An image in the MeteorCloud registry needs a digest; save the release again.")
-	}
-	var out helper.DockerOutput
-	if err := r.Helper.Call(ctx, "docker.has_image", helper.DockerImageRequest{Image: image}, &out); err != nil {
-		return err
-	}
-	if out.OK {
-		return nil
-	}
-	a, err := auth(ctx)
-	if err != nil {
-		return err
-	}
-	out = helper.DockerOutput{}
-	req := helper.DockerPullRequest{Image: image, Registry: a.Registry, Username: a.Username, Password: a.Password}
-	if err := r.Helper.Call(ctx, "docker.pull", req, &out); err != nil {
-		return err
-	}
-	if !out.OK {
-		return runtime.Failf("docker pull %s failed: %s", image, detail(out.Output))
-	}
-	return nil
 }
 
 // load runs docker load and returns the image it reported.

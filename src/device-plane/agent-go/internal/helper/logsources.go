@@ -265,7 +265,7 @@ func (h Host) requireListed(ctx context.Context, r ShowLogsRequest) error {
 
 // showCommand is the fixed command for one source. lines may be 0 (follow
 // only new lines).
-func showCommand(r ShowLogsRequest, lines int, follow bool) (string, []string) {
+func (h Host) showCommand(r ShowLogsRequest, lines int, follow bool) (string, []string) {
 	switch r.Kind {
 	case "journal", "systemd":
 		args := []string{"--no-pager", "--quiet", "--output=short-iso", "--lines=" + strconv.Itoa(lines)}
@@ -290,7 +290,7 @@ func showCommand(r ShowLogsRequest, lines int, follow bool) (string, []string) {
 		if follow {
 			args = append(args, "--follow")
 		}
-		return "docker", append(args, "--", r.Name)
+		return h.engineArgs(append(args, "--", r.Name)...)
 	}
 	// tail cannot filter by time; since does not apply to files.
 	args := []string{"-n", strconv.Itoa(lines)}
@@ -312,11 +312,11 @@ func ShowLogs(ctx context.Context, h Host, r ShowLogsRequest, w io.Writer) error
 		return err
 	}
 	if r.Grep == "" {
-		name, args := showCommand(r, r.Lines, r.Follow)
+		name, args := h.showCommand(r, r.Lines, r.Follow)
 		return h.StreamAll(ctx, w, name, args...)
 	}
 	m := newMatcher(r.Grep, r.Lines)
-	name, args := showCommand(r, grepScanLines, false)
+	name, args := h.showCommand(r, grepScanLines, false)
 	if err := h.StreamAll(ctx, m, name, args...); err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func ShowLogs(ctx context.Context, h Host, r ShowLogsRequest, w io.Writer) error
 	if !r.Follow {
 		return nil
 	}
-	name, args = showCommand(r, 0, true)
+	name, args = h.showCommand(r, 0, true)
 	return h.StreamAll(ctx, &grepWriter{needle: lowerASCII([]byte(r.Grep)), w: w}, name, args...)
 }
 

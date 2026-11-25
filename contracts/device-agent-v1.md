@@ -66,7 +66,7 @@ and `actions_pending` (collect from `GET /actions`). Desired software is listed 
   "systemd": true, "docker": true, "docker_compose": false, "wireguard": true, "ssh": true,
   "actions": ["reboot", "shutdown", "set_password", "add_user", "update_agent"],
   "deploy_kinds": ["systemd", "docker", "docker_compose"],
-  "deploy_features": ["registry", "run_options"],
+  "deploy_features": ["registry", "run_options", "compose_registry"],
   "modules": {"heartbeat": {"state": "running", "restarts": 0}, "deploy": {"state": "parked", "restarts": 5, "last_error": "..."}}
 }
 ```
@@ -76,8 +76,10 @@ and `actions_pending` (collect from `GET /actions`). Desired software is listed 
 - `actions`, `deploy_kinds` (new in v1, additive): what this agent's code can do. The server
   refuses to queue an action kind the agent did not list (`409 action_unsupported`) and skips
   a deployment whose kind is not listed. Without the list every kind stays allowed.
+- `container_engine` (new in v1, additive, optional): the engine behind Docker's API (`docker`, `podman`, …).
 - `deploy_features` (new in v1, additive): optional release settings the agent applies: `registry`
-  (`spec.registry`), `run_options` (`volumes`, `resources`, `secret_env`). The server does not deploy a
+  (`spec.registry`), `run_options` (`volumes`, `resources`, `secret_env`), `compose_registry`
+  (`registry_images`). The server does not deploy a
   release that needs a feature an agent with `deploy_kinds` did not list.
 - `modules` (new in v1, additive, optional): module name to health (`running`, `starting`,
   `waiting`, `failed`, `parked`, `stopped`). The Go agent sends it; older agents may omit it.
@@ -151,6 +153,10 @@ password stops working) and reconnects. `enabled: false` stops the MQTT session.
    on the device before (a rollback). The agent refuses an answer whose names are not exactly that list,
    and keeps no copy. `spec.volumes` (`name:/path[:ro]`, named volumes prefixed with the container's
    name) and `spec.resources` (`memory_mb`, `cpu_millis`) are also additive.
+
+7. A `docker_compose` item with `spec.registry_images` (`host/namespace/web:1.0@sha256:…`; additive) needs
+   those images from MeteorCloud's registry: the agent pulls each by digest with the pull token, which
+   then covers all of them, and tags it locally before `compose up`.
 
 Deploy kinds today: `systemd`, `docker`, `docker_compose`.
 

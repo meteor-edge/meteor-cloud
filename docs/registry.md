@@ -106,6 +106,8 @@ device. It exists on the device only while the image is pulled, in a private tem
 An image that is already on the device is not pulled again. The device must reach the registry host, and
 needs an agent from this version on; an older agent fails with Docker's "denied" or "unauthorized".
 
+Compose releases can use registry images too: see [Releases](fleet/releases.md#apply-notes).
+
 ## Tokens
 
 | | Personal | Robot |

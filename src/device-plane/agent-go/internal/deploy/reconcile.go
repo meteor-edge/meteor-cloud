@@ -259,7 +259,7 @@ func (c *cycle) apply(ctx context.Context, it item, app *runtime.App, wasApplied
 		ForceRecreate: kind == "docker_compose" && app != nil && wasApplied,
 	}
 	var pullErr, secretErr error
-	if it.spec().Text("registry", "") == "meteorcloud" {
+	if it.spec().Text("registry", "") == "meteorcloud" || len(it.spec().Strings("registry_images")) > 0 {
 		w.PullAuth = func(ctx context.Context) (runtime.PullAuth, error) {
 			t, err := c.r.d.API.RegistryPullToken(ctx, c.token, key)
 			if err != nil {

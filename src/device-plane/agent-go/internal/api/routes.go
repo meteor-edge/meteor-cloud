@@ -80,13 +80,15 @@ type ModuleHealth struct {
 
 // Capabilities says what this device has and what this agent can do.
 type Capabilities struct {
-	Systemd       bool     `json:"systemd"`
-	Docker        bool     `json:"docker"`
-	DockerCompose bool     `json:"docker_compose"`
-	WireGuard     bool     `json:"wireguard"`
-	SSH           bool     `json:"ssh"`
-	Actions       []string `json:"actions"`
-	DeployKinds   []string `json:"deploy_kinds"`
+	Systemd       bool `json:"systemd"`
+	Docker        bool `json:"docker"`
+	DockerCompose bool `json:"docker_compose"`
+	// ContainerEngine is the engine behind Docker\'s API (docker, podman, ...).
+	ContainerEngine string   `json:"container_engine,omitempty"`
+	WireGuard       bool     `json:"wireguard"`
+	SSH             bool     `json:"ssh"`
+	Actions         []string `json:"actions"`
+	DeployKinds     []string `json:"deploy_kinds"`
 	// DeployFeatures are the optional release settings this agent applies.
 	DeployFeatures []string                `json:"deploy_features"`
 	Modules        map[string]ModuleHealth `json:"modules,omitempty"`

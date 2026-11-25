@@ -179,6 +179,15 @@ class CatalogService:
             )
         )
         wanted = {pin_tag(digest): digest for digest in digests if digest}
+        for images in self.session.scalars(
+            select(Release.spec["registry_images"]).where(
+                Release.organization_id == organization_id, Release.spec.has_key("registry_images")
+            )
+        ):
+            for entry in images or []:
+                image, _, digest = str(entry).partition("@")
+                if image.startswith(prefix) and digest:
+                    wanted[pin_tag(digest)] = digest
         for tag in pins - wanted.keys():
             self.registry.delete_tag(repository, tag)
         for tag in wanted.keys() - pins:
