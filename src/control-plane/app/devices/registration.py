@@ -345,8 +345,8 @@ class RegistrationService:
         if payload.architecture:
             device.architecture = payload.architecture
         serial = (payload.serial_number or "").strip()
-        # Heartbeats repeat the same identity; only a change needs the uniqueness
-        # check, which scans devices by serial and MAC (no index) on every call.
+        # Heartbeats repeat the same identity. The uniqueness check is a global
+        # serial and MAC lookup, so it runs only when that identity changed.
         if (
             serial
             and serial != device.serial_number

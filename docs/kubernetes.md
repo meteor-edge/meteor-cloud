@@ -252,4 +252,5 @@ The chart itself is the same everywhere; only values differ.
 - The bundled broker is a single node, and its sessions and retained messages are not persisted.
 - `cache.provider=memory` keeps rate-limit counters per pod.
 - Migrations run in each API pod's init container. With several replicas starting at the same time, one may retry while another migrates.
+- Several API processes in one pod are `backend.workers` (default 1). `/metrics` and the MQTT test page are per process; prefer `backend.replicaCount`. Pool size is `backend.dbPool`. See [Capacity](capacity.md).
 - Images are not published by this repository; you build and push them.

@@ -26,6 +26,12 @@ platform_domain: ""
 acme_email: "{{ EDGE_PLATFORM_ACME_EMAIL | default(lookup('env', 'EDGE_PLATFORM_ACME_EMAIL'), true) }}"
 log_format: console
 log_level: INFO
+# API processes on this host, and the SQLAlchemy pool per process.
+# 1 process is the default: /metrics and the console MQTT test page are per process.
+# See docs/capacity.md.
+backend_workers: 1
+db_pool_size: 5
+db_max_overflow: 10
 # Empty = app default (access log on when log_format is json).
 access_log: ""
 metrics_enabled: true

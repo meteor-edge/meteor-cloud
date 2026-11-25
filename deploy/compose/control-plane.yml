@@ -101,9 +101,22 @@ services:
       - ${ARTIFACTS_DATA:-artifacts_data}:/data/artifacts
     ports:
       - "${BACKEND_PORT:-8000}:8000"
-    command: >
-      sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    # $$ so Compose leaves $WEB_CONCURRENCY for the container. 1 stays a single
+    # process; make dev replaces this command with --reload. See docs/capacity.md.
+    command:
+      - sh
+      - -c
+      - |
+        alembic upgrade head &&
+        workers="$${WEB_CONCURRENCY:-1}" &&
+        case "$$workers" in
+          ''|*[!0-9]*) workers=1 ;;
+        esac &&
+        if [ "$$workers" -le 1 ]; then
+          exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+        else
+          exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "$$workers"
+        fi
     depends_on:
       postgres:
         condition: service_healthy

@@ -44,15 +44,20 @@ see below.
   is the first choice. Each replica is a separate Prometheus target, and the deploy sweeper
   and history relay already coordinate through PostgreSQL advisory locks.
 - **More worker processes per replica** (Helm `backend.workers`, Ansible `backend_workers`,
-  Compose `WEB_CONCURRENCY`) uses more cores in one pod or VM. Two things work per process,
-  not per pod, so prefer replicas while they matter to you:
+  Compose `WEB_CONCURRENCY`) uses more cores in one pod or VM. The image command and
+  production Compose pass `--workers` to uvicorn when that value is greater than 1.
+  `make dev` stays one process with `--reload` and ignores `WEB_CONCURRENCY`.
+  Two things work per process, not per pod, so prefer replicas while they matter to you:
   - `/metrics` answers for the one worker that took the scrape, so counters jump between
     scrapes.
   - The console's MQTT test page only sees messages that reached the same worker.
-- **PostgreSQL connections.** Each worker keeps its own pool of up to
-  `DB_POOL_SIZE + DB_MAX_OVERFLOW` connections (5 + 10). Keep
-  `workers x replicas x 15` under PostgreSQL's `max_connections` (100 by default), or put
-  PgBouncer in front and set `DB_POOL_RECYCLE_SECONDS` to suit it.
+- **PostgreSQL connections.** Each worker keeps its own pool. The app reads
+  `DB_POOL_SIZE` (5), `DB_MAX_OVERFLOW` (10), `DB_POOL_TIMEOUT_SECONDS` (30) and
+  `DB_POOL_RECYCLE_SECONDS` (1800). Helm sets the first two from `backend.dbPool`;
+  Ansible sets them from `db_pool_size` and `db_max_overflow`. Keep
+  `workers x replicas x (DB_POOL_SIZE + DB_MAX_OVERFLOW)` under PostgreSQL's
+  `max_connections` (100 by default), or put PgBouncer in front and lower
+  `DB_POOL_RECYCLE_SECONDS` to suit it.
 - **Longer heartbeat interval.** `DEVICE_HEARTBEAT_INTERVAL_SECONDS=120` halves the load;
   raise `DEVICE_OFFLINE_THRESHOLD_SECONDS` with it.
 
@@ -64,16 +69,17 @@ see below.
   waited for a connection that only a waiting request could give back. The API stopped
   answering, even `/health`, and stayed that way while heartbeats kept coming. Device auth now returns the
   connection before the endpoint runs.
-- **Table scan on every heartbeat.** Each heartbeat checked that its serial number and MAC
-  addresses were not used by another device, with queries that use no index. The check now
-  runs only when the identity changed.
+- **Identity lookup on every heartbeat.** Each heartbeat checked that its serial number
+  and MAC addresses were not used by another device. That lookup is global, so the
+  `(organization_id, serial_number)` index does not serve it, and MAC addresses are not
+  indexed. The check now runs only when the identity changed.
 
 ## Run it yourself
 
 `scripts/loadtest/fleet_load.py` needs only Python 3.11+. It registers devices through
 the real agent API and then sends heartbeats spread evenly over the interval. One machine
-plays thousands of devices; for real agent behaviour use the
-[device simulator](fleet/simulator.md) instead.
+plays thousands of devices. A real device runs [meteorcli](meteorcli.md); this script
+only speaks the heartbeat HTTP API.
 
 Never point it at a production installation: it creates an organization and thousands of
 devices. Use a staging copy, and raise `REGISTRATION_RATE_LIMIT_REQUESTS` there for the

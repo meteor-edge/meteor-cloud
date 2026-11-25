@@ -3,9 +3,9 @@
 
 Standard library only. It registers devices through the real agent API and then sends
 heartbeats the way meteorcli does (inventory, capabilities, metrics), spread evenly over
-the heartbeat interval. It speaks the protocol directly, so one machine can play
-thousands of devices; for agent behaviour use the device simulator instead
-(docs/fleet/simulator.md). See docs/capacity.md for how to run it and what it measured.
+the heartbeat interval. It speaks the HTTP API directly, so one machine can play
+thousands of devices. For a real agent on a device, use meteorcli (docs/meteorcli.md).
+See docs/capacity.md for how to run this and what it measured.
 
   # once: an organization, a registration token and N device credentials
   python scripts/loadtest/fleet_load.py setup --server http://localhost:8000 \\
@@ -166,7 +166,7 @@ def _percentile(values: list[float], pct: float) -> float:
     if not values:
         return float("nan")
     ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int(round(pct / 100 * (len(ordered) - 1))))]
+    return ordered[min(len(ordered) - 1, round(pct / 100 * (len(ordered) - 1)))]
 
 
 def cmd_run(args: argparse.Namespace) -> int:
