@@ -25,6 +25,7 @@ def test_inventory_pins_host_keys_and_keeps_secrets_out(tmp_path: Path) -> None:
     state = State("ci-1", root=tmp_path)
     state.ensure()
     secrets = state.secrets(cfg)
+    assert secrets["EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD"]
     hosts = hosts_from_outputs(OUTPUTS)
     inventory = render_inventory(cfg, state, hosts, platform_archive=tmp_path / "p.tgz",
                                  device_archive=tmp_path / "d.tgz", ssh_key=tmp_path / "key")
