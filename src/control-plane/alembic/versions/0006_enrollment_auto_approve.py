@@ -1,7 +1,7 @@
 """Auto-approve rules on enrollment API keys.
 
-Revision ID: 0019_enrollment_auto_approve
-Revises: 0018_agent_version_update
+Revision ID: 0006_enrollment_auto_approve
+Revises: 0005_integration_url_sealed
 Create Date: 2026-11-19 23:00:00.000000
 """
 
@@ -14,8 +14,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0019_enrollment_auto_approve"
-down_revision: str | Sequence[str] | None = "0018_agent_version_update"
+revision: str = "0006_enrollment_auto_approve"
+down_revision: str | Sequence[str] | None = "0005_integration_url_sealed"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
