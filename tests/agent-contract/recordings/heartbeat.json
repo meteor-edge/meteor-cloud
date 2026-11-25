@@ -1,8 +1,15 @@
 {
+  "scenario": "heartbeat",
   "contract": "contracts/device-agent-v1.md",
   "http": [
     {
       "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/register",
+        "headers": {
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
         "body": {
           "agent_version": "<inventory>",
           "architecture": "<inventory>",
@@ -18,79 +25,85 @@
           "os_version": "<inventory>",
           "serial_number": "<inventory>",
           "token": "<registration_token>"
-        },
-        "headers": {
-          "user-agent": "meteorcli/<version>",
-          "x-meteor-agent-protocol": "1"
-        },
-        "method": "POST",
-        "path": "/api/v1/agent/register"
+        }
       },
       "response": {
+        "status": 201,
+        "headers": {},
         "body": {
           "device_id": "<uuid:1>",
           "device_token": "<device_token>",
-          "heartbeat_interval_seconds": 60,
-          "mqtt": null,
+          "organization_id": "<uuid:2>",
           "name": "contract-device",
-          "organization_id": "<uuid:2>"
-        },
-        "headers": {},
-        "status": 201
+          "heartbeat_interval_seconds": 60,
+          "mqtt": null
+        }
       }
     },
     {
       "request": {
-        "body": null,
+        "method": "GET",
+        "path": "/api/v1/agent/mqtt",
         "headers": {
           "authorization": "Bearer <device_token>",
           "user-agent": "meteorcli/<version>",
           "x-meteor-agent-protocol": "1"
         },
-        "method": "GET",
-        "path": "/api/v1/agent/mqtt"
+        "body": null
       },
       "response": {
-        "body": {
-          "config_version": null,
-          "enabled": false
-        },
+        "status": 200,
         "headers": {},
-        "status": 200
+        "body": {
+          "enabled": false,
+          "config_version": null
+        }
       }
     },
     {
       "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/connectivity/wireguard",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
         "body": {
           "public_key": "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=",
-          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK",
-          "ssh_user": "pi"
-        },
-        "headers": {
-          "authorization": "Bearer <device_token>",
-          "user-agent": "meteorcli/<version>",
-          "x-meteor-agent-protocol": "1"
-        },
-        "method": "POST",
-        "path": "/api/v1/agent/connectivity/wireguard"
+          "ssh_user": "pi",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK"
+        }
       },
       "response": {
+        "status": 404,
+        "headers": {},
         "body": {
           "error": {
             "code": "not_found",
             "message": "POST /api/v1/agent/connectivity/wireguard is not scripted"
           }
-        },
-        "headers": {},
-        "status": 404
+        }
       }
     },
     {
       "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/heartbeat",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
         "body": {
           "agent_version": "<inventory>",
           "architecture": "<inventory>",
           "capabilities": {
+            "systemd": true,
+            "docker": true,
+            "docker_compose": true,
+            "wireguard": true,
+            "ssh": true,
             "actions": [
               "reboot",
               "shutdown",
@@ -104,77 +117,72 @@
               "workload_start",
               "workload_snapshot"
             ],
-            "deploy_features": [
-              "registry",
-              "run_options"
-            ],
             "deploy_kinds": [
               "systemd",
               "docker",
               "docker_compose"
             ],
-            "docker": true,
-            "docker_compose": true,
             "modules": {
               "actions": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "appcreds": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "deploy": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "heartbeat": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "identity": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "metrics": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "mqtt": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "socket": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "wifi": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "wireguard": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "workloads": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               }
             },
-            "ssh": true,
-            "systemd": true,
-            "wireguard": true
+            "deploy_features": [
+              "registry",
+              "run_options"
+            ]
           },
           "cpu_cores": "<inventory>",
           "cpu_model": "<inventory>",
@@ -187,83 +195,88 @@
           "os_name": "<inventory>",
           "os_version": "<inventory>",
           "serial_number": "<inventory>"
-        },
-        "headers": {
-          "authorization": "Bearer <device_token>",
-          "user-agent": "meteorcli/<version>",
-          "x-meteor-agent-protocol": "1"
-        },
-        "method": "POST",
-        "path": "/api/v1/agent/heartbeat"
+        }
       },
       "response": {
+        "status": 200,
+        "headers": {},
         "body": {
-          "actions_pending": false,
-          "desired_software": [],
           "device_id": "<uuid:1>",
+          "status": "online",
           "heartbeat_interval_seconds": 5,
           "server_time": "<timestamp>",
-          "status": "online",
-          "wifi_pending": false
-        },
-        "headers": {},
-        "status": 200
+          "desired_software": [],
+          "wifi_pending": false,
+          "actions_pending": false
+        }
       }
     },
     {
       "request": {
-        "body": {
-          "public_key": "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=",
-          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK",
-          "ssh_user": "pi"
-        },
+        "method": "POST",
+        "path": "/api/v1/agent/connectivity/wireguard",
         "headers": {
           "authorization": "Bearer <device_token>",
           "user-agent": "meteorcli/<version>",
           "x-meteor-agent-protocol": "1"
         },
-        "method": "POST",
-        "path": "/api/v1/agent/connectivity/wireguard"
+        "body": {
+          "public_key": "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=",
+          "ssh_user": "pi",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGR72aezhaCVWi/bpEuEaWtIh9MnmvRaBbdD7eAyFDAK"
+        }
       },
       "response": {
+        "status": 404,
+        "headers": {},
         "body": {
           "error": {
             "code": "not_found",
             "message": "POST /api/v1/agent/connectivity/wireguard is not scripted"
           }
-        },
-        "headers": {},
-        "status": 404
+        }
       }
     },
     {
       "request": {
-        "body": null,
+        "method": "GET",
+        "path": "/api/v1/agent/software",
         "headers": {
           "authorization": "Bearer <device_token>",
           "user-agent": "meteorcli/<version>",
           "x-meteor-agent-protocol": "1"
         },
-        "method": "GET",
-        "path": "/api/v1/agent/software"
+        "body": null
       },
       "response": {
+        "status": 404,
+        "headers": {},
         "body": {
           "error": {
             "code": "not_found",
             "message": "GET /api/v1/agent/software is not scripted"
           }
-        },
-        "headers": {},
-        "status": 404
+        }
       }
     },
     {
       "request": {
+        "method": "POST",
+        "path": "/api/v1/agent/heartbeat",
+        "headers": {
+          "authorization": "Bearer <device_token>",
+          "user-agent": "meteorcli/<version>",
+          "x-meteor-agent-protocol": "1"
+        },
         "body": {
           "agent_version": "<inventory>",
           "architecture": "<inventory>",
           "capabilities": {
+            "systemd": true,
+            "docker": true,
+            "docker_compose": true,
+            "wireguard": true,
+            "ssh": true,
             "actions": [
               "reboot",
               "shutdown",
@@ -277,77 +290,72 @@
               "workload_start",
               "workload_snapshot"
             ],
-            "deploy_features": [
-              "registry",
-              "run_options"
-            ],
             "deploy_kinds": [
               "systemd",
               "docker",
               "docker_compose"
             ],
-            "docker": true,
-            "docker_compose": true,
             "modules": {
               "actions": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "appcreds": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "deploy": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "heartbeat": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "identity": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "metrics": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "mqtt": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "socket": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "wifi": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "wireguard": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               },
               "workloads": {
+                "state": "running",
                 "restarts": 0,
-                "since": "<timestamp>",
-                "state": "running"
+                "since": "<timestamp>"
               }
             },
-            "ssh": true,
-            "systemd": true,
-            "wireguard": true
+            "deploy_features": [
+              "registry",
+              "run_options"
+            ]
           },
           "cpu_cores": "<inventory>",
           "cpu_model": "<inventory>",
@@ -360,29 +368,21 @@
           "os_name": "<inventory>",
           "os_version": "<inventory>",
           "serial_number": "<inventory>"
-        },
-        "headers": {
-          "authorization": "Bearer <device_token>",
-          "user-agent": "meteorcli/<version>",
-          "x-meteor-agent-protocol": "1"
-        },
-        "method": "POST",
-        "path": "/api/v1/agent/heartbeat"
+        }
       },
       "response": {
+        "status": 200,
+        "headers": {},
         "body": {
-          "actions_pending": false,
-          "desired_software": [],
           "device_id": "<uuid:1>",
+          "status": "online",
           "heartbeat_interval_seconds": 60,
           "server_time": "<timestamp>",
-          "status": "online",
-          "wifi_pending": false
-        },
-        "headers": {},
-        "status": 200
+          "desired_software": [],
+          "wifi_pending": false,
+          "actions_pending": false
+        }
       }
     }
-  ],
-  "scenario": "heartbeat"
+  ]
 }
