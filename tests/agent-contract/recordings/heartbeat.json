@@ -104,9 +104,11 @@
               "workload_start",
               "workload_snapshot"
             ],
+            "container_engine": "docker",
             "deploy_features": [
               "registry",
-              "run_options"
+              "run_options",
+              "compose_registry"
             ],
             "deploy_kinds": [
               "systemd",
@@ -277,9 +279,11 @@
               "workload_start",
               "workload_snapshot"
             ],
+            "container_engine": "docker",
             "deploy_features": [
               "registry",
-              "run_options"
+              "run_options",
+              "compose_registry"
             ],
             "deploy_kinds": [
               "systemd",
