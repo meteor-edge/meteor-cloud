@@ -65,3 +65,51 @@ export function revokeRegistryToken(
     token,
   });
 }
+
+export type ImageRepository = { repository: string; tag_count: number; pushed_at: string };
+
+export type ImageTag = {
+  repository: string;
+  tag: string;
+  digest: string;
+  media_type: string;
+  size_bytes: number;
+  platforms: { os: string; architecture: string; variant: string | null; size_bytes: number }[];
+  pushed_at: string;
+  pushed_by: string | null;
+};
+
+export type ImagePage<T> = { items: T[]; total: number; page: number; page_size: number };
+
+export function listImages(
+  token: string,
+  organizationId: string,
+  params: { search?: string; page?: number; page_size?: number } = {},
+): Promise<ImagePage<ImageRepository>> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) query.set(key, String(value));
+  }
+  return apiRequest(`${base(organizationId)}/images?${query}`, { token });
+}
+
+export function listImageTags(
+  token: string,
+  organizationId: string,
+  repository: string,
+  page = 1,
+  pageSize = 20,
+): Promise<ImagePage<ImageTag>> {
+  const query = new URLSearchParams({ repository, page: String(page), page_size: String(pageSize) });
+  return apiRequest(`${base(organizationId)}/images/tags?${query}`, { token });
+}
+
+export function deleteImage(
+  token: string,
+  organizationId: string,
+  repository: string,
+  tag?: string,
+): Promise<void> {
+  const query = new URLSearchParams({ repository, ...(tag ? { tag } : {}) });
+  return apiRequest(`${base(organizationId)}/images?${query}`, { method: "DELETE", token });
+}

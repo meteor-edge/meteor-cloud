@@ -110,6 +110,9 @@ export function MobileNavigation() {
                         <NavLink to={`${organizationPath}/artifacts?type=os_image`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("artifacts") && artifactType === "os_image")}>
                           OS images
                         </NavLink>
+                        <NavLink to={`${organizationPath}/images`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("images"))}>
+                          Images
+                        </NavLink>
                         <NavLink to={`${organizationPath}/releases`} onClick={() => setOpen(false)} className={() => sectionClass(isPage("releases"))}>
                           Releases
                         </NavLink>

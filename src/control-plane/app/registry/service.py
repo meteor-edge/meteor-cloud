@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import jwt
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
@@ -19,7 +18,7 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError, ConflictError, ForbiddenError, NotFoundError
 from app.devices.tokens import generate_registry_token, hash_token
 from app.identity.models import User
-from app.registry.keys import RegistryKeys
+from app.registry.access import sign_access_token
 from app.registry.models import RegistryNamespace, RegistryToken
 from app.registry.schemas import (
     COMPONENT,
@@ -31,7 +30,6 @@ from app.registry.schemas import (
 )
 from app.tenancy.models import Organization
 
-TOKEN_ISSUER = "meteorcloud"
 # More scopes than any client asks for at once (a push with cross-repository mounts asks for a few).
 _MAX_SCOPES = 20
 _REPOSITORY_RE = re.compile(rf"({COMPONENT})/({COMPONENT}(?:/{COMPONENT})*)")
@@ -111,24 +109,9 @@ class RegistryService:
         now = datetime.now(UTC)
         access = self._grant(token, parse_scopes(scopes))
         self._touch(token, now)
-        key_id, private_key = RegistryKeys(self.session, self.settings).signing_key()
+        # The registry reports the subject in push events; the token id maps to a person or robot.
+        signed = sign_access_token(self.session, self.settings, subject=str(token.id), access=access, now=now)
         ttl = self.settings.registry_token_ttl_seconds
-        signed = jwt.encode(
-            {
-                "iss": TOKEN_ISSUER,
-                "aud": service,
-                # The registry reports this in push events; token id, so it maps to a person or robot.
-                "sub": str(token.id),
-                "jti": str(uuid.uuid4()),
-                "iat": now,
-                "nbf": now - timedelta(seconds=10),
-                "exp": now + timedelta(seconds=ttl),
-                "access": access,
-            },
-            private_key,
-            algorithm="ES256",
-            headers={"kid": key_id},
-        )
         self.session.commit()
         return RegistryAccessTokenResponse(token=signed, access_token=signed, expires_in=ttl, issued_at=now)
 

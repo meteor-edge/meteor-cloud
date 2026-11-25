@@ -45,6 +45,8 @@ from app.mqtt.internal_router import router as mqtt_internal_router
 from app.mqtt.runtime import start_mqtt_runtime, stop_mqtt_runtime
 from app.mqtt.vernemq_router import router as mqtt_vernemq_router
 from app.network.router import router as network_router
+from app.registry.catalog import run_reconciler
+from app.registry.router import internal_router as registry_internal_router
 from app.registry.router import router as registry_router
 from app.registry.router import token_router as registry_token_router
 from app.releases.router import router as releases_router
@@ -69,8 +71,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     relay: asyncio.Task[None] | None = None
     if history_recorder.history_enabled():
         relay = asyncio.create_task(run_relay(settings.history_relay_interval_seconds))
+    reconciler: asyncio.Task[None] | None = None
+    if settings.registry_provider != "none" and settings.registry_reconcile_interval_seconds > 0:
+        reconciler = asyncio.create_task(run_reconciler(settings.registry_reconcile_interval_seconds))
     yield
-    for task in (sweeper, relay):
+    for task in (sweeper, relay, reconciler):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -136,6 +141,7 @@ def create_app() -> FastAPI:
     application.include_router(agent_router)
     application.include_router(mqtt_internal_router)
     application.include_router(mqtt_vernemq_router)
+    application.include_router(registry_internal_router)
     application.include_router(connectivity_internal_router)
     application.include_router(routing_internal_router)
     if metrics_enabled():

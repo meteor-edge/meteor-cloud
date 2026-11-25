@@ -308,6 +308,13 @@ class Settings(BaseSettings):
     registry_public_host: str = Field(default="", alias="REGISTRY_PUBLIC_HOST")
     # Public URL of GET /api/v1/registry/token, where clients get access tokens.
     registry_token_realm: str = Field(default="", alias="REGISTRY_TOKEN_REALM")
+    # How the API and the registry reach each other, inside the platform's network.
+    registry_internal_url: str = Field(default="http://registry:5000", alias="REGISTRY_INTERNAL_URL")
+    registry_events_url: str = Field(
+        default="http://backend:8000/internal/registry/events", alias="REGISTRY_EVENTS_URL"
+    )
+    # The image list is compared with the registry this often, in case a notification was lost. 0 = never.
+    registry_reconcile_interval_seconds: int = Field(default=3600, ge=0, alias="REGISTRY_RECONCILE_INTERVAL_SECONDS")
     registry_token_ttl_seconds: int = Field(default=300, ge=60, le=3600, alias="REGISTRY_TOKEN_TTL_SECONDS")
     registry_token_rate_limit_requests: int = Field(default=600, alias="REGISTRY_TOKEN_RATE_LIMIT_REQUESTS")
     registry_token_rate_limit_window_seconds: int = Field(

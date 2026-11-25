@@ -47,6 +47,11 @@ export function canPushImages(role: string | undefined): boolean {
   return role === "owner" || role === "admin" || role === "developer";
 }
 
+/** Delete container images (image.delete). */
+export function canDeleteImages(role: string | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
 /** Robot registry tokens belong to the organization (organization.update). */
 export function canManageRegistryRobots(role: string | undefined): boolean {
   return role === "owner" || role === "admin";
