@@ -96,6 +96,10 @@ func (c *cycle) run(ctx context.Context) (reports []report, attempts map[string]
 			return nil, nil // reports would be sent with a token the server refused
 		}
 		if rep != nil {
+			// So the server does not take it for the result of a newer deploy.
+			if _, revision, ok := it.identity(); ok {
+				rep["revision"] = revision
+			}
 			reports = append(reports, rep)
 			if attempted {
 				attempts[it.key()] = true
