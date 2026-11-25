@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POST /api/v1/agent/registry/pull-token (200)",
+  "description": "password is a secret: it goes into a private Docker config for one pull and is not kept.",
+  "type": "object",
+  "required": [
+    "registry",
+    "username",
+    "password",
+    "expires_at"
+  ],
+  "properties": {
+    "registry": {
+      "type": "string"
+    },
+    "username": {
+      "type": "string"
+    },
+    "password": {
+      "type": "string"
+    },
+    "expires_at": {
+      "$ref": "../common.json#/$defs/timestamp"
+    }
+  }
+}

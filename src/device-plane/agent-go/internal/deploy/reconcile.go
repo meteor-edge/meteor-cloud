@@ -258,9 +258,23 @@ func (c *cycle) apply(ctx context.Context, it item, app *runtime.App, wasApplied
 		// lost, and the containers must be created again to mount the new one.
 		ForceRecreate: kind == "docker_compose" && app != nil && wasApplied,
 	}
+	var pullErr error
+	if it.spec().Text("registry", "") == "meteorcloud" {
+		w.PullAuth = func(ctx context.Context) (runtime.PullAuth, error) {
+			t, err := c.r.d.API.RegistryPullToken(ctx, c.token, key)
+			if err != nil {
+				pullErr = err
+				return runtime.PullAuth{}, runtime.Failf("Could not sign in to the container registry: %s", message(err))
+			}
+			return runtime.PullAuth{Registry: t.Registry, Username: t.Username, Password: t.Password}, nil
+		}
+	}
 	actx, cancel := context.WithTimeout(ctx, applyTimeout)
 	defer cancel()
 	res, err := c.r.runtimes[kind].Apply(actx, w)
+	if pullErr != nil && api.IsAuth(pullErr) {
+		return nil, c.check(pullErr)
+	}
 	if err != nil {
 		return failed(key, message(err)), nil
 	}

@@ -13,6 +13,14 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 COMPONENT = r"[a-z0-9]+(?:(?:\.|_|__|-+)[a-z0-9]+)*"
 _PREFIX_RE = re.compile(rf"{COMPONENT}(?:/{COMPONENT})*")
 
+# An image of the organization's registry, without host and namespace: team/web:1.0 or team/web@sha256:...
+REFERENCE_RE = re.compile(
+    rf"(?P<repository>{COMPONENT}(?:/{COMPONENT})*)"
+    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9._-]{0,127}))?(?:@(?P<digest>sha256:[a-f0-9]{64}))?"
+)
+# Long enough for a slow pull: layers are requested with access tokens obtained while it runs.
+PULL_PASSWORD_SECONDS = 1800
+
 
 class RegistryInfoResponse(BaseModel):
     enabled: bool
@@ -115,3 +123,15 @@ class RegistryEvents(BaseModel):
     """Notification envelope of CNCF Distribution; the events are read leniently."""
 
     events: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
+
+
+class AgentPullTokenRequest(BaseModel):
+    workload_key: str = Field(min_length=1, max_length=255)
+
+
+class AgentPullTokenResponse(BaseModel):
+    registry: str
+    username: str
+    # A secret.
+    password: str
+    expires_at: datetime

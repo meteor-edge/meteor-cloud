@@ -165,6 +165,15 @@
       "responses": {
         "201": "http/applications-credentials.response.json"
       }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/registry/pull-token",
+      "auth": "device",
+      "request": "http/registry-pull-token.request.json",
+      "responses": {
+        "200": "http/registry-pull-token.response.json"
+      }
     }
   ],
   "mqtt": [

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -68,6 +68,8 @@ class MeteorCloudBinding(BaseModel):
 class DockerSpec(BaseModel):
     container_name: str = Field(min_length=1, max_length=255)
     image: str | None = Field(default=None, max_length=512)
+    # "meteorcloud": image is in the organization's own registry (docs/registry.md).
+    registry: Literal["meteorcloud"] | None = None
     # sha256 manifest digest the device pulls instead of the tag; set when the release is saved.
     image_digest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
     ports: list[str] = Field(default_factory=list)
@@ -138,6 +140,8 @@ def validate_release_spec(kind: ReleaseKind, spec: dict[str, Any]) -> dict[str, 
     # Unbound workloads keep the spec shape they had before application bindings existed.
     if validated.get("meteorcloud") is None:
         validated.pop("meteorcloud", None)
+    if validated.get("registry") is None:
+        validated.pop("registry", None)
     if "image_digest" in validated and validated["image_digest"] is None:
         validated.pop("image_digest")
     return validated
@@ -158,6 +162,11 @@ def validate_artifact_for_kind(
     if kind == ReleaseKind.DOCKER:
         has_image = bool(spec.get("image"))
         has_artifact = artifact_id is not None
+        if spec.get("registry") and (has_artifact or not has_image):
+            raise ValidationAppError(
+                "invalid_release_spec",
+                "A release from the container registry needs an image name and no artifact.",
+            )
         if not has_image and not has_artifact:
             raise ValidationAppError(
                 "invalid_release_spec",

@@ -87,6 +87,10 @@ func (f *fakeHost) Call(ctx context.Context, op string, params, out any) error {
 	switch op {
 	case "docker.load":
 		result = helper.DockerOutput{OK: true, Output: "Loaded image: demo/app:1.0\n"}
+	case "docker.has_image":
+		result = helper.DockerOutput{}
+	case "docker.pull":
+		result = helper.DockerOutput{OK: true}
 	case "docker.run":
 		var r helper.DockerRunRequest
 		_ = json.Unmarshal(raw, &r)

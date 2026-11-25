@@ -204,7 +204,7 @@ func (h Host) dockerRunContainer(ctx context.Context, _ localrpc.Peer, raw json.
 	args = append(args, r.Image)
 	args = append(args, r.Command...) // after the image: arguments of the container, not of docker
 
-	_, _ = h.Run(ctx, "docker", "rm", "-f", r.Name) // a missing container is fine
+	_, _ = h.engineRun(ctx, "rm", "-f", r.Name) // a missing container is fine
 	return h.dockerRun(ctx, args...)
 }
 

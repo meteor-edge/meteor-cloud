@@ -77,6 +77,25 @@ func (c *Client) AppCredentials(ctx context.Context, deviceToken, workloadKey st
 	return &out, nil
 }
 
+// RegistryPullToken signs in to MeteorCloud's container registry for one
+// workload's image (registry-pull-token.response.json). Password is a secret.
+type RegistryPullToken struct {
+	Registry  string `json:"registry"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// RegistryPullToken asks for the credential to pull a desired workload's image.
+func (c *Client) RegistryPullToken(ctx context.Context, deviceToken, workloadKey string) (*RegistryPullToken, error) {
+	var out RegistryPullToken
+	body := map[string]string{"workload_key": workloadKey}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/agent/registry/pull-token", deviceToken, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // SoftwareSnapshot sends what one workload is made of (software-snapshots.request.json).
 func (c *Client) SoftwareSnapshot(ctx context.Context, deviceToken string, snapshot any) error {
 	body := map[string]any{"snapshot": snapshot}

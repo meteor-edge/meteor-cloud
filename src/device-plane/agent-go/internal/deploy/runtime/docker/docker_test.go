@@ -188,3 +188,46 @@ func TestRemove(t *testing.T) {
 		t.Fatalf("params %s", h.params["docker.remove"])
 	}
 }
+
+func TestPullFromTheMeteorCloudRegistry(t *testing.T) {
+	d := "sha256:" + strings.Repeat("ab", 32)
+	running := helper.DockerOutput{OK: true, Output: "true|running|0|"}
+	w := runtime.Workload{Key: "web", Spec: runtime.Spec{"image": "registry.example.com/acme/web:1", "image_digest": d}}
+	asked := 0
+	w.PullAuth = func(context.Context) (runtime.PullAuth, error) {
+		asked++
+		return runtime.PullAuth{Registry: "registry.example.com", Username: "device", Password: "pw"}, nil
+	}
+
+	h := &scripted{out: map[string]helper.DockerOutput{"docker.pull": {OK: true}, "docker.run": {OK: true}, "docker.health": running}}
+	if _, err := (Runtime{Helper: h}).Apply(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	var pull helper.DockerPullRequest
+	var run helper.DockerRunRequest
+	_ = json.Unmarshal(h.params["docker.pull"], &pull)
+	_ = json.Unmarshal(h.params["docker.run"], &run)
+	if pull.Image != "registry.example.com/acme/web@"+d || pull.Password != "pw" || run.Image != pull.Image || !run.PullNever {
+		t.Errorf("pull %+v run %+v", pull, run)
+	}
+
+	// On the device already: no credential is asked for.
+	h = &scripted{out: map[string]helper.DockerOutput{"docker.has_image": {OK: true}, "docker.run": {OK: true}, "docker.health": running}}
+	if _, err := (Runtime{Helper: h}).Apply(context.Background(), w); err != nil || asked != 1 || h.params["docker.pull"] != nil {
+		t.Errorf("err %v, asked %d, pull %s", err, asked, h.params["docker.pull"])
+	}
+
+	// A failed pull leaves the running container alone.
+	h = &scripted{out: map[string]helper.DockerOutput{"docker.pull": {Output: "denied"}}}
+	if _, err := (Runtime{Helper: h}).Apply(context.Background(), w); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Errorf("err %v", err)
+	}
+	if h.params["docker.run"] != nil {
+		t.Error("docker run after a failed pull")
+	}
+
+	w.Spec = runtime.Spec{"image": "registry.example.com/acme/web:1"}
+	if _, err := (Runtime{Helper: h}).Apply(context.Background(), w); err == nil || !strings.Contains(err.Error(), "digest") {
+		t.Errorf("a tag was accepted: %v", err)
+	}
+}

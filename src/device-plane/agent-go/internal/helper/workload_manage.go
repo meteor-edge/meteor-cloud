@@ -225,7 +225,7 @@ func (h Host) composeFilters(project string) ([]string, error) {
 // dockerLines runs docker and returns its stdout's lines.
 func (h Host) dockerLines(ctx context.Context, args ...string) ([]string, error) {
 	out := &capped{max: maxStdout}
-	if err := h.Stream(ctx, out, "docker", args...); err != nil {
+	if err := h.engineStream(ctx, out, args...); err != nil {
 		return nil, err
 	}
 	var lines []string
@@ -262,7 +262,7 @@ func inspectLines[T any](ctx context.Context, h Host, format string, names []str
 	}
 	args := append(slices.Clone(what), "inspect", "-f", format)
 	buf := &capped{max: maxStdout}
-	_ = h.Stream(ctx, buf, "docker", append(args, names...)...)
+	_ = h.engineStream(ctx, buf, append(args, names...)...)
 	for _, line := range bytes.Split(buf.Bytes(), []byte("\n")) {
 		var v T
 		if len(bytes.TrimSpace(line)) > 0 && json.Unmarshal(line, &v) == nil {
@@ -508,7 +508,7 @@ func (h Host) controlContainer(ctx context.Context, r WorkloadControlRequest) er
 	if len(ids) > MaxContainers {
 		return badRequest("too many containers carry the label of %s", r.Key)
 	}
-	_, err = h.Run(ctx, "docker", append([]string{r.Verb}, ids...)...)
+	_, err = h.engineRun(ctx, append([]string{r.Verb}, ids...)...)
 	return err
 }
 
@@ -559,6 +559,6 @@ func (h Host) controlProject(ctx context.Context, r WorkloadControlRequest) erro
 		}
 		args = append(args, running.sorted()...)
 	}
-	_, err = h.Run(ctx, "docker", args...)
+	_, err = h.engineRun(ctx, args...)
 	return err
 }

@@ -171,7 +171,7 @@ func (h Host) dockerContainers(ctx context.Context) []LogSource {
 	}
 	var out []LogSource
 	format := `{{.Names}}	{{.State}}	{{.Label "com.docker.compose.project"}}`
-	for _, line := range h.lines(ctx, "docker", "ps", "--all", "--format", format) {
+	for _, line := range h.engineLines(ctx, "ps", "--all", "--format", format) {
 		name, rest, _ := strings.Cut(line, "\t")
 		state, project, _ := strings.Cut(rest, "\t")
 		if !logContainerRe.MatchString(name) {

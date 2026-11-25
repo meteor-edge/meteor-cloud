@@ -16,6 +16,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.exceptions import AppError, UnauthorizedError
 from app.core.metrics import RATE_LIMITED
+from app.devices.dependencies import CurrentDevice
 from app.devices.rate_limit import retry_after_seconds
 from app.devices.schemas import Page
 from app.identity.dependencies import CurrentUser
@@ -23,7 +24,10 @@ from app.ports.cache import RateLimiter
 from app.ports.registry import RegistryUnavailableError
 from app.registry.access import events_secret
 from app.registry.catalog import CatalogService
+from app.registry.images import RegistryImages
 from app.registry.schemas import (
+    AgentPullTokenRequest,
+    AgentPullTokenResponse,
     ImageRepositoryResponse,
     ImageTagResponse,
     RegistryAccessTokenResponse,
@@ -38,6 +42,7 @@ from app.registry.service import RegistryService
 token_router = APIRouter(prefix="/api/v1/registry", tags=["registry"])
 router = APIRouter(prefix="/api/v1/organizations/{organization_id}/registry", tags=["registry"])
 internal_router = APIRouter(prefix="/internal/registry", tags=["internal-registry"], include_in_schema=False)
+agent_router = APIRouter(prefix="/api/v1/agent/registry", tags=["agent"])
 basic_scheme = HTTPBasic(auto_error=False)
 
 
@@ -191,3 +196,16 @@ def receive_registry_events(
     except RegistryUnavailableError as exc:
         # The registry sends it again.
         raise AppError("registry_unavailable", str(exc), status_code=503) from exc
+
+
+@agent_router.post("/pull-token", response_model=AgentPullTokenResponse)
+def issue_pull_token(
+    payload: AgentPullTokenRequest,
+    device: CurrentDevice,
+    response: Response,
+    session: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AgentPullTokenResponse:
+    """The agent calls this before it pulls a desired image from the organization's registry."""
+    response.headers["Cache-Control"] = "no-store"
+    return RegistryImages(session, settings).issue_pull_token(device=device, workload_key=payload.workload_key)

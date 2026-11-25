@@ -105,15 +105,35 @@ class RegistryService:
         self._require_enabled()
         if service != self.settings.registry_public_host:
             raise AppError("invalid_registry_service", "Unknown registry service.", status_code=400)
-        token = self._authenticate(password)
         now = datetime.now(UTC)
-        access = self._grant(token, parse_scopes(scopes))
-        self._touch(token, now)
+        if password and "." in password:  # a device's pull password; registry tokens have no dots
+            subject, access = self._device_access(password, parse_scopes(scopes))
+        else:
+            token = self._authenticate(password)
+            access = self._grant(token, parse_scopes(scopes))
+            self._touch(token, now)
+            subject = str(token.id)
         # The registry reports the subject in push events; the token id maps to a person or robot.
-        signed = sign_access_token(self.session, self.settings, subject=str(token.id), access=access, now=now)
+        signed = sign_access_token(self.session, self.settings, subject=subject, access=access, now=now)
         ttl = self.settings.registry_token_ttl_seconds
         self.session.commit()
         return RegistryAccessTokenResponse(token=signed, access_token=signed, expires_in=ttl, issued_at=now)
+
+    def _device_access(self, password: str, scopes: list[RequestedScope]) -> tuple[str, list[dict[str, Any]]]:
+        # Imported here: it names images with this module's namespace_for.
+        from app.registry.images import RegistryImages
+
+        found = RegistryImages(self.session, self.settings).pullable_repository(password)
+        if found is None:
+            raise RegistryAuthError()
+        device, repository = found
+        set_request_actor(actor_type="device", actor_id=device.id)
+        access = [
+            {"type": "repository", "name": repository, "actions": ["pull"]}
+            for scope in scopes
+            if scope.repository == repository and "pull" in scope.actions
+        ]
+        return f"device:{device.id}", access
 
     def _authenticate(self, password: str | None) -> RegistryToken:
         token = None

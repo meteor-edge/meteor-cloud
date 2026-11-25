@@ -106,6 +106,7 @@ All under `/api/v1/agent`. Request and answer schemas: `schemas/agent/http/<name
 | `GET /actions` | device | | `200` `actions.response` |
 | `POST /actions/report` | device | `actions-report.request` | `200` `actions-report.response` |
 | `POST /applications/credentials` | device | `applications-credentials.request` | `201` `applications-credentials.response` |
+| `POST /registry/pull-token` | device | `registry-pull-token.request` | `200` `registry-pull-token.response` |
 
 `GET /api/v1/health` (no auth) is used to check that the server is reachable, for
 example after joining a new Wi-Fi network.
@@ -131,6 +132,14 @@ password stops working) and reconnects. `enabled: false` stops the MQTT session.
    signed `artifact_sha256`).
 4. Progress and results go in `software_report`: `sync_status` `updating` (with `progress_percent`),
    `in_sync`, `failed` (with `last_error`), `rolled_back`; `health` `unknown` / `healthy` / `unhealthy`.
+
+5. A `docker` item whose signed `spec.registry` is `meteorcloud` (new in v1, additive) names an image in
+   the organization's registry, always with `spec.image_digest`. If the image is not on the device, the
+   agent calls `POST /registry/pull-token` with the `workload_key`, pulls `image@digest` with the answer
+   in a temporary Docker config, deletes it, and runs the container without pulling. The password works
+   only for that repository, only to pull, for 30 minutes, and only while the item is desired; `404
+   registry_image_not_desired` otherwise. The agent sends it only to the registry named in the answer,
+   and only when that is the image's own host.
 
 Deploy kinds today: `systemd`, `docker`, `docker_compose`.
 

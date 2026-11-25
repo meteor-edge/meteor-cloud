@@ -45,7 +45,7 @@ type DockerInspectRequest struct {
 }
 
 func (h Host) dockerRun(ctx context.Context, args ...string) (any, error) {
-	out, err := h.Run(ctx, "docker", args...)
+	out, err := h.engineRun(ctx, args...)
 	if err != nil && len(out) == 0 {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ const maxStdout = 1 << 20
 // as data. When docker fails, Output is the error with its stderr.
 func (h Host) dockerStdout(ctx context.Context, args ...string) (any, error) {
 	out := &capped{max: maxStdout}
-	if err := h.Stream(ctx, out, "docker", args...); err != nil {
+	if err := h.engineStream(ctx, out, args...); err != nil {
 		if ctx.Err() != nil {
 			return nil, err
 		}
