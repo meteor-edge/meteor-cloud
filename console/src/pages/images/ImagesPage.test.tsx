@@ -75,6 +75,35 @@ describe("ImagesPage", () => {
     );
   });
 
+  it("shows the pull command when it cannot be copied", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "web" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copy pull command for web:1.0" }));
+    expect(
+      await screen.findByText("docker pull registry.example.com/acme/web:1.0"),
+    ).toBeInTheDocument();
+  });
+
+  it("leads back when the last page becomes empty", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPage("owner", 21);
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+    expect(await screen.findByText(/Page 2 of 2/)).toBeInTheDocument();
+    vi.mocked(listImages).mockImplementation(async (_token, _org, { page } = {}) => ({
+      items: page === 1 ? [{ repository: "first", tag_count: 1, pushed_at: "2026-11-25T10:00:00Z" }] : [],
+      total: 20,
+      page: page ?? 1,
+      page_size: 20,
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete web" }));
+    await waitFor(() => expect(screen.queryByText("web")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(await screen.findByText("first")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Previous" })).not.toBeInTheDocument();
+  });
+
   it("deletes a tag after confirmation", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderPage();

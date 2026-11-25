@@ -261,7 +261,12 @@ def registry_config(directory: str, *, rotate: bool = False) -> int:
             except BaseException:
                 Path(partial).unlink(missing_ok=True)
                 raise
-        session.commit()
+        try:
+            session.commit()
+        except Exception:
+            # The files may hold a key that was not saved. Rerunning writes the saved one, whatever the outcome.
+            logger.error("Run registry-config again, without --rotate-key, before the registry restarts.")
+            raise
     finally:
         session.close()
     logger.info("Wrote registry configuration to %s", target)
