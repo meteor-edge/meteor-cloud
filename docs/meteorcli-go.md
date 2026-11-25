@@ -677,3 +677,20 @@ test-only `debian:12.8-slim` image ([licensing](licensing.md)).
 or device identity. A token is sent only to the registry's own sign-in address (HTTPS, or this machine),
 is read from stdin (hidden on a terminal) or the environment, and reaches Docker through a private `--config` directory.
 `docker-credential-meteorcli` is the same binary under another name.
+
+## Container engines
+
+Deploys use Docker by default. Any engine with the Docker API works with the `docker` CLI (and its
+Compose plugin) installed; choose it in `/etc/meteorcli/engine.json` (owned and writable by root only),
+then `sudo systemctl restart meteorcli-helper meteorcli`:
+
+| Engine | `engine.json` |
+| --- | --- |
+| Docker | no file |
+| Podman (`systemctl enable --now podman.socket podman-restart.service`) | `{"name": "podman"}` |
+| Another Docker-API engine, such as Kiri | `{"name": "kiri", "endpoint": "unix:///path/to.sock"}` |
+
+Only `unix://` endpoints are accepted. With a file that cannot be used, container operations fail rather
+than run on another engine. The `podman` CLI itself is not used: it starts containers in its own process,
+which the helper's sandbox forbids. With Podman, use full image names (`docker.io/library/nginx`).
+The engine is reported as `capabilities.container_engine`. Deploy features do not depend on it.

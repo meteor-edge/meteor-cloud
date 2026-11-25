@@ -31,7 +31,7 @@ Reading requires `artifact.read`. Creating and updating require `artifact.create
 |------|----------|------|
 | `systemd` | type `systemd` (required) | `unit_name` (required), `start` (default true) |
 | `docker` | type `docker` tarball **or** none if pulling | `container_name`, and either `image` or an artifact |
-| `docker_compose` | type `docker_compose` (required) | `project_name`, optional `env` |
+| `docker_compose` | type `docker_compose` (required) | `project_name`, optional `env`, `registry_images` |
 
 Every kind also takes an optional `health_check`: devices wait for the update to be healthy
 and roll back to their previous release if it is not. See [automatic rollback](rollback.md).
@@ -73,7 +73,13 @@ Releases and artifacts link both ways in the console:
   also give `image_digest` (or `image@sha256:…`) yourself, for private registries.
   `RELEASE_RESOLVE_IMAGE_DIGESTS=false` turns the lookup off;
   `RELEASE_REQUIRE_IMAGE_DIGESTS=true` refuses releases that cannot be pinned.
-- **docker_compose** — materialize YAML/zip and `docker compose up -d`.
+  With `"registry": "meteorcloud"` the image comes from the organization's own
+  [registry](../registry.md#deploy-to-devices). Optional: `volumes`, `resources`.
+- **docker_compose** — materialize YAML/zip and `docker compose up -d`. List the images that
+  are in the organization's registry in `registry_images` (`["web:1.0"]`) and use their full
+  names in the compose file (`registry.example.com/<org>/web:1.0`). They are pinned to their
+  digests when the release is saved; the device pulls those digests before `compose up`.
+  Do not set `pull_policy: always` on them: Compose itself is not signed in.
 
 ## Deployment provider
 

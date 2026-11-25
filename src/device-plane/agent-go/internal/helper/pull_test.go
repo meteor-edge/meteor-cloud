@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"meteorcloud/meteorcli/internal/localrpc"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,5 +92,18 @@ func TestEngineEndpointAndCLI(t *testing.T) {
 	h.Engine = Engine{Name: "other", CLI: "other", Endpoint: "unix:///run/other.sock"}
 	if cli, args := h.engineArgs("ps"); cli != "other" || !slices.Equal(args, []string{"--host", "unix:///run/other.sock", "ps"}) {
 		t.Errorf("configured %s %q", cli, args)
+	}
+}
+
+func TestDockerTag(t *testing.T) {
+	h := Host{Run: func(context.Context, string, ...string) ([]byte, error) { return nil, nil }}
+	image := "r.example.com/acme/web@sha256:" + strings.Repeat("ab", 32)
+	if _, err := call(t, h, "docker.tag", DockerTagRequest{Image: image, Tag: "r.example.com/acme/web:1.0"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []string{"r.example.com/acme/other:1", "nginx:1", "r.example.com/acme/web", "r.example.com/acme/web:-x", ""} {
+		if _, err := call(t, h, "docker.tag", DockerTagRequest{Image: image, Tag: tag}); localrpc.CodeOf(err) != localrpc.CodeBadRequest {
+			t.Errorf("%q: %v", tag, err)
+		}
 	}
 }

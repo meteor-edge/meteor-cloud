@@ -16,12 +16,20 @@ var (
 	// pinnedRe is the only kind of image docker.pull and docker.has_image take:
 	// a repository on a named registry, by digest.
 	pinnedRe   = regexp.MustCompile(`^([a-z0-9][a-z0-9.-]*(?::[0-9]{1,5})?)/([a-z0-9][a-z0-9._/-]*)@sha256:[a-f0-9]{64}$`)
+	tagRe      = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
 	registryRe = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?$`)
 )
 
 // DockerImageRequest is the params of docker.has_image.
 type DockerImageRequest struct {
 	Image string `json:"image"`
+}
+
+// DockerTagRequest is the params of docker.tag: name Image, by digest, with a
+// tag of the same repository.
+type DockerTagRequest struct {
+	Image string `json:"image"`
+	Tag   string `json:"tag"`
 }
 
 // DockerPullRequest is the params of docker.pull: Image by digest, from
@@ -90,4 +98,17 @@ func (h Host) dockerPull(ctx context.Context, _ localrpc.Peer, raw json.RawMessa
 		return nil, err
 	}
 	return h.dockerRun(ctx, "--config", dir, "pull", "--quiet", r.Image)
+}
+
+func (h Host) dockerTag(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
+	var p DockerTagRequest
+	if err := decode(raw, &p); err != nil {
+		return nil, err
+	}
+	repository, _, _ := strings.Cut(p.Image, "@")
+	tag, ok := strings.CutPrefix(p.Tag, repository+":")
+	if !pinnedRe.MatchString(p.Image) || !ok || !tagRe.MatchString(tag) {
+		return nil, badRequest("%q is not a tag of %q", p.Tag, p.Image)
+	}
+	return h.dockerRun(ctx, "tag", p.Image, p.Tag)
 }

@@ -50,6 +50,9 @@ class ReleaseService:
         self, membership: OrganizationMembership, kind: ReleaseKind, spec: dict, previous: dict | None = None
     ) -> dict:
         """Add ``image_digest`` to a docker spec that names an image by tag."""
+        if kind == ReleaseKind.DOCKER_COMPOSE and spec.get("registry_images"):
+            self.authz.require(membership, "image.read")
+            return RegistryImages(self.session, self.settings).pin_all(membership.organization_id, spec, previous)
         image = spec.get("image")
         if kind != ReleaseKind.DOCKER or not image:
             return spec

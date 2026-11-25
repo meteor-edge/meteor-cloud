@@ -63,6 +63,7 @@ export function CreateReleaseDialog({
   const [containerName, setContainerName] = useState("");
   const [image, setImage] = useState("");
   const [projectName, setProjectName] = useState("");
+  const [composeImages, setComposeImages] = useState("");
   const [description, setDescription] = useState("");
   const [healthGate, setHealthGate] = useState(false);
   const [healthUrl, setHealthUrl] = useState("");
@@ -166,7 +167,11 @@ export function CreateReleaseDialog({
         ...(image.trim() ? { image: image.trim() } : {}),
       };
     } else {
-      spec = { project_name: projectName.trim() };
+      const registryImages = composeImages.split(/[\s,]+/).filter(Boolean);
+      spec = {
+        project_name: projectName.trim(),
+        ...(registryImages.length > 0 ? { registry_images: registryImages } : {}),
+      };
     }
     if (healthGate) {
       spec.health_check = healthUrl.trim() ? { http_url: healthUrl.trim() } : {};
@@ -411,6 +416,7 @@ export function CreateReleaseDialog({
           )}
 
           {kind === "docker_compose" && (
+            <>
             <div className="space-y-2">
               <Label htmlFor="release-project">Application / project name</Label>
               <Input
@@ -425,6 +431,19 @@ export function CreateReleaseDialog({
                 Used as the Docker Compose project name on the device.
               </p>
             </div>
+              <div>
+                <Label htmlFor="release-registry-images">Registry images (optional)</Label>
+                <Input
+                  id="release-registry-images"
+                  placeholder="web:1.0, team/worker:2"
+                  value={composeImages}
+                  onChange={(event) => setComposeImages(event.target.value)}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Images of the compose file that are in this organization&apos;s registry.
+                </p>
+              </div>
+            </>
           )}
 
           <div className="space-y-2">

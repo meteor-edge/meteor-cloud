@@ -148,6 +148,8 @@ class DockerComposeSpec(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     meteorcloud: MeteorCloudBinding | None = None
     health_check: HealthCheck | None = None
+    # Images of the compose file that are in the organization's registry ("web:1.0"); stored pinned.
+    registry_images: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("project_name")
     @classmethod
@@ -183,7 +185,7 @@ def validate_release_spec(kind: ReleaseKind, spec: dict[str, Any]) -> dict[str, 
     # Unbound workloads keep the spec shape they had before application bindings existed.
     if validated.get("meteorcloud") is None:
         validated.pop("meteorcloud", None)
-    for optional in ("volumes", "resources", "secret_env"):
+    for optional in ("volumes", "resources", "secret_env", "registry_images"):
         if not validated.get(optional):
             validated.pop(optional, None)
     if validated.get("registry") is None:

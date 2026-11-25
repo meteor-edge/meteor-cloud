@@ -84,6 +84,13 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 	} else if err := os.Remove(override); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return runtime.Result{}, fmt.Errorf("compose %s: %w", name, err)
 	}
+	// Last, so that a failed pull leaves the running project alone. The tags the
+	// compose file uses are pointed at the signed digests.
+	for _, entry := range w.Spec.Strings("registry_images") {
+		if err := r.pullTagged(ctx, entry, w.PullAuth); err != nil {
+			return runtime.Result{}, err
+		}
+	}
 	var out helper.DockerOutput
 	if err := r.Helper.Call(ctx, "compose.up", req, &out); err != nil {
 		return runtime.Result{}, err
@@ -96,6 +103,27 @@ func (r Runtime) Apply(ctx context.Context, w runtime.Workload) (runtime.Result,
 		return runtime.Result{}, runtime.Failf("%s after apply.", h.Problem)
 	}
 	return runtime.Result{Health: h}, nil
+}
+
+// pullTagged brings "registry/namespace/web:1.0@sha256:…" to the device under its tag.
+func (r Runtime) pullTagged(ctx context.Context, entry string, auth func(context.Context) (runtime.PullAuth, error)) error {
+	tagged, digest, _ := strings.Cut(entry, "@")
+	i := strings.LastIndex(tagged, ":")
+	if auth == nil || digest == "" || i <= strings.LastIndex(tagged, "/") {
+		return runtime.Failf("Invalid registry image %q.", entry)
+	}
+	pinned := tagged[:i] + "@" + digest
+	if err := runtime.Pull(ctx, r.Helper, pinned, auth); err != nil {
+		return err
+	}
+	var out helper.DockerOutput
+	if err := r.Helper.Call(ctx, "docker.tag", helper.DockerTagRequest{Image: pinned, Tag: tagged}, &out); err != nil {
+		return err
+	}
+	if !out.OK {
+		return runtime.Failf("docker tag %s failed: %s", tagged, detail(out.Output))
+	}
+	return nil
 }
 
 // envLines writes KEY=VALUE lines in a stable order, each value quoted so

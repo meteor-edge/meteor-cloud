@@ -207,8 +207,10 @@
             },
             "deploy_features": [
               "registry",
-              "run_options"
-            ]
+              "run_options",
+              "compose_registry"
+            ],
+            "container_engine": "docker"
           },
           "cpu_cores": "<inventory>",
           "cpu_model": "<inventory>",

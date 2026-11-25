@@ -174,9 +174,7 @@ class DeploymentService:
     def _require_not_rolled_back(self, deployment: Deployment) -> None:
         """Resume/retry would write the release again onto devices a rollback restored."""
         rolled_back = self.session.scalar(
-            select(Deployment.id)
-            .where(Deployment.rollback_of_deployment_id == deployment.id)
-            .limit(1)
+            select(Deployment.id).where(Deployment.rollback_of_deployment_id == deployment.id).limit(1)
         )
         if rolled_back is not None:
             raise ConflictError(
@@ -215,6 +213,8 @@ class DeploymentService:
         needed = set()
         if spec.get("registry"):
             needed.add("registry")
+        if spec.get("registry_images"):
+            needed.add("compose_registry")
         if any(spec.get(key) for key in ("volumes", "resources", "secret_env")):
             needed.add("run_options")
         if needed - set(caps.get("deploy_features") or []):
@@ -318,16 +318,12 @@ class DeploymentService:
         *,
         include_devices: bool = False,
     ) -> DeploymentResponse:
-        release = self.releases.get(
-            organization_id=deployment.organization_id, release_id=deployment.release_id
-        )
+        release = self.releases.get(organization_id=deployment.organization_id, release_id=deployment.release_id)
         devices_payload: list[DeploymentDeviceResponse] | None = None
         if include_devices:
             rows = self.deployments.list_devices(deployment_id=deployment.id)
             devices = self._device_map([row.device_id for row in rows])
-            workload_key = (
-                workload_key_from_spec(release.kind, release.spec) if release is not None else None
-            )
+            workload_key = workload_key_from_spec(release.kind, release.spec) if release is not None else None
             endpoint_availability = {
                 endpoint.device_id: endpoint.availability
                 for endpoint in self.session.scalars(
@@ -470,9 +466,7 @@ class DeploymentService:
         deploy_ids: list[uuid.UUID] = []
         already_installed_ids: list[uuid.UUID] = []
         for device in devices:
-            existing = self.software_rows.get_by_workload(
-                device_id=device.id, workload_key=workload_key
-            )
+            existing = self.software_rows.get_by_workload(device_id=device.id, workload_key=workload_key)
             previous_desired = existing.desired_release_id if existing else None
             unsupported = mismatches.get(device.id) or self.unsupported_reason(device, release.kind)
             if unsupported is not None:
@@ -484,11 +478,7 @@ class DeploymentService:
                 already_installed_ids.append(device.id)
             else:
                 # Progressive rollouts start queued; the engine picks the first wave below.
-                status = (
-                    DeploymentDeviceStatus.QUEUED.value
-                    if progressive
-                    else DeploymentDeviceStatus.PENDING.value
-                )
+                status = DeploymentDeviceStatus.QUEUED.value if progressive else DeploymentDeviceStatus.PENDING.value
                 last_error = None
                 deploy_ids.append(device.id)
             self.deployments.create_device(
@@ -621,9 +611,7 @@ class DeploymentService:
                 "release a different name (unit, container or project name).",
             )
 
-    def _ports_used_by_other_workloads(
-        self, *, device_id: uuid.UUID, workload_key: str
-    ) -> dict[tuple[int, str], str]:
+    def _ports_used_by_other_workloads(self, *, device_id: uuid.UUID, workload_key: str) -> dict[tuple[int, str], str]:
         """Device ports already claimed by other workloads: docker bindings and public addresses.
 
         Compose and systemd apps only declare ports through an endpoint, so a port they bind
@@ -704,13 +692,13 @@ class DeploymentService:
                     f"Endpoint port must be a host port this docker release publishes ({listed})."
                     if bindings
                     else "This docker release publishes no fixed TCP host port, so nothing on the "
-                    "device listens on the endpoint port. Add a ports entry such as \"8080:80\".",
+                    'device listens on the endpoint port. Add a ports entry such as "8080:80".',
                 )
             if match is not None and match.loopback_only:
                 raise ValidationAppError(
                     "endpoint_port_loopback",
                     f"Port {spec.port} is bound to {match.host_ip} only, so the public address "
-                    "cannot reach it. Publish it on all interfaces (e.g. \"8080:80\").",
+                    'cannot reach it. Publish it on all interfaces (e.g. "8080:80").',
                 )
         from app.endpoints.schemas import EndpointCreate
         from app.endpoints.service import EndpointService
@@ -739,9 +727,12 @@ class DeploymentService:
                 hostname=spec.hostname,
             )
             return
-        hostname = spec.hostname or endpoints.suggest_hostname(
-            actor=actor, organization_id=organization_id, device_id=device_id, app=release.name
-        ).hostname
+        hostname = (
+            spec.hostname
+            or endpoints.suggest_hostname(
+                actor=actor, organization_id=organization_id, device_id=device_id, app=release.name
+            ).hostname
+        )
         endpoints.create_endpoint(
             actor=actor,
             organization_id=organization_id,
@@ -1147,16 +1138,10 @@ class DeploymentService:
             }
         unhealthy: set[uuid.UUID] = set()
         if config.failure_threshold_percent is not None:
-            release = self.releases.get(
-                organization_id=deployment.organization_id, release_id=deployment.release_id
-            )
+            release = self.releases.get(organization_id=deployment.organization_id, release_id=deployment.release_id)
             if release is not None:
                 software = self.software_rows.by_device_for_workload(
-                    device_ids=[
-                        row.device_id
-                        for row in rows
-                        if row.status == DeploymentDeviceStatus.SUCCEEDED.value
-                    ],
+                    device_ids=[row.device_id for row in rows if row.status == DeploymentDeviceStatus.SUCCEEDED.value],
                     workload_key=workload_key_from_spec(release.kind, release.spec),
                 )
                 unhealthy = {
@@ -1200,9 +1185,7 @@ class DeploymentService:
                 self.session,
                 DEPLOYMENT_DEVICE_RESULTS.labels(status=DeploymentDeviceStatus.TIMED_OUT.value),
             )
-            row.last_error = (
-                f"No report within {config.pending_timeout_seconds} seconds of activation."
-            )
+            row.last_error = f"No report within {config.pending_timeout_seconds} seconds of activation."
         if plan.pause_reason is not None:
             deployment.status = DeploymentStatus.PAUSED.value
 
@@ -1225,9 +1208,7 @@ class DeploymentService:
                 rollout=rollout,
                 created_by_user_id=deployment.created_by_user_id or uuid.UUID(int=0),
             )
-            rollout["activated_device_ids"] = sorted(
-                str(row.device_id) for row in rows if row.activated_at is not None
-            )
+            rollout["activated_device_ids"] = sorted(str(row.device_id) for row in rows if row.activated_at is not None)
             rollout["batch_released_at"] = now.isoformat()
         if strategy == "phased":
             rollout["state"] = plan.new_state
@@ -1275,9 +1256,7 @@ class DeploymentService:
             self._lock_deployment(deployment_id)
         touched_deployments: dict[uuid.UUID, Deployment] = {}
         for progress in open_rows:
-            deployment = self.deployments.get(
-                organization_id=organization_id, deployment_id=progress.deployment_id
-            )
+            deployment = self.deployments.get(organization_id=organization_id, deployment_id=progress.deployment_id)
             status = mapped
             if (
                 deployment is not None
