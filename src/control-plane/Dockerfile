@@ -22,4 +22,6 @@ RUN pip install --no-cache-dir .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# WEB_CONCURRENCY=1 keeps a single process. A higher value starts that many workers.
+# See docs/capacity.md. `make dev` overrides this command and stays on --reload.
+CMD ["sh", "-c", "workers=\"${WEB_CONCURRENCY:-1}\"; case \"$workers\" in ''|*[!0-9]*) workers=1;; esac; if [ \"$workers\" -le 1 ]; then exec uvicorn app.main:app --host 0.0.0.0 --port 8000; else exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers \"$workers\"; fi"]

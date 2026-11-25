@@ -33,6 +33,9 @@ prepares the server and runs those same files; it does not keep its own copy.
 | Application settings | `deploy/compose/.env` | `roles/meteorcloud/defaults/main.yml` |
 
 Every key is documented in [`deploy/compose/.env.example`](../deploy/compose/.env.example).
+API processes and the database pool (`WEB_CONCURRENCY`, `DB_POOL_SIZE`,
+`DB_MAX_OVERFLOW`; Ansible `backend_workers`, `db_pool_size`, `db_max_overflow`)
+are in [Capacity](capacity.md). `make dev` stays one process.
 
 ### Storage options
 

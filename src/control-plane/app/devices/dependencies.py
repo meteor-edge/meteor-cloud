@@ -255,6 +255,13 @@ def get_current_device(
             "This device has been disabled.",
         )
     set_request_actor(actor_type="device", actor_id=device.id)
+    # Hand the connection back before the endpoint runs. FastAPI runs this
+    # dependency and the endpoint in separate thread-pool calls; holding the
+    # connection in between let a burst of agents take every worker thread while
+    # waiting for a connection that only a thread could release (see
+    # docs/capacity.md). Nothing is pending here, and expire_on_commit=False
+    # keeps the device loaded.
+    session.commit()
     return device
 
 

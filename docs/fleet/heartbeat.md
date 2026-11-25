@@ -110,7 +110,9 @@ Two settings control the timing (defaults shown):
 - `DEVICE_OFFLINE_THRESHOLD_SECONDS=150` — window before a device is offline.
 
 The threshold is intentionally larger than the interval so a single missed
-heartbeat does not immediately flip a device offline.
+heartbeat does not immediately flip a device offline. How many devices that
+interval can support, and how to measure a staging API, is in
+[Capacity](../capacity.md).
 
 ## Reference agent
 

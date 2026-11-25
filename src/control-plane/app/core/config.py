@@ -62,6 +62,13 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://edge:edge@localhost:5432/edge_platform",
         alias="DATABASE_URL",
     )
+    # Connection pool per API worker process (docs/capacity.md). Keep
+    # (pool_size + max_overflow) x workers x replicas below Postgres max_connections.
+    db_pool_size: int = Field(default=5, ge=1, le=200, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=10, ge=0, le=200, alias="DB_MAX_OVERFLOW")
+    db_pool_timeout_seconds: int = Field(default=30, ge=1, le=300, alias="DB_POOL_TIMEOUT_SECONDS")
+    # Recycle connections older than this (seconds); -1 never. Helps behind PgBouncer or idle-timeout proxies.
+    db_pool_recycle_seconds: int = Field(default=1800, ge=-1, alias="DB_POOL_RECYCLE_SECONDS")
 
     jwt_secret_key: str = Field(default="change-me-jwt", alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")

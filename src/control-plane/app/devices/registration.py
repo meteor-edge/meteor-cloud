@@ -345,14 +345,24 @@ class RegistrationService:
         if payload.architecture:
             device.architecture = payload.architecture
         serial = (payload.serial_number or "").strip()
-        if serial and not self._identity_in_use(device, serial_number=serial, mac_addresses=()):
+        # Heartbeats repeat the same identity. The uniqueness check is a global
+        # serial and MAC lookup, so it runs only when that identity changed.
+        if (
+            serial
+            and serial != device.serial_number
+            and not self._identity_in_use(device, serial_number=serial, mac_addresses=())
+        ):
             device.serial_number = serial
         if payload.mac_addresses:
             macs = DeviceIdentity.from_inventory(
                 serial_number=None,
                 mac_addresses=payload.mac_addresses,
             ).mac_addresses
-            if macs and not self._identity_in_use(device, serial_number=None, mac_addresses=macs):
+            if (
+                macs
+                and macs != list(device.mac_addresses or [])
+                and not self._identity_in_use(device, serial_number=None, mac_addresses=macs)
+            ):
                 device.mac_addresses = macs
         if payload.hardware_model:
             device.hardware_model = payload.hardware_model

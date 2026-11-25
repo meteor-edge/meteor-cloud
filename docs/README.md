@@ -75,6 +75,7 @@ Commands and APIs you look up while working.
 | Modular services (`cloud_app`, `vpn`) | [Services](services.md) |
 | Production: new AWS EC2 (`make aws-up`) | [Prerequisites](aws-prerequisites.md) · [AWS deployment](aws-deployment.md) |
 | Upgrades · destroy · logs | [Upgrades](upgrades.md) · [Destroy](destroy.md) · [Observability](observability.md) |
+| Capacity · load testing | [Capacity](capacity.md) |
 | When something breaks | [Troubleshooting](troubleshooting.md) |
 | EC2 smoke test (CI) | [AWS CI](aws-ci.md) |
 | Full-stack E2E (one command, CI) | [E2E](e2e.md) |
