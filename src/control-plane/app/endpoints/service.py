@@ -435,7 +435,8 @@ class EndpointService:
             if software is None:
                 continue
             if (
-                software.sync_status == SoftwareSyncStatus.IN_SYNC.value
+                # rolled_back: the previous release is running.
+                software.sync_status in {SoftwareSyncStatus.IN_SYNC.value, SoftwareSyncStatus.ROLLED_BACK.value}
                 and software.health == SoftwareHealth.HEALTHY.value
             ):
                 row.availability = EndpointAvailability.READY.value

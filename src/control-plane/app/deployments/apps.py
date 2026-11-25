@@ -6,7 +6,7 @@ import re
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -43,6 +43,9 @@ def _one_line(values: dict[str, Any]) -> dict[str, Any]:
 
 
 class AppEndpoint(BaseModel):
+    # A misspelled setting must not be dropped silently.
+    model_config = ConfigDict(extra="forbid")
+
     # Empty: the suggested address.
     hostname: str | None = Field(default=None, max_length=255)
     # Empty: the first published port.
@@ -50,6 +53,9 @@ class AppEndpoint(BaseModel):
 
 
 class AppRunRequest(BaseModel):
+    # A misspelled setting must not be dropped silently.
+    model_config = ConfigDict(extra="forbid")
+
     image: str = Field(min_length=1, max_length=512)
     # "meteorcloud": the organization's own registry. null: a public image.
     registry: Literal["meteorcloud"] | None = "meteorcloud"
@@ -87,6 +93,8 @@ class AppRunRequest(BaseModel):
 
 class AppRedeployRequest(BaseModel):
     """What to change; everything left out stays as it is."""
+
+    model_config = ConfigDict(extra="forbid")
 
     image: str | None = Field(default=None, min_length=1, max_length=512)
     ports: list[str] | None = Field(default=None, max_length=20)
