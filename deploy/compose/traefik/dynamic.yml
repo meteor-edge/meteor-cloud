@@ -5,7 +5,7 @@
 # /v1 reaches the application data API (profile data-api): its public listener only.
 # REGISTRY_PUBLIC_HOST set: that host goes to the container registry (profile registry).
 {{ $domain := env "PLATFORM_DOMAIN" }}
-{{ $registry := env "REGISTRY_PUBLIC_HOST" }}
+{{ $registry := regexReplaceAll ":[0-9]+$" (env "REGISTRY_PUBLIC_HOST") "" }}
 http:
   routers:
     backend:

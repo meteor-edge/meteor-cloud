@@ -33,6 +33,9 @@ organization's namespace is never given to another one (a new organization with 
 | Stops working | Revoked, expired, member removed or account disabled | Revoked or expired |
 | Limit to a path | No | Optional: `ci` allows `ci` and `ci/*` |
 
+A client that already has an access token keeps its access until that expires (5 minutes by
+default, `REGISTRY_TOKEN_TTL_SECONDS`), also after a revoke or role change.
+
 "Push" includes pull. Owners and admins see and can revoke every token of the organization; others
 see their own. Only a SHA-256 hash is stored. "Log out everywhere" does not revoke registry tokens.
 
@@ -49,8 +52,8 @@ Permissions: `image.read` (every role), `image.push` (owner, admin, developer), 
 
 You need a host name for the registry, normally `registry.<domain>` ([DNS](dns.md)).
 
-**Ansible / `make up`**: set `registry_enabled: true` (needs `platform_domain`, or
-`registry_public_host`), then run the install again.
+**Ansible / `make up`**: set `registry_enabled: true` (needs `platform_domain`; or
+`registry_public_host` and an `https://` `platform_public_url` when your own proxy ends TLS), then run the install again.
 
 **Compose**: add `registry` to `COMPOSE_PROFILES` and set:
 
@@ -93,6 +96,10 @@ Images use the same storage choice as [artifacts](fleet/artifacts.md):
   `OBJECT_STORAGE_ENDPOINT_URL`, layers are downloaded straight from the bucket; otherwise they
   pass through the registry. MinIO is for local tests only ([licensing](licensing.md)). Create a
   separate `REGISTRY_STORAGE_BUCKET` yourself; the registry does not create buckets.
+
+**Restoring PostgreSQL to an older backup:** restore image storage from the same time, or empty it.
+A namespace claimed after that backup is forgotten by the database, and a new organization could
+claim it while the old images are still stored.
 
 **Not covered yet:** `scripts/backup.sh` does not include filesystem images (back up the volume
 yourself), there are no quotas, deleted images are not garbage-collected, and deleting an

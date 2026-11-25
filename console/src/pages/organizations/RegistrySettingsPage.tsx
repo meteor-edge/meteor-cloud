@@ -30,6 +30,11 @@ function status(token: RegistryToken): string {
 
 export function RegistrySettingsPage() {
   const { organizationId = "" } = useParams();
+  // Remounted per organization: a one-time secret must not stay open on another one's page.
+  return <RegistrySettings key={organizationId} organizationId={organizationId} />;
+}
+
+function RegistrySettings({ organizationId }: { organizationId: string }) {
   const { token } = useAuth();
   const queryClient = useQueryClient();
 
@@ -64,7 +69,7 @@ export function RegistrySettingsPage() {
   const canRobots = canManageRegistryRobots(role);
   const repository = `${registry?.host}/${registry?.namespace}`;
   const tokens = tokensQuery.data ?? [];
-  const loadFailed = registryQuery.isError || tokensQuery.isError;
+  const loadFailed = orgQuery.isError || registryQuery.isError || tokensQuery.isError;
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -217,7 +222,7 @@ export function RegistrySettingsPage() {
               </select>
             </div>
             <div className="flex items-end">
-              <Button type="submit" disabled={createMutation.isPending}>
+              <Button type="submit" disabled={createMutation.isPending || !orgQuery.isSuccess}>
                 Create token
               </Button>
             </div>

@@ -221,7 +221,8 @@ def test_bad_credentials_expiry_and_service(registry: TestClient, db_session: Se
 
 
 def test_rate_limit(registry: TestClient) -> None:
-    limiter = InMemoryRateLimiter(limit=1, window_seconds=60)
+    # A window this long cannot end between the two requests.
+    limiter = InMemoryRateLimiter(limit=1, window_seconds=10**12)
     registry.app.dependency_overrides[get_registry_rate_limiter] = lambda: limiter
     assert _login(registry, "rgt_x").status_code == 401
     assert _login(registry, "rgt_x").status_code == 429

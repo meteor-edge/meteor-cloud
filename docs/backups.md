@@ -47,6 +47,9 @@ ls /opt/edge-platform/backups
 
 ### Restore on a VM
 
+If the [container registry](registry.md#storage) is on, its images must be restored from the same
+time or emptied, so an old organization's images cannot end up under a new one.
+
 The restore replaces the current database, ClickHouse tables and artifacts. Application
 services are stopped while data is replaced and started again afterwards.
 `/opt/edge-platform/backup.env` is a systemd EnvironmentFile (not for shell `source`).

@@ -244,17 +244,18 @@ def registry_config(directory: str, *, rotate: bool = False) -> int:
         if rotate:
             keys.rotate()
         files = registry.config_files(keys.jwks())
+        # Before the commit: if writing fails, a rotation is rolled back.
+        target = Path(directory)
+        target.mkdir(parents=True, exist_ok=True)
+        for name, content in files.items():
+            # Replaced in one step: the registry never reads half a file.
+            partial = target / f".{name}.tmp"
+            partial.touch(mode=0o600)
+            partial.write_text(content, encoding="utf-8")
+            partial.replace(target / name)
         session.commit()
     finally:
         session.close()
-    target = Path(directory)
-    target.mkdir(parents=True, exist_ok=True)
-    for name, content in files.items():
-        # Replaced in one step: the registry never reads half a file.
-        partial = target / f".{name}.tmp"
-        partial.touch(mode=0o600)
-        partial.write_text(content, encoding="utf-8")
-        partial.replace(target / name)
     logger.info("Wrote registry configuration to %s", target)
     return 0
 
