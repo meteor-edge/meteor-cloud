@@ -1,4 +1,4 @@
-# kube-prometheus-stack values for the local k3d cluster only (make k8s-deploy OBS=1).
+# kube-prometheus-stack values for the local k3d cluster only (make k8s-deploy; OBS=0 to skip).
 # Production clusters bring their own Prometheus; the MeteorCloud chart only adds
 # ServiceMonitors and rules (values-monitoring.yaml). Grafana (AGPLv3) stays reachable
 # through kubectl port-forward on localhost, see docs/licensing.md.

@@ -127,9 +127,11 @@ When `cloud_app` is enabled:
 ```bash
 export EDGE_PLATFORM_POSTGRES_PASSWORD='...'
 export EDGE_PLATFORM_JWT_SECRET='...'
+export EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD='...'  # default observability dashboards; or set observability.enabled: false
 ```
 
-Optional:
+`make aws-up` / `ensure-platform-secrets.sh` generate the Grafana password when
+unset. Optional:
 
 ```bash
 export EDGE_PLATFORM_ADMIN_EMAIL='admin@example.com'
@@ -137,7 +139,6 @@ export EDGE_PLATFORM_ADMIN_PASSWORD='...'
 export EDGE_PLATFORM_ACME_EMAIL='ops@example.com'      # HTTPS + domain
 export EDGE_PLATFORM_VPN_SERVER_PRIVATE_KEY='...'    # activate WireGuard
 export EDGE_PLATFORM_DATABASE_URL='postgresql+psycopg://...'   # components.postgres.enabled: false
-export EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD='...'    # observability.components.dashboards
 export EDGE_PLATFORM_ALERT_WEBHOOK_URL='https://...' # observability.components.alerting delivery
 export EDGE_PLATFORM_ALERT_HEARTBEAT_URL='https://...' # optional dead-man's-switch for the Watchdog alert (needs the webhook)
 ```

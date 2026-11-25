@@ -414,6 +414,8 @@ jobs:
         run: gunzip -c images.tar.gz | docker load
       # The runner already has Docker, so only the Compose deployment roles run
       # (provision.yml would replace the runner's Docker packages).
+      # Base deploy turns observability off so the next step can enable a subset
+      # (defaults are on; Grafana would need EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD).
       - name: Deploy with Ansible, twice (second run must report no changes)
         env:
           EDGE_PLATFORM_POSTGRES_PASSWORD: ci-${{ github.run_id }}-pg
@@ -427,15 +429,16 @@ jobs:
           image_pull_policy: never
           backend_image: meteorcloud/backend:ci
           frontend_image: meteorcloud/console:ci
+          observability_enabled: false
           EOF
           ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml playbooks/services/cloud_app.yml
           ansible-playbook -i /tmp/inventory.ini -e @/tmp/vars.yml playbooks/services/cloud_app.yml | tee /tmp/second-run.log
           grep -Eq 'changed=0 .*failed=0' /tmp/second-run.log
       - name: Smoke test the Ansible deployment
         run: python scripts/smoke_test.py http://127.0.0.1
-      # Same deployment with observability on (metrics + alerting, no Grafana password
-      # needed): Prometheus must scrape the API and load the rules, and the API must
-      # still pass the smoke test.
+      # Turn observability on (metrics + alerting, no Grafana password needed):
+      # Prometheus must scrape the API and load the rules, and the API must still
+      # pass the smoke test.
       - name: Turn on observability with Ansible and check it scrapes the platform
         env:
           EDGE_PLATFORM_POSTGRES_PASSWORD: ci-${{ github.run_id }}-pg
