@@ -30,6 +30,7 @@ SECRET_KEYS = (
     "EDGE_PLATFORM_ADMIN_EMAIL",
     "EDGE_PLATFORM_ADMIN_PASSWORD",
     "EDGE_PLATFORM_ACME_EMAIL",
+    "EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD",
 )
 
 
@@ -162,6 +163,8 @@ class State:
             "EDGE_PLATFORM_ADMIN_EMAIL": f"e2e-admin@{cfg.fqdn or 'example.com'}",
             "EDGE_PLATFORM_ADMIN_PASSWORD": secrets.token_urlsafe(24),
             "EDGE_PLATFORM_ACME_EMAIL": cfg.acme_email,
+            # Required when Ansible observability_enabled (default) includes dashboards.
+            "EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD": secrets.token_urlsafe(24),
         }
         changed = False
         for key, value in defaults.items():
