@@ -34,6 +34,7 @@ _ACCEPT = ", ".join(
         "application/vnd.docker.distribution.manifest.v2+json",
     )
 )
+_NEXT_RE = re.compile(r'<([^>]*)>\s*;\s*rel="?next"?')
 _DIGEST_RE = re.compile(r"sha256:[a-f0-9]{64}")
 
 Access = list[dict[str, Any]]
@@ -74,6 +75,10 @@ class DistributionRegistry:
                 body = response.read(_MAX_BODY + 1)
                 if len(body) > _MAX_BODY:
                     raise RegistryUnavailableError("The registry sent an answer that is too large.")
+                # A bounded read does not report a connection that closed early.
+                length = response.headers.get("Content-Length")
+                if method == "GET" and length is not None and len(body) != int(length):
+                    raise RegistryUnavailableError("The registry sent an incomplete answer.")
                 return response.status, {k.lower(): v for k, v in response.headers.items()}, body
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
@@ -82,19 +87,31 @@ class DistributionRegistry:
         except OSError as exc:  # URLError and timeouts are OSErrors
             raise RegistryUnavailableError(f"The registry is unreachable: {exc}") from exc
 
-    def _json(self, path: str, access: Access) -> dict[str, Any]:
-        return _parse(self._request("GET", path, access)[2])
-
     def _pages(self, path: str, key: str, access: Access) -> list[str]:
+        """Every page, or an error: what is missing from a list is removed from the catalog."""
         items: list[str] = []
+        seen = {""}
         last = ""
         while True:
             query = urllib.parse.urlencode({"n": 1000, **({"last": last} if last else {})})
-            page = self._json(f"{path}?{query}", access).get(key) or []
-            items += page
-            if len(page) < 1000:
+            status, headers, body = self._request("GET", f"{path}?{query}", access)
+            if status == 404:
                 return items
-            last = page[-1]
+            document = _parse(body)
+            page = document.get(key) or []
+            if key not in document or not isinstance(page, list):
+                raise RegistryUnavailableError("The registry sent a list that cannot be read.")
+            items += page
+            # A page may be shorter than asked for; only the header tells whether more follow.
+            following = _NEXT_RE.search(headers.get("link", ""))
+            if following is None:
+                return items
+            # Only the position is used, so the request stays on our own address and path.
+            query = urllib.parse.urlsplit(following.group(1)).query
+            last = urllib.parse.parse_qs(query).get("last", [""])[0]
+            if last in seen:
+                raise RegistryUnavailableError("The registry sent a list that does not end.")
+            seen.add(last)
 
     def list_repositories(self) -> list[str]:
         return self._pages("/v2/_catalog", "repositories", [{"type": "registry", "name": "catalog", "actions": ["*"]}])

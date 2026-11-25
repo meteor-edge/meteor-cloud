@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.distribution_registry import DistributionRegistry, _platform
@@ -149,7 +151,8 @@ def test_reconcile_keeps_a_tag_pushed_again_meanwhile(
     catalog.reconcile()
 
     def list_tags(repository: str) -> list[str]:
-        catalog.sync_tag(org.id, repository, "app", "1")  # the push's own event, after an empty listing
+        # The push's own event, after an empty listing.
+        catalog.sync_tag(org.id, repository, "app", "1", pushed_digest=fake.digest(repository, "1"))
         return []
 
     monkeypatch.setattr(fake, "list_tags", list_tags)
@@ -169,7 +172,48 @@ def test_deleting_a_repository_includes_tags_missing_from_the_list(
     assert registry.delete(base, headers=headers, params={"repository": "app"}).status_code == 204
     assert fake.images["acme/app"] == {}
     events = db_session.scalars(select(AuditEvent).where(AuditEvent.action == "image.delete")).all()
-    assert sorted(e.metadata_["tag"] for e in events) == ["1", "2"]
+    assert {e.metadata_["tag"]: e.metadata_["catalog_digest"] for e in events} == {
+        "1": "sha256:" + "a" * 64,
+        "2": None,
+    }
+
+
+def test_a_tag_is_read_and_stored_by_one_worker_at_a_time(
+    registry: TestClient,  # noqa: F811
+    db_session: Session,
+    fake: FakeRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org, _, _ = _claim(registry, db_session)
+    fake.push("acme/app", "1")
+    read = fake.manifest
+    free: list[bool | None] = []
+
+    def manifest(repository: str, reference: str) -> ImageManifest | None:
+        with db_session.get_bind().connect() as other:
+            lock = func.hashtextextended(f"registry-tag:{repository}:{reference}", 0)
+            free.append(other.scalar(select(func.pg_try_advisory_xact_lock(lock))))
+        return read(repository, reference)
+
+    monkeypatch.setattr(fake, "manifest", manifest)
+    CatalogService(db_session, registry_settings(), fake).sync_tag(org.id, "acme/app", "app", "1")
+    db_session.commit()
+    assert free == [False]
+
+
+def test_a_comparison_keeps_who_pushed(
+    registry: TestClient,  # noqa: F811
+    db_session: Session,
+    fake: FakeRegistry,
+) -> None:
+    org, headers, base = _claim(registry, db_session)
+    token = _token(registry, org, headers, name="builder")
+    fake.push("acme/app", "1")
+    _notify(registry, _event("push", "acme/app", "1", token["id"]))
+    CatalogService(db_session, registry_settings(), fake).sync_tag(org.id, "acme/app", "app", "1")
+    db_session.commit()
+    (tag,) = registry.get(f"{base}/tags", headers=headers, params={"repository": "app"}).json()["items"]
+    assert tag["pushed_by"] == "builder"
 
 
 def test_notifications_are_not_trusted(registry: TestClient, db_session: Session, fake: FakeRegistry) -> None:  # noqa: F811
@@ -281,6 +325,55 @@ def test_platforms_fit_the_database(bad: str) -> None:
     assert platform is not None
     assert platform.variant is None
     assert platform.size_bytes * 20 < 2**63
+
+
+def test_lists_follow_the_link_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = DistributionRegistry(registry_settings(), lambda access: "token")
+    paths: list[str] = []
+    link = '<http://elsewhere.example/v2/acme/app/tags/list?last=b&n=2>; rel="next"'
+
+    def request(method: str, path: str, access: object, **kwargs: object) -> tuple[int, dict[str, str], bytes]:
+        paths.append(path)
+        if "last=" in path:
+            return 200, {}, b'{"tags": ["c"]}'
+        return 200, {"link": link}, b'{"tags": ["a", "b"]}'
+
+    monkeypatch.setattr(client, "_request", request)
+    assert client.list_tags("acme/app") == ["a", "b", "c"]
+    assert paths == ["/v2/acme/app/tags/list?n=1000", "/v2/acme/app/tags/list?n=1000&last=b"]
+    # A registry that never ends its list.
+    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: (200, {"link": link}, b'{"tags": ["a"]}'))
+    with pytest.raises(RegistryUnavailableError):
+        client.list_tags("acme/app")
+
+
+def test_an_unreadable_list_is_not_an_empty_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = DistributionRegistry(registry_settings(), lambda access: "token")
+    for body in (b"", b'{"tags": ["a"', b"[]", b"{}", b'{"tags": "a"}'):
+        monkeypatch.setattr(client, "_request", lambda *args, _body=body, **kwargs: (200, {}, _body))
+        with pytest.raises(RegistryUnavailableError):
+            client.list_tags("acme/app")
+    for status, body in ((200, b'{"tags": null}'), (200, b'{"tags": []}'), (404, b"")):
+        monkeypatch.setattr(client, "_request", lambda *args, _answer=(status, {}, body), **kwargs: _answer)
+        assert client.list_tags("acme/app") == []
+
+
+def test_a_connection_that_closes_early_is_an_error() -> None:
+    class Truncated(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b'{"tags": []}')
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    with HTTPServer(("127.0.0.1", 0), Truncated) as server:
+        threading.Thread(target=server.handle_request, daemon=True).start()
+        settings = registry_settings(registry_internal_url=f"http://127.0.0.1:{server.server_port}")
+        with pytest.raises(RegistryUnavailableError, match="incomplete"):
+            DistributionRegistry(settings, lambda access: "token").list_tags("acme/app")
 
 
 def test_the_events_token_is_not_logged() -> None:

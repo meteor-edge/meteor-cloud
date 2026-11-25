@@ -91,7 +91,7 @@ describe("ImagesPage", () => {
     renderPage("owner", 21);
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
     expect(await screen.findByText(/Page 2 of 2/)).toBeInTheDocument();
-    vi.mocked(listImages).mockImplementation(async (_token, _org, { page }) => ({
+    vi.mocked(listImages).mockImplementation(async (_token, _org, { page } = {}) => ({
       items: page === 1 ? [{ repository: "first", tag_count: 1, pushed_at: "2026-11-25T10:00:00Z" }] : [],
       total: 20,
       page: page ?? 1,

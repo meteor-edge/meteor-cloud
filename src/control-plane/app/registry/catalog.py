@@ -115,17 +115,20 @@ class CatalogService:
         pushed_by: uuid.UUID | None = None,
         pushed_digest: str | None = None,
     ) -> None:
+        # Until the commit: what was read here cannot overwrite what another worker reads later.
+        lock = func.hashtextextended(f"registry-tag:{repository}:{tag}", 0)
+        self.session.execute(select(func.pg_advisory_xact_lock(lock)))
         manifest = self.registry.manifest(repository, tag)
         key = {"organization_id": organization_id, "repository": path, "tag": tag}
         if manifest is None:
             self.session.execute(delete(ContainerImage).filter_by(**key))
             return
-        if pushed_digest is not None and manifest.digest != pushed_digest:
-            # A late event: the tag has moved on, so its push is not the one announced.
-            pushed_by = None
-            stored = self.session.scalar(select(ContainerImage.digest).filter_by(**key))
-            if stored == manifest.digest:
+        if manifest.digest != pushed_digest:
+            # A comparison, or a late event: keep what the push's own event stored.
+            if self.session.scalar(select(ContainerImage.digest).filter_by(**key)) == manifest.digest:
                 return
+            if pushed_digest is not None:
+                pushed_by = None  # the tag has moved on: not the push that was announced
         values = {
             "digest": manifest.digest,
             "media_type": manifest.media_type,
@@ -159,6 +162,7 @@ class CatalogService:
             stored = known.get(tag)
             if stored is None or stored[0] != self.registry.digest(repository, tag):
                 self.sync_tag(organization_id, repository, path, tag)
+                self.session.commit()  # one tag's lock at a time
         for tag in known.keys() - set(tags):
             # Only the row that was read: the tag may have been pushed again since.
             digest, pushed_at = known[tag]
@@ -295,7 +299,8 @@ class CatalogService:
                 metadata={
                     "repository": repository,
                     "tag": name,
-                    "digest": image.digest if image is not None else None,
+                    # As last seen: the tag may have moved before it was deleted.
+                    "catalog_digest": image.digest if image is not None else None,
                 },
             )
             self.session.commit()

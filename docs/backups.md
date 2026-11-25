@@ -75,10 +75,19 @@ make restore BACKUP=deploy/compose/backups/20261116T101500Z
 from the directory with `docker-compose.yml`, or set `COMPOSE_DIR` and `COMPOSE` (the
 full `docker compose -f … -f …` command). See the header of each script for all settings.
 
-If the container registry is on, stop it before the restore. Restore its storage from the same time
-as the database, or empty it, before the API and the registry start again: see
-[the reason](registry.md#storage). `make restore` starts the services it stopped, so change the
-registry storage first.
+If the container registry is on, its storage must be restored from the same time as the database, or
+emptied, before the API starts again ([why](registry.md#storage)). Stop the registry and change its
+storage first. `make restore` starts only what was running when it began, so start the registry
+afterwards, with the `docker compose -f … -f …` command of your deployment:
+
+```bash
+cd deploy/compose
+compose="docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+$compose stop registry
+# restore or empty the registry's storage, then run the restore from the repository root
+(cd ../.. && make restore BACKUP=deploy/compose/backups/20261116T101500Z)
+$compose up -d --wait registry
+```
 
 ## Kubernetes (Helm)
 
