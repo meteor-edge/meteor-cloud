@@ -35,7 +35,7 @@ class RegistryKeys:
             .limit(1)
         ).first()
 
-    def _lock(self) -> None:
+    def lock(self) -> None:
         self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("registry-signing-key", 0))))
 
     def _create(self) -> RegistrySigningKey:
@@ -58,13 +58,13 @@ class RegistryKeys:
     def active(self) -> RegistrySigningKey:
         row = self._active()
         if row is None:
-            self._lock()
+            self.lock()
             row = self._active() or self._create()
         return row
 
     def rotate(self) -> RegistrySigningKey:
         """Retire every key and create a new one. The registry must reload its key set afterwards."""
-        self._lock()
+        self.lock()
         for row in self.session.scalars(select(RegistrySigningKey).where(RegistrySigningKey.retired_at.is_(None))):
             row.retired_at = datetime.now(UTC)
         self.session.flush()
