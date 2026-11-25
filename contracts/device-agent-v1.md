@@ -137,6 +137,8 @@ password stops working) and reconnects. `enabled: false` stops the MQTT session.
    signed `artifact_sha256`).
 4. Progress and results go in `software_report`: `sync_status` `updating` (with `progress_percent`),
    `in_sync`, `failed` (with `last_error`), `rolled_back`; `health` `unknown` / `healthy` / `unhealthy`.
+   `revision` (new in v1, additive) is the item's revision: a result for an older one than desired does
+   not change the status of the newer deploy.
 
 5. A `docker` item whose signed `spec.registry` is `meteorcloud` (new in v1, additive) names an image in
    the organization's registry, always with `spec.image_digest`. If the image is not on the device, the

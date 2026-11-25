@@ -84,6 +84,8 @@ class SoftwareReportItem(BaseModel):
     last_error: str | None = Field(default=None, max_length=2000)
     # Added in v1 (additive): the user stopped it from the console.
     stopped_by_user: bool = False
+    # Added in v1 (additive): the desired revision this report is about.
+    revision: int | None = Field(default=None, ge=0)
 
     @field_validator("installed_version")
     @classmethod
