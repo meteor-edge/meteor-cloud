@@ -21,8 +21,8 @@ jobs:
     name: Plane import boundaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install pytest
@@ -54,8 +54,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -95,10 +95,10 @@ jobs:
         options: >-
           --health-cmd "wget -qO- http://127.0.0.1:8123/ping" --health-interval 5s --health-timeout 5s --health-retries 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: src/data-plane/go/go.mod
           cache-dependency-path: src/data-plane/go/go.sum
@@ -125,14 +125,14 @@ jobs:
       run:
         working-directory: sdk/python
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: src/data-plane/go/go.mod
           cache-dependency-path: src/data-plane/go/go.sum
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -151,8 +151,8 @@ jobs:
       run:
         working-directory: infrastructure/installer
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -170,8 +170,8 @@ jobs:
     name: First-boot scripts (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install pytest
@@ -189,11 +189,11 @@ jobs:
       run:
         working-directory: src/device-plane/agent-go
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       # Latest patched Go: govulncheck reports standard library fixes too.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
@@ -224,7 +224,7 @@ jobs:
       # Download from the run's Summary page to try a PR on a device:
       #   sudo bash install-meteorcli.sh --base-url file:///path/to/unzipped/dir
       - name: Upload release files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: meteorcli-go-${{ github.sha }}
           path: ${{ runner.temp }}/dist
@@ -249,15 +249,15 @@ jobs:
       run:
         working-directory: tests/agent-contract
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: tests/agent-contract/requirements.txt
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: src/device-plane/agent-go/go.mod
           cache: false
@@ -280,10 +280,10 @@ jobs:
       run:
         working-directory: console
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -300,12 +300,12 @@ jobs:
     name: Docker images (build, no push)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build backend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: src/control-plane
           tags: meteorcloud/backend:ci
@@ -314,7 +314,7 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
       - name: Build application data API (Go)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: src/data-plane/go
           tags: meteorcloud/data-api:ci
@@ -323,7 +323,7 @@ jobs:
           cache-from: type=gha,scope=data-api
           cache-to: type=gha,mode=max,scope=data-api
       - name: Build MQTT broker (Mosquitto + auth plugin; runs the plugin tests)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: src/data-plane/broker/mosquitto
           tags: meteorcloud/mosquitto:ci
@@ -332,7 +332,7 @@ jobs:
           cache-from: type=gha,scope=mosquitto
           cache-to: type=gha,mode=max,scope=mosquitto
       - name: Build console
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: console
           tags: meteorcloud/console:ci
@@ -342,7 +342,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=console
       - name: Export images
         run: docker save meteorcloud/backend:ci meteorcloud/data-api:ci meteorcloud/mosquitto:ci meteorcloud/console:ci | gzip -1 > images.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: images
           path: images.tar.gz
@@ -353,10 +353,10 @@ jobs:
     needs: images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: images
       - name: Load images
@@ -372,10 +372,10 @@ jobs:
     name: MQTT (local Compose)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -395,10 +395,10 @@ jobs:
     needs: images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install Ansible
@@ -407,7 +407,7 @@ jobs:
         run: make ansible-check
       - name: ansible-lint
         run: make ansible-lint
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: images
       - name: Load images
@@ -491,10 +491,10 @@ jobs:
     name: Helm (lint + template)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: Lint and render every values file
         run: make helm-lint
 
@@ -502,7 +502,7 @@ jobs:
     name: Terraform (fmt + validate, no credentials)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: hashicorp/setup-terraform@v4
@@ -516,10 +516,10 @@ jobs:
     name: Full-stack E2E tooling (unit tests, validate; no cloud)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - uses: hashicorp/setup-terraform@v4
@@ -539,10 +539,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: Install k3d
         env:
           K3D_VERSION: v5.8.3
@@ -550,7 +550,7 @@ jobs:
           curl -fsSL -o /usr/local/bin/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
           chmod +x /usr/local/bin/k3d
           k3d version
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: images
       - name: Load images
