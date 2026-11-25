@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.distribution_registry import DistributionRegistry
+from app.adapters.distribution_registry import DistributionRegistry, _platform
 from app.audit.models import AuditEvent
 from app.ports.registry import ImageManifest, Platform, RegistryUnavailableError
 from app.registry.access import events_secret
@@ -119,6 +119,59 @@ def test_a_push_is_announced_before_its_tag_is_written(
         assert tag["digest"] == event["target"]["digest"]
 
 
+def test_a_late_event_does_not_take_over_a_moved_tag(
+    registry: TestClient,  # noqa: F811
+    db_session: Session,
+    fake: FakeRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.registry.catalog.time.sleep", lambda _: None)
+    org, headers, base = _claim(registry, db_session)
+    old, new = (_token(registry, org, headers, name=name)["id"] for name in ("old", "new"))
+    fake.push("acme/app", "1", "b")
+    for seed, token in (("b", new), ("a", old)):
+        event = _event("push", "acme/app", "1", token)
+        event["target"]["digest"] = f"sha256:{seed * 64}"
+        assert _notify(registry, event).status_code == 204
+        (tag,) = registry.get(f"{base}/tags", headers=headers, params={"repository": "app"}).json()["items"]
+        assert (tag["digest"], tag["pushed_by"]) == ("sha256:" + "b" * 64, "new")
+
+
+def test_reconcile_keeps_a_tag_pushed_again_meanwhile(
+    registry: TestClient,  # noqa: F811
+    db_session: Session,
+    fake: FakeRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org, _, _ = _claim(registry, db_session)
+    catalog = CatalogService(db_session, registry_settings(), fake)
+    fake.push("acme/app", "1")
+    catalog.reconcile()
+
+    def list_tags(repository: str) -> list[str]:
+        catalog.sync_tag(org.id, repository, "app", "1")  # the push's own event, after an empty listing
+        return []
+
+    monkeypatch.setattr(fake, "list_tags", list_tags)
+    catalog.reconcile()
+    assert db_session.scalars(select(ContainerImage.tag)).all() == ["1"]
+
+
+def test_deleting_a_repository_includes_tags_missing_from_the_list(
+    registry: TestClient,  # noqa: F811
+    db_session: Session,
+    fake: FakeRegistry,
+) -> None:
+    _, headers, base = _claim(registry, db_session)
+    fake.push("acme/app", "1")
+    CatalogService(db_session, registry_settings(), fake).reconcile()
+    fake.push("acme/app", "2")
+    assert registry.delete(base, headers=headers, params={"repository": "app"}).status_code == 204
+    assert fake.images["acme/app"] == {}
+    events = db_session.scalars(select(AuditEvent).where(AuditEvent.action == "image.delete")).all()
+    assert sorted(e.metadata_["tag"] for e in events) == ["1", "2"]
+
+
 def test_notifications_are_not_trusted(registry: TestClient, db_session: Session, fake: FakeRegistry) -> None:  # noqa: F811
     _, headers, base = _claim(registry, db_session)
     other, other_headers, _ = _claim(registry, db_session, slug="other", email="other@example.com")
@@ -203,6 +256,8 @@ def test_tenant_written_manifests_do_not_break_the_client(monkeypatch: pytest.Mo
     documents = [
         b"not json",
         b"[]",
+        b"[" * 200_000,
+        b'{"mediaType": "x\\u0000"}',
         b'{"config": "x", "layers": "y"}',
         b'{"manifests": "x"}',
         b'{"manifests": [1, {"platform": 2}, {"platform": {"os": "unknown"}}]}',
@@ -213,3 +268,21 @@ def test_tenant_written_manifests_do_not_break_the_client(monkeypatch: pytest.Mo
         manifest = client.manifest("acme/app", "1")
         assert manifest is not None
         assert manifest.platforms == ()
+        assert manifest.media_type.isprintable()
+
+
+@pytest.mark.parametrize("bad", ["linux\x00", "\ud800"])
+def test_platforms_fit_the_database(bad: str) -> None:
+    assert _platform({"os": bad, "architecture": "amd64"}, {}) is None
+    assert _platform({"os": "linux", "architecture": bad}, {}) is None
+    platform = _platform(
+        {"os": "linux", "architecture": "arm64", "variant": bad}, {"layers": [{"size": 2**50 - 1}] * 9000}
+    )
+    assert platform is not None
+    assert platform.variant is None
+    assert platform.size_bytes * 20 < 2**63
+
+
+def test_the_events_token_is_not_logged() -> None:
+    config = json.loads(DistributionRegistry(registry_settings()).config_files({"keys": []})["config.yml"])
+    assert config["log"]["level"] == "warn"
