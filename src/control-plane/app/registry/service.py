@@ -65,6 +65,10 @@ def parse_scopes(values: list[str]) -> list[RequestedScope]:
     return scopes
 
 
+# generate_registry_token: the prefix and 32 random bytes.
+_TOKEN_RE = re.compile(r"rgt_[A-Za-z0-9_-]{43}")
+
+
 def namespace_for(session: Session, organization: Organization) -> str:
     """The organization's namespace, claimed on first use. The caller commits."""
     statement = select(RegistryNamespace.name).where(RegistryNamespace.organization_id == organization.id)
@@ -102,12 +106,12 @@ class RegistryService:
     # --- Docker token endpoint ----------------------------------------------
 
     def issue_access_token(
-        self, *, password: str | None, service: str, scopes: list[str]
+        self, *, presented: str | None, service: str, scopes: list[str]
     ) -> RegistryAccessTokenResponse:
         self._require_enabled()
         if service != self.settings.registry_public_host:
             raise AppError("invalid_registry_service", "Unknown registry service.", status_code=400)
-        token = self._authenticate(password)
+        token = self._authenticate(presented)
         now = datetime.now(UTC)
         access = self._grant(token, parse_scopes(scopes))
         self._touch(token, now)
@@ -132,10 +136,11 @@ class RegistryService:
         self.session.commit()
         return RegistryAccessTokenResponse(token=signed, access_token=signed, expires_in=ttl, issued_at=now)
 
-    def _authenticate(self, password: str | None) -> RegistryToken:
+    def _authenticate(self, presented: str | None) -> RegistryToken:
         token = None
-        if password:
-            token = self.session.scalar(select(RegistryToken).where(RegistryToken.token_hash == hash_token(password)))
+        # Only our own random tokens are looked up, never a password someone chose.
+        if presented and _TOKEN_RE.fullmatch(presented):
+            token = self.session.scalar(select(RegistryToken).where(RegistryToken.token_hash == hash_token(presented)))
         if token is None:
             raise RegistryAuthError()
         set_request_actor(actor_type="registry_token", actor_id=token.id)
