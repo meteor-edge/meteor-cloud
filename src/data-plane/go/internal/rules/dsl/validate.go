@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"meteorcloud/dataplane/internal/streams"
 )
@@ -50,10 +51,10 @@ func Validate(r *Rule, lim Limits, allowPlatform bool) error {
 	if r.SchemaVersion != SchemaVersion {
 		v.add("schema_version", "must be %d", SchemaVersion)
 	}
-	if n := strings.TrimSpace(r.Name); n == "" || len(n) > 200 {
+	if n := strings.TrimSpace(r.Name); n == "" || utf8.RuneCountInString(n) > 200 {
 		v.add("name", "is required and at most 200 characters")
 	}
-	if len(r.Description) > 2000 {
+	if utf8.RuneCountInString(r.Description) > 2000 {
 		v.add("description", "is at most 2000 characters")
 	}
 	switch r.Severity {
@@ -142,20 +143,20 @@ func (v *validator) scope(s Scope, allowPlatform bool) {
 	default:
 		v.add("scope.type", "must be device, group, device_type, organization or platform")
 	}
-	if s.Type != ScopeDevice && len(s.DeviceIDs) > 0 {
+	if s.Type != ScopeDevice && s.has("device_ids") {
 		v.add("scope.device_ids", "applies only to a device scope")
 	}
-	if s.Type != ScopeGroup && s.GroupID != "" {
+	if s.Type != ScopeGroup && s.has("group_id") {
 		v.add("scope.group_id", "applies only to a group scope")
 	}
-	if s.Type != ScopeDeviceType && s.DeviceTypeID != "" {
+	if s.Type != ScopeDeviceType && s.has("device_type_id") {
 		v.add("scope.device_type_id", "applies only to a device_type scope")
 	}
 	if len(s.Labels) > 20 {
 		v.add("scope.labels", "at most 20 labels")
 	}
 	for k, val := range s.Labels {
-		if k == "" || len(k) > 64 || len(val) > 256 {
+		if k == "" || utf8.RuneCountInString(k) > 64 || utf8.RuneCountInString(val) > 256 {
 			v.add("scope.labels", "label keys are 1-64 characters, values at most 256")
 			break
 		}
@@ -399,8 +400,8 @@ func (v *validator) actions(acts []Action) {
 			}
 		}
 		if len(a.Params) > 0 {
-			t := bytes.TrimSpace(a.Params)
-			if len(t) == 0 || len(t) > 4096 || t[0] != '{' || !json.Valid(t) {
+			var t bytes.Buffer // measured without insignificant spaces, as the API does
+			if err := json.Compact(&t, a.Params); err != nil || t.Len() > 4096 || t.Bytes()[0] != '{' {
 				v.add(p+".params", "must be a JSON object of at most 4 KiB")
 			}
 		}
@@ -438,7 +439,7 @@ func scalar(raw json.RawMessage) (any, bool) {
 	case float64, bool:
 		return t, true
 	case string:
-		return t, len(t) <= 256
+		return t, utf8.RuneCountInString(t) <= 256
 	}
 	return nil, false
 }

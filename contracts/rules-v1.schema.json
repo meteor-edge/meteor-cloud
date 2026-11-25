@@ -54,7 +54,14 @@
       "$ref": "#/$defs/node"
     },
     "resolve": {
-      "$ref": "#/$defs/node"
+      "allOf": [
+        {
+          "$ref": "#/$defs/node"
+        },
+        {
+          "$ref": "#/$defs/noAbsence"
+        }
+      ]
     },
     "cooldown": {
       "type": "string",
@@ -895,6 +902,24 @@
       "minLength": 1,
       "maxLength": 128,
       "pattern": "^[a-z0-9][a-z0-9_-]{0,62}(\\.[a-z0-9][a-z0-9_-]{0,62}){0,7}$"
+    },
+    "noAbsence": {
+      "description": "No absence node anywhere in the tree.",
+      "properties": {
+        "type": {
+          "not": {
+            "const": "absence"
+          }
+        },
+        "condition": {
+          "$ref": "#/$defs/noAbsence"
+        },
+        "conditions": {
+          "items": {
+            "$ref": "#/$defs/noAbsence"
+          }
+        }
+      }
     }
   }
 }

@@ -38,8 +38,9 @@ make up
 # or: make up PLATFORM_DOMAIN=fleet.example.com
 ```
 
-Then a **checkbox** of optional services (all on). **Up/down** to move, **space**
-to check or uncheck, **Enter** to continue.
+Then a **checkbox** of optional services (all on, including Prometheus + Grafana).
+**Up/down** to move, **space** to check or uncheck, **Enter** to continue.
+Skip observability with `make up OBS=0` or `ARGS=--no-observability`.
 
 ```text
   > [x]  WireGuard (vpn)
@@ -57,6 +58,10 @@ to check or uncheck, **Enter** to continue.
     [x]  Demo organization
          What: Demo Organization owned by the admin login.
          For:  open the console and explore. Add devices with meteorcli.
+
+    [x]  Observability (Prometheus + Grafana)
+         What: metrics, logs, alerts, and dashboards on this host.
+         For:  operator SSH tunnel only (127.0.0.1).
 ```
 
 It then prints DNS records for that setup. `--storage=s3` or `--mqtt=external`

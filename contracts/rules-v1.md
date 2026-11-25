@@ -8,7 +8,9 @@ network or read another tenant's data.
 - Machine-readable schema: [`rules-v1.schema.json`](rules-v1.schema.json). The Go
   validator (`internal/rules/dsl`) is the authority; the schema mirrors it for the
   control plane and the console.
-- Examples that both are tested against: [`rules-v1.examples.json`](rules-v1.examples.json).
+- Rules that the schema, the engine and the API must accept
+  ([`rules-v1.examples.json`](rules-v1.examples.json)) and refuse
+  ([`rules-v1.invalid.json`](rules-v1.invalid.json)); tests run all three against both.
 
 ## Top level
 
@@ -84,7 +86,9 @@ gives `net.eth0.rx`. Arrays and nulls are not fields. If a literal key `"net.eth
 spells the same field, the nested path wins. A comparison on a field the
 event does not carry keeps its previous outcome, because devices may report
 metrics in separate messages. Such an event is no evidence either way for
-`count_within`, also under `not`; it ends a `consecutive` streak.
+`count_within`, also under `not`; it ends a `consecutive` streak. Until the field is
+reported for the first time the comparison is neither true nor false, so `not` around it
+does not fire either.
 
 ### Time and order
 

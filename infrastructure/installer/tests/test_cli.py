@@ -28,6 +28,7 @@ def secrets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("EDGE_PLATFORM_POSTGRES_PASSWORD", "postgres-secret")
     monkeypatch.setenv("EDGE_PLATFORM_JWT_SECRET", "jwt-secret")
     monkeypatch.setenv("EDGE_PLATFORM_CONNECTIVITY_INTERNAL_TOKEN", "connectivity-secret")
+    monkeypatch.setenv("EDGE_PLATFORM_GRAFANA_ADMIN_PASSWORD", "grafana-secret")
     return key_path
 
 

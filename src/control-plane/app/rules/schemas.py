@@ -7,7 +7,16 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    HttpUrl,
+    UrlConstraints,
+    model_validator,
+)
 
 
 class RuleWrite(BaseModel):
@@ -112,8 +121,8 @@ class SilenceCreate(BaseModel):
     rule_id: uuid.UUID | None = None
     device_id: uuid.UUID | None = None
     comment: str | None = Field(default=None, max_length=2000)
-    starts_at: datetime | None = None
-    ends_at: datetime
+    starts_at: AwareDatetime | None = None
+    ends_at: AwareDatetime
 
     @model_validator(mode="after")
     def _window(self) -> SilenceCreate:
@@ -136,6 +145,8 @@ class SilenceResponse(BaseModel):
     created_at: datetime
 
 
+# As long as the column.
+IntegrationUrl = Annotated[HttpUrl, UrlConstraints(max_length=2048)]
 IntegrationKind = Literal["webhook", "slack", "email", "telegram"]
 TELEGRAM_TOKEN = re.compile(r"^[0-9]{5,20}:[A-Za-z0-9_-]{20,100}\Z")
 TELEGRAM_CHAT = re.compile(r"^(-?[0-9]{1,20}|@[A-Za-z0-9_]{4,64})\Z")
@@ -171,7 +182,7 @@ def check_integration(kind: str, *, url: Any, recipients: Any, chat_id: str | No
 class IntegrationCreate(BaseModel):
     kind: IntegrationKind = "webhook"
     name: str = Field(min_length=1, max_length=120)
-    url: HttpUrl | None = None
+    url: IntegrationUrl | None = None
     recipients: Recipients | None = None
     chat_id: str | None = Field(default=None, max_length=80)
     enabled: bool = True
@@ -186,7 +197,7 @@ class IntegrationCreate(BaseModel):
 
 class IntegrationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    url: HttpUrl | None = None
+    url: IntegrationUrl | None = None
     recipients: Recipients | None = None
     chat_id: str | None = Field(default=None, max_length=80)
     enabled: bool | None = None

@@ -42,7 +42,7 @@ Prefix: `/api/v1/organizations/{organization_id}`. Every change is written to th
 | `POST` | `/alerts/{id}/acknowledge` | `alert.acknowledge` | Firing to acknowledged; repeating it is harmless |
 | `GET`/`POST` | `/alert-silences` | `alert.read` / `alert.silence` | Silence by rule, device, both or neither until `ends_at` |
 | `DELETE` | `/alert-silences/{id}` | `alert.silence` | End a silence |
-| `GET`/`POST` | `/notification-integrations` | `rule.read` / `integration.manage` | Channels: `email` (`recipients`), `telegram` (`chat_id`, bot token as `secret`), `slack` and `webhook` (`url`); `secret` is sealed and never returned |
+| `GET`/`POST` | `/notification-integrations` | `rule.read` / `integration.manage` | Channels: `email` (`recipients`), `telegram` (`chat_id`, bot token as `secret`), `slack` and `webhook` (`url`); `secret` is sealed and never returned; `url` is sealed and complete only for `integration.manage`, others see its host |
 | `GET` | `/notification-integrations/capabilities` | `rule.read` | Whether the engine answers and has a mail server |
 | `POST` | `/notification-integrations/{id}/test` | `integration.manage` | Send a sample alert now; answers whether it arrived |
 | `PATCH`/`DELETE` | `/notification-integrations/{id}` | `integration.manage` | Change; `"secret": ""` removes it. A target a rule uses cannot be deleted |

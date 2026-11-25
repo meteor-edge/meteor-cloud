@@ -135,10 +135,23 @@ func (e *Engine) tick(ctx context.Context, t state.Timer) error {
 		}
 		return e.commits.commit(ctx, b)
 	}
-	now := e.clock.Now()
+	cur, err := e.store.LoadCursor(ctx, t.DeviceID)
+	if err != nil {
+		e.metrics.StateErrors.WithLabelValues("load").Inc()
+		return err
+	}
+	wall := e.clock.Now()
+	now := wall
+	if cur != nil && cur.Watermark.After(now) {
+		// The device clock runs ahead: time must not move back behind its newest event.
+		now = cur.Watermark
+	}
 	isNew := false
 	if st == nil {
-		st, isNew = e.newState(r, dev, now), true
+		st, isNew = e.newState(r, dev, wall), true
+	}
+	if st.RuleVersion > r.Version {
+		return ErrStale // the lease expires and a later pass has the newer snapshot
 	}
 	before := snapshotOf(st)
 	ts := e.reconcileVersion(st, r, now)
@@ -149,7 +162,7 @@ func (e *Engine) tick(ctx context.Context, t state.Timer) error {
 	st.TimerDue = t.Due // the claimed timer exists until this commit clears or moves it
 	e.planTimer(st, out, true, b)
 	if len(ts) > 0 || isNew || snapshotOf(st) != before {
-		st.LastEvaluated = now
+		st.LastEvaluated = wall
 		b.States = append(b.States, st)
 	} else if len(b.TimersSet)+len(b.TimersClear) > 0 {
 		b.States = append(b.States, st) // keep TimerDue in step with the timer row
@@ -220,6 +233,8 @@ func (e *Engine) Reconcile(ctx context.Context, cur *RuleSet) error {
 				return e.retireLocked(ctx, st, nil, ReasonRemoved)
 			case !okDev || !r.Matches(dev):
 				return e.retireLocked(ctx, st, r, ReasonNoDevice)
+			case st.RuleVersion > r.Version:
+				return nil // another worker has a newer snapshot
 			case st.ConditionHash != r.Hash:
 				return e.Tick(ctx, state.Timer{RuleID: st.RuleID, DeviceID: st.DeviceID, OrgID: st.OrgID, Due: e.clock.Now()})
 			}

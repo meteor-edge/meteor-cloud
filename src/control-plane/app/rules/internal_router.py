@@ -31,7 +31,7 @@ def rules_snapshot(
     service: RuleSvc,
     response: Response,
     if_none_match: Annotated[str | None, Header()] = None,
-):
+) -> RulesSnapshot | Response:
     """Enabled rules at their current version plus the device index. ``If-None-Match`` gives 304."""
     snapshot = service.snapshot()
     etag = f'"{snapshot.version}"'
@@ -42,19 +42,19 @@ def rules_snapshot(
 
 
 @router.post("/alert-transitions", response_model=AlertTransitionResponse)
-def alert_transitions(service: RuleSvc, payload: AlertTransitionBatch):
+def alert_transitions(service: RuleSvc, payload: AlertTransitionBatch) -> AlertTransitionResponse:
     """Apply ``alert`` actions from the engine outbox. Keyed by idempotency key, so retries are safe."""
     return AlertTransitionResponse(results=service.apply_transitions(payload.items))
 
 
 @router.post("/deliveries", response_model=DeliveryResponse)
-def delivery(service: RuleSvc, payload: DeliveryRequest):
+def delivery(service: RuleSvc, payload: DeliveryRequest) -> DeliveryResponse:
     """URL, kind and secret of an integration for one webhook, and whether a silence holds it."""
     return service.delivery(payload)
 
 
 @router.post("/commands", response_model=CommandResult)
-def command(service: RuleSvc, payload: EngineAction):
+def command(service: RuleSvc, payload: EngineAction) -> CommandResult:
     """Send a rule's device command with its author's current permissions (403 when they lost them)."""
     return service.run_command(payload)
 
