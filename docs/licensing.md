@@ -27,7 +27,7 @@ Guidance for images and tools MeteorCloud can start. **Not legal advice.**
 | `debian:12.8-slim` image with Debian `systemd` | Test only: `src/device-plane/agent-go/test/systemd` boots systemd in a container to check the meteorcli units, sockets and permissions | Mixed (systemd LGPL-2.1+, Debian userland GPL family) | **Yes** | Built and run in CI and by developers only; never shipped or pushed. Unmodified Debian packages |
 | Python SDK dependencies: `httpx`, `websockets` | `sdk/python` | BSD-3-Clause | **Yes** | Installed by application developers alongside the SDK |
 | `pg8000` 1.31 (with `scramp`, `python-dateutil`) | SDK example `sdk/python/examples/stream-to-database` | [BSD-3-Clause](https://github.com/tlocke/pg8000/blob/main/LICENSE) (scramp MIT-0, python-dateutil Apache 2.0 / BSD-3-Clause) | **Yes** | Example only, run by the customer against their own database. Chosen over `psycopg` (LGPL-3.0) to keep the example permissive |
-| `golang:1.26-alpine` (build) / `alpine:3.21` (runtime) images | Data API image | BSD-3-Clause (Go) / MIT and GPL-2.0 userland (Alpine, BusyBox) | **Yes** | Unmodified base image; only the static Go binary is added. Same position as the other Alpine-based images |
+| `golang:1.27-alpine` (build) / `alpine:3.24` (runtime) images | Data API image | BSD-3-Clause (Go) / MIT and GPL-2.0 userland (Alpine, BusyBox) | **Yes** | Unmodified base image; only the static Go binary is added. Same position as the other Alpine-based images |
 | `psycopg` 3 (`psycopg[binary]`, control plane) | PostgreSQL driver | [LGPL-3.0](https://github.com/psycopg/psycopg/blob/master/LICENSE.txt) (wheel bundles libpq: PostgreSQL licence) | **Yes** | Used unmodified as a library, installed from PyPI into the image. LGPL lets us ship it in a commercial product as long as it is not modified and can be replaced |
 | Terraform **>= 1.6** | Installer provisioning (`make aws-up`, `edge-installer`) | [BSL 1.1](https://github.com/hashicorp/terraform/blob/main/LICENSE) | **Yes, with limits** | A tool the operator installs and runs; MeteorCloud does not ship it. Allowed for provisioning; do not bundle Terraform in a product offered as a competing service. **OpenTofu** (MPL-2.0) works too: the installer uses `tofu` when `terraform` is not installed, or set `EDGE_INSTALLER_TERRAFORM` / `make TERRAFORM=tofu` |
 | Ansible | Installer (`make up`) | [GPL-3.0](https://github.com/ansible/ansible/blob/devel/COPYING) | **Yes** | A tool run on the host, not linked into or shipped inside MeteorCloud images |
@@ -66,7 +66,7 @@ AGPL does **not** by itself force MeteorCloud’s Python/React code to become AG
 | VerneMQ | `deploy/compose/data-plane.yml` → `vernemq/vernemq:2.2.1` (`VERNEMQ_IMAGE`) | not in the chart (external only) |
 | ClickHouse | `deploy/compose/data-plane.yml` → `clickhouse/clickhouse-server:25.8-alpine` | `clickhouse.enabled` |
 | NATS Server | `deploy/compose/data-plane.yml` → `nats:2.15.3-alpine` | `nats.enabled` (image `nats:2.15.3-alpine`) |
-| Data API base images | `src/data-plane/go/Dockerfile` → `golang:1.26-alpine`, `alpine:3.21` | not in the chart |
+| Data API base images | `src/data-plane/go/Dockerfile` → `golang:1.27-alpine`, `alpine:3.24` | not in the chart |
 | Data API Go modules | `src/data-plane/go/go.mod` | same |
 | Go meteorcli systemd test (test only) | `src/device-plane/agent-go/test/systemd/Dockerfile` → `debian:12.8-slim` | not in the chart |
 | MinIO (dev) | `deploy/compose/control-plane.yml` (`MINIO_IMAGE`) | not in the chart |
