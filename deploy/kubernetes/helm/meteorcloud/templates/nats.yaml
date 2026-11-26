@@ -69,6 +69,13 @@ spec:
             - |
               : "${NATS_INGEST_PASSWORD:?missing}" "${NATS_RULES_PASSWORD:?missing}" \
                 "${NATS_CHWRITER_PASSWORD:?missing}" "${NATS_ADMIN_PASSWORD:?missing}"
+              # nats-server parses a `$VAR` value as config, so a password such as
+              # "-abc" or "18-abc" fails to load. Quoting it keeps it a string.
+              for v in NATS_INGEST_PASSWORD NATS_RULES_PASSWORD NATS_CHWRITER_PASSWORD NATS_ADMIN_PASSWORD; do
+                eval "p=\${$v}"
+                case "$p" in *[\"\\]*) echo "$v must not contain a double quote or backslash" >&2; exit 1 ;; esac
+                export "$v=\"$p\""
+              done
               exec nats-server -c /etc/nats/nats.conf
           ports:
             - name: client

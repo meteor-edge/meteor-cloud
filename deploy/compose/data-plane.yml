@@ -266,11 +266,20 @@ services:
     image: nats:2.15.3-alpine
     profiles: [nats]
     # Refuse to start with an empty password rather than run an open server.
+    # nats.conf reads each password as `$NATS_*_PASSWORD`, and nats-server parses
+    # that value as config, not as a plain string: one starting with "-" or
+    # "<digits>-" (read as a date) fails to load. Wrapping it in double quotes
+    # keeps it a string. Clients still use the raw value.
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         : "$${NATS_INGEST_PASSWORD:?is empty: set it in .env (see .env.example)}"
         : "$${NATS_RULES_PASSWORD:?is empty}" "$${NATS_CHWRITER_PASSWORD:?is empty}" "$${NATS_ADMIN_PASSWORD:?is empty}"
+        for v in NATS_INGEST_PASSWORD NATS_RULES_PASSWORD NATS_CHWRITER_PASSWORD NATS_ADMIN_PASSWORD; do
+          eval "p=\$${$$v}"
+          case "$$p" in *[\"\\]*) echo "$$v must not contain a double quote or backslash" >&2; exit 1 ;; esac
+          export "$$v=\"$$p\""
+        done
         exec nats-server -c /etc/nats/nats.conf
     environment:
       NATS_INGEST_PASSWORD: ${NATS_INGEST_PASSWORD:-}
