@@ -354,6 +354,30 @@ func TestWireGuardApply(t *testing.T) {
 	if out, _ := call(t, h, "wireguard.apply", c); string(out) != `{"changed":true}` || !s.ran("wg-quick down "+h.wgConf()) {
 		t.Errorf("changed apply = %s, ran %v", out, s.calls[runs:])
 	}
+	// Replacing the tunnel while it already owns its address. Linux reports that
+	// address as "local … dev lo" only while wg0 is up; once it is down the
+	// address is reached through the normal gateway.
+	s.answers["ip -j -4 addr show dev wg0"] = `[{"addr_info":[{"local":"10.8.0.12"}]}]`
+	routed := h.Run
+	h.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "ip" && len(args) >= 4 && args[1] == "route" {
+			addr := args[len(args)-1]
+			if addr == "10.8.0.12" && h.wgUp() {
+				return []byte(`[{"dst":"10.8.0.12","dev":"lo"}]`), nil
+			}
+			if h.wgUp() {
+				return []byte(`[{"dst":"` + addr + `","dev":"wg0"}]`), nil
+			}
+			return []byte(`[{"dst":"` + addr + `","gateway":"192.168.0.1","dev":"eth0"}]`), nil
+		}
+		return routed(ctx, name, args...)
+	}
+	c.Endpoint = "192.0.2.12:51820"
+	if out, err := call(t, h, "wireguard.apply", c); err != nil || string(out) != `{"changed":true}` {
+		t.Errorf("replace own address = %s, %v", out, err)
+	}
+	h.Run = routed
+
 	// A tunnel host on the LAN is refused before the working tunnel is touched.
 	s.answers["ip -j route get"] = `[{"dst":"10.8.0.12","dev":"eth0","prefsrc":"10.8.0.2"}]`
 	c.Endpoint = "192.0.2.11:51820"

@@ -185,6 +185,10 @@ func (h Host) wgTearDown(ctx context.Context) error {
 // refuseLocalHosts fails when a tunnel host is reachable without a gateway:
 // it is on a local network, and taking it over would hijack that link.
 func (h Host) refuseLocalHosts(ctx context.Context, hosts []netip.Addr) error {
+	// Linux answers `ip route get` for an address this host already has with
+	// "local … dev lo". That includes the address of the tunnel we manage, so
+	// a new server endpoint must still be allowed to replace it.
+	own := h.tunnelAddresses(ctx)
 	for _, a := range hosts {
 		out, err := h.Run(ctx, "ip", "-j", "route", "get", a.String())
 		var routes []struct {
@@ -197,12 +201,46 @@ func (h Host) refuseLocalHosts(ctx context.Context, hosts []netip.Addr) error {
 			return fmt.Errorf("cannot check the route to %s: %v", a, err)
 		}
 		for _, r := range routes {
+			if r.Dev == "lo" {
+				if _, ok := own[a]; ok {
+					continue
+				}
+			}
 			if r.Dev != wgInterface && r.Gateway == "" {
 				return badRequest("%s is on the local network (%s)", a, r.Dev)
 			}
 		}
 	}
 	return nil
+}
+
+// tunnelAddresses is the set of IPv4 addresses currently on wg0. Empty when
+// the interface is down or its addresses cannot be read.
+func (h Host) tunnelAddresses(ctx context.Context) map[netip.Addr]struct{} {
+	own := map[netip.Addr]struct{}{}
+	if !h.wgUp() {
+		return own
+	}
+	out, err := h.Run(ctx, "ip", "-j", "-4", "addr", "show", "dev", wgInterface)
+	if err != nil {
+		return own
+	}
+	var links []struct {
+		AddrInfo []struct {
+			Local string `json:"local"`
+		} `json:"addr_info"`
+	}
+	if json.Unmarshal(bytes.TrimSpace(out), &links) != nil {
+		return own
+	}
+	for _, link := range links {
+		for _, info := range link.AddrInfo {
+			if a, err := netip.ParseAddr(info.Local); err == nil {
+				own[a] = struct{}{}
+			}
+		}
+	}
+	return own
 }
 
 func (h Host) wireguardApply(ctx context.Context, _ localrpc.Peer, raw json.RawMessage) (any, error) {
