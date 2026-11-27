@@ -16,7 +16,7 @@ aws:
   instance_type: auto
   architecture: amd64
   ami_id: null
-  ssh_key_name: edge-platform-v2
+  ssh_key_name: edge-platform-demo
   ssh_private_key_path: ~/.ssh/edge-platform.pem
   root_volume_size_gb: 30
   assign_elastic_ip: true
@@ -66,8 +66,8 @@ components:
     provider: traefik
 
 deployment:
-  repository_url: https://github.com/shahabkamali/meteor-cloud.git  # TEMP test: revert to meteor-edge
-  git_ref: feature/device-connectivity-routing  # TEMP test: revert to master
+  repository_url: https://github.com/meteor-edge/meteor-cloud.git
+  git_ref: master
   image_source: git
   backend_image: edge-platform-backend:0.2.0
   frontend_image: edge-platform-frontend:0.2.0
